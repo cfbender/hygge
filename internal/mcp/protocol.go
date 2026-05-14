@@ -122,6 +122,8 @@ type ListToolsResult struct {
 
 // MCPToolDef describes a single tool the server offers.  InputSchema
 // is an opaque JSON Schema map passed through to the provider unchanged.
+//
+//nolint:revive // exported name intentionally mirrors the MCP spec's "tool definition" surface
 type MCPToolDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`

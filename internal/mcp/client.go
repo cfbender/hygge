@@ -148,8 +148,10 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	}
 
 	// Spawn the dispatch goroutine BEFORE sending initialize so the
-	// response can be routed back to us.
-	go c.readLoop()
+	// response can be routed back to us.  The read loop intentionally
+	// uses its own background context — it must outlive the
+	// initialize call so future requests can use the same dispatcher.
+	go c.readLoop(context.Background()) //nolint:gosec // dispatch loop intentionally outlives the initialize request context
 
 	params := InitializeParams{
 		ProtocolVersion: ProtocolVersion,
@@ -373,10 +375,10 @@ func (c *Client) removePending(id string) {
 // requests are logged and discarded (v0.2 does not act on them).  On
 // transport error or EOF the loop fails every outstanding call with
 // the underlying error.
-func (c *Client) readLoop() {
+func (c *Client) readLoop(ctx context.Context) {
 	defer close(c.readDone)
 	for {
-		body, err := c.transport.Recv(context.Background())
+		body, err := c.transport.Recv(ctx)
 		if err != nil {
 			c.failAll(err)
 			return

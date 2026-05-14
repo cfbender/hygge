@@ -145,6 +145,61 @@ Credential precedence at startup:
    `ANTHROPIC_API_KEY`).
 3. The auth store entry for the configured provider.
 
+### MCP servers
+
+Hygge connects to [MCP](https://modelcontextprotocol.io) (Model Context
+Protocol) servers and exposes every tool they advertise to the agent,
+prefixed with the server's name (e.g. `github_create_issue`).
+
+Configure servers in `mcp.toml`, discovered through the same four-layer
+`.agents` search path as skills and AGENTS.md (later overrides
+earlier):
+
+1. `~/.agents/mcp.toml`
+2. `~/.config/hygge/mcp.toml`
+3. `<project>/.agents/mcp.toml`  (walk-up; stops at `.git` or `$HOME`)
+4. `<project>/.hygge/mcp.toml`   (walk-up; stops at `.git` or `$HOME`)
+
+Example:
+
+```toml
+[[servers]]
+name = "github"
+transport = "stdio"
+command = "mcp-server-github"
+args = ["--token", "$GITHUB_TOKEN"]
+env = { GITHUB_API_URL = "https://api.github.com" }
+
+[[servers]]
+name = "postgres"
+transport = "stdio"
+command = "mcp-server-postgres"
+args = ["postgres://localhost/mydb"]
+permission_category = "network"   # gate via the network category
+```
+
+`$VAR` / `${VAR}` references in `command`, `args`, `env`, and `dir` are
+interpolated at load time so secrets can come from the environment.
+
+Commands:
+
+- `hygge mcp list` — show configured servers and their boot-time
+  status (ready / failed / disabled).
+- `hygge mcp ping <name>` — spawn a temporary client and verify the
+  server responds (init + ping latency).
+- `hygge mcp tools [server]` — list every tool advertised by the
+  connected servers, optionally filtered to one.
+- `hygge mcp doctor` — walk every discovered `mcp.toml`, validate it,
+  and report issues.
+
+Permission gating: MCP tool calls go through the new `mcp` category
+(default: `ask`). Override per-server with `permission_category` in
+`mcp.toml` if a particular server is better gated as `shell`,
+`network`, `file.read`, or `file.write`.
+
+Only the `stdio` transport is supported in v0.2. SSE and Streamable
+HTTP transports are deferred to v0.3.
+
 ## Development
 
 ```sh

@@ -93,21 +93,6 @@ func (f *fakeTransport) Close() error {
 
 func (f *fakeTransport) ServerLabel() string { return f.label }
 
-// readClientFrame reads one outbound frame the Client sent.
-func (f *fakeTransport) readClientFrame(t *testing.T) RPCRequest {
-	t.Helper()
-	br := bufio.NewReader(f.serverInR)
-	body, err := ReadFrame(br)
-	if err != nil {
-		t.Fatalf("readClientFrame: %v", err)
-	}
-	var req RPCRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Fatalf("decode client frame: %v (%s)", err, body)
-	}
-	return req
-}
-
 // writeServerFrame sends one frame from the server side to the Client.
 func (f *fakeTransport) writeServerFrame(t *testing.T, body []byte) {
 	t.Helper()
@@ -119,14 +104,13 @@ func (f *fakeTransport) writeServerFrame(t *testing.T, body []byte) {
 // scriptedServer drives a fakeTransport on a goroutine.  It exposes a
 // channel of inbound RPCRequests so the test can assert and respond.
 type scriptedServer struct {
-	t         *testing.T
-	tr        *fakeTransport
-	inbox     chan RPCRequest
-	wg        sync.WaitGroup
-	br        *bufio.Reader
-	stop      chan struct{}
-	stopOnce  sync.Once
-	stopAfter atomic.Bool
+	t        *testing.T
+	tr       *fakeTransport
+	inbox    chan RPCRequest
+	wg       sync.WaitGroup
+	br       *bufio.Reader
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 func newScriptedServer(t *testing.T, tr *fakeTransport) *scriptedServer {

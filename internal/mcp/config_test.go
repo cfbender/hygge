@@ -115,7 +115,7 @@ func TestLoadConfigs_WalkUpFromSubdir(t *testing.T) {
 	configs, err := LoadConfigs(LoadOptions{
 		HomeDir:   home,
 		Pwd:       sub,
-		EnvLookup: func(k string) string { return "tok" },
+		EnvLookup: func(_ string) string { return "tok" },
 	})
 	if err != nil {
 		t.Fatalf("LoadConfigs: %v", err)
@@ -338,14 +338,14 @@ func mustMkdirAll(t *testing.T, path string) {
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	mustMkdirAll(t, filepath.Dir(path))
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil { //nolint:gosec // test fixture; path comes from t.TempDir
 		t.Fatalf("WriteFile %s: %v", path, err)
 	}
 }
 
 func copyTestdata(t *testing.T, src, dst string) {
 	t.Helper()
-	data, err := os.ReadFile(src)
+	data, err := os.ReadFile(src) //nolint:gosec // test fixture; src is a static testdata path
 	if err != nil {
 		t.Fatalf("ReadFile %s: %v", src, err)
 	}

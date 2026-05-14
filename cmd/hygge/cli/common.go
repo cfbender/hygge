@@ -26,6 +26,7 @@ import (
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/mcp"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
 	_ "github.com/cfbender/hygge/internal/provider/anthropic"  // self-register
@@ -57,8 +58,29 @@ type appRuntime struct {
 	Theme        *theme.Theme
 	Skills       *skill.Registry
 	AgentsBlocks []agentsmd.Block
+	MCPClients   []*mcp.Client
+	MCPConfigs   []mcp.ServerConfig
+	MCPStatuses  []MCPServerStatus
 	SystemPrompt string
 	Pwd          string
+}
+
+// MCPServerStatus summarises the boot-time outcome of one MCP server
+// after bootstrap.  Surfaced by `hygge mcp list`.
+type MCPServerStatus struct {
+	Name      string
+	Transport string
+	Enabled   bool
+	// Ready is true when Initialize + ListTools both succeeded.
+	Ready bool
+	// Error captures the first failure observed; empty when Ready.
+	Error string
+	// ToolCount is the number of tools registered from this server.
+	ToolCount int
+	// Source is the diagnostic source token, e.g. "project/.agents".
+	Source string
+	// CommandLabel is the command + first arg for display.
+	CommandLabel string
 }
 
 // bootstrapOptions feeds bootstrap.  Most fields are populated from
@@ -103,6 +125,11 @@ func (r *appRuntime) Close() error {
 	var firstErr error
 	if r.Agent != nil {
 		if err := r.Agent.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, c := range r.MCPClients {
+		if err := c.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -304,6 +331,11 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// configured.
 	tools := tool.DefaultWith(tool.DefaultOptions{SkillRegistry: skillReg})
 
+	// MCP servers contribute additional tools.  Loading is best-
+	// effort: a misconfigured server warns and is skipped.  The agent
+	// still works without any MCP tools.
+	mcpClients, mcpConfigs, mcpStatuses := bootstrapMCP(ctx, opts, xdgConfig, tools)
+
 	sysPrompt := opts.SystemPrompt
 	if sysPrompt == "" {
 		sysPrompt = defaultSystemPrompt
@@ -349,9 +381,94 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Theme:        thm,
 		Skills:       skillReg,
 		AgentsBlocks: agentsBlocks,
+		MCPClients:   mcpClients,
+		MCPConfigs:   mcpConfigs,
+		MCPStatuses:  mcpStatuses,
 		SystemPrompt: sysPrompt,
 		Pwd:          opts.Pwd,
 	}, nil
+}
+
+// bootstrapMCP loads mcp.toml files, spawns each enabled server, and
+// registers its tools.  Returns the live clients, the discovered
+// configs (including disabled ones), and a status summary for the
+// `hygge mcp list` command.
+//
+// Failures are non-fatal: every server is independently spawned; one
+// crashing does not affect the others.  Errors are recorded in the
+// status so the CLI can surface them without blocking startup.
+func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, tools *tool.Registry) ([]*mcp.Client, []mcp.ServerConfig, []MCPServerStatus) {
+	configs, err := mcp.LoadConfigs(mcp.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load mcp.toml; MCP support disabled for this run", "err", err)
+		return nil, nil, nil
+	}
+	if len(configs) == 0 {
+		return nil, nil, nil
+	}
+
+	var clients []*mcp.Client
+	statuses := make([]MCPServerStatus, 0, len(configs))
+	for _, cfg := range configs {
+		status := MCPServerStatus{
+			Name:      cfg.Name,
+			Transport: cfg.Transport,
+			Enabled:   cfg.Enabled,
+			Source:    cfg.Source.String(),
+		}
+		if !cfg.Enabled {
+			statuses = append(statuses, status)
+			continue
+		}
+		transport := mcp.NewStdio(mcp.StdioOptions{
+			Command: cfg.Command,
+			Args:    cfg.Args,
+			Env:     cfg.Env,
+			Dir:     cfg.Dir,
+		})
+		status.CommandLabel = transport.ServerLabel()
+		client := mcp.New(mcp.ClientOptions{
+			Transport:     transport,
+			Name:          cfg.Name,
+			ClientName:    "hygge",
+			ClientVersion: Version,
+			Now:           opts.Now,
+		})
+		if _, err := client.Initialize(ctx); err != nil {
+			slog.Warn("cli: MCP server failed to initialize", "name", cfg.Name, "err", err)
+			status.Error = err.Error()
+			_ = client.Close()
+			statuses = append(statuses, status)
+			continue
+		}
+		defs, err := client.ListTools(ctx)
+		if err != nil {
+			slog.Warn("cli: MCP tools/list failed", "name", cfg.Name, "err", err)
+			status.Error = err.Error()
+			_ = client.Close()
+			statuses = append(statuses, status)
+			continue
+		}
+		registered := 0
+		for _, def := range defs {
+			t := mcp.NewMCPTool(client, def, permission.Category(cfg.PermissionCategory))
+			if err := tools.Register(t); err != nil {
+				slog.Warn("cli: MCP tool name collision; skipping",
+					"server", cfg.Name, "tool", def.Name, "err", err)
+				continue
+			}
+			registered++
+		}
+		status.Ready = true
+		status.ToolCount = registered
+		statuses = append(statuses, status)
+		clients = append(clients, client)
+	}
+	return clients, configs, statuses
 }
 
 // buildProvider returns the resolved Provider, preferring a caller-supplied

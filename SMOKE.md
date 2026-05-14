@@ -140,7 +140,6 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
 These are deliberately deferred. Do not block v0.1 on them.
 
 - LSP integration (dropped from v0.1 scope).
-- MCP client.
 - Subagents.
 - OpenAI / OpenRouter / additional providers.
 - Plugins (WASM or subprocess).
@@ -150,3 +149,40 @@ These are deliberately deferred. Do not block v0.1 on them.
 - AssistantThinkingDelta rendering.
 - History cycling on Up arrow.
 - Windows shell support in the `bash` tool.
+
+## v0.2 progress
+
+- MCP client (stdio transport) — shipped. See `hygge mcp list` and the
+  MCP section in README.md. Items below cover the manual smoke for it.
+
+### MCP smoke
+
+- [ ] **MCP server config loads from `.agents/mcp.toml`.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.git" "$tmp/.agents"
+      cat > "$tmp/.agents/mcp.toml" <<'EOF'
+      [[servers]]
+      name = "demo"
+      command = "/nonexistent/mcp-binary"
+      EOF
+      (cd "$tmp" && ../bin/hygge mcp list)
+      ```
+      Output lists `demo` with source `project/.agents`. Status shows
+      `failed` (no real binary) — that's expected here; the point is
+      that discovery works.
+
+- [ ] **`hygge mcp doctor` reports the file.**
+      Same setup as above, then:
+      ```
+      (cd "$tmp" && ../bin/hygge mcp doctor)
+      ```
+      Output shows the `.agents/mcp.toml` path with status `ok` and
+      a server count of 1.
+
+- [ ] **MCP tool invocable (manual; requires a real MCP binary).**
+      Install a real MCP server (e.g. `mcp-server-filesystem`),
+      configure it in `~/.agents/mcp.toml`, then `hygge mcp ping
+      filesystem` and `hygge mcp tools filesystem`. In the TUI, ask
+      the agent to use one of the advertised tools and verify the
+      permission prompt fires under the `mcp` category.
