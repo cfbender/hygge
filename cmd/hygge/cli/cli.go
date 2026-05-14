@@ -65,6 +65,9 @@ func applyTestOverrides(o bootstrapOptions) bootstrapOptions {
 	if o.CatalogBaseURL == "" {
 		o.CatalogBaseURL = testOverrides.CatalogBaseURL
 	}
+	if o.ReasoningOverride == "" {
+		o.ReasoningOverride = testOverrides.ReasoningOverride
+	}
 	return o
 }
 

@@ -134,6 +134,9 @@ func parseStream(ctx context.Context, providerName string, body io.ReadCloser, o
 		if chunk.Usage != nil {
 			usage.InputTokens = chunk.Usage.PromptTokens
 			usage.OutputTokens = chunk.Usage.CompletionTokens
+			if d := chunk.Usage.CompletionTokensDetails; d != nil {
+				usage.ReasoningTokens = d.ReasoningTokens
+			}
 			usageSet = true
 		}
 
@@ -149,6 +152,14 @@ func parseStream(ctx context.Context, providerName string, body io.ReadCloser, o
 
 			if ch.Delta.Content != "" {
 				emit(ctx, out, provider.Event{Type: provider.EventTextDelta, Text: ch.Delta.Content})
+			}
+
+			// Reasoning-summary chunks (o-series) flow through as
+			// EventThinkingDelta so the TUI's existing thinking
+			// renderer surfaces them with no new UI work.  See
+			// reasoningDelta for the detection heuristic.
+			if rd := reasoningDelta(ch.Delta); rd != "" {
+				emit(ctx, out, provider.Event{Type: provider.EventThinkingDelta, Text: rd})
 			}
 
 			for _, tc := range ch.Delta.ToolCalls {
@@ -239,5 +250,28 @@ func emit(ctx context.Context, out chan<- provider.Event, ev provider.Event) boo
 		default:
 		}
 		return false
+	}
+}
+
+// reasoningDelta extracts the reasoning-summary fragment from a chat
+// delta, if any.  OpenAI's public Streaming API doc surfaces the
+// fragment as `reasoning_summary`; some gateways and SDK preview
+// variants use the shorter `reasoning` key.  We accept both and
+// concatenate them (in practice only one is set per chunk) so the
+// caller doesn't need to care which spelling the upstream picked.
+//
+// Returns "" when neither field is populated.  Keeping the helper
+// named and on its own line makes it cheap to extend (e.g. once
+// OpenAI ships a third spelling, only this function needs touching).
+func reasoningDelta(d chatDelta) string {
+	switch {
+	case d.ReasoningSummary != "" && d.Reasoning != "":
+		return d.ReasoningSummary + d.Reasoning
+	case d.ReasoningSummary != "":
+		return d.ReasoningSummary
+	case d.Reasoning != "":
+		return d.Reasoning
+	default:
+		return ""
 	}
 }

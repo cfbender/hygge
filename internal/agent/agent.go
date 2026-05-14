@@ -133,6 +133,12 @@ type Options struct {
 	// the seen-dir set is shared, which is the intended behaviour
 	// for one workspace).
 	LazyContext *agentsmd.LazyTracker
+	// Reasoning is the session-scoped reasoning knob copied onto
+	// every [provider.Request] this agent issues.  The zero value
+	// means "no reasoning" — adapters that support reasoning will
+	// not enable it.  CLI / config plumb a [provider.Reasoning]
+	// into this field at bootstrap.
+	Reasoning provider.Reasoning
 }
 
 // Agent is the orchestrator.  Construct via [New]; the zero value is not

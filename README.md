@@ -282,12 +282,55 @@ Use:
 - `hygge context show` — print every loaded file, in precedence order, exactly as the system prompt sees it.
 - `hygge context paths` — one absolute path per line for shell pipelines.
 
-### Provider credentials
+### Reasoning models
 
-API keys live separately from the human-edited config so the config can
-be committed to a dotfiles repo without leaking secrets. They are
-stored at `$XDG_STATE_HOME/hygge/auth.json` (mode `0600`,
-`~/.local/state/hygge/auth.json` by default) and managed via:
+Hygge exposes a single knob for reasoning / extended-thinking models
+that both Anthropic and OpenAI-family adapters translate into the
+appropriate wire format. The session-wide default lives under
+`[model]` in any config layer:
+
+```toml
+[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+reasoning = "medium"            # "" / "off" / "low" / "medium" / "high"
+# reasoning_budget = 12000      # optional explicit Anthropic token budget
+```
+
+Override per run with the `--reasoning` flag:
+
+```sh
+hygge --reasoning high -p "Plan the migration from X to Y."
+```
+
+Adapter behaviour:
+
+- **Anthropic** — `claude-sonnet-4-5` and `claude-opus-4-5` support
+  extended thinking. `low` / `medium` / `high` map to a budget of
+  `2048` / `8192` / `16384` tokens unless `reasoning_budget` pins an
+  explicit value. The `max_tokens` default is raised so it sits at
+  least `budget + 1024` above the thinking budget. Models without
+  extended-thinking support silently ignore the field.
+- **OpenAI o-series** — `o1`, `o1-mini`, `o3`, `o3-mini`, `o4-mini`,
+  and any `reasoning-*` model are auto-detected by name prefix. The
+  request body switches to `max_completion_tokens`, drops
+  `temperature` entirely, and sends `reasoning_effort` when the knob
+  is `low` / `medium` / `high`. With `--reasoning off` on a
+  reasoning-class model, the field is omitted and the server picks
+  its default. Non-reasoning models silently ignore the knob.
+
+Reasoning tokens are billed (OpenAI counts them under
+`completion_tokens`) and propagated through `provider.Usage` and the
+running cost totals. Reasoning-summary chunks streamed by the o-series
+arrive as the same `thinking_delta` events the TUI already renders, so
+no extra UI is needed.
+
+The reasoning-model detection list is currently a hardcoded prefix
+matcher in `internal/provider/openaicompat`. When the models-catalog
+work lands the detection will move to a capability lookup; see
+`STATUS.md`.
+
+### Provider credentials
 
 - `hygge provider auth [name]` — save an API key for a provider. Reads
   a single line from stdin when piped, or prompts interactively

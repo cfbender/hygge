@@ -16,6 +16,18 @@
 // per-1k-vs-per-1M confusion that plagues pricing code.  Convert at the API
 // boundary — never store mixed units.
 //
+// # Reasoning tokens
+//
+// OpenAI's reasoning-class models (o1, o3, o4-*) report a
+// reasoning_tokens count under completion_tokens_details.  That count
+// is a SUBSET of completion_tokens (not in addition): the API already
+// counts reasoning under the output total for billing purposes.
+// [Calculate] therefore does NOT add ReasoningTokens to the output
+// cost a second time — it is exposed on [Usage] so callers can show
+// the breakdown to the user without distorting the dollar figure.
+// Anthropic does not report a separate reasoning count; its thinking
+// tokens are folded into OutputTokens by the API.
+//
 // # No live network in tests
 //
 // Tests under this package MUST NOT make real HTTP calls.  All network paths

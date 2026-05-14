@@ -53,6 +53,7 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 		OutputTokens:     totalsForEvent.Totals.OutputTokens,
 		CacheReadTokens:  totalsForEvent.Totals.CacheReadTokens,
 		CacheWriteTokens: totalsForEvent.Totals.CacheWriteTokens,
+		ReasoningTokens:  u.ReasoningTokens,
 		DollarsTotal:     totalsForEvent.Totals.CostUSD,
 		At:               a.opts.Now(),
 	})
@@ -64,11 +65,12 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 		pct = float64(used) / float64(maxTok)
 	}
 	bus.Publish(a.opts.Bus, bus.ContextUsageUpdated{
-		SessionID:  sessionID,
-		UsedTokens: used,
-		MaxTokens:  maxTok,
-		PctUsed:    pct,
-		At:         a.opts.Now(),
+		SessionID:       sessionID,
+		UsedTokens:      used,
+		MaxTokens:       maxTok,
+		PctUsed:         pct,
+		ReasoningTokens: u.ReasoningTokens,
+		At:              a.opts.Now(),
 	})
 }
 

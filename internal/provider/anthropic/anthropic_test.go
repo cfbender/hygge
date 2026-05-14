@@ -723,6 +723,160 @@ func TestBuildRequestBody_ThinkingOption(t *testing.T) {
 	}
 }
 
+// TestBuildRequestBody_Reasoning covers the typed Reasoning field's
+// translation into the thinking block plus the max_tokens default
+// inflation when the configured cap is too small for the requested
+// budget.
+func TestBuildRequestBody_Reasoning(t *testing.T) {
+	p, err := New(map[string]any{"api_key": "k", "base_url": "http://unused", "cache": false})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a := p.(*adapter)
+
+	cases := []struct {
+		name           string
+		req            provider.Request
+		wantThinking   bool
+		wantBudget     int
+		wantMinMaxTok  int
+		wantMaxTok     int // 0 means "don't check exact"
+		wantLegacyOnly bool
+	}{
+		{
+			name: "off (no reasoning, no legacy)",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+			},
+			wantThinking: false,
+			wantMaxTok:   4096,
+		},
+		{
+			name: "low effort -> 2048 budget, default max raised to 3072",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Reasoning: provider.Reasoning{Effort: "low"},
+			},
+			wantThinking:  true,
+			wantBudget:    2048,
+			wantMinMaxTok: 2048 + 1024,
+		},
+		{
+			name: "medium effort -> 8192 budget, default max raised",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Reasoning: provider.Reasoning{Effort: "medium"},
+			},
+			wantThinking:  true,
+			wantBudget:    8192,
+			wantMinMaxTok: 8192 + 1024,
+		},
+		{
+			name: "high effort -> 16384 budget",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Reasoning: provider.Reasoning{Effort: "high"},
+			},
+			wantThinking:  true,
+			wantBudget:    16384,
+			wantMinMaxTok: 16384 + 1024,
+		},
+		{
+			name: "explicit BudgetTokens overrides effort mapping",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Reasoning: provider.Reasoning{Effort: "low", BudgetTokens: 12000},
+			},
+			wantThinking:  true,
+			wantBudget:    12000,
+			wantMinMaxTok: 12000 + 1024,
+		},
+		{
+			name: "caller-pinned MaxTokens is preserved verbatim",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				MaxTokens: 2000,
+				Reasoning: provider.Reasoning{Effort: "high"},
+			},
+			wantThinking: true,
+			wantBudget:   16384,
+			wantMaxTok:   2000,
+		},
+		{
+			name: "legacy Options[thinking] still works when Reasoning is off",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Options:   map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 4000}},
+			},
+			wantThinking:   true,
+			wantLegacyOnly: true,
+		},
+		{
+			name: "typed Reasoning beats legacy Options[thinking] when both set",
+			req: provider.Request{
+				ModelName: "claude-sonnet-4-5",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Options:   map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 4000}},
+				Reasoning: provider.Reasoning{Effort: "high"},
+			},
+			wantThinking:  true,
+			wantBudget:    16384,
+			wantMinMaxTok: 16384 + 1024,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body, err := a.buildRequestBody(c.req, true)
+			if err != nil {
+				t.Fatalf("buildRequestBody: %v", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("unmarshal: %v: %s", err, body)
+			}
+			thinking, has := got["thinking"].(map[string]any)
+			if c.wantThinking != has {
+				t.Fatalf("thinking present=%v, want %v: %s", has, c.wantThinking, body)
+			}
+			if !c.wantThinking {
+				if c.wantMaxTok > 0 {
+					if int(got["max_tokens"].(float64)) != c.wantMaxTok {
+						t.Errorf("max_tokens=%v, want %d", got["max_tokens"], c.wantMaxTok)
+					}
+				}
+				return
+			}
+			if c.wantLegacyOnly {
+				if int(thinking["budget_tokens"].(float64)) != 4000 {
+					t.Errorf("legacy budget_tokens=%v", thinking["budget_tokens"])
+				}
+				return
+			}
+			if int(thinking["budget_tokens"].(float64)) != c.wantBudget {
+				t.Errorf("budget_tokens=%v, want %d", thinking["budget_tokens"], c.wantBudget)
+			}
+			if c.wantMinMaxTok > 0 {
+				if int(got["max_tokens"].(float64)) < c.wantMinMaxTok {
+					t.Errorf("max_tokens=%v, want >= %d", got["max_tokens"], c.wantMinMaxTok)
+				}
+			}
+			if c.wantMaxTok > 0 {
+				if int(got["max_tokens"].(float64)) != c.wantMaxTok {
+					t.Errorf("max_tokens=%v, want exact %d", got["max_tokens"], c.wantMaxTok)
+				}
+			}
+		})
+	}
+}
+
 // Live smoke test — gated behind HYGGE_LIVE=1 so CI never runs it.
 func TestLive_AnthropicSmoke(t *testing.T) {
 	if os.Getenv("HYGGE_LIVE") != "1" {

@@ -83,8 +83,41 @@
   session. See `internal/agentsmd/lazy.go` and
   `internal/agent/touched.go`.
 
+- **Reasoning model support (v0.2).** A unified `provider.Reasoning`
+  field on `provider.Request` is translated by both adapters into
+  their wire-format equivalents. The Anthropic adapter populates the
+  existing `thinking` block from the typed field and raises the
+  default `max_tokens` to sit at least `budget + 1024` above the
+  budget; the legacy `Options["thinking"]` passthrough is preserved
+  for callers that need explicit shape control. The OpenAI-compat
+  adapter detects reasoning-class models (`o1*`, `o3*`, `o4-*`,
+  `reasoning-*`) by name prefix, switches the request body to
+  `max_completion_tokens`, drops `temperature`, and sends
+  `reasoning_effort` when the knob is `low/medium/high`. Reasoning
+  tokens are parsed from
+  `usage.completion_tokens_details.reasoning_tokens` and propagated
+  through `provider.Usage`, `bus.CostUpdated`, and
+  `bus.ContextUsageUpdated`. Reasoning-summary stream chunks are
+  surfaced as `EventThinkingDelta` (via the `reasoningDelta` helper)
+  so the existing TUI thinking renderer surfaces them with no UI
+  changes. Exposed as `model.reasoning` / `model.reasoning_budget`
+  in config and `--reasoning {off|low|medium|high}` on the CLI.
+
+  Detection of reasoning-class models currently uses a hardcoded
+  prefix matcher in `internal/provider/openaicompat`. Once
+  "models-catalog-driven model lists" lands, this should move to a
+  catalog capability flag — the prefix matcher will become a
+  fallback for ids the catalog doesn't yet know about.
+
 ## Follow-ups
 
+- **Models-catalog-driven reasoning detection.** The OpenAI-compat
+  adapter currently identifies reasoning-class models by hardcoded
+  name prefix (`o1*`, `o3*`, `o4-*`, `reasoning-*`). When the
+  catalog work lands, swap this for a catalog capability lookup with
+  the prefix matcher as a fallback so the adapter handles ids the
+  catalog hasn't been refreshed for. Search for
+  `TODO(catalog)` in `internal/provider/openaicompat`.
 - Bash `cwd` argument: the bash tool currently has no explicit
   working-directory argument, so `touchedPaths` returns nil for it.
   When bash grows a `cwd` field, wire it into `touchedPaths` so

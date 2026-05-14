@@ -57,3 +57,17 @@ func TestResumeWithSeed(t *testing.T) {
 		t.Errorf("expected short id in output, got:\n%s", out.String())
 	}
 }
+
+// TestRoot_ReasoningFlagPresent confirms the --reasoning flag is wired
+// into the root command and appears in `hygge --help`.  Detailed
+// resolution behaviour lives in resolveReasoning's unit test.
+func TestRoot_ReasoningFlagPresent(t *testing.T) {
+	root := NewRootCmd()
+	flag := root.Flags().Lookup("reasoning")
+	if flag == nil {
+		t.Fatal("--reasoning flag missing from root command")
+	}
+	if !strings.Contains(flag.Usage, "off") || !strings.Contains(flag.Usage, "high") {
+		t.Errorf("--reasoning usage text should advertise off/high, got %q", flag.Usage)
+	}
+}

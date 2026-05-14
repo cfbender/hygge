@@ -766,3 +766,245 @@ func equalTypes(a, b []provider.EventType) bool {
 	}
 	return true
 }
+
+// --- Reasoning-model detection --------------------------------------------
+
+func TestIsReasoningModel(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		{"o1", true},
+		{"o1-mini", true},
+		{"o1-preview", true},
+		{"o3", true},
+		{"o3-mini", true},
+		{"o4-mini", true},
+		{"o4-MINI", true}, // case-insensitive
+		{"O1", true},
+		{"reasoning-test", true},
+		{"openai/o3-mini", true},
+		{"openrouter/openai/o3", true},
+		{"gpt-4o", false},
+		{"gpt-4o-mini", false},
+		{"claude-sonnet-4-5", false},
+		{"claude-foo", false},
+		{"", false},
+		{"o2-not-a-real-model", false}, // unmatched prefix
+		{"oxford", false},
+		{"reasoning", false}, // bare word, no dash
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			if got := isReasoningModel(c.id); got != c.want {
+				t.Errorf("isReasoningModel(%q)=%v, want %v", c.id, got, c.want)
+			}
+		})
+	}
+}
+
+// --- Reasoning request-body construction ----------------------------------
+
+func TestBuildRequestBody_ReasoningModel_DropsTemperatureAndUsesMaxCompletionTokens(t *testing.T) {
+	srv, capt := newSSEServer(t, "stream_basic_text.sse")
+	p := newCompat(t, Config{BaseURL: srv.URL})
+
+	req := provider.Request{
+		ModelName:   "o3-mini",
+		Messages:    []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+		Temperature: 0.7,
+		MaxTokens:   2048,
+		Reasoning:   provider.Reasoning{Effort: "medium"},
+	}
+	ch, err := p.Stream(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	_ = collect(ch)
+
+	var got map[string]any
+	if err := json.Unmarshal(capt.body, &got); err != nil {
+		t.Fatalf("unmarshal: %v: %s", err, capt.body)
+	}
+	if _, present := got["temperature"]; present {
+		t.Errorf("temperature should be omitted entirely for reasoning models: %v", got)
+	}
+	if _, present := got["max_tokens"]; present {
+		t.Errorf("max_tokens should be omitted for reasoning models: %v", got)
+	}
+	if mct, ok := got["max_completion_tokens"].(float64); !ok || int(mct) != 2048 {
+		t.Errorf("max_completion_tokens=%v, want 2048", got["max_completion_tokens"])
+	}
+	if got["reasoning_effort"] != "medium" {
+		t.Errorf("reasoning_effort=%v, want medium", got["reasoning_effort"])
+	}
+}
+
+func TestBuildRequestBody_ReasoningOff_NoReasoningEffort(t *testing.T) {
+	srv, capt := newSSEServer(t, "stream_basic_text.sse")
+	p := newCompat(t, Config{BaseURL: srv.URL})
+
+	req := provider.Request{
+		ModelName: "o3-mini",
+		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+		// Reasoning zero value: still routed through reasoning path
+		// because the model is reasoning-class, but no
+		// reasoning_effort field is sent.
+	}
+	ch, err := p.Stream(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	_ = collect(ch)
+
+	var got map[string]any
+	if err := json.Unmarshal(capt.body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := got["reasoning_effort"]; present {
+		t.Errorf("reasoning_effort should be omitted when Reasoning is off: %v", got)
+	}
+	if _, present := got["temperature"]; present {
+		t.Errorf("temperature should be omitted: %v", got)
+	}
+}
+
+func TestBuildRequestBody_NonReasoningModel_IgnoresReasoning(t *testing.T) {
+	srv, capt := newSSEServer(t, "stream_basic_text.sse")
+	p := newCompat(t, Config{BaseURL: srv.URL})
+
+	req := provider.Request{
+		ModelName:   "gpt-4o",
+		Messages:    []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+		Temperature: 0.5,
+		MaxTokens:   1024,
+		Reasoning:   provider.Reasoning{Effort: "high"},
+	}
+	ch, err := p.Stream(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	_ = collect(ch)
+
+	var got map[string]any
+	if err := json.Unmarshal(capt.body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := got["reasoning_effort"]; present {
+		t.Errorf("reasoning_effort should be absent on non-reasoning models: %v", got)
+	}
+	if _, present := got["max_completion_tokens"]; present {
+		t.Errorf("max_completion_tokens should be absent on non-reasoning models: %v", got)
+	}
+	if got["max_tokens"].(float64) != 1024 {
+		t.Errorf("max_tokens=%v, want 1024", got["max_tokens"])
+	}
+	if got["temperature"].(float64) != 0.5 {
+		t.Errorf("temperature=%v, want 0.5", got["temperature"])
+	}
+}
+
+func TestBuildRequestBody_ReasoningEffortValues(t *testing.T) {
+	for _, eff := range []string{"low", "medium", "high"} {
+		t.Run(eff, func(t *testing.T) {
+			srv, capt := newSSEServer(t, "stream_basic_text.sse")
+			p := newCompat(t, Config{BaseURL: srv.URL})
+			ch, err := p.Stream(t.Context(), provider.Request{
+				ModelName: "o4-mini",
+				Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
+				Reasoning: provider.Reasoning{Effort: eff},
+			})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			_ = collect(ch)
+			var got map[string]any
+			if err := json.Unmarshal(capt.body, &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got["reasoning_effort"] != eff {
+				t.Errorf("reasoning_effort=%v, want %q", got["reasoning_effort"], eff)
+			}
+		})
+	}
+}
+
+// --- Reasoning usage / streaming-summary ----------------------------------
+
+func TestStream_ReasoningUsage(t *testing.T) {
+	srv, _ := newSSEServer(t, "stream_reasoning_usage.sse")
+	p := newCompat(t, Config{BaseURL: srv.URL})
+
+	ch, err := p.Stream(t.Context(), basicReq())
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	events := collect(ch)
+
+	var u *provider.Event
+	for i := range events {
+		if events[i].Type == provider.EventUsage {
+			u = &events[i]
+		}
+	}
+	if u == nil {
+		t.Fatalf("expected EventUsage: %v", eventTypes(events))
+	}
+	if u.Usage.InputTokens != 5 || u.Usage.OutputTokens != 11 {
+		t.Errorf("usage tokens: %+v", u.Usage)
+	}
+	if u.Usage.ReasoningTokens != 7 {
+		t.Errorf("reasoning tokens: got %d want 7", u.Usage.ReasoningTokens)
+	}
+}
+
+func TestStream_ReasoningSummaryDeltas(t *testing.T) {
+	srv, _ := newSSEServer(t, "stream_reasoning_summary.sse")
+	p := newCompat(t, Config{BaseURL: srv.URL})
+
+	ch, err := p.Stream(t.Context(), basicReq())
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	events := collect(ch)
+
+	var thinking, text strings.Builder
+	for _, e := range events {
+		switch e.Type {
+		case provider.EventThinkingDelta:
+			thinking.WriteString(e.Text)
+		case provider.EventTextDelta:
+			text.WriteString(e.Text)
+		}
+	}
+	if got := thinking.String(); got != "Let me think... carefully." {
+		t.Errorf("thinking: %q", got)
+	}
+	if got := text.String(); got != "The answer is 42." {
+		t.Errorf("text: %q", got)
+	}
+	last := events[len(events)-1]
+	if last.Type != provider.EventDone {
+		t.Errorf("last event: %v", last.Type)
+	}
+}
+
+func TestReasoningDelta_HelperHandlesBothSpellings(t *testing.T) {
+	cases := []struct {
+		name string
+		d    chatDelta
+		want string
+	}{
+		{"empty", chatDelta{}, ""},
+		{"summary only", chatDelta{ReasoningSummary: "hi"}, "hi"},
+		{"reasoning only", chatDelta{Reasoning: "hi"}, "hi"},
+		{"both", chatDelta{ReasoningSummary: "a", Reasoning: "b"}, "ab"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := reasoningDelta(c.d); got != c.want {
+				t.Errorf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}

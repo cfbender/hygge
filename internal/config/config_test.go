@@ -692,3 +692,94 @@ name = "from-state-profile"
 		t.Errorf("Profile: got %q, want work", cfg.Profile)
 	}
 }
+
+// --- Reasoning fields --------------------------------------------------------
+
+// TestLoad_Reasoning_ValidValues exercises the happy path: each
+// recognised reasoning value passes through unchanged.
+func TestLoad_Reasoning_ValidValues(t *testing.T) {
+	for _, val := range []string{"", "off", "low", "medium", "high"} {
+		t.Run("value="+val, func(t *testing.T) {
+			tmp := t.TempDir()
+			cfgDir := filepath.Join(tmp, ".config", "hygge")
+			writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+reasoning = "`+val+`"
+reasoning_budget = 3000
+`)
+			cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Model.Reasoning != val {
+				t.Errorf("model.reasoning: got %q, want %q", cfg.Model.Reasoning, val)
+			}
+			if cfg.Model.ReasoningBudget != 3000 {
+				t.Errorf("model.reasoning_budget: got %d, want 3000", cfg.Model.ReasoningBudget)
+			}
+		})
+	}
+}
+
+// TestLoad_Reasoning_InvalidValueWarnsAndResets confirms an invalid
+// reasoning string does NOT fail the load — it warns and is reset to "".
+func TestLoad_Reasoning_InvalidValueWarnsAndResets(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+reasoning = "extreme"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Model.Reasoning != "" {
+		t.Errorf("invalid reasoning value should reset to \"\", got %q", cfg.Model.Reasoning)
+	}
+}
+
+// TestLoad_Reasoning_NegativeBudgetResets confirms a negative
+// reasoning_budget is clamped to zero rather than failing the load.
+func TestLoad_Reasoning_NegativeBudgetResets(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+reasoning_budget = -500
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Model.ReasoningBudget != 0 {
+		t.Errorf("negative reasoning_budget should reset to 0, got %d", cfg.Model.ReasoningBudget)
+	}
+}
+
+// TestLoad_Reasoning_CaseInsensitive verifies upper-case TOML values
+// are normalised to lower-case so adapters can match on a fixed
+// vocabulary without string-folding at every callsite.
+func TestLoad_Reasoning_CaseInsensitive(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+reasoning = "MEDIUM"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Model.Reasoning != "medium" {
+		t.Errorf("reasoning value should be lower-cased, got %q", cfg.Model.Reasoning)
+	}
+}
