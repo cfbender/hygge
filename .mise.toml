@@ -22,7 +22,7 @@ run = "go mod tidy"
 description = "Remove build artifacts and coverage output"
 run = "rm -rf ./bin ./coverage.out"
 
-[tasks.run]
+[tasks.cli]
 description = "Build and run the hygge binary (pass args after --)"
 run = ["mise run build", "./bin/hygge $@"]
 
