@@ -21,9 +21,17 @@ import (
 // into the persistent flag set above any subcommand.
 var resumeFlag string
 
-// init binds --resume.  Called from NewRootCmd via wireRunFlags below.
+// reasoningFlag is the value bound to the root command's --reasoning
+// flag.  Allowed values: "" / "off" / "low" / "medium" / "high".
+// Overrides config.Model.Reasoning for the run.  Validated at
+// bootstrap; invalid values warn and are reset to "" (no reasoning).
+var reasoningFlag string
+
+// init binds --resume and --reasoning.  Called from NewRootCmd via
+// wireRunFlags below.
 func wireRunFlags(root *cobra.Command) {
 	root.Flags().StringVar(&resumeFlag, "resume", "", "resume the most recent session whose id starts with this prefix")
+	root.Flags().StringVar(&reasoningFlag, "reasoning", "", "reasoning depth for the run: off | low | medium | high (overrides [model] reasoning)")
 }
 
 // runRun is the body of `hygge` (no subcommand).  Bootstraps the
@@ -32,9 +40,10 @@ func runRun(cmd *cobra.Command, _ []string) error {
 	ctx := context.Background()
 
 	rt, err := bootstrap(ctx, bootstrapOptions{
-		ConfigFile:  rootFlags.ConfigFile,
-		ProfileName: rootFlags.Profile,
-		Pwd:         rootFlags.Pwd,
+		ConfigFile:        rootFlags.ConfigFile,
+		ProfileName:       rootFlags.Profile,
+		Pwd:               rootFlags.Pwd,
+		ReasoningOverride: reasoningFlag,
 	})
 	if err != nil {
 		return err

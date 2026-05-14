@@ -90,6 +90,81 @@ type Request struct {
 	// include {"thinking": {"type": "enabled", "budget_tokens": 8000}} and
 	// {"cache": false} to disable prompt caching.
 	Options map[string]any
+
+	// Reasoning configures the model's reasoning / extended-thinking
+	// behaviour.  Adapters that don't support reasoning ignore this
+	// field.  See [Reasoning] for the translation rules.
+	Reasoning Reasoning
+}
+
+// Reasoning describes how much reasoning budget to give the model.
+// The zero value means "off": no reasoning_effort is sent for OpenAI,
+// no thinking block is sent for Anthropic.
+//
+// Effort is the user-facing knob.  Adapters that support discrete
+// effort levels (OpenAI-family reasoning models: o1, o3, o4-*) map
+// "low" / "medium" / "high" directly onto the reasoning_effort field.
+// Adapters that take an explicit token budget (Anthropic extended
+// thinking) map effort to BudgetTokens via [Reasoning.AnthropicBudget]
+// unless BudgetTokens is non-zero, which overrides the mapping.
+//
+// Note on OpenAI: when an Effort other than off is requested but the
+// model is NOT a reasoning-class model, the adapter silently drops
+// the request — non-reasoning models reject reasoning_effort.  When
+// the model IS reasoning-class but Effort is off, the adapter omits
+// reasoning_effort and lets the server pick its default.
+type Reasoning struct {
+	// Effort is the discrete user-facing knob.  Empty string and "off"
+	// both mean "no reasoning".  Other recognised values are "low",
+	// "medium", and "high".
+	Effort string
+
+	// BudgetTokens is an explicit Anthropic-style token budget.  When
+	// non-zero it overrides the Effort -> budget mapping.  Ignored by
+	// OpenAI-family adapters; only the Effort field affects their
+	// reasoning_effort wire field.
+	BudgetTokens int
+}
+
+// IsOn reports whether reasoning should be requested at all.
+// Returns true for Effort in {"low", "medium", "high"} or any non-zero
+// BudgetTokens.  "" and "off" return false.
+func (r Reasoning) IsOn() bool {
+	if r.BudgetTokens > 0 {
+		return true
+	}
+	switch r.Effort {
+	case "low", "medium", "high":
+		return true
+	default:
+		return false
+	}
+}
+
+// AnthropicBudget returns the token budget for Anthropic's thinking
+// block.  Returns 0 when reasoning is off.  When BudgetTokens is set,
+// returns it verbatim.  Otherwise maps low/medium/high to
+// 2048/8192/16384 respectively.  These figures are the v0.1 mapping
+// chosen to (a) sit comfortably under the model's max_tokens ceiling
+// on a default 4096 cap once we raise it, and (b) give "high" enough
+// room for non-trivial reasoning on hard tasks.
+func (r Reasoning) AnthropicBudget() int {
+	if !r.IsOn() {
+		return 0
+	}
+	if r.BudgetTokens > 0 {
+		return r.BudgetTokens
+	}
+	switch r.Effort {
+	case "low":
+		return 2048
+	case "medium":
+		return 8192
+	case "high":
+		return 16384
+	default:
+		return 0
+	}
 }
 
 // Tool describes a callable function the assistant can invoke.
@@ -144,4 +219,13 @@ type Usage struct {
 	// CacheWriteTokens is the number of tokens written into the provider's
 	// prompt cache on this turn.
 	CacheWriteTokens int64
+
+	// ReasoningTokens is the number of internal reasoning tokens the
+	// model burned on this turn.  Populated when the provider exposes
+	// the figure (OpenAI o-series via
+	// completion_tokens_details.reasoning_tokens; Anthropic does not
+	// report it separately — those tokens are folded into OutputTokens
+	// for billing).  Zero when the model is not a reasoning model or
+	// the provider does not surface the count.
+	ReasoningTokens int64
 }

@@ -70,6 +70,18 @@ type ModelConfig struct {
 	Provider string         `mapstructure:"provider"`
 	Name     string         `mapstructure:"name"`
 	Options  map[string]any `mapstructure:"options"`
+	// Reasoning is the session-default reasoning knob.  Allowed
+	// values: "" / "off" (no reasoning), "low", "medium", "high".
+	// Invalid values are reset to "" with a warning at load time so
+	// a typo in a profile cannot block startup.
+	Reasoning string `mapstructure:"reasoning"`
+	// ReasoningBudget is an explicit Anthropic-style token budget
+	// for extended thinking.  Zero means "derive from Reasoning"
+	// (the standard low/medium/high mapping).  Negative values are
+	// reset to zero with a warning.  Ignored by OpenAI-family
+	// adapters; only the discrete effort knob affects their wire
+	// format.
+	ReasoningBudget int `mapstructure:"reasoning_budget"`
 }
 
 // PermissionConfig controls which operations require user approval.
@@ -316,6 +328,24 @@ func validateConfig(cfg *Config) error {
 	}
 	if strings.TrimSpace(cfg.Model.Name) == "" {
 		return &InvalidValueError{Key: "model.name", Value: cfg.Model.Name, Msg: "must not be empty"}
+	}
+
+	// Reasoning is best-effort: invalid values warn and reset to ""
+	// rather than fail the load.  This keeps a stray typo in a
+	// profile from blocking startup; the user gets a default
+	// (reasoning off) plus a clear warning.
+	switch strings.ToLower(strings.TrimSpace(cfg.Model.Reasoning)) {
+	case "", "off", "low", "medium", "high":
+		cfg.Model.Reasoning = strings.ToLower(strings.TrimSpace(cfg.Model.Reasoning))
+	default:
+		slog.Warn("config: invalid model.reasoning, resetting to off",
+			"value", cfg.Model.Reasoning)
+		cfg.Model.Reasoning = ""
+	}
+	if cfg.Model.ReasoningBudget < 0 {
+		slog.Warn("config: invalid model.reasoning_budget, resetting to 0",
+			"value", cfg.Model.ReasoningBudget)
+		cfg.Model.ReasoningBudget = 0
 	}
 	return nil
 }

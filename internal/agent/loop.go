@@ -55,6 +55,7 @@ func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*sess
 			modelName,
 			nil,
 			lazyBlocks,
+			a.opts.Reasoning,
 		)
 
 		asstMsg, hasTools, err := a.runOneTurn(ctx, sessionID, req, modelName)

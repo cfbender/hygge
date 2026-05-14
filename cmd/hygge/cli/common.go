@@ -114,6 +114,12 @@ type bootstrapOptions struct {
 	// Tests point this at an httptest server (typically a 500-returning
 	// stub) so no live network call is ever made.  Test-only.
 	CatalogBaseURL string
+	// ReasoningOverride, when non-empty, replaces the config-supplied
+	// model.reasoning value for the lifetime of this runtime.  Values
+	// outside the allowed set ("off"/"low"/"medium"/"high") are
+	// silently ignored — bootstrap warns and falls back to the
+	// config value.  Populated from the --reasoning CLI flag.
+	ReasoningOverride string
 }
 
 // defaultSystemPrompt is the v0.1 hardcoded system prompt.  Two sentences.
@@ -488,6 +494,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		SystemPrompt:  sysPrompt,
 		Now:           opts.Now,
 		LazyContext:   lazyTracker,
+		Reasoning:     resolveReasoning(cfg, opts.ReasoningOverride),
 	})
 	if err != nil {
 		permEngine.Close()
@@ -892,6 +899,37 @@ func toolNamesFromRegistry(r *tool.Registry) []string {
 		names = append(names, t.Name())
 	}
 	return names
+}
+
+// resolveReasoning composes a [provider.Reasoning] from the config's
+// model.reasoning / model.reasoning_budget fields and any --reasoning
+// CLI override.  Order of precedence: override > config.
+//
+// Override values outside the allowed set ("off" / "low" / "medium" /
+// "high") are ignored with a warning; the config value (or off) wins.
+// An override of "off" explicitly clears any reasoning configured at
+// the config level — this is the documented way to disable reasoning
+// for a single run.
+func resolveReasoning(cfg *config.Config, override string) provider.Reasoning {
+	effort := ""
+	if cfg != nil {
+		effort = cfg.Model.Reasoning
+	}
+	override = strings.ToLower(strings.TrimSpace(override))
+	if override != "" {
+		switch override {
+		case "off", "low", "medium", "high":
+			effort = override
+		default:
+			slog.Warn("cli: invalid --reasoning value, ignoring",
+				"value", override)
+		}
+	}
+	r := provider.Reasoning{Effort: effort}
+	if cfg != nil {
+		r.BudgetTokens = cfg.Model.ReasoningBudget
+	}
+	return r
 }
 
 // stubProviderFactory builds a provider that satisfies the interface

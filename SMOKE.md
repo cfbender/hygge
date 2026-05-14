@@ -312,3 +312,33 @@ These are deliberately deferred. Do not block v0.1 on them.
       filesystem` and `hygge mcp tools filesystem`. In the TUI, ask
       the agent to use one of the advertised tools and verify the
       permission prompt fires under the `mcp` category.
+
+### Reasoning models smoke
+
+- [ ] **`--reasoning` flag visible in help.**
+      `./bin/hygge --help` lists `--reasoning` with the
+      `off | low | medium | high` vocabulary in the usage text.
+
+- [ ] **Anthropic extended thinking ticks the TUI thinking renderer.**
+      With `ANTHROPIC_API_KEY` set, run:
+      ```
+      ./bin/hygge --reasoning high \
+        -p "Think hard then answer: what is the sum of the first ten primes?"
+      ```
+      (or launch the TUI with `--reasoning high` and ask the same
+      question.)  The TUI's thinking renderer streams reasoning
+      content alongside the final text and the footer's token totals
+      reflect the budget the model spent.
+
+- [ ] **OpenAI o-series uses the reasoning request shape (manual).**
+      With `OPENAI_API_KEY` set:
+      ```
+      ./bin/hygge --reasoning medium --model openai/o4-mini \
+        -p "Briefly reason about 1+1 and answer."
+      ```
+      The request body the adapter sends (visible in
+      `~/.local/state/hygge/hygge.log` at debug level) contains
+      `max_completion_tokens` and `reasoning_effort`, and lacks
+      `temperature` and `max_tokens`.  If no key is available, this
+      step is verified by the unit tests in
+      `internal/provider/openaicompat` instead.

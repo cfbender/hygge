@@ -895,3 +895,46 @@ func (c *customStreamProvider) ListModels(_ context.Context) ([]provider.Model, 
 func equalStrings(a, b []string) bool {
 	return slices.Equal(a, b)
 }
+
+// TestSend_ReasoningOptionPropagates verifies that an Agent built with
+// a non-zero Options.Reasoning copies that value onto every
+// provider.Request issued during the turn — both the initial call and
+// the post-tool-call follow-up.
+func TestSend_ReasoningOptionPropagates(t *testing.T) {
+	env := newTestEnv(t)
+
+	target := filepath.Join(env.pwd, "hello.txt")
+	if err := os.WriteFile(target, []byte("hi\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	prov := newFakeProvider("fake",
+		scriptToolUse("looking", toolUseEvent(t, "tu1", "read", map[string]any{"path": target})),
+		scriptText("done", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+	)
+	wantReasoning := provider.Reasoning{Effort: "medium"}
+	var seen []provider.Reasoning
+	var mu sync.Mutex
+	prov.onStream = func(req provider.Request) {
+		mu.Lock()
+		seen = append(seen, req.Reasoning)
+		mu.Unlock()
+	}
+
+	a := env.newAgent(prov, func(o *Options) { o.Reasoning = wantReasoning })
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("go")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("want 2 provider calls, got %d (%+v)", len(seen), seen)
+	}
+	for i, r := range seen {
+		if r != wantReasoning {
+			t.Errorf("call %d Reasoning=%+v, want %+v", i, r, wantReasoning)
+		}
+	}
+}

@@ -212,7 +212,27 @@ func (a *adapter) buildRequestBody(req provider.Request, stream bool) ([]byte, e
 		t := req.Temperature
 		body.Temperature = &t
 	}
-	if req.Options != nil {
+
+	// Reasoning translation: the typed Request.Reasoning field wins
+	// over the legacy Options["thinking"] passthrough so callers can
+	// migrate without touching their adapter glue.  When the typed
+	// field is off and a legacy thinking option is present, the
+	// legacy shape is forwarded verbatim for back-compat.
+	switch {
+	case req.Reasoning.IsOn():
+		budget := req.Reasoning.AnthropicBudget()
+		body.Thinking = map[string]any{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		}
+		// Anthropic requires max_tokens >= budget_tokens + headroom.
+		// Only raise the DEFAULT — callers who pinned an explicit
+		// MaxTokens keep their value (we trust they know what they
+		// want, even if the server may reject it).
+		if req.MaxTokens == 0 && body.MaxTokens < budget+1024 {
+			body.MaxTokens = budget + 1024
+		}
+	case req.Options != nil:
 		if t, ok := req.Options["thinking"].(map[string]any); ok {
 			body.Thinking = t
 		}

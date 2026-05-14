@@ -49,6 +49,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cfbender/hygge/internal/provider"
@@ -224,18 +225,40 @@ func (a *adapter) buildRequestBody(req provider.Request) ([]byte, error) {
 		body.ToolChoice = "auto"
 	}
 
-	if req.Temperature > 0 {
-		t := req.Temperature
-		body.Temperature = &t
-	}
+	reasoning := isReasoningModel(req.ModelName)
 
-	switch {
-	case req.MaxTokens > 0:
-		mt := req.MaxTokens
-		body.MaxTokens = &mt
-	case a.cfg.DefaultMaxTokens > 0:
-		mt := a.cfg.DefaultMaxTokens
-		body.MaxTokens = &mt
+	// Reasoning-class OpenAI models reject `temperature` and
+	// `max_tokens` outright.  Route them through the
+	// reasoning-specific fields and omit both legacy fields entirely
+	// (a zero is not the same as absent for these models).
+	if reasoning {
+		switch {
+		case req.MaxTokens > 0:
+			mt := req.MaxTokens
+			body.MaxCompletionTokens = &mt
+		case a.cfg.DefaultMaxTokens > 0:
+			mt := a.cfg.DefaultMaxTokens
+			body.MaxCompletionTokens = &mt
+		}
+		if req.Reasoning.IsOn() {
+			switch req.Reasoning.Effort {
+			case "low", "medium", "high":
+				body.ReasoningEffort = req.Reasoning.Effort
+			}
+		}
+	} else {
+		if req.Temperature > 0 {
+			t := req.Temperature
+			body.Temperature = &t
+		}
+		switch {
+		case req.MaxTokens > 0:
+			mt := req.MaxTokens
+			body.MaxTokens = &mt
+		case a.cfg.DefaultMaxTokens > 0:
+			mt := a.cfg.DefaultMaxTokens
+			body.MaxTokens = &mt
+		}
 	}
 
 	if a.includeUsage() {
@@ -243,6 +266,51 @@ func (a *adapter) buildRequestBody(req provider.Request) ([]byte, error) {
 	}
 
 	return encodeJSON(body)
+}
+
+// isReasoningModel reports whether the model id refers to a
+// reasoning-class OpenAI model that requires the reasoning request
+// shape (max_completion_tokens, no temperature, reasoning_effort).
+//
+// Detection is by name prefix because hygge's catalog doesn't yet
+// carry capability metadata.  This will move to a catalog lookup when
+// "Models-catalog-driven model lists" lands (see STATUS.md).  Matches,
+// case-insensitive on the prefix:
+//
+//   - o1, o1-* (e.g. o1-mini)
+//   - o3, o3-* (e.g. o3-mini)
+//   - o4-*    (e.g. o4-mini; bare "o4" is not yet a real model)
+//   - reasoning-*  (future-proof escape hatch for explicitly-tagged
+//     gateway models)
+//
+// Provider-prefixed forms ("openai/o3-mini", "openrouter/openai/o3")
+// also match by stripping any leading "<vendor>/" segments before
+// the prefix check.
+//
+// TODO(catalog): replace with a capability lookup once the catalog
+// carries reasoning support flags per-model.
+func isReasoningModel(modelID string) bool {
+	if modelID == "" {
+		return false
+	}
+	id := strings.ToLower(modelID)
+	// Strip any vendor-prefix segments ("openai/o3-mini" -> "o3-mini",
+	// "openrouter/openai/o3" -> "o3").
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		id = id[i+1:]
+	}
+	switch {
+	case id == "o1", strings.HasPrefix(id, "o1-"):
+		return true
+	case id == "o3", strings.HasPrefix(id, "o3-"):
+		return true
+	case strings.HasPrefix(id, "o4-"):
+		return true
+	case strings.HasPrefix(id, "reasoning-"):
+		return true
+	default:
+		return false
+	}
 }
 
 // includeUsage resolves the IncludeUsage tri-state (nil = default true,

@@ -137,6 +137,13 @@ type CostUpdated struct {
 	CacheReadTokens int64
 	// CacheWriteTokens is the cumulative count of cache-write tokens for the session.
 	CacheWriteTokens int64
+	// ReasoningTokens is the cumulative count of reasoning tokens
+	// reported by reasoning-class models.  OpenAI reports these
+	// alongside completion_tokens (they are a SUBSET, not in addition)
+	// — the field is exposed separately so callers can show the
+	// breakdown in the footer without changing how OutputTokens
+	// itself is interpreted.
+	ReasoningTokens int64
 	// DollarsTotal is the cumulative cost in USD for the session.
 	DollarsTotal float64
 	// At is the wall-clock time of the cost update.
@@ -193,6 +200,12 @@ type ContextUsageUpdated struct {
 	MaxTokens int64
 	// PctUsed is the fraction of the context window used, in the range [0.0, 1.0].
 	PctUsed float64
+	// ReasoningTokens is the per-turn count of reasoning tokens
+	// reported by reasoning-class models (see [CostUpdated]).  Zero
+	// for non-reasoning models.  Surfaced alongside the window stats
+	// so the TUI footer can show the per-turn breakdown without a
+	// second event type.
+	ReasoningTokens int64
 	// At is the wall-clock time of the measurement.
 	// Populated by the caller; the bus does not set this field.
 	At time.Time

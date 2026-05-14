@@ -47,6 +47,7 @@ func buildRequest(
 	modelName string,
 	options map[string]any,
 	lazyBlocks []agentsmd.Block,
+	reasoning provider.Reasoning,
 ) provider.Request {
 	values := make([]session.Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -64,6 +65,7 @@ func buildRequest(
 		System:    system,
 		Tools:     tools,
 		Options:   options,
+		Reasoning: reasoning,
 	}
 }
 

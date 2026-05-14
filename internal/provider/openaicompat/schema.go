@@ -9,15 +9,23 @@ import "encoding/json"
 // fields are used aggressively because OpenAI-compatible providers vary in
 // what they tolerate — sending a zero-valued field where the spec says
 // "optional" is the safest path.
+//
+// Reasoning-class OpenAI models (o1, o3, o4-*) use a slightly different
+// shape: max_completion_tokens replaces max_tokens, temperature must be
+// omitted entirely (not zero), and reasoning_effort selects the depth of
+// thought.  The omitempty + pointer pattern lets the same struct cover
+// both request shapes without per-mode types.
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []chatMessage  `json:"messages"`
-	Tools         []chatTool     `json:"tools,omitempty"`
-	ToolChoice    string         `json:"tool_choice,omitempty"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
-	Temperature   *float64       `json:"temperature,omitempty"`
-	MaxTokens     *int           `json:"max_tokens,omitempty"`
+	Model               string         `json:"model"`
+	Messages            []chatMessage  `json:"messages"`
+	Tools               []chatTool     `json:"tools,omitempty"`
+	ToolChoice          string         `json:"tool_choice,omitempty"`
+	Stream              bool           `json:"stream"`
+	StreamOptions       *streamOptions `json:"stream_options,omitempty"`
+	Temperature         *float64       `json:"temperature,omitempty"`
+	MaxTokens           *int           `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int           `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
 }
 
 // streamOptions enables the trailing usage chunk on the SSE stream.
@@ -97,6 +105,16 @@ type chatDelta struct {
 	Role      string              `json:"role,omitempty"`
 	Content   string              `json:"content,omitempty"`
 	ToolCalls []chatToolCallDelta `json:"tool_calls,omitempty"`
+
+	// ReasoningSummary is the o-series reasoning-summary stream
+	// fragment.  OpenAI's public Streaming API doc (Nov 2024) carries
+	// it under this field on the delta for reasoning-class models.
+	// Some intermediate gateway variants surface the same content as
+	// "reasoning" — we treat both as equivalent and emit
+	// EventThinkingDelta for either.  See [reasoningDelta] in
+	// stream.go for the detection helper.
+	ReasoningSummary string `json:"reasoning_summary,omitempty"`
+	Reasoning        string `json:"reasoning,omitempty"`
 }
 
 // chatToolCallDelta is the streamed-form of a tool call.  Every field is
@@ -117,6 +135,18 @@ type chatUsage struct {
 	PromptTokens     int64 `json:"prompt_tokens"`
 	CompletionTokens int64 `json:"completion_tokens"`
 	TotalTokens      int64 `json:"total_tokens"`
+
+	// CompletionTokensDetails carries the per-class breakdown that
+	// reasoning-class models report.  reasoning_tokens is the
+	// interesting field; OpenAI bills these alongside the
+	// completion_tokens count (they are a SUBSET, not in addition).
+	CompletionTokensDetails *chatCompletionDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// chatCompletionDetails is the breakdown emitted under
+// usage.completion_tokens_details for reasoning-class OpenAI models.
+type chatCompletionDetails struct {
+	ReasoningTokens int64 `json:"reasoning_tokens"`
 }
 
 // apiErrorResponse is the body returned by /chat/completions on non-2xx

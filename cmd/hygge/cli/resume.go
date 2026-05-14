@@ -23,9 +23,10 @@ func newResumeCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			rt, err := bootstrap(ctx, bootstrapOptions{
-				ConfigFile:  rootFlags.ConfigFile,
-				ProfileName: rootFlags.Profile,
-				Pwd:         rootFlags.Pwd,
+				ConfigFile:        rootFlags.ConfigFile,
+				ProfileName:       rootFlags.Profile,
+				Pwd:               rootFlags.Pwd,
+				ReasoningOverride: reasoningFlag,
 			})
 			if err != nil {
 				return err

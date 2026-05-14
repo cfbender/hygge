@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cfbender/hygge/internal/auth"
+	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 )
@@ -386,5 +387,53 @@ func TestBootstrap_AgentsMDAppearsInSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(rt.SystemPrompt, "project rule: be conservative.") {
 		t.Errorf("SystemPrompt missing AGENTS.md body:\n%s", rt.SystemPrompt)
+	}
+}
+
+// TestResolveReasoning_OverrideAndConfig exercises the precedence
+// matrix between config.Model.Reasoning and the --reasoning CLI
+// override.
+func TestResolveReasoning_OverrideAndConfig(t *testing.T) {
+	cases := []struct {
+		name       string
+		cfgEffort  string
+		cfgBudget  int
+		override   string
+		wantEffort string
+		wantBudget int
+	}{
+		{name: "both empty", cfgEffort: "", override: "", wantEffort: ""},
+		{name: "config only", cfgEffort: "medium", override: "", wantEffort: "medium"},
+		{name: "override wins", cfgEffort: "medium", override: "high", wantEffort: "high"},
+		{name: "override to off clears config", cfgEffort: "high", override: "off", wantEffort: "off"},
+		{name: "invalid override falls back to config", cfgEffort: "low", override: "extreme", wantEffort: "low"},
+		{name: "case-insensitive override", cfgEffort: "", override: "HIGH", wantEffort: "high"},
+		{name: "trims whitespace", cfgEffort: "", override: "  medium  ", wantEffort: "medium"},
+		{name: "config budget forwarded", cfgEffort: "high", cfgBudget: 12000, wantEffort: "high", wantBudget: 12000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Model.Reasoning = c.cfgEffort
+			cfg.Model.ReasoningBudget = c.cfgBudget
+			r := resolveReasoning(cfg, c.override)
+			if r.Effort != c.wantEffort {
+				t.Errorf("Effort=%q, want %q", r.Effort, c.wantEffort)
+			}
+			if r.BudgetTokens != c.wantBudget {
+				t.Errorf("BudgetTokens=%d, want %d", r.BudgetTokens, c.wantBudget)
+			}
+		})
+	}
+}
+
+// TestResolveReasoning_NilConfigSafe ensures resolveReasoning does
+// not panic when handed a nil *config.Config (defensive: bootstrap
+// always passes a non-nil one in production but the helper should
+// remain safe in isolation).
+func TestResolveReasoning_NilConfigSafe(t *testing.T) {
+	r := resolveReasoning(nil, "low")
+	if r.Effort != "low" {
+		t.Errorf("Effort=%q, want low", r.Effort)
 	}
 }
