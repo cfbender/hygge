@@ -49,6 +49,34 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       ```
       Output shows `deny` with provenance pointing at the project file.
 
+- [ ] **Skills load from `.agents/skills`.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.agents/skills"
+      cat > "$tmp/.agents/skills/demo.md" <<'EOF'
+      ---
+      name: demo
+      description: Demo skill for the smoke test
+      when_to_use: Manual smoke verification only
+      ---
+      Body of the demo skill.
+      EOF
+      (cd "$tmp" && ../bin/hygge skills list)
+      ```
+      Output lists `demo` with source `project/.agents`.
+
+- [ ] **AGENTS.md is picked up.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.git"
+      cat > "$tmp/AGENTS.md" <<'EOF'
+      # Project rules
+      Be conservative with destructive shell commands.
+      EOF
+      (cd "$tmp" && ../bin/hygge context show)
+      ```
+      Output shows `## Project context` followed by the file's body.
+
 ## TUI session
 
 - [ ] **TUI launches.**
@@ -113,7 +141,7 @@ These are deliberately deferred. Do not block v0.1 on them.
 
 - LSP integration (dropped from v0.1 scope).
 - MCP client.
-- Skills, subagents.
+- Subagents.
 - OpenAI / OpenRouter / additional providers.
 - Plugins (WASM or subprocess).
 - Live theme reload and additional builtin themes.
