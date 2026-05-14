@@ -966,10 +966,19 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		if !a.isForeground(e.SessionID) {
 			return nil
 		}
+		// Finalize any trailing streaming thinking block before appending text.
+		a.finalizeTrailingThinking()
 		a.appendAssistantDelta(e.Text)
 
 	case bus.AssistantThinkingDelta:
-		// v0.1: ignore.  Could be rendered as a faint sidebar in v0.2.
+		if a.routeToSubagent(e.SessionID) {
+			// Subagent thinking is not surfaced in the nested block view.
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		a.appendThinkingDelta(e.Text)
 
 	case bus.MessageAppended:
 		if a.routeToSubagent(e.SessionID) {
@@ -979,6 +988,8 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		if !a.isForeground(e.SessionID) {
 			return nil
 		}
+		// Finalize any trailing thinking block when the message is committed.
+		a.finalizeTrailingThinking()
 		a.flushAssistantStream(e.Role)
 
 	case bus.ToolCallRequested:
@@ -989,6 +1000,8 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		if !a.isForeground(e.SessionID) {
 			return nil
 		}
+		// Finalize any trailing thinking block before a tool call.
+		a.finalizeTrailingThinking()
 		target := extractTarget(e.Args)
 		a.messages = append(a.messages, uiMessage{
 			Role:        components.RoleTool,
@@ -1098,9 +1111,23 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		// The compactionCompleteMsg path handles toast rendering.
-		// Here we also clear the banner since compaction has finished.
+		// Here we also clear the banner since compaction has finished,
+		// and append a persistent marker row to the message list.
 		a.bannerVisible = false
 		a.bannerDismissed = false
+		// Fetch the marker summary from store so the banner row carries
+		// the full text.  Best-effort: if the store is unavailable or the
+		// fetch fails we skip the marker row (the toast still fires).
+		if a.opts.Store != nil && e.MarkerID != "" {
+			marker, err := a.opts.Store.LatestMarker(a.ctx, e.SessionID)
+			if err == nil && marker != nil {
+				a.messages = append(a.messages, uiMessage{
+					Role:              components.RoleMarker,
+					MarkerSummary:     marker.Summary,
+					MarkerTokensSaved: marker.InputTokensSaved,
+				})
+			}
+		}
 
 	case bus.CompactionFailed:
 		if !a.isForeground(e.SessionID) {
@@ -1569,6 +1596,36 @@ func (a *App) toggleLatestSubagent() {
 	latest.Expanded = !latest.Expanded
 }
 
+// appendThinkingDelta appends thinking text to a streaming RoleThinking
+// message, or starts a new one if the last message isn't a streaming thinking
+// entry.  Thinking precedes the assistant's text in chronological order.
+func (a *App) appendThinkingDelta(text string) {
+	if n := len(a.messages); n > 0 {
+		last := &a.messages[n-1]
+		if last.Role == components.RoleThinking && last.IsStreaming {
+			last.Raw += text
+			return
+		}
+	}
+	a.messages = append(a.messages, uiMessage{
+		Role:        components.RoleThinking,
+		Raw:         text,
+		IsStreaming: true,
+	})
+}
+
+// finalizeTrailingThinking marks the most recent streaming thinking message
+// as no longer streaming.  Called when a non-thinking event (text delta,
+// tool call, message appended) arrives, signalling the thinking phase is over.
+func (a *App) finalizeTrailingThinking() {
+	if n := len(a.messages); n > 0 {
+		last := &a.messages[n-1]
+		if last.Role == components.RoleThinking && last.IsStreaming {
+			last.IsStreaming = false
+		}
+	}
+}
+
 // appendAssistantDelta appends text to the streaming assistant message, or
 // starts a new one if the last message isn't a streaming assistant.
 func (a *App) appendAssistantDelta(text string) {
@@ -1947,9 +2004,10 @@ func (a *App) applyRenameSession(id, slug string) tea.Cmd {
 }
 
 // hydrateMessagesFromStore loads persisted history for sid and replaces
-// a.messages.  Respects the latest compaction marker so post-compaction
-// sessions show only the active conversation slice, matching what a
-// running agent would see.
+// a.messages.  Loads the full conversation history (all messages, including
+// pre-compaction ones) and injects RoleMarker banner entries at the correct
+// compaction boundaries.  Also reconstructs subagent state for any `task`
+// tool messages that have corresponding child sessions.
 //
 // Idempotent: replaces the slice on every call; calling it twice for the
 // same session id produces the same result.
@@ -1961,28 +2019,282 @@ func (a *App) hydrateMessagesFromStore(sid string) {
 	if a.opts.Store == nil || sid == "" {
 		return
 	}
-	msgs, _, err := a.opts.Store.MessagesSinceLatestMarker(a.ctx, sid)
+	visited := make(map[string]struct{})
+	msgs := a.hydrateSessionMessages(sid, visited)
+	a.messages = msgs
+}
+
+// hydrateSessionMessages is the recursive implementation shared by
+// hydrateMessagesFromStore (primary session) and subagent reconstruction.
+// visited guards against cycles (impossible today but defensive).
+// It returns a []uiMessage slice for the session's conversation.
+//
+// For KindSubagent sessions, only messages directly owned by the session
+// are loaded (no fork-chain walking), because subagents start with a
+// fresh history independent of their parent.
+func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []uiMessage {
+	if _, seen := visited[sid]; seen {
+		slog.Warn("ui: hydrateSessionMessages: cycle detected, skipping",
+			"session_id", sid)
+		return nil
+	}
+	visited[sid] = struct{}{}
+
+	// Look up session kind to decide which message query to use.
+	// For subagent sessions: load messages directly (no fork-chain).
+	// For primary/fork sessions: load via MessagesForSession (walks fork chain).
+	var (
+		storeMsgs []*session.Message
+		err       error
+	)
+	if sess, lookupErr := a.opts.Store.GetSession(a.ctx, sid); lookupErr == nil &&
+		sess.Kind == session.KindSubagent {
+		storeMsgs, err = a.opts.Store.MessagesDirectForSession(a.ctx, sid)
+	} else {
+		storeMsgs, err = a.opts.Store.MessagesForSession(a.ctx, sid)
+	}
 	if err != nil {
-		slog.Warn("ui: hydrateMessagesFromStore: failed to load history",
+		slog.Warn("ui: hydrateSessionMessages: failed to load history",
 			"session_id", sid, "err", err)
+		return nil
+	}
+
+	// Load all markers so we can inject them in order.
+	var markers []*session.Marker
+	if markList, err := a.opts.Store.ListMarkersForSession(a.ctx, sid); err == nil {
+		markers = markList
+	} else {
+		slog.Warn("ui: hydrateSessionMessages: failed to load markers",
+			"session_id", sid, "err", err)
+	}
+
+	// Build a set of message ids that are marker cut-off points.
+	// key: beforeMessageID → marker.  Multiple markers may share no
+	// common message ids since each compaction advances the cursor.
+	// We walk markers in chronological order (oldest first) and inject
+	// each one immediately before the message it cuts off at.
+	markerByBefore := make(map[string]*session.Marker, len(markers))
+	for _, mk := range markers {
+		markerByBefore[mk.BeforeMessageID] = mk
+	}
+
+	// Build the flat message list.
+	var out []uiMessage
+	for _, m := range storeMsgs {
+		// Inject marker banner before this message if one targets it.
+		if mk, ok := markerByBefore[m.ID]; ok {
+			out = append(out, uiMessage{
+				Role:              components.RoleMarker,
+				MarkerSummary:     mk.Summary,
+				MarkerTokensSaved: mk.InputTokensSaved,
+			})
+		}
+		out = append(out, uiEntriesFromStoreMessage(m)...)
+	}
+
+	// Handle markers whose BeforeMessageID no longer matches any message
+	// (e.g. the message was deleted or the chain was rebased).  Fall back
+	// to appending orphaned markers at the end.
+	injectedIDs := make(map[string]struct{}, len(storeMsgs))
+	for _, m := range storeMsgs {
+		injectedIDs[m.ID] = struct{}{}
+	}
+	for _, mk := range markers {
+		if _, found := injectedIDs[mk.BeforeMessageID]; !found {
+			out = append(out, uiMessage{
+				Role:              components.RoleMarker,
+				MarkerSummary:     mk.Summary,
+				MarkerTokensSaved: mk.InputTokensSaved,
+			})
+		}
+	}
+
+	// Reconstruct subagent state for `task` tool messages.
+	// We list all KindSubagent sessions for this parent once, then match
+	// them to task tool UIMessages by ToolUseID (extracted from the slug).
+	a.reconstructSubagentState(sid, out, visited)
+
+	return out
+}
+
+// reconstructSubagentState finds child subagent sessions for sid and
+// populates a.subagents + stamps SubagentID on the parent task UIMessages.
+// msgs is the already-built message list for sid (modified in place via
+// the a.messages slice reference for the primary session).
+func (a *App) reconstructSubagentState(parentSID string, msgs []uiMessage, visited map[string]struct{}) {
+	if a.opts.Store == nil {
 		return
 	}
-	a.messages = a.messages[:0]
-	for _, m := range msgs {
-		if entry, ok := uiEntryFromStoreMessage(m); ok {
-			a.messages = append(a.messages, entry)
+
+	// List all KindSubagent sessions for this parent.
+	childSessions, err := a.opts.Store.ListSessions(a.ctx, session.ListOpts{
+		ParentID: parentSID,
+		Kind:     session.KindSubagent,
+	})
+	if err != nil {
+		slog.Warn("ui: reconstructSubagentState: failed to list child sessions",
+			"parent_id", parentSID, "err", err)
+		return
+	}
+	if len(childSessions) == 0 {
+		return
+	}
+
+	// Build a map from ToolUseID → child session by parsing the slug.
+	// Slug format: "<type>: <description> [<toolUseID>]"
+	// We also keep an ordered slice of children for fallback matching.
+	toolUseToChild := make(map[string]*session.Session, len(childSessions))
+	for _, cs := range childSessions {
+		if toolUseID := extractToolUseIDFromSlug(cs.Slug); toolUseID != "" {
+			toolUseToChild[toolUseID] = cs
 		}
+	}
+
+	// Walk msgs (the already-built flat list for this parent) and match
+	// task tool entries to child sessions.  We work on the caller's slice
+	// by walking a.messages when parentSID is the primary session, or
+	// directly on msgs otherwise.  Since hydrateSessionMessages returns
+	// the slice and the caller either assigns it to a.messages or uses it
+	// directly, we pass a pointer-slice approach: stamp SubagentID on the
+	// returned slice, which the caller then stores.
+	//
+	// For the primary session path, msgs and a.messages will be the same
+	// slice after hydrateMessagesFromStore assigns them — but we're still
+	// building msgs here, so we work on msgs.
+	matched := make(map[string]bool, len(childSessions))
+	for i := range msgs {
+		msg := &msgs[i]
+		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+			continue
+		}
+		cs, ok := toolUseToChild[msg.ToolUseID]
+		if !ok || msg.ToolUseID == "" {
+			continue
+		}
+		matched[cs.ID] = true
+		a.buildSubagentState(cs, msg, visited)
+	}
+
+	// Collect truly unmatched children (those not matched by ToolUseID).
+	var unmatchedChildren []*session.Session
+	for _, cs := range childSessions {
+		if !matched[cs.ID] {
+			unmatchedChildren = append(unmatchedChildren, cs)
+		}
+	}
+
+	// Fallback: match remaining children to unclaimed task messages in
+	// order of session creation time.  Walk msgs again for unclaimed task
+	// entries.
+	childIdx := 0
+	for i := range msgs {
+		if childIdx >= len(unmatchedChildren) {
+			break
+		}
+		msg := &msgs[i]
+		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+			continue
+		}
+		if msg.SubagentID != "" {
+			continue // already claimed
+		}
+		cs := unmatchedChildren[childIdx]
+		childIdx++
+		slog.Warn("ui: reconstructSubagentState: falling back to order-based matching",
+			"parent_id", parentSID, "child_id", cs.ID)
+		a.buildSubagentState(cs, msg, visited)
+	}
+
+	// Any remaining unmatched children have no corresponding task message
+	// (e.g. the message was deleted).  Register them without an anchor.
+	for ; childIdx < len(unmatchedChildren); childIdx++ {
+		cs := unmatchedChildren[childIdx]
+		childMsgs := a.hydrateSessionMessages(cs.ID, visited)
+		state := a.buildSubagentStateFromSession(cs, childMsgs)
+		a.subagents[cs.ID] = state
 	}
 }
 
-// uiEntryFromStoreMessage converts a persisted *session.Message into a
-// uiMessage for the App's message buffer.  Returns (entry, true) when the
-// message produces a renderable entry, (zero, false) for message types that
-// are not surfaced in the TUI (e.g. pure thinking blocks, empty parts).
+// buildSubagentState hydrates the child session cs, creates a SubagentState,
+// registers it in a.subagents, and stamps SubagentID on msg.
+func (a *App) buildSubagentState(cs *session.Session, msg *uiMessage, visited map[string]struct{}) {
+	childMsgs := a.hydrateSessionMessages(cs.ID, visited)
+	state := a.buildSubagentStateFromSession(cs, childMsgs)
+	a.subagents[cs.ID] = state
+	msg.SubagentID = cs.ID
+}
+
+// buildSubagentStateFromSession constructs a SubagentState from a session row
+// and a pre-hydrated message list.
+func (a *App) buildSubagentStateFromSession(cs *session.Session, msgs []uiMessage) *components.SubagentState {
+	endedAt := cs.UpdatedAt
+	if endedAt.IsZero() {
+		endedAt = cs.CreatedAt
+	}
+	// Parse type/description from slug: "<type>: <description> [toolID]"
+	agentType, description := parseTypeDescFromSlug(cs.Slug)
+
+	state := &components.SubagentState{
+		SubSessionID:    cs.ID,
+		ParentSessionID: cs.ParentID,
+		Type:            agentType,
+		Description:     description,
+		Model:           cs.Model.Provider + "/" + cs.Model.Name,
+		StartedAt:       cs.CreatedAt,
+		EndedAt:         endedAt, // completed on resume
+		Cost:            cs.Totals.CostUSD,
+		InputTokens:     cs.Totals.InputTokens,
+		OutputTokens:    cs.Totals.OutputTokens,
+		Messages:        msgs,
+		Expanded:        false,
+	}
+	return state
+}
+
+// extractToolUseIDFromSlug parses the ToolUseID from a subagent session slug.
+// The slug format produced by buildSlug is: "<type>: <description> [<toolUseID>]"
+// or "<type> [<toolUseID>]" when no description.  Returns "" if not present.
+func extractToolUseIDFromSlug(slug string) string {
+	// Find the last "[" ... "]" bracketed segment.
+	last := strings.LastIndex(slug, "[")
+	if last < 0 {
+		return ""
+	}
+	rest := slug[last+1:]
+	end := strings.Index(rest, "]")
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
+}
+
+// parseTypeDescFromSlug extracts the type and description from a subagent
+// session slug.  Format: "<type>: <description> [<toolUseID>]".
+// Returns ("", "") when the slug is empty or doesn't match.
+func parseTypeDescFromSlug(slug string) (agentType, description string) {
+	// Strip trailing " [toolUseID]" if present.
+	if last := strings.LastIndex(slug, " ["); last >= 0 {
+		slug = slug[:last]
+	}
+	// Split on ": " to separate type from description.
+	parts := strings.SplitN(slug, ": ", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return slug, ""
+}
+
+// uiEntriesFromStoreMessage converts a persisted *session.Message into zero
+// or more uiMessages for the App's message buffer.  Multiple entries can be
+// returned from a single store row when the message has both thinking and text
+// parts (thinking entries precede text/tool entries within the same turn).
 //
 // The conversion mirrors the live-event path in handleBusEvent:
 //   - RoleUser / RoleSystem → plain text from the first PartText part.
-//   - RoleAssistant → plain text from all PartText parts; no streaming flag.
+//   - RoleAssistant → optional RoleThinking entry from PartThinking parts
+//     (in declaration order), followed by a RoleAssistant entry from all
+//     PartText parts.  If there is no text at all but there are thinking parts,
+//     only the thinking entries are emitted.
 //   - RoleTool (PartToolUse + PartToolResult) → tool entry with name, target,
 //     and result.  Each PartToolUse is paired with its PartToolResult by ToolID.
 //
@@ -1990,24 +2302,35 @@ func (a *App) hydrateMessagesFromStore(sid string) {
 // PartToolUse and one PartToolResult part (the agent appends them together
 // after completion).  We emit one uiMessage per PartToolUse part, carrying
 // the matching result.
-func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
+func uiEntriesFromStoreMessage(m *session.Message) []uiMessage {
 	if m == nil {
-		return uiMessage{}, false
+		return nil
 	}
 	switch m.Role {
 	case session.RoleUser:
 		text := firstTextPart(m.Parts)
 		if text == "" {
-			return uiMessage{}, false
+			return nil
 		}
-		return uiMessage{Role: components.RoleUser, Raw: text}, true
+		return []uiMessage{{Role: components.RoleUser, Raw: text}}
 
 	case session.RoleAssistant:
-		text := allTextParts(m.Parts)
-		if text == "" {
-			return uiMessage{}, false
+		var entries []uiMessage
+		// Emit RoleThinking entries for all PartThinking parts (in order).
+		for _, p := range m.Parts {
+			if p.Kind == session.PartThinking && p.Text != "" {
+				entries = append(entries, uiMessage{
+					Role: components.RoleThinking,
+					Raw:  p.Text,
+				})
+			}
 		}
-		return uiMessage{Role: components.RoleAssistant, Raw: text}, true
+		// Emit a RoleAssistant entry for all PartText parts concatenated.
+		text := allTextParts(m.Parts)
+		if text != "" {
+			entries = append(entries, uiMessage{Role: components.RoleAssistant, Raw: text})
+		}
+		return entries
 
 	case session.RoleTool:
 		// Build a result index keyed by ToolUseID for O(n) pairing.
@@ -2018,6 +2341,7 @@ func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
 			}
 		}
 		// Emit one uiMessage per PartToolUse.
+		var entries []uiMessage
 		for _, p := range m.Parts {
 			if p.Kind != session.PartToolUse {
 				continue
@@ -2029,27 +2353,48 @@ func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
 				raw = res.Content
 				isError = res.IsError
 			}
-			return uiMessage{
+			entries = append(entries, uiMessage{
 				Role:      components.RoleTool,
 				ToolName:  p.ToolName,
 				ToolUseID: p.ToolID,
 				Target:    target,
 				Raw:       raw,
 				IsError:   isError,
-			}, true
+			})
 		}
-		return uiMessage{}, false
+		return entries
 
 	case session.RoleSystem:
 		text := firstTextPart(m.Parts)
 		if text == "" {
-			return uiMessage{}, false
+			return nil
 		}
-		return uiMessage{Role: components.RoleSystem, Raw: text}, true
+		return []uiMessage{{Role: components.RoleSystem, Raw: text}}
 
 	default:
+		return nil
+	}
+}
+
+// uiEntryFromStoreMessage is a compatibility shim retained for test
+// coverage of the single-entry path.  It delegates to
+// uiEntriesFromStoreMessage and returns the first entry when exactly one
+// is produced, or (zero, false) otherwise.  Tests for multi-entry paths
+// should call uiEntriesFromStoreMessage directly.
+func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
+	entries := uiEntriesFromStoreMessage(m)
+	if len(entries) == 0 {
 		return uiMessage{}, false
 	}
+	// Return the first non-thinking entry if multiple are present,
+	// preserving the original single-entry semantics for callers
+	// that only handle one result.
+	for _, e := range entries {
+		if e.Role != components.RoleThinking {
+			return e, true
+		}
+	}
+	return entries[0], true
 }
 
 // firstTextPart returns the Text of the first PartText part in parts, or "".

@@ -424,15 +424,546 @@ func TestUiEntryFromStoreMessage_Nil(t *testing.T) {
 	}
 }
 
-func TestUiEntryFromStoreMessage_ThinkingPartOnlySkipped(t *testing.T) {
+func TestUiEntryFromStoreMessage_ThinkingPartProducesThinkingEntry(t *testing.T) {
 	t.Parallel()
 	m := &session.Message{
 		Role:  session.RoleAssistant,
 		Parts: []session.Part{{Kind: session.PartThinking, Text: "thinking..."}},
 	}
-	// Assistant with only thinking parts: allTextParts returns "", so skipped.
-	_, ok := uiEntryFromStoreMessage(m)
-	if ok {
-		t.Errorf("expected ok=false for assistant with only thinking parts")
+	// Assistant with only thinking parts: uiEntryFromStoreMessage returns the
+	// thinking entry (first entry from uiEntriesFromStoreMessage).
+	entry, ok := uiEntryFromStoreMessage(m)
+	if !ok {
+		t.Fatalf("expected ok=true for assistant with thinking parts")
 	}
+	if entry.Role != components.RoleThinking {
+		t.Errorf("role = %q, want RoleThinking", entry.Role)
+	}
+	if entry.Raw != "thinking..." {
+		t.Errorf("raw = %q, want 'thinking...'", entry.Raw)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// New tests: thinking, markers, and subagent hydration
+// ---------------------------------------------------------------------------
+
+// TestUiEntriesFromStoreMessage_ThinkingBeforeText verifies that an assistant
+// message with both a thinking part and a text part produces two entries in
+// order: thinking first, then text.
+func TestUiEntriesFromStoreMessage_ThinkingBeforeText(t *testing.T) {
+	t.Parallel()
+	m := &session.Message{
+		Role: session.RoleAssistant,
+		Parts: []session.Part{
+			{Kind: session.PartThinking, Text: "let me think"},
+			{Kind: session.PartText, Text: "here is the answer"},
+		},
+	}
+	entries := uiEntriesFromStoreMessage(m)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %+v", len(entries), entries)
+	}
+	if entries[0].Role != components.RoleThinking {
+		t.Errorf("entries[0].Role = %q, want RoleThinking", entries[0].Role)
+	}
+	if entries[0].Raw != "let me think" {
+		t.Errorf("entries[0].Raw = %q", entries[0].Raw)
+	}
+	if entries[1].Role != components.RoleAssistant {
+		t.Errorf("entries[1].Role = %q, want RoleAssistant", entries[1].Role)
+	}
+	if entries[1].Raw != "here is the answer" {
+		t.Errorf("entries[1].Raw = %q", entries[1].Raw)
+	}
+}
+
+// TestHydrate_ThinkingPartsProduceRoleThinkingEntries verifies that resuming a
+// session with assistant messages that contain thinking parts produces
+// RoleThinking entries in the correct chronological position.
+func TestHydrate_ThinkingPartsProduceRoleThinkingEntries(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "question"}},
+		},
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartThinking, Text: "let me reason about this"},
+				{Kind: session.PartText, Text: "here is my answer"},
+			},
+		},
+	})
+	_ = app.Init()
+
+	// Expect: user, thinking, assistant (3 entries).
+	if got := len(app.messages); got != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleUser {
+		t.Errorf("messages[0].Role = %q, want user", app.messages[0].Role)
+	}
+	if app.messages[1].Role != components.RoleThinking {
+		t.Errorf("messages[1].Role = %q, want thinking", app.messages[1].Role)
+	}
+	if app.messages[1].Raw != "let me reason about this" {
+		t.Errorf("messages[1].Raw = %q", app.messages[1].Raw)
+	}
+	if app.messages[2].Role != components.RoleAssistant {
+		t.Errorf("messages[2].Role = %q, want assistant", app.messages[2].Role)
+	}
+	if app.messages[2].Raw != "here is my answer" {
+		t.Errorf("messages[2].Raw = %q", app.messages[2].Raw)
+	}
+}
+
+// TestLiveThinkingDelta_StreamsAndFinalizes verifies that:
+//  1. AssistantThinkingDelta events produce a streaming RoleThinking message.
+//  2. When AssistantTextDelta arrives, the thinking message is finalized
+//     (IsStreaming=false) and text streaming begins as a new assistant entry.
+func TestLiveThinkingDelta_StreamsAndFinalizes(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Emit two thinking deltas.
+	app.Handle(bus.AssistantThinkingDelta{SessionID: "fg-session", Text: "step 1: "})
+	app.Handle(bus.AssistantThinkingDelta{SessionID: "fg-session", Text: "step 2"})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message after thinking deltas, got %d", got)
+	}
+	th := app.messages[0]
+	if th.Role != components.RoleThinking {
+		t.Errorf("role = %q, want thinking", th.Role)
+	}
+	if th.Raw != "step 1: step 2" {
+		t.Errorf("raw = %q, want 'step 1: step 2'", th.Raw)
+	}
+	if !th.IsStreaming {
+		t.Errorf("expected IsStreaming=true while thinking")
+	}
+
+	// Emit a text delta — thinking should finalize.
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "here is the answer"})
+
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages after text delta, got %d", got)
+	}
+	if app.messages[0].IsStreaming {
+		t.Errorf("thinking message should be finalized after text delta")
+	}
+	if app.messages[1].Role != components.RoleAssistant {
+		t.Errorf("messages[1].Role = %q, want assistant", app.messages[1].Role)
+	}
+	if app.messages[1].Raw != "here is the answer" {
+		t.Errorf("messages[1].Raw = %q", app.messages[1].Raw)
+	}
+}
+
+// TestLiveThinkingDelta_FinalizedOnToolCall verifies that a trailing thinking
+// block is finalized when a ToolCallRequested event arrives.
+func TestLiveThinkingDelta_FinalizedOnToolCall(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantThinkingDelta{SessionID: "fg-session", Text: "thinking"})
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "read",
+		Args:      []byte(`{"path":"/tmp/x"}`),
+	})
+
+	// messages[0] = thinking (finalized), messages[1] = tool
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages, got %d", got)
+	}
+	if app.messages[0].IsStreaming {
+		t.Errorf("thinking should be finalized on ToolCallRequested")
+	}
+	if app.messages[1].Role != components.RoleTool {
+		t.Errorf("messages[1].Role = %q, want tool", app.messages[1].Role)
+	}
+}
+
+// TestHydrate_CompactionMarkerInjectsRoleMarkerEntry verifies that resuming a
+// session with one compaction marker produces a RoleMarker entry at the
+// correct position, with the expected summary and token count.
+func TestHydrate_CompactionMarkerInjectsRoleMarkerEntry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "hygge_test.db")
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	sess, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      session.ModelRef{Provider: "anthropic", Name: "test-model"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Seed: user1, assistant1, then compact after assistant1, then user2.
+	user1, err := st.AppendMessage(ctx, sess.ID, session.NewMessage{
+		Role:  session.RoleUser,
+		Parts: []session.Part{{Kind: session.PartText, Text: "first question"}},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage user1: %v", err)
+	}
+	if _, err := st.AppendMessage(ctx, sess.ID, session.NewMessage{
+		Role:  session.RoleAssistant,
+		Parts: []session.Part{{Kind: session.PartText, Text: "first answer"}},
+	}); err != nil {
+		t.Fatalf("AppendMessage assistant1: %v", err)
+	}
+
+	// The marker cuts off at (before) user2: in practice the marker records the
+	// first message AFTER the compacted content.  We use user1 as the cutoff
+	// so that user1 appears before the marker and user2 appears after.
+	user2, err := st.AppendMessage(ctx, sess.ID, session.NewMessage{
+		Role:  session.RoleUser,
+		Parts: []session.Part{{Kind: session.PartText, Text: "second question"}},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage user2: %v", err)
+	}
+
+	// Add a compaction marker: cuts off before user2, summary, 500 tokens.
+	if _, err := st.AddCompactionMarker(ctx, sess.ID, user2.ID, "summary of first exchange", 500); err != nil {
+		t.Fatalf("AddCompactionMarker: %v", err)
+	}
+
+	_ = user1 // used to verify ordering
+
+	b := bus.New()
+	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		ProfileName:   "default",
+		SessionID:     sess.ID,
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	_ = app.Init()
+
+	// Expected message order:
+	// [0] user: "first question"
+	// [1] assistant: "first answer"
+	// [2] marker (before user2)
+	// [3] user: "second question"
+	if got := len(app.messages); got != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleUser {
+		t.Errorf("messages[0].Role = %q, want user", app.messages[0].Role)
+	}
+	if app.messages[1].Role != components.RoleAssistant {
+		t.Errorf("messages[1].Role = %q, want assistant", app.messages[1].Role)
+	}
+	if app.messages[2].Role != components.RoleMarker {
+		t.Errorf("messages[2].Role = %q, want marker", app.messages[2].Role)
+	}
+	if app.messages[2].MarkerSummary != "summary of first exchange" {
+		t.Errorf("MarkerSummary = %q", app.messages[2].MarkerSummary)
+	}
+	if app.messages[2].MarkerTokensSaved != 500 {
+		t.Errorf("MarkerTokensSaved = %d, want 500", app.messages[2].MarkerTokensSaved)
+	}
+	if app.messages[3].Role != components.RoleUser {
+		t.Errorf("messages[3].Role = %q, want user", app.messages[3].Role)
+	}
+	if app.messages[3].Raw != "second question" {
+		t.Errorf("messages[3].Raw = %q", app.messages[3].Raw)
+	}
+}
+
+// TestHydrate_SubagentReconstructsFromStore verifies that resuming a session
+// that spawned a subagent produces a parent task tool row with SubagentID set
+// and the child's transcript in app.subagents.
+func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "hygge_test.db")
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	model := session.ModelRef{Provider: "anthropic", Name: "test-model"}
+
+	// Create parent session.
+	parent, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession parent: %v", err)
+	}
+
+	// Append user message + task tool call on the parent.
+	if _, err := st.AppendMessage(ctx, parent.ID, session.NewMessage{
+		Role:  session.RoleUser,
+		Parts: []session.Part{{Kind: session.PartText, Text: "do a task"}},
+	}); err != nil {
+		t.Fatalf("AppendMessage user: %v", err)
+	}
+	toolUseID := "toolu_abc123"
+	if _, err := st.AppendMessage(ctx, parent.ID, session.NewMessage{
+		Role: session.RoleTool,
+		Parts: []session.Part{
+			{
+				Kind:      session.PartToolUse,
+				ToolID:    toolUseID,
+				ToolName:  "task",
+				ToolInput: []byte(`{"subagent_type":"general","description":"find something"}`),
+			},
+			{
+				Kind:      session.PartToolResult,
+				ToolUseID: toolUseID,
+				Content:   "task done",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("AppendMessage tool: %v", err)
+	}
+
+	// Create child session (KindSubagent) with slug containing the ToolUseID.
+	child, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+		ParentID:   parent.ID,
+		Kind:       session.KindSubagent,
+		Slug:       "general: find something [" + toolUseID + "]",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession child: %v", err)
+	}
+
+	// Append a message to the child session.
+	if _, err := st.AppendMessage(ctx, child.ID, session.NewMessage{
+		Role:  session.RoleAssistant,
+		Parts: []session.Part{{Kind: session.PartText, Text: "I found it"}},
+	}); err != nil {
+		t.Fatalf("AppendMessage child: %v", err)
+	}
+
+	b := bus.New()
+	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		ProfileName:   "default",
+		SessionID:     parent.ID,
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	_ = app.Init()
+
+	// Find the task tool message.
+	var taskMsg *uiMessage
+	for i := range app.messages {
+		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "task" {
+			taskMsg = &app.messages[i]
+			break
+		}
+	}
+	if taskMsg == nil {
+		t.Fatalf("expected a task UIMessage in messages: %+v", app.messages)
+	}
+	if taskMsg.SubagentID == "" {
+		t.Fatalf("expected task message to have SubagentID set, got empty")
+	}
+	if taskMsg.SubagentID != child.ID {
+		t.Errorf("SubagentID = %q, want %q", taskMsg.SubagentID, child.ID)
+	}
+
+	// Verify the child session state is in app.subagents.
+	state, ok := app.subagents[child.ID]
+	if !ok {
+		t.Fatalf("expected child session %q in app.subagents", child.ID)
+	}
+	if state == nil {
+		t.Fatal("subagent state is nil")
+	}
+	if len(state.Messages) == 0 {
+		t.Fatalf("expected child messages to be hydrated, got 0")
+	}
+	if state.Messages[0].Raw != "I found it" {
+		t.Errorf("child message raw = %q, want 'I found it'", state.Messages[0].Raw)
+	}
+}
+
+// TestHydrate_SubagentRecursiveTwoLevels verifies that hydration reconstructs
+// nested subagents at least two levels deep (grandparent → parent → child).
+func TestHydrate_SubagentRecursiveTwoLevels(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "hygge_test.db")
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	model := session.ModelRef{Provider: "anthropic", Name: "test-model"}
+
+	// Root session.
+	root, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession root: %v", err)
+	}
+
+	toolUseL1 := "toolu_level1"
+	if _, err := st.AppendMessage(ctx, root.ID, session.NewMessage{
+		Role: session.RoleTool,
+		Parts: []session.Part{
+			{Kind: session.PartToolUse, ToolID: toolUseL1, ToolName: "task", ToolInput: []byte(`{}`)},
+			{Kind: session.PartToolResult, ToolUseID: toolUseL1, Content: "l1 done"},
+		},
+	}); err != nil {
+		t.Fatalf("AppendMessage root tool: %v", err)
+	}
+
+	// Level-1 subagent.
+	l1, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+		ParentID:   root.ID,
+		Kind:       session.KindSubagent,
+		Slug:       "general: level1 [" + toolUseL1 + "]",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession l1: %v", err)
+	}
+
+	toolUseL2 := "toolu_level2"
+	if _, err := st.AppendMessage(ctx, l1.ID, session.NewMessage{
+		Role: session.RoleTool,
+		Parts: []session.Part{
+			{Kind: session.PartToolUse, ToolID: toolUseL2, ToolName: "task", ToolInput: []byte(`{}`)},
+			{Kind: session.PartToolResult, ToolUseID: toolUseL2, Content: "l2 done"},
+		},
+	}); err != nil {
+		t.Fatalf("AppendMessage l1 tool: %v", err)
+	}
+
+	// Level-2 subagent.
+	l2, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+		ParentID:   l1.ID,
+		Kind:       session.KindSubagent,
+		Slug:       "general: level2 [" + toolUseL2 + "]",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession l2: %v", err)
+	}
+
+	if _, err := st.AppendMessage(ctx, l2.ID, session.NewMessage{
+		Role:  session.RoleAssistant,
+		Parts: []session.Part{{Kind: session.PartText, Text: "deep answer"}},
+	}); err != nil {
+		t.Fatalf("AppendMessage l2 assistant: %v", err)
+	}
+
+	b := bus.New()
+	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		ProfileName:   "default",
+		SessionID:     root.ID,
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	_ = app.Init()
+
+	// Level-1 subagent should be in app.subagents.
+	stateL1, ok := app.subagents[l1.ID]
+	if !ok {
+		t.Fatalf("expected l1 in app.subagents; keys: %v", subagentIDs(app.subagents))
+	}
+	if stateL1 == nil {
+		t.Fatal("l1 state is nil")
+	}
+
+	// Level-1 state should have a task tool message pointing at l2.
+	var l1TaskMsg *uiMessage
+	for i := range stateL1.Messages {
+		if stateL1.Messages[i].Role == components.RoleTool && stateL1.Messages[i].ToolName == "task" {
+			l1TaskMsg = &stateL1.Messages[i]
+			break
+		}
+	}
+	if l1TaskMsg == nil {
+		t.Fatalf("expected task message in l1 messages: %+v", stateL1.Messages)
+	}
+	if l1TaskMsg.SubagentID != l2.ID {
+		t.Errorf("l1 task SubagentID = %q, want %q", l1TaskMsg.SubagentID, l2.ID)
+	}
+
+	// Level-2 subagent should also be in app.subagents.
+	stateL2, ok := app.subagents[l2.ID]
+	if !ok {
+		t.Fatalf("expected l2 in app.subagents; keys: %v", subagentIDs(app.subagents))
+	}
+	if len(stateL2.Messages) == 0 {
+		t.Fatalf("expected l2 messages to be hydrated")
+	}
+	if stateL2.Messages[0].Raw != "deep answer" {
+		t.Errorf("l2 message raw = %q, want 'deep answer'", stateL2.Messages[0].Raw)
+	}
+}
+
+// subagentIDs returns a slice of keys from the subagents map for test diagnostics.
+func subagentIDs(m map[string]*components.SubagentState) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

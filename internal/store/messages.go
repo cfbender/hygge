@@ -173,7 +173,38 @@ func (s *Store) GetMessage(ctx context.Context, id string) (*session.Message, er
 	return out, err
 }
 
-// forkChainCTE is the recursive CTE that walks ancestry from a leaf session
+// MessagesDirectForSession returns only the messages directly owned by
+// sessionID, without walking the fork chain.  Soft-deleted messages are
+// excluded.  Used for KindSubagent sessions that have a fresh history
+// independent of their parent.
+func (s *Store) MessagesDirectForSession(ctx context.Context, sessionID string) ([]*session.Message, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("store: MessagesDirectForSession: session_id required")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		messageSelectColumns+`
+		FROM messages
+		WHERE session_id = ? AND deleted_at IS NULL
+		ORDER BY created_at, id`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: MessagesDirectForSession: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []*session.Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: MessagesDirectForSession scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: MessagesDirectForSession iterate: %w", err)
+	}
+	return out, nil
+}
+
 // up to its root.  Each ancestry row records (session_id, cutoff_message_id,
 // parent_id, depth):
 //
