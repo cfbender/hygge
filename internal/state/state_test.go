@@ -586,6 +586,196 @@ func TestMutators_PropagateLoadError(t *testing.T) {
 	}
 }
 
+// --- test: AllowedRules backward-compat + mutators ---------------------------
+
+func TestLoad_BackwardCompat_NoAllowedRules(t *testing.T) {
+	dir := t.TempDir()
+	// Write a state.json that predates the AllowedRules field.
+	writeFile(t, statePath(t, dir), `{"active_profile":"work"}`)
+
+	s, err := Load(opts(dir))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if s.ActiveProfile != "work" {
+		t.Errorf("ActiveProfile: got %q, want work", s.ActiveProfile)
+	}
+	if len(s.AllowedRules) != 0 {
+		t.Errorf("AllowedRules: got %v, want empty slice", s.AllowedRules)
+	}
+}
+
+func TestAddAllowRule(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	rule := AllowRule{Category: "file.write", Pattern: "/repo/src/**"}
+	if err := AddAllowRule(rule, o); err != nil {
+		t.Fatalf("AddAllowRule: %v", err)
+	}
+
+	s, err := Load(o)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(s.AllowedRules) != 1 {
+		t.Fatalf("AllowedRules: got %d, want 1", len(s.AllowedRules))
+	}
+	got := s.AllowedRules[0]
+	if got.Category != rule.Category || got.Pattern != rule.Pattern {
+		t.Errorf("rule mismatch: got %+v, want %+v", got, rule)
+	}
+	if got.CreatedAt == 0 {
+		t.Error("CreatedAt: got 0, want a non-zero unix-ms timestamp")
+	}
+
+	// Adding the same rule again is a no-op (dedupe by Category+Pattern).
+	if err := AddAllowRule(rule, o); err != nil {
+		t.Fatalf("AddAllowRule dedupe: %v", err)
+	}
+	s, err = Load(o)
+	if err != nil {
+		t.Fatalf("Load after dedupe: %v", err)
+	}
+	if len(s.AllowedRules) != 1 {
+		t.Errorf("AllowedRules length after dedupe: got %d, want 1", len(s.AllowedRules))
+	}
+
+	// A rule with different category but same pattern is a separate entry.
+	if err := AddAllowRule(AllowRule{Category: "file.read", Pattern: "/repo/src/**"}, o); err != nil {
+		t.Fatalf("AddAllowRule second category: %v", err)
+	}
+	s, err = Load(o)
+	if err != nil {
+		t.Fatalf("Load after second add: %v", err)
+	}
+	if len(s.AllowedRules) != 2 {
+		t.Errorf("AllowedRules length: got %d, want 2", len(s.AllowedRules))
+	}
+}
+
+func TestRemoveAllowRule(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	for _, r := range []AllowRule{
+		{Category: "file.write", Pattern: "/a"},
+		{Category: "file.write", Pattern: "/b"},
+		{Category: "shell", Pattern: "ls *"},
+	} {
+		if err := AddAllowRule(r, o); err != nil {
+			t.Fatalf("AddAllowRule(%+v): %v", r, err)
+		}
+	}
+
+	if err := RemoveAllowRule("file.write", "/a", o); err != nil {
+		t.Fatalf("RemoveAllowRule: %v", err)
+	}
+
+	s, err := Load(o)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(s.AllowedRules) != 2 {
+		t.Fatalf("AllowedRules len: got %d, want 2", len(s.AllowedRules))
+	}
+	for _, r := range s.AllowedRules {
+		if r.Category == "file.write" && r.Pattern == "/a" {
+			t.Errorf("removed rule still present: %+v", r)
+		}
+	}
+
+	// Removing a missing rule is idempotent.
+	if err := RemoveAllowRule("file.write", "/does-not-exist", o); err != nil {
+		t.Errorf("RemoveAllowRule on missing: got %v, want nil", err)
+	}
+
+	// Removing from empty list is also fine.
+	if err := RemoveAllowRule("file.write", "/b", o); err != nil {
+		t.Fatalf("RemoveAllowRule second: %v", err)
+	}
+	if err := RemoveAllowRule("shell", "ls *", o); err != nil {
+		t.Fatalf("RemoveAllowRule third: %v", err)
+	}
+	s, _ = Load(o)
+	if len(s.AllowedRules) != 0 {
+		t.Errorf("AllowedRules after clearing: got %d, want 0", len(s.AllowedRules))
+	}
+	if err := RemoveAllowRule("nope", "nope", o); err != nil {
+		t.Errorf("RemoveAllowRule on empty: got %v, want nil", err)
+	}
+}
+
+func TestAddAllowRule_PreserveExistingTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	// Pre-populate with an explicit CreatedAt.
+	original := AllowRule{Category: "shell", Pattern: "git status", CreatedAt: 1234567890}
+	if err := AddAllowRule(original, o); err != nil {
+		t.Fatalf("AddAllowRule: %v", err)
+	}
+	s, _ := Load(o)
+	if s.AllowedRules[0].CreatedAt != 1234567890 {
+		t.Errorf("CreatedAt: got %d, want 1234567890", s.AllowedRules[0].CreatedAt)
+	}
+
+	// Adding "the same rule" with a fresh timestamp must not overwrite the original.
+	if err := AddAllowRule(AllowRule{Category: "shell", Pattern: "git status"}, o); err != nil {
+		t.Fatalf("AddAllowRule re-add: %v", err)
+	}
+	s, _ = Load(o)
+	if len(s.AllowedRules) != 1 {
+		t.Fatalf("AllowedRules len: got %d, want 1", len(s.AllowedRules))
+	}
+	if s.AllowedRules[0].CreatedAt != 1234567890 {
+		t.Errorf("CreatedAt mutated by re-add: got %d, want 1234567890",
+			s.AllowedRules[0].CreatedAt)
+	}
+}
+
+func TestAllowedRules_PropagateLoadError(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+	writeFile(t, statePath(t, dir), "not json")
+
+	if err := AddAllowRule(AllowRule{Category: "shell", Pattern: "ls"}, o); !errors.Is(err, ErrCorruptState) {
+		t.Errorf("AddAllowRule: expected ErrCorruptState, got %v", err)
+	}
+	if err := RemoveAllowRule("shell", "ls", o); !errors.Is(err, ErrCorruptState) {
+		t.Errorf("RemoveAllowRule: expected ErrCorruptState, got %v", err)
+	}
+}
+
+func TestSaveLoad_RoundTrip_AllowedRules(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	want := &State{
+		AllowedRules: []AllowRule{
+			{Category: "file.write", Pattern: "/repo/**", CreatedAt: 1},
+			{Category: "shell", Pattern: "go test ./...", CreatedAt: 2},
+		},
+	}
+	if err := Save(want, o); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(o)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got.AllowedRules) != len(want.AllowedRules) {
+		t.Fatalf("AllowedRules len: got %d, want %d",
+			len(got.AllowedRules), len(want.AllowedRules))
+	}
+	for i, w := range want.AllowedRules {
+		g := got.AllowedRules[i]
+		if g.Category != w.Category || g.Pattern != w.Pattern || g.CreatedAt != w.CreatedAt {
+			t.Errorf("AllowedRules[%d]: got %+v, want %+v", i, g, w)
+		}
+	}
+}
+
 // --- test 12: race detector clean (covered by test 3 with -race) -------------
 // TestSave_RaceDetectorClean is a dedicated marker test; the actual
 // concurrent-access scenario lives in TestSave_AtomicWrite which is designed
