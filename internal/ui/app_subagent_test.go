@@ -536,3 +536,157 @@ func TestSubagentAnchor_FallbackWarnsWhenToolUseIDAbsent(t *testing.T) {
 		t.Errorf("fallback did not attach subagent; SubagentID=%q, want sub-fallback", taskMsg.SubagentID)
 	}
 }
+
+// --- T2.2 foreground-stack tests -------------------------------------------
+
+func TestCtrlGNoSubagents_Notice(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// No subagents tracked — Ctrl+G should produce a notice but not crash.
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	if cmd == nil {
+		t.Fatal("expected a notice cmd from Ctrl+G with no subagents")
+	}
+	// Execute the cmd to get the message (setNotice returns a Cmd).
+	_ = cmd()
+	// App should not have pushed anything onto the stack.
+	if len(app.foregroundStack) != 0 {
+		t.Errorf("expected empty foreground stack, got %v", app.foregroundStack)
+	}
+}
+
+func TestCtrlGFollowsIntoSubagent(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	// Add a message to the sub-agent transcript.
+	app.Handle(bus.AssistantTextDelta{SessionID: "sub-1", Text: "sub-agent reply"})
+
+	// Press Ctrl+G — should push sub-1 onto the foreground stack.
+	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+
+	// Stack should be ["fg-session", "sub-1"] (depth 2).
+	if len(app.foregroundStack) != 2 {
+		t.Fatalf("expected foreground stack depth 2 after Ctrl+G, got %d: %v", len(app.foregroundStack), app.foregroundStack)
+	}
+	if app.foregroundStack[1] != "sub-1" {
+		t.Errorf("foreground stack top = %q, want sub-1", app.foregroundStack[1])
+	}
+	if app.foregroundID() != "sub-1" {
+		t.Errorf("foregroundID = %q, want sub-1", app.foregroundID())
+	}
+	if app.rootSessionID() != "fg-session" {
+		t.Errorf("rootSessionID = %q, want fg-session", app.rootSessionID())
+	}
+}
+
+func TestEscAtDepth1_DoesNotPopStack(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// At root depth (no stack), Esc falls through to existing behaviour.
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	// No stack change.
+	if len(app.foregroundStack) != 0 {
+		t.Errorf("Esc at depth 1 should not modify stack, got %v", app.foregroundStack)
+	}
+	_ = cmd
+}
+
+func TestEscAtDepth2_PopsStack(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	// Follow into sub-1.
+	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+
+	// Stack is ["fg-session", "sub-1"] — depth 2.
+	if len(app.foregroundStack) != 2 {
+		t.Fatalf("expected depth 2 after Ctrl+G, got %d: %v", len(app.foregroundStack), app.foregroundStack)
+	}
+
+	// Esc should pop back to root.
+	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if len(app.foregroundStack) != 1 {
+		t.Errorf("expected stack depth 1 after Esc pop, got %d: %v", len(app.foregroundStack), app.foregroundStack)
+	}
+	if app.foregroundID() != "fg-session" {
+		t.Errorf("foregroundID after pop = %q, want fg-session", app.foregroundID())
+	}
+}
+
+func TestBreadcrumbHiddenAtRootDepth(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+	// No pushes — stack depth 0.
+	segs := app.breadcrumbSegments()
+	if len(segs) > 1 {
+		t.Errorf("expected breadcrumb segments ≤ 1 at root, got %v", segs)
+	}
+}
+
+func TestBreadcrumbVisibleAtDepth2(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+
+	segs := app.breadcrumbSegments()
+	if len(segs) < 2 {
+		t.Errorf("expected ≥ 2 breadcrumb segments, got %v", segs)
+	}
+}
+
+func TestFooterCostSubscribesToRoot(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Sub-agent cost event — should NOT change costDollars (root is fg-session).
+	app.Handle(bus.CostUpdated{
+		SessionID:    "sub-1",
+		DollarsTotal: 0.05,
+	})
+	if app.costDollars != 0 {
+		t.Errorf("sub-session cost should not update footer; got %v", app.costDollars)
+	}
+
+	// Root session cost event — SHOULD update costDollars.
+	app.Handle(bus.CostUpdated{
+		SessionID:    "fg-session",
+		DollarsTotal: 0.12,
+	})
+	if app.costDollars != 0.12 {
+		t.Errorf("root cost event should update footer; got %v, want 0.12", app.costDollars)
+	}
+}

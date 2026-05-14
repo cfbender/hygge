@@ -113,6 +113,33 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       kind `subagent` (visible via `sqlite3 ~/.local/state/hygge/
       sessions.db 'select id, parent_id, kind from sessions'`).
 
+- [ ] **T2.1/T2.2 — Cost roll-up and foreground-switch.**
+      Prerequisite: complete the `task` tool step above so a sub-agent
+      session exists in the DB.
+
+      1. Note the **footer cost** before dispatching the sub-agent.
+      2. Dispatch the sub-agent (ask it to "find LICENSE").
+      3. While the sub-agent is running, watch the footer — the `$X.XXXX`
+         figure should climb as the sub-agent burns tokens, not just the
+         nested block header.  Both the nested block AND the footer are
+         updating from the same rolled-up parent total.
+      4. Once the sub-agent starts (or after it completes):
+         - Press `Ctrl+G`.  The message list switches to show the
+           sub-agent's full transcript.  A breadcrumb appears above the
+           messages, e.g. `<root-label> › <sub-label>`.
+         - The footer still shows the ROOT session's rolled-up cost.
+         - Press `Esc`.  The breadcrumb disappears, the primary session's
+           message list returns.
+      5. Open `/sessions` and confirm the sub-session row shows its own
+         per-session token and cost totals (not the rolled-up number).
+      6. Verify via raw SQL that the primary session's `total_cost_usd`
+         is the sum of its own turns plus the sub-session's turns:
+         ```
+         sqlite3 ~/.local/state/hygge/sessions.db \
+           'select id, parent_id, kind, total_input_tokens, total_cost_usd
+            from sessions order by created_at desc limit 5'
+         ```
+
 - [ ] **Sub-agent model override switches provider.**
       Define a sub-agent type that pins a different provider than the
       one in your active hygge config, then dispatch it.

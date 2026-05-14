@@ -735,3 +735,169 @@ func TestLatestUserMessageID(t *testing.T) {
 		t.Errorf("expected latest user msg %s, got %s (first was %s)", msg2.ID, id, msg1.ID)
 	}
 }
+
+// --- T2.1 PropagateTotals tests ------------------------------------------------
+
+// mustCreateSubagent is a helper that creates a KindSubagent session with the
+// given parentID.
+func mustCreateSubagent(t *testing.T, s *store.Store, parentID string) *session.Session {
+	t.Helper()
+	sub, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: "/p",
+		Model:      sampleModel(),
+		ParentID:   parentID,
+		Kind:       session.KindSubagent,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession subagent: %v", err)
+	}
+	return sub
+}
+
+func TestPropagateTotals_SingleSession(t *testing.T) {
+	// PropagateTotals on a root session (no parent) updates only that row.
+	s := newTestStore(t)
+	root := mustCreateSession(t, s, "/p")
+
+	delta := session.Totals{InputTokens: 10, OutputTokens: 5, CostUSD: 0.001}
+	updated, err := s.PropagateTotals(t.Context(), root.ID, delta)
+	if err != nil {
+		t.Fatalf("PropagateTotals: %v", err)
+	}
+	if len(updated) != 1 || updated[0] != root.ID {
+		t.Fatalf("expected [%s], got %v", root.ID, updated)
+	}
+
+	got, err := s.GetSession(t.Context(), root.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.Totals.InputTokens != 10 || got.Totals.OutputTokens != 5 {
+		t.Errorf("tokens: got %+v want {10,5,...}", got.Totals)
+	}
+	if got.Totals.CostUSD < 0.0009 || got.Totals.CostUSD > 0.0011 {
+		t.Errorf("cost: got %v want ~0.001", got.Totals.CostUSD)
+	}
+}
+
+func TestPropagateTotals_Depth1(t *testing.T) {
+	// PropagateTotals on a depth-1 subagent updates both the child and parent.
+	s := newTestStore(t)
+	parent := mustCreateSession(t, s, "/p")
+	child := mustCreateSubagent(t, s, parent.ID)
+
+	delta := session.Totals{InputTokens: 20, OutputTokens: 10, CostUSD: 0.002}
+	updated, err := s.PropagateTotals(t.Context(), child.ID, delta)
+	if err != nil {
+		t.Fatalf("PropagateTotals: %v", err)
+	}
+	if len(updated) != 2 {
+		t.Fatalf("expected 2 updated ids, got %d: %v", len(updated), updated)
+	}
+	// First entry must be the leaf (child), last must be the root (parent).
+	if updated[0] != child.ID {
+		t.Errorf("updated[0] = %s, want child %s", updated[0], child.ID)
+	}
+	if updated[1] != parent.ID {
+		t.Errorf("updated[1] = %s, want parent %s", updated[1], parent.ID)
+	}
+
+	gotChild, err := s.GetSession(t.Context(), child.ID)
+	if err != nil {
+		t.Fatalf("GetSession child: %v", err)
+	}
+	gotParent, err := s.GetSession(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatalf("GetSession parent: %v", err)
+	}
+
+	if gotChild.Totals.InputTokens != 20 {
+		t.Errorf("child input tokens: got %d want 20", gotChild.Totals.InputTokens)
+	}
+	if gotParent.Totals.InputTokens != 20 {
+		t.Errorf("parent input tokens: got %d want 20", gotParent.Totals.InputTokens)
+	}
+	// Each row gets the SAME delta — not cumulative.
+	if gotChild.Totals.CostUSD < 0.0019 || gotChild.Totals.CostUSD > 0.0021 {
+		t.Errorf("child cost: got %v want ~0.002", gotChild.Totals.CostUSD)
+	}
+	if gotParent.Totals.CostUSD < 0.0019 || gotParent.Totals.CostUSD > 0.0021 {
+		t.Errorf("parent cost: got %v want ~0.002", gotParent.Totals.CostUSD)
+	}
+}
+
+func TestPropagateTotals_Depth2(t *testing.T) {
+	// PropagateTotals on a depth-2 chain updates all three rows.
+	// The agent currently caps recursion at depth 1, but the store
+	// supports arbitrary depth so future relaxation is safe.
+	s := newTestStore(t)
+	root := mustCreateSession(t, s, "/p")
+	mid := mustCreateSubagent(t, s, root.ID)
+	leaf := mustCreateSubagent(t, s, mid.ID)
+
+	delta := session.Totals{InputTokens: 30, OutputTokens: 15, CostUSD: 0.003}
+	updated, err := s.PropagateTotals(t.Context(), leaf.ID, delta)
+	if err != nil {
+		t.Fatalf("PropagateTotals: %v", err)
+	}
+	if len(updated) != 3 {
+		t.Fatalf("expected 3 updated ids, got %d: %v", len(updated), updated)
+	}
+	if updated[0] != leaf.ID {
+		t.Errorf("updated[0] = %s, want leaf %s", updated[0], leaf.ID)
+	}
+	if updated[len(updated)-1] != root.ID {
+		t.Errorf("updated[last] = %s, want root %s", updated[len(updated)-1], root.ID)
+	}
+
+	for _, sessID := range []string{root.ID, mid.ID, leaf.ID} {
+		got, err := s.GetSession(t.Context(), sessID)
+		if err != nil {
+			t.Fatalf("GetSession %s: %v", sessID, err)
+		}
+		if got.Totals.InputTokens != 30 {
+			t.Errorf("session %s: input tokens = %d want 30", sessID, got.Totals.InputTokens)
+		}
+	}
+}
+
+func TestPropagateTotals_Additive(t *testing.T) {
+	// Two consecutive PropagateTotals calls add up correctly — neither
+	// double-counts nor resets the prior total.
+	s := newTestStore(t)
+	parent := mustCreateSession(t, s, "/p")
+	child := mustCreateSubagent(t, s, parent.ID)
+
+	delta := session.Totals{InputTokens: 5, OutputTokens: 3, CostUSD: 0.0005}
+
+	for i := range 3 {
+		_, err := s.PropagateTotals(t.Context(), child.ID, delta)
+		if err != nil {
+			t.Fatalf("PropagateTotals call %d: %v", i+1, err)
+		}
+	}
+
+	wantTokens := int64(15) // 5 * 3
+	wantCost := 0.0015      // 0.0005 * 3
+
+	for sessID, label := range map[string]string{parent.ID: "parent", child.ID: "child"} {
+		got, err := s.GetSession(t.Context(), sessID)
+		if err != nil {
+			t.Fatalf("GetSession %s: %v", label, err)
+		}
+		if got.Totals.InputTokens != wantTokens {
+			t.Errorf("%s: input tokens = %d want %d", label, got.Totals.InputTokens, wantTokens)
+		}
+		if got.Totals.CostUSD < wantCost-0.0001 || got.Totals.CostUSD > wantCost+0.0001 {
+			t.Errorf("%s: cost = %v want ~%v", label, got.Totals.CostUSD, wantCost)
+		}
+	}
+}
+
+func TestPropagateTotals_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.PropagateTotals(t.Context(), "01ZZZZZZZZZZZZZZZZZZZZZZZZ", session.Totals{InputTokens: 1})
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}

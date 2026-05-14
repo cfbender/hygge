@@ -223,6 +223,22 @@ type Store interface {
 	// bumps UpdatedAt.
 	UpdateSessionTotals(ctx context.Context, id string, delta Totals) error
 
+	// PropagateTotals adds delta to every session in the parent chain
+	// starting at id (inclusive) and walking up via parent_id.  The
+	// walk is capped at 32 hops to guard against accidental cycles.
+	// All updates happen in a single SQL transaction so the chain is
+	// updated atomically.
+	//
+	// Returns the slice of session ids that were updated, ordered
+	// leaf-first (id is index 0; the root ancestor is last).  The
+	// caller uses this list to publish CostUpdated events for each
+	// ancestor so the TUI footer — which subscribes to the root id —
+	// sees the rolled-up total.
+	//
+	// Sessions that existed before T2.1 keep their prior (un-rolled-up)
+	// totals; only new deltas go through the chain walk.
+	PropagateTotals(ctx context.Context, id string, delta Totals) ([]string, error)
+
 	// SoftDeleteSession marks the session and bumps UpdatedAt.  Already
 	// deleted sessions are left untouched (no error).
 	SoftDeleteSession(ctx context.Context, id string) error
