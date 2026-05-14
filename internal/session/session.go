@@ -36,6 +36,22 @@
 // Persistence is decoupled from event publication.  The agent (Task 11)
 // publishes bus events after Store operations succeed.  The Store itself is
 // silent.
+//
+// # Session kinds
+//
+// Every session row carries a [Kind].  The two recognised kinds are
+// [KindPrimary] (the default; a normal user-facing conversation) and
+// [KindSubagent] (a sub-session spawned by the `task` tool).  Subagent
+// sessions have a non-empty ParentID pointing at the primary session that
+// dispatched them, but -- unlike a forked session -- they do NOT need a
+// ForkMessageID: a subagent has its own fresh history rather than
+// inheriting the parent's prefix.
+//
+// We chose an explicit Kind column over reusing fork_message_id (Approach
+// B in the Stage A design) because `hygge sessions list` will grow filters
+// next ("show me just the primary sessions") and a column-level
+// distinction is cheaper to query than a row-by-row inspection of message
+// parts.
 package session
 
 import (
@@ -49,6 +65,22 @@ type ModelRef struct {
 	Provider string
 	Name     string
 }
+
+// Kind identifies how a session was created.  See the package doc for
+// the rationale behind the explicit column.
+type Kind string
+
+// Recognised session kinds.  The DB CHECK constraint enforces this exact
+// set.
+const (
+	// KindPrimary is the default kind: a regular user-facing
+	// conversation, possibly forked from another primary session.
+	KindPrimary Kind = "primary"
+	// KindSubagent is the kind tagged on sub-sessions spawned by the
+	// `task` tool.  These sessions carry a ParentID pointing at the
+	// dispatching session but do not require ForkMessageID.
+	KindSubagent Kind = "subagent"
+)
 
 // Totals is a bundle of cumulative token and cost counters used both on
 // Session (running totals) and as deltas passed to UpdateSessionTotals.
@@ -68,6 +100,7 @@ type Session struct {
 	Slug          string
 	ProjectDir    string
 	Model         ModelRef
+	Kind          Kind // "primary" or "subagent"; empty on read means "primary"
 	Totals        Totals
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -122,7 +155,8 @@ type NewSession struct {
 	Model         ModelRef
 	Slug          string // optional
 	ParentID      string // optional; "" = root session
-	ForkMessageID string // required when ParentID is set
+	ForkMessageID string // required when ParentID is set AND Kind != KindSubagent
+	Kind          Kind   // empty defaults to KindPrimary
 }
 
 // NewMessage is the input to Store.AppendMessage.  ID and CreatedAt are
@@ -154,9 +188,11 @@ const DefaultListLimit = 50
 // Implementations are expected to be safe for concurrent use by multiple
 // goroutines.
 type Store interface {
-	// CreateSession creates a new session.  When in.ParentID is non-empty,
-	// in.ForkMessageID must also be non-empty and reference a message owned
-	// by the parent session.
+	// CreateSession creates a new session.  When in.ParentID is non-empty
+	// and in.Kind is not KindSubagent, in.ForkMessageID must also be
+	// non-empty and reference a message owned by the parent session.
+	// Subagent sessions (Kind == KindSubagent) may have a ParentID
+	// without a ForkMessageID.
 	CreateSession(ctx context.Context, in NewSession) (*Session, error)
 
 	// GetSession returns the session with the given id.  Deleted sessions

@@ -33,6 +33,8 @@ func modeToAction(m config.PermissionMode) Action {
 //  4. shell anywhere -> permission.shell
 //  5. network anywhere -> permission.network
 //  6. mcp anywhere -> permission.mcp
+//  7. agent anywhere -> ask  (sub-agent dispatch: always confirm with user;
+//     individual tools the sub-agent runs still go through their own gate)
 //
 // All synthesised rules carry Source = "default" so Decision.Reason can name
 // the origin.
@@ -53,6 +55,7 @@ func defaultRules(cfg *config.Config) []Rule {
 			{Category: CategoryShell, Pattern: "**", Action: ActionAsk, Source: "default"},
 			{Category: CategoryNetwork, Pattern: "**", Action: ActionDeny, Source: "default"},
 			{Category: CategoryMCP, Pattern: "**", Action: ActionAsk, Source: "default"},
+			{Category: CategoryAgent, Pattern: "**", Action: ActionAsk, Source: "default"},
 		}
 	}
 	p := cfg.Permission
@@ -92,6 +95,17 @@ func defaultRules(cfg *config.Config) []Rule {
 			Category: CategoryMCP,
 			Pattern:  "**",
 			Action:   modeToAction(p.MCP),
+			Source:   "default",
+		},
+		// Sub-agent dispatch is always "ask" by default; we intentionally
+		// do not let cfg.Permission introduce a blanket "allow" because
+		// the user expectation is to confirm at least the first time a
+		// sub-agent is launched on their behalf.  Per-pattern allows can
+		// still come from persisted state.
+		{
+			Category: CategoryAgent,
+			Pattern:  "**",
+			Action:   ActionAsk,
 			Source:   "default",
 		},
 	}

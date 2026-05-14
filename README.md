@@ -37,6 +37,7 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge config explain [key]` — print the effective config with provenance.
 - `hygge theme list` / `hygge theme show <name>` — inspect available themes.
 - `hygge skills list` / `show <name>` / `doctor` — inspect loaded skills.
+- `hygge subagents list` / `show <name>` — inspect registered sub-agent types invokable by the `task` tool.
 - `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
 - `hygge version` — print version, Go version, OS/arch.
 
@@ -133,6 +134,58 @@ The system prompt advertises every loaded skill's `name` and
 fetched on demand via the built-in `skill` tool. Use `hygge skills
 list` to see what is loaded, `hygge skills show <name>` to inspect one,
 and `hygge skills doctor` to diagnose files that failed to parse.
+
+### Sub-agents and the `task` tool
+
+The `task` tool dispatches a focused mission to a sub-agent that runs
+in isolation and returns a single summary message. Use it for
+self-contained work — codebase searches, documentation lookups,
+focused refactors — that would otherwise pollute the main context.
+
+Hygge ships a built-in **general** sub-agent type with access to all
+built-in tools (except `task` itself). Add more types by declaring
+them in a `subagents.toml` under any of the four discovery layers
+(`~/.agents/`, `~/.config/hygge/`, `<project>/.agents/`,
+`<project>/.hygge/`):
+
+```toml
+# subagents.toml
+[subagents.search]
+description = "Codebase recon. Reads files, runs grep/glob, returns a summary with file:line citations."
+prompt = """
+You are a search sub-agent.  Your job is to find specific facts in
+this codebase and return a concise summary with file:line citations.
+Don't read more than necessary.  Return one final message.
+"""
+tools = ["read", "grep", "glob", "bash"]
+
+[subagents.librarian]
+description = "External documentation lookup."
+prompt = "..."
+tools = ["read", "bash"]
+# model = "anthropic/claude-haiku-4-5"   # reserved for a future release; ignored today
+```
+
+Per-type model overrides are parsed but not yet honoured at runtime —
+sub-agents currently inherit the parent's provider and model.
+
+Sub-agents NEVER see the `task` tool, even when their TOML config
+asks for it: the recursion guard strips it from every sub-agent's
+tool set. Each side-effecting tool the sub-agent invokes still goes
+through the same permission engine as the parent, so you keep
+fine-grained control after the umbrella "launch the sub-agent" prompt.
+
+Sub-agent runs are persisted as their own sessions with `kind =
+subagent` and a `parent_id` link back to the dispatching session.
+They are auditable and replayable via the standard `hygge sessions`
+plumbing. Tokens and cost accumulate on the sub-session row; Stage A
+does not aggregate them into the parent's running totals — the `task`
+tool surfaces them in its metadata so the model (and you) can see
+what the run cost.
+
+Use `hygge subagents list` to see the registered types and `hygge
+subagents show <name>` to inspect a single type's system prompt and
+tool allowlist.
 
 ### Project context (AGENTS.md / CLAUDE.md)
 

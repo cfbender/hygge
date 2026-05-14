@@ -36,6 +36,7 @@ import (
 	"github.com/cfbender/hygge/internal/skill"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/store"
+	"github.com/cfbender/hygge/internal/subagent"
 	"github.com/cfbender/hygge/internal/tool"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
@@ -44,25 +45,27 @@ import (
 // from bootstrap.  Callers must defer Close to release the SQLite handle
 // and unblock the agent's per-session locks.
 type appRuntime struct {
-	Config       *config.Config
-	Provenance   config.Provenance
-	State        *state.State
-	StateOpts    state.LoadOptions
-	Bus          *bus.Bus
-	Store        *store.Store
-	Provider     provider.Provider
-	Permission   *permission.Engine
-	Tools        *tool.Registry
-	Catalog      *cost.Catalog
-	Agent        *agent.Agent
-	Theme        *theme.Theme
-	Skills       *skill.Registry
-	AgentsBlocks []agentsmd.Block
-	MCPClients   []*mcp.Client
-	MCPConfigs   []mcp.ServerConfig
-	MCPStatuses  []MCPServerStatus
-	SystemPrompt string
-	Pwd          string
+	Config         *config.Config
+	Provenance     config.Provenance
+	State          *state.State
+	StateOpts      state.LoadOptions
+	Bus            *bus.Bus
+	Store          *store.Store
+	Provider       provider.Provider
+	Permission     *permission.Engine
+	Tools          *tool.Registry
+	Catalog        *cost.Catalog
+	Agent          *agent.Agent
+	Theme          *theme.Theme
+	Skills         *skill.Registry
+	Subagents      *subagent.Registry
+	SubagentRunner *subagent.Runner
+	AgentsBlocks   []agentsmd.Block
+	MCPClients     []*mcp.Client
+	MCPConfigs     []mcp.ServerConfig
+	MCPStatuses    []MCPServerStatus
+	SystemPrompt   string
+	Pwd            string
 }
 
 // MCPServerStatus summarises the boot-time outcome of one MCP server
@@ -406,6 +409,55 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// configured.
 	tools := tool.DefaultWith(tool.DefaultOptions{SkillRegistry: skillReg})
 
+	// Sub-agents: the `task` tool dispatches isolated missions to a
+	// fresh agent.  We load the type registry (built-in `general` +
+	// any TOML-declared additions), construct the Runner, and
+	// register the tool ONLY in the orchestrator's tool set.  The
+	// runner internally builds a restricted tool registry per
+	// invocation that strips `task` -- the recursion guard.
+	//
+	// DefaultTools is the parent's built-in tool names minus `task`
+	// (the tool isn't registered yet at this point, so the list is
+	// already correct).  MCP tools register below; they are NOT
+	// automatically included in the sub-agent default set so a TOML
+	// type that wants them must opt in explicitly.
+	defaultSubagentTools := toolNamesFromRegistry(tools)
+	subagentReg, err := subagent.Load(subagent.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+		DefaultTools:  defaultSubagentTools,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load subagents.toml; using built-in types only", "err", err)
+		subagentReg, _ = subagent.Load(subagent.LoadOptions{DefaultTools: defaultSubagentTools})
+	}
+
+	subRunner, err := subagent.NewRunner(subagent.RunnerOptions{
+		Bus:           b,
+		Store:         stOpen,
+		Provider:      prv,
+		Permission:    permEngine,
+		Catalog:       catalog,
+		Registry:      subagentReg,
+		ParentTools:   tools,
+		Pwd:           opts.Pwd,
+		ContextWindow: contextWindow,
+		Now:           opts.Now,
+	})
+	if err != nil {
+		permEngine.Close()
+		_ = stOpen.Close()
+		b.Close()
+		return nil, fmt.Errorf("cli: build subagent runner: %w", err)
+	}
+	if err := tools.Register(tool.NewTaskTool(subRunner.ToolAdapter())); err != nil {
+		permEngine.Close()
+		_ = stOpen.Close()
+		b.Close()
+		return nil, fmt.Errorf("cli: register task tool: %w", err)
+	}
+
 	// MCP servers contribute additional tools.  Loading is best-
 	// effort: a misconfigured server warns and is skipped.  The agent
 	// still works without any MCP tools.
@@ -443,25 +495,27 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	return &appRuntime{
-		Config:       cfg,
-		Provenance:   prov,
-		State:        st,
-		StateOpts:    stateOpts,
-		Bus:          b,
-		Store:        stOpen,
-		Provider:     prv,
-		Permission:   permEngine,
-		Tools:        tools,
-		Catalog:      catalog,
-		Agent:        ag,
-		Theme:        thm,
-		Skills:       skillReg,
-		AgentsBlocks: agentsBlocks,
-		MCPClients:   mcpClients,
-		MCPConfigs:   mcpConfigs,
-		MCPStatuses:  mcpStatuses,
-		SystemPrompt: sysPrompt,
-		Pwd:          opts.Pwd,
+		Config:         cfg,
+		Provenance:     prov,
+		State:          st,
+		StateOpts:      stateOpts,
+		Bus:            b,
+		Store:          stOpen,
+		Provider:       prv,
+		Permission:     permEngine,
+		Tools:          tools,
+		Catalog:        catalog,
+		Agent:          ag,
+		Theme:          thm,
+		Skills:         skillReg,
+		Subagents:      subagentReg,
+		SubagentRunner: subRunner,
+		AgentsBlocks:   agentsBlocks,
+		MCPClients:     mcpClients,
+		MCPConfigs:     mcpConfigs,
+		MCPStatuses:    mcpStatuses,
+		SystemPrompt:   sysPrompt,
+		Pwd:            opts.Pwd,
 	}, nil
 }
 
@@ -734,6 +788,24 @@ func envLookupWithXDG(homeDir, xdgConfig, xdgState string) func(string) (string,
 		}
 		return os.LookupEnv(key)
 	}
+}
+
+// toolNamesFromRegistry returns the names of every currently
+// registered tool, sorted.  Used to seed the sub-agent registry's
+// DefaultTools list at bootstrap so the built-in "general" type
+// inherits the orchestrator's toolbox (minus `task`, which is added
+// later to the same registry but excluded by the runtime's recursion
+// guard).
+func toolNamesFromRegistry(r *tool.Registry) []string {
+	if r == nil {
+		return nil
+	}
+	all := r.All()
+	names := make([]string, 0, len(all))
+	for _, t := range all {
+		names = append(names, t.Name())
+	}
+	return names
 }
 
 // stubProviderFactory builds a provider that satisfies the interface

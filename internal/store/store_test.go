@@ -32,8 +32,11 @@ func TestOpen_FreshDB_RunsMigrations(t *testing.T) {
 	).Scan(&version); err != nil {
 		t.Fatalf("scan schema_migrations: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected schema_migrations version 1, got %d", version)
+	// Bumped to 2 when the 0002_subagent_kind migration landed.  Keep
+	// in lock-step with the highest version under
+	// internal/store/migrations/.
+	if version != 2 {
+		t.Fatalf("expected schema_migrations version 2, got %d", version)
 	}
 }
 
@@ -60,8 +63,11 @@ func TestOpen_Idempotent(t *testing.T) {
 	).Scan(&count); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 migration record after re-open, got %d", count)
+	// Must equal the number of files under
+	// internal/store/migrations/.  Bumped to 2 with
+	// 0002_subagent_kind.sql.
+	if count != 2 {
+		t.Fatalf("expected 2 migration records after re-open, got %d", count)
 	}
 }
 

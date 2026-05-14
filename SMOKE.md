@@ -65,6 +65,39 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       ```
       Output lists `demo` with source `project/.agents`.
 
+- [ ] **Sub-agents: built-in `general` is always available.**
+      `./bin/hygge subagents list` prints a row with name `general`,
+      source `builtin`, and a non-empty description. `./bin/hygge
+      subagents show general` prints the full system prompt body.
+
+- [ ] **Sub-agents: TOML additions are picked up.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.agents"
+      cat > "$tmp/.agents/subagents.toml" <<'EOF'
+      [subagents.searcher]
+      description = "Find files matching a pattern"
+      prompt = "You search the repo. Return one final message."
+      tools = ["read", "grep", "glob"]
+      EOF
+      (cd "$tmp" && ../bin/hygge subagents list)
+      ```
+      Output lists both `general` (builtin) and `searcher` (source
+      `project`).
+
+- [ ] **`task` tool dispatches a sub-agent and persists a sub-session.**
+      With `ANTHROPIC_API_KEY` set, launch hygge in a sample repo and
+      ask: "use the task tool with subagent_type=general, description
+      'find LICENSE', prompt 'find any file named LICENSE in this
+      repo'". After it returns:
+      ```
+      ./bin/hygge sessions list
+      ```
+      The list shows a primary session and a sub-session whose
+      `parent_id` points at it. The sub-session's row is tagged with
+      kind `subagent` (visible via `sqlite3 ~/.local/state/hygge/
+      sessions.db 'select id, parent_id, kind from sessions'`).
+
 - [ ] **AGENTS.md is picked up.**
       ```
       tmp=$(mktemp -d)

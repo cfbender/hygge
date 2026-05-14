@@ -37,7 +37,19 @@ func (s *Store) CreateSession(ctx context.Context, in session.NewSession) (*sess
 	if in.Model.Provider == "" || in.Model.Name == "" {
 		return nil, fmt.Errorf("store: CreateSession: model provider+name required")
 	}
-	if in.ParentID != "" && in.ForkMessageID == "" {
+	kind := in.Kind
+	if kind == "" {
+		kind = session.KindPrimary
+	}
+	switch kind {
+	case session.KindPrimary, session.KindSubagent:
+	default:
+		return nil, fmt.Errorf("store: CreateSession: unknown kind %q", kind)
+	}
+	// Forked primary sessions still require fork_message_id.  Subagent
+	// sessions branch out of an originating tool_use; they keep
+	// parent_id (auditability) but have no inherited prefix.
+	if in.ParentID != "" && kind != session.KindSubagent && in.ForkMessageID == "" {
 		return nil, fmt.Errorf("store: CreateSession: fork_message_id required when parent_id set")
 	}
 
@@ -51,10 +63,10 @@ func (s *Store) CreateSession(ctx context.Context, in session.NewSession) (*sess
 			model_provider, model_name,
 			total_input_tokens, total_output_tokens,
 			total_cache_read_tokens, total_cache_write_tokens, total_cost_usd,
-			created_at, updated_at, deleted_at, metadata
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0.0, ?, ?, NULL, '{}')`,
+			created_at, updated_at, deleted_at, metadata, kind
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0.0, ?, ?, NULL, '{}', ?)`,
 		id, nullableString(in.ParentID), nullableString(in.ForkMessageID), nullableString(in.Slug),
-		in.ProjectDir, in.Model.Provider, in.Model.Name, nowMillis, nowMillis,
+		in.ProjectDir, in.Model.Provider, in.Model.Name, nowMillis, nowMillis, string(kind),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("store: CreateSession: %w", err)
@@ -67,6 +79,7 @@ func (s *Store) CreateSession(ctx context.Context, in session.NewSession) (*sess
 		Slug:          in.Slug,
 		ProjectDir:    in.ProjectDir,
 		Model:         in.Model,
+		Kind:          kind,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		Metadata:      []byte("{}"),
@@ -90,7 +103,7 @@ const sessionSelectColumns = `SELECT
 	model_provider, model_name,
 	total_input_tokens, total_output_tokens,
 	total_cache_read_tokens, total_cache_write_tokens, total_cost_usd,
-	created_at, updated_at, deleted_at, metadata`
+	created_at, updated_at, deleted_at, metadata, kind`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows so scanSession can
 // service single-row and multi-row reads.
@@ -108,13 +121,14 @@ func scanSession(r rowScanner) (*session.Session, error) {
 		updatedMs int64
 		deletedMs sql.NullInt64
 		metadata  string
+		kind      string
 	)
 	if err := r.Scan(
 		&s.ID, &parentID, &forkMsg, &slug, &s.ProjectDir,
 		&s.Model.Provider, &s.Model.Name,
 		&s.Totals.InputTokens, &s.Totals.OutputTokens,
 		&s.Totals.CacheReadTokens, &s.Totals.CacheWriteTokens, &s.Totals.CostUSD,
-		&createdMs, &updatedMs, &deletedMs, &metadata,
+		&createdMs, &updatedMs, &deletedMs, &metadata, &kind,
 	); err != nil {
 		return nil, err
 	}
@@ -127,6 +141,10 @@ func scanSession(r rowScanner) (*session.Session, error) {
 		s.DeletedAt = time.UnixMilli(deletedMs.Int64).UTC()
 	}
 	s.Metadata = []byte(metadata)
+	s.Kind = session.Kind(kind)
+	if s.Kind == "" {
+		s.Kind = session.KindPrimary
+	}
 	return &s, nil
 }
 
