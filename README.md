@@ -33,6 +33,7 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge sessions list` — list recent sessions; `--include-deleted` to show soft-deleted rows.
 - `hygge sessions delete <id-prefix>` — soft-delete a session.
 - `hygge profile list` / `hygge profile use <name>` — manage config profiles.
+- `hygge provider auth [name]` / `list` / `remove` — manage per-machine API credentials.
 - `hygge config explain [key]` — print the effective config with provenance.
 - `hygge theme list` / `hygge theme show <name>` — inspect available themes.
 - `hygge version` — print version, Go version, OS/arch.
@@ -52,6 +53,27 @@ per-project model or permission overrides.
 
 `hygge config explain` shows the resolved config along with the source
 of every value: builtin default, user config, profile, or project file.
+
+### Provider credentials
+
+API keys live separately from the human-edited config so the config can
+be committed to a dotfiles repo without leaking secrets. They are
+stored at `$XDG_STATE_HOME/hygge/auth.json` (mode `0600`,
+`~/.local/state/hygge/auth.json` by default) and managed via:
+
+- `hygge provider auth [name]` — save an API key for a provider. Reads
+  a single line from stdin when piped, or prompts interactively
+  (hidden input) when run from a TTY.
+- `hygge provider list` — show stored credentials with masked keys.
+- `hygge provider remove <name>` — delete a stored credential
+  (`-f` / `--no-confirm` skips the prompt).
+
+Credential precedence at startup:
+
+1. `model.options.api_key` in config (explicit override).
+2. The canonical `$<PROVIDER>_API_KEY` env var (e.g.
+   `ANTHROPIC_API_KEY`).
+3. The auth store entry for the configured provider.
 
 ## Development
 
