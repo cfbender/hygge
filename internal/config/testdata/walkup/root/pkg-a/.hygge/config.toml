@@ -1,0 +1,5 @@
+[model]
+name = "gpt-4o-mini"
+
+[permission]
+shell = "ask"
