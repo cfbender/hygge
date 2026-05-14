@@ -2,7 +2,7 @@
   "anthropic": {
     "id": "anthropic",
     "models": {
-      "claude-sonnet-4.5": {
+      "claude-sonnet-4-5": {
         "id": "claude-sonnet-4-5",
         "name": "Claude Sonnet 4.5 (latest)",
         "family": "claude-sonnet",

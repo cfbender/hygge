@@ -351,6 +351,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sendCompleted:
 		a.busy = false
 		a.inflightCancel = nil
+		if m.Err != nil && !errors.Is(m.Err, context.Canceled) {
+			// Surface the failure so the user has something to react to;
+			// silently dropping errors leaves the UI looking dead.
+			a.messages = append(a.messages, uiMessage{
+				Role:    components.RoleSystem,
+				Raw:     "error: " + m.Err.Error(),
+				IsError: true,
+			})
+		}
 		return a, nil
 
 	case tea.KeyMsg:

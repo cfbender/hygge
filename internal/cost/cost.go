@@ -45,7 +45,7 @@ type Pricing struct {
 	Provider string
 
 	// Model is the model id as the provider exposes it (e.g.
-	// "claude-sonnet-4.5").  When the live models.dev catalog uses a
+	// "claude-sonnet-4-5").  When the live models.dev catalog uses a
 	// different spelling (e.g. "claude-sonnet-4-5"), the catalog still
 	// returns Pricing.Model spelled the way the caller asked for.
 	Model string

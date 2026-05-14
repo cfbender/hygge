@@ -12,25 +12,25 @@ package cost
 func fallbackPricing() map[string]map[string]Pricing {
 	return map[string]map[string]Pricing{
 		"anthropic": {
-			"claude-sonnet-4.5": {
+			"claude-sonnet-4-5": {
 				Provider:          "anthropic",
-				Model:             "claude-sonnet-4.5",
+				Model:             "claude-sonnet-4-5",
 				InputPerMTok:      3.00,
 				OutputPerMTok:     15.00,
 				CacheReadPerMTok:  0.30,
 				CacheWritePerMTok: 3.75,
 			},
-			"claude-opus-4.7": {
+			"claude-opus-4-5": {
 				Provider:          "anthropic",
-				Model:             "claude-opus-4.7",
+				Model:             "claude-opus-4-5",
 				InputPerMTok:      15.00,
 				OutputPerMTok:     75.00,
 				CacheReadPerMTok:  1.50,
 				CacheWritePerMTok: 18.75,
 			},
-			"claude-haiku-3.5": {
+			"claude-haiku-4-5": {
 				Provider:          "anthropic",
-				Model:             "claude-haiku-3.5",
+				Model:             "claude-haiku-4-5",
 				InputPerMTok:      1.00,
 				OutputPerMTok:     5.00,
 				CacheReadPerMTok:  0.10,

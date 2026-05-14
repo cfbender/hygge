@@ -24,7 +24,7 @@ func fixtureServer(t *testing.T) (*httptest.Server, *atomic.Int64) {
       "anthropic": {
         "id": "anthropic",
         "models": {
-          "claude-sonnet-4.5": {
+          "claude-sonnet-4-5": {
             "cost": {"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75}
           },
           "claude-zenith-9": {
@@ -58,7 +58,7 @@ func TestLookUp_LiveFetchPopulatesAndPersistsCache(t *testing.T) {
 		CachePath:  cachePath,
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestLookUp_LiveFetchPopulatesAndPersistsCache(t *testing.T) {
 	if err := json.Unmarshal(data, &snap); err != nil {
 		t.Fatalf("cache JSON: %v", err)
 	}
-	if _, ok := snap.Providers["anthropic"]["claude-sonnet-4.5"]; !ok {
+	if _, ok := snap.Providers["anthropic"]["claude-sonnet-4-5"]; !ok {
 		t.Errorf("cache missing sonnet entry: %+v", snap)
 	}
 }
@@ -97,7 +97,7 @@ func TestLookUp_InMemoryCacheServesSecondCall(t *testing.T) {
 	})
 
 	for i := 0; i < 3; i++ {
-		_, _, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+		_, _, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 		if err != nil {
 			t.Fatalf("LookUp %d: %v", i, err)
 		}
@@ -118,9 +118,9 @@ func TestLookUp_FreshDiskCacheNoHTTP(t *testing.T) {
 		FetchedAt: now,
 		Providers: map[string]map[string]Pricing{
 			"anthropic": {
-				"claude-sonnet-4.5": {
+				"claude-sonnet-4-5": {
 					Provider:      "anthropic",
-					Model:         "claude-sonnet-4.5",
+					Model:         "claude-sonnet-4-5",
 					InputPerMTok:  3.0,
 					OutputPerMTok: 15.0,
 					UpdatedAt:     now,
@@ -143,7 +143,7 @@ func TestLookUp_FreshDiskCacheNoHTTP(t *testing.T) {
 		Now:        func() time.Time { return now.Add(1 * time.Hour) },
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestLookUp_StaleDiskCacheTriggersHTTP(t *testing.T) {
 		FetchedAt: staleTime,
 		Providers: map[string]map[string]Pricing{
 			"anthropic": {
-				"claude-sonnet-4.5": {InputPerMTok: 999}, // bogus value to detect re-fetch
+				"claude-sonnet-4-5": {InputPerMTok: 999}, // bogus value to detect re-fetch
 			},
 		},
 	}
@@ -180,7 +180,7 @@ func TestLookUp_StaleDiskCacheTriggersHTTP(t *testing.T) {
 		Now:        func() time.Time { return staleTime.Add(2 * time.Hour) },
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestLookUp_FallbackWhenFetchFailsAndNoCache(t *testing.T) {
 		CachePath:  tempCachePath(t),
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestLookUp_CorruptCacheFallsThroughToFetch(t *testing.T) {
 		CachePath:  cachePath,
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -276,15 +276,15 @@ func TestLookUp_UnknownModelLivePresentInFallback(t *testing.T) {
 	t.Parallel()
 
 	srv, _ := fixtureServer(t)
-	// fixtureServer's catalog has only "claude-sonnet-4.5" + "claude-zenith-9".
-	// Ask for claude-opus-4.7 — not in live, but IS in fallback.
+	// fixtureServer's catalog has only "claude-sonnet-4-5" + "claude-zenith-9".
+	// Ask for claude-opus-4-5 — not in live, but IS in fallback.
 	c := NewCatalog(CatalogOptions{
 		BaseURL:    srv.URL,
 		HTTPClient: srv.Client(),
 		CachePath:  tempCachePath(t),
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-opus-4.7")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-opus-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestLookUp_ConcurrentSingleFlight(t *testing.T) {
 	t.Parallel()
 
 	var hits atomic.Int64
-	body := `{"anthropic":{"models":{"claude-sonnet-4.5":{"cost":{"input":3.0,"output":15.0}}}}}`
+	body := `{"anthropic":{"models":{"claude-sonnet-4-5":{"cost":{"input":3.0,"output":15.0}}}}}`
 
 	// Add a small artificial delay so concurrent goroutines pile up on
 	// the in-flight channel rather than each finishing before the next
@@ -326,7 +326,7 @@ func TestLookUp_ConcurrentSingleFlight(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			_, _, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+			_, _, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 			if err != nil {
 				errs <- err
 			}
@@ -352,7 +352,7 @@ func TestRefresh_ForcesRefetchWithinTTL(t *testing.T) {
 		CachePath:  tempCachePath(t),
 	})
 
-	if _, _, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5"); err != nil {
+	if _, _, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5"); err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
 	if got := hits.Load(); got != 1 {
@@ -369,7 +369,7 @@ func TestRefresh_ForcesRefetchWithinTTL(t *testing.T) {
 func TestLookUp_RelaxedDotDashMatch(t *testing.T) {
 	t.Parallel()
 
-	// models.dev uses "claude-sonnet-4-5"; hygge asks for "claude-sonnet-4.5".
+	// models.dev uses "claude-sonnet-4-5"; hygge asks for "claude-sonnet-4-5".
 	body := `{"anthropic":{"models":{"claude-sonnet-4-5":{"cost":{"input":3.0,"output":15.0}}}}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(body))
@@ -382,15 +382,15 @@ func TestLookUp_RelaxedDotDashMatch(t *testing.T) {
 		CachePath:  tempCachePath(t),
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
 	if !fresh {
 		t.Errorf("expected fresh=true on relaxed-match live hit")
 	}
-	if p.Model != "claude-sonnet-4.5" {
-		t.Errorf("returned Pricing.Model = %q, want caller's spelling %q", p.Model, "claude-sonnet-4.5")
+	if p.Model != "claude-sonnet-4-5" {
+		t.Errorf("returned Pricing.Model = %q, want caller's spelling %q", p.Model, "claude-sonnet-4-5")
 	}
 	if p.InputPerMTok != 3.0 {
 		t.Errorf("expected live data, got %+v", p)
@@ -406,7 +406,7 @@ func TestLookUp_FetchFailsWithStaleCache_ReturnsStaleNotFresh(t *testing.T) {
 		FetchedAt: staleTime,
 		Providers: map[string]map[string]Pricing{
 			"anthropic": {
-				"claude-sonnet-4.5": {InputPerMTok: 42, OutputPerMTok: 99},
+				"claude-sonnet-4-5": {InputPerMTok: 42, OutputPerMTok: 99},
 			},
 		},
 	}
@@ -425,7 +425,7 @@ func TestLookUp_FetchFailsWithStaleCache_ReturnsStaleNotFresh(t *testing.T) {
 		Now:        func() time.Time { return staleTime.Add(2 * time.Hour) },
 	})
 
-	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4.5")
+	p, fresh, err := c.LookUp(context.Background(), "anthropic", "claude-sonnet-4-5")
 	if err != nil {
 		t.Fatalf("LookUp: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestWarnOnce_DoesNotPanicOnRepeats(t *testing.T) {
 func TestFallback_KnownAnthropicModels(t *testing.T) {
 	t.Parallel()
 
-	for _, m := range []string{"claude-sonnet-4.5", "claude-opus-4.7", "claude-haiku-3.5"} {
+	for _, m := range []string{"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"} {
 		p, ok := lookupFallback("anthropic", m)
 		if !ok {
 			t.Errorf("fallback missing %q", m)
@@ -500,7 +500,7 @@ func TestFallback_KnownAnthropicModels(t *testing.T) {
 	if _, ok := lookupFallback("anthropic", "no-such-model"); ok {
 		t.Errorf("fallback returned ok for nonexistent model")
 	}
-	if _, ok := lookupFallback("no-such-provider", "claude-sonnet-4.5"); ok {
+	if _, ok := lookupFallback("no-such-provider", "claude-sonnet-4-5"); ok {
 		t.Errorf("fallback returned ok for nonexistent provider")
 	}
 }

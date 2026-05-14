@@ -12,13 +12,13 @@ func TestStatusBarRendersIdentity(t *testing.T) {
 	sb := StatusBar{
 		Profile:  "work",
 		Provider: "anthropic",
-		Model:    "claude-sonnet-4.5",
+		Model:    "claude-sonnet-4-5",
 		Pwd:      "~/proj",
 		Width:    80,
 		Theme:    theme.ShellTheme(),
 	}
 	out := sb.View()
-	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4.5", "~/proj"} {
+	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4-5", "~/proj"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("statusbar missing %q in:\n%s", want, out)
 		}

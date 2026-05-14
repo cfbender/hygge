@@ -60,8 +60,8 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	if cfg.Model.Provider != "anthropic" {
 		t.Errorf("model.provider: got %q, want %q", cfg.Model.Provider, "anthropic")
 	}
-	if cfg.Model.Name != "claude-sonnet-4.5" {
-		t.Errorf("model.name: got %q, want %q", cfg.Model.Name, "claude-sonnet-4.5")
+	if cfg.Model.Name != "claude-sonnet-4-5" {
+		t.Errorf("model.name: got %q, want %q", cfg.Model.Name, "claude-sonnet-4-5")
 	}
 	if cfg.Permission.Shell != PermAsk {
 		t.Errorf("permission.shell: got %q, want %q", cfg.Permission.Shell, PermAsk)
@@ -396,7 +396,7 @@ func TestLoad_UnknownKeysTolerated(t *testing.T) {
 	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
 [model]
 provider = "anthropic"
-name = "claude-sonnet-4.5"
+name = "claude-sonnet-4-5"
 
 [unknown_section]
 foo = "bar"
@@ -423,7 +423,7 @@ func TestLoad_EnvInterpolation(t *testing.T) {
 	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
 [model]
 provider = "anthropic"
-name = "claude-sonnet-4.5"
+name = "claude-sonnet-4-5"
 
 [model.options]
 api_key = "$MY_API_KEY"
@@ -451,7 +451,7 @@ func TestLoad_EnvInterpolation_UnsetVarKeptLiteral(t *testing.T) {
 	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
 [model]
 provider = "anthropic"
-name = "claude-sonnet-4.5"
+name = "claude-sonnet-4-5"
 
 [model.options]
 api_key = "$UNSET_VAR"
@@ -641,7 +641,7 @@ func TestLoad_BraceEnvInterpolation(t *testing.T) {
 	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
 [model]
 provider = "anthropic"
-name = "claude-sonnet-4.5"
+name = "claude-sonnet-4-5"
 
 [model.options]
 api_key = "${BRACE_VAR}"

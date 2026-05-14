@@ -19,7 +19,7 @@ func defaultConfig() map[string]any {
 	return map[string]any{
 		"model": map[string]any{
 			"provider": "anthropic",
-			"name":     "claude-sonnet-4.5",
+			"name":     "claude-sonnet-4-5",
 			"options":  map[string]any{},
 		},
 		"permission": map[string]any{
