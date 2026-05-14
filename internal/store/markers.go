@@ -42,6 +42,47 @@ func (s *Store) AddCompactionMarker(
 	}, nil
 }
 
+// ListMarkersForSession returns all compaction markers for the session in
+// chronological order (oldest first).  Returns an empty (non-nil) slice when
+// no markers exist for the session.
+func (s *Store) ListMarkersForSession(ctx context.Context, sessionID string) ([]*session.Marker, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("store: ListMarkersForSession: session_id required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, session_id, before_message_id, summary, input_tokens_saved, created_at
+		FROM compaction_markers
+		WHERE session_id = ?
+		ORDER BY created_at ASC, id ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: ListMarkersForSession: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []*session.Marker
+	for rows.Next() {
+		var (
+			m         session.Marker
+			createdMs int64
+		)
+		if err := rows.Scan(
+			&m.ID, &m.SessionID, &m.BeforeMessageID, &m.Summary,
+			&m.InputTokensSaved, &createdMs,
+		); err != nil {
+			return nil, fmt.Errorf("store: ListMarkersForSession scan: %w", err)
+		}
+		m.CreatedAt = time.UnixMilli(createdMs).UTC()
+		out = append(out, &m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: ListMarkersForSession iterate: %w", err)
+	}
+	if out == nil {
+		out = []*session.Marker{}
+	}
+	return out, nil
+}
+
 // LatestMarker returns the most recent compaction marker for the session,
 // breaking ties by id (ULIDs are time-ordered so id-desc is the natural
 // secondary sort).  Returns (nil, nil) when no marker exists for the session.

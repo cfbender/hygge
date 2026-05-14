@@ -270,6 +270,13 @@ type Store interface {
 	// soft-deleted messages.  Returns messages in chronological order.
 	MessagesForSession(ctx context.Context, sessionID string) ([]*Message, error)
 
+	// MessagesDirectForSession returns only the messages directly owned by
+	// sessionID (no fork-chain walking).  Excludes soft-deleted messages.
+	// Returns messages in chronological order.  Used for session kinds
+	// (e.g. KindSubagent) that start with a fresh history rather than
+	// inheriting a parent's prefix.
+	MessagesDirectForSession(ctx context.Context, sessionID string) ([]*Message, error)
+
 	// MessagesSinceLatestMarker returns the messages newer than the
 	// session's latest compaction marker, plus the marker itself.  When the
 	// session has no marker, returns the full MessagesForSession output and
@@ -282,6 +289,11 @@ type Store interface {
 	// LatestMarker returns the most recent compaction marker for the
 	// session, or (nil, nil) when there are none.
 	LatestMarker(ctx context.Context, sessionID string) (*Marker, error)
+
+	// ListMarkersForSession returns all compaction markers for the session
+	// in chronological order (oldest first).  Returns an empty slice (not
+	// an error) when no markers exist.
+	ListMarkersForSession(ctx context.Context, sessionID string) ([]*Marker, error)
 
 	// Close releases backing resources.  Safe to call multiple times.
 	Close() error

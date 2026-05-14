@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -19,6 +20,12 @@ const (
 	RoleAssistant MessageRole = "assistant"
 	RoleTool      MessageRole = "tool"
 	RoleSystem    MessageRole = "system"
+	// RoleThinking renders assistant reasoning content as always-visible dim
+	// italic text preceding the assistant's response.  No expand/collapse.
+	RoleThinking MessageRole = "thinking"
+	// RoleMarker renders a prominent banner-style section break produced
+	// by a compaction event.  It shows the summary and tokens-saved count.
+	RoleMarker MessageRole = "marker"
 )
 
 // UIMessage is one entry in the conversation view.
@@ -42,6 +49,13 @@ type UIMessage struct {
 	// message.  Set on the parent `task` tool UIMessage when
 	// bus.SubagentStarted arrives.
 	SubagentID string
+
+	// MarkerSummary is the post-compaction context summary, populated on
+	// RoleMarker messages.
+	MarkerSummary string
+	// MarkerTokensSaved is the number of input tokens saved by the
+	// compaction, populated on RoleMarker messages.
+	MarkerTokensSaved int64
 }
 
 // MessageList renders the conversation history.
@@ -85,6 +99,23 @@ func (m MessageList) View() string {
 // renderOne renders a single message with its gutter, plus any nested
 // subagent block bound to it.
 func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
+	// RoleThinking: always-visible dim italic text, no gutter header line.
+	if msg.Role == RoleThinking {
+		var style lipgloss.Style
+		if m.Theme != nil {
+			style = m.Theme.Style(theme.AtomMuted).Faint(true).Italic(true)
+		} else {
+			style = lipgloss.NewStyle().Faint(true).Italic(true)
+		}
+		body := strings.TrimRight(msg.Raw, "\n")
+		return style.Render(body)
+	}
+
+	// RoleMarker: prominent banner-style compaction section break.
+	if msg.Role == RoleMarker {
+		return m.renderMarker(msg)
+	}
+
 	gutter := m.gutter(msg)
 
 	body := msg.Raw
@@ -107,7 +138,47 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	return rendered
 }
 
-// nestedFor returns the rendered nested subagent block bound to msg,
+// renderMarker renders a RoleMarker message as a prominent banner-style
+// compaction section break.  Shows the tokens saved and the full summary text.
+func (m MessageList) renderMarker(msg UIMessage) string {
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1)
+	labelStyle := lipgloss.NewStyle().Bold(true)
+	bodyStyle := lipgloss.NewStyle()
+	if m.Theme != nil {
+		borderStyle = borderStyle.
+			BorderForeground(m.Theme.Style(theme.AtomWarn).GetForeground())
+		labelStyle = m.Theme.Style(theme.AtomWarn).Bold(true)
+		bodyStyle = m.Theme.Style(theme.AtomMuted)
+	}
+
+	header := fmt.Sprintf("── compacted · %s saved ──", formatTokensSaved(msg.MarkerTokensSaved))
+	body := msg.MarkerSummary
+	if body == "" {
+		body = "(no summary)"
+	}
+
+	inner := labelStyle.Render(header) + "\n" + bodyStyle.Render(body)
+	return borderStyle.Render(inner)
+}
+
+// formatTokensSaved renders an integer token count compactly for the
+// compaction marker banner (e.g. 0, 1.2k, 5.8M).
+func formatTokensSaved(n int64) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d tokens", n)
+	case n < 1_000_000:
+		return fmt.Sprintf("%.1fk tokens", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%.1fM tokens", float64(n)/1_000_000)
+	}
+}
+
 // or "" when no block applies.
 func (m MessageList) nestedFor(msg UIMessage) string {
 	if msg.SubagentID == "" || m.Subagents == nil {
@@ -154,6 +225,8 @@ func (m MessageList) roleStyle(role MessageRole) lipgloss.Style {
 		return m.Theme.Style(theme.AtomAccent).Bold(true)
 	case RoleTool:
 		return m.Theme.Style(theme.AtomMuted).Bold(true)
+	case RoleThinking:
+		return m.Theme.Style(theme.AtomMuted).Faint(true).Italic(true)
 	default:
 		return m.Theme.Style(theme.AtomMuted)
 	}
