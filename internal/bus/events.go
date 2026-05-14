@@ -144,6 +144,45 @@ type CostUpdated struct {
 	At time.Time
 }
 
+// AssistantTextDelta fires for each streamed chunk of assistant text content.
+// Subscribers (e.g. the UI) render these in real time so the user does not
+// have to wait for the full assistant response before seeing output.
+type AssistantTextDelta struct {
+	// SessionID is the session the delta belongs to.
+	SessionID string
+	// Text is the new chunk of text (not the cumulative buffer).
+	Text string
+	// At is the wall-clock time the delta was emitted.
+	// Populated by the caller; the bus does not set this field.
+	At time.Time
+}
+
+// AssistantThinkingDelta fires for each streamed chunk of assistant
+// reasoning content (Anthropic "thinking" blocks).  Treated separately
+// from AssistantTextDelta so the UI can render it differently.
+type AssistantThinkingDelta struct {
+	// SessionID is the session the delta belongs to.
+	SessionID string
+	// Text is the new chunk of reasoning text.
+	Text string
+	// At is the wall-clock time the delta was emitted.
+	// Populated by the caller; the bus does not set this field.
+	At time.Time
+}
+
+// IterationLimitReached fires when the agent loop hits its configured
+// maximum iteration count and aborts.  The agent persists an assistant
+// message describing the abort and returns ErrIterationLimit to the caller.
+type IterationLimitReached struct {
+	// SessionID is the session whose loop hit the limit.
+	SessionID string
+	// Limit is the configured maximum number of iterations.
+	Limit int
+	// At is the wall-clock time the limit was hit.
+	// Populated by the caller; the bus does not set this field.
+	At time.Time
+}
+
 // ContextUsageUpdated fires after each provider response with the current window usage.
 type ContextUsageUpdated struct {
 	// SessionID is the session whose context window was measured.
