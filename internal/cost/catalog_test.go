@@ -366,10 +366,12 @@ func TestRefresh_ForcesRefetchWithinTTL(t *testing.T) {
 	}
 }
 
-func TestLookUp_RelaxedDotDashMatch(t *testing.T) {
+func TestLookUp_ExactMatchLiveCatalog(t *testing.T) {
 	t.Parallel()
 
-	// models.dev uses "claude-sonnet-4-5"; hygge asks for "claude-sonnet-4-5".
+	// hygge and models.dev both use dash-form ids for the Anthropic
+	// provider; this is just a sanity check that an exact-match hit
+	// against the live snapshot returns the right Pricing.
 	body := `{"anthropic":{"models":{"claude-sonnet-4-5":{"cost":{"input":3.0,"output":15.0}}}}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(body))
@@ -387,10 +389,10 @@ func TestLookUp_RelaxedDotDashMatch(t *testing.T) {
 		t.Fatalf("LookUp: %v", err)
 	}
 	if !fresh {
-		t.Errorf("expected fresh=true on relaxed-match live hit")
+		t.Errorf("expected fresh=true on live hit")
 	}
 	if p.Model != "claude-sonnet-4-5" {
-		t.Errorf("returned Pricing.Model = %q, want caller's spelling %q", p.Model, "claude-sonnet-4-5")
+		t.Errorf("returned Pricing.Model = %q, want %q", p.Model, "claude-sonnet-4-5")
 	}
 	if p.InputPerMTok != 3.0 {
 		t.Errorf("expected live data, got %+v", p)
