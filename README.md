@@ -143,30 +143,29 @@ every turn. Hygge treats `AGENTS.md` and `CLAUDE.md` (and
 `CLAUDE.local.md`) as first-class equivalents so the same repo can
 be used by either tool without duplication.
 
-Hygge discovers context files across eight layers, in precedence
-order (lowest first; all that exist are concatenated, none override
-each other):
+Hygge discovers context files across eight project-root layers, in
+precedence order (lowest first; all that exist are concatenated, none
+override each other):
 
 1. `~/.agents/AGENTS.md` — vendor-neutral, per-user.
 2. `~/.config/hygge/AGENTS.md` — hygge-native, per-user.
 3. `~/.claude/CLAUDE.md` — CLAUDE-format compat, per-user.
 4. `<project-root>/.agents/AGENTS.md` — vendor-neutral, per-project.
 5. `<project-root>/AGENTS.md` — conventional project root file.
-6. `<project-root>/CLAUDE.md` — CLAUDE-format compat at project root.
-7. `<project-root>/CLAUDE.local.md` — local CLAUDE override (ignored from VCS).
-8. `<project-root>/**/{AGENTS.md,CLAUDE.md,CLAUDE.local.md}` —
-   recursive descent into subdirectories.
+6. `<project-root>/AGENTS.local.md` — local AGENTS override (ignored from VCS).
+7. `<project-root>/CLAUDE.md` — CLAUDE-format compat at project root.
+8. `<project-root>/CLAUDE.local.md` — local CLAUDE override (ignored from VCS).
 
 The project-root walk-up stops at the first directory containing
 `AGENTS.md`, `CLAUDE.md`, `.git`, `.agents/`, or `.hygge/`, and never
 climbs into `$HOME`.
 
-The recursive descent (layer 8) skips common dependency / build
-directories — `.git`, `.agents`, `.hygge`, `node_modules`, `vendor`,
-`.venv`, `__pycache__`, `dist`, `target`, `bin`, `build` — and is
-bounded to **50 files** and **256 KB** total to keep the system
-prompt from blowing up in a misconfigured workspace. The first file
-or byte over each cap is logged via `slog.Warn`.
+**Coming next:** subdirectory `AGENTS.md` / `CLAUDE.md` files will be
+loaded automatically when the agent reads, writes, or runs commands
+in those directories — walked up from the touched path toward the
+project root and injected as transient system notes in the next
+provider turn. Until that lands, only the eight project-root layers
+above are surfaced at startup.
 
 Use:
 

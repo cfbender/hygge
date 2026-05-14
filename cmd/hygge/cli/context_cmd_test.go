@@ -138,11 +138,13 @@ func TestContextList_TabularOutput(t *testing.T) {
 	}
 }
 
-// TestContextList_SubdirAndRoot plants both a root AGENTS.md and a
-// subdirectory AGENTS.md, verifies both are listed, and verifies
-// that the subdir row uses `project/subdir` as SOURCE with a
-// project-relative PATH (not absolute).
-func TestContextList_SubdirAndRoot(t *testing.T) {
+// TestContextList_MultipleRootFiles plants both AGENTS.md and
+// CLAUDE.md at the project root and verifies that `hygge context
+// list` renders one row per file with project-relative PATH values
+// and the `project/root` SOURCE token.  Subdirectory files are not
+// loaded at startup (lazy per-tool-call loader; see STATUS.md), so
+// only root files are asserted here.
+func TestContextList_MultipleRootFiles(t *testing.T) {
 	home := hermeticHome(t)
 
 	// Construct a project root one level below $HOME so the
@@ -158,14 +160,11 @@ func TestContextList_SubdirAndRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"),
-		[]byte("root body"), 0o600); err != nil {
+		[]byte("agents body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "internal"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "internal", "AGENTS.md"),
-		[]byte("internal body"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"),
+		[]byte("claude body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -191,26 +190,26 @@ func TestContextList_SubdirAndRoot(t *testing.T) {
 	}
 	got := buf.String()
 
-	// Both source layers present.
-	if !strings.Contains(got, "project/root") {
-		t.Errorf("missing project/root row:\n%s", got)
+	// Two project/root rows.
+	if strings.Count(got, "project/root") != 2 {
+		t.Errorf("want 2 project/root rows, got:\n%s", got)
 	}
-	if !strings.Contains(got, "project/subdir") {
-		t.Errorf("missing project/subdir row:\n%s", got)
+	// No subdir rows (Load doesn't scan subdirectories in v0.2).
+	if strings.Contains(got, "project/subdir") {
+		t.Errorf("unexpected project/subdir row (lazy loader only):\n%s", got)
 	}
 
-	// The subdir PATH column must be the relative path, not absolute.
-	wantRel := filepath.Join("internal", "AGENTS.md")
-	if !strings.Contains(got, wantRel) {
-		t.Errorf("missing relative subdir path %q:\n%s", wantRel, got)
+	// Both filenames present as project-relative PATH values.
+	for _, rel := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if !strings.Contains(got, rel) {
+			t.Errorf("missing %q row:\n%s", rel, got)
+		}
 	}
-	// And must NOT contain the absolute subdir path.
-	absSubdir := filepath.Join(root, "internal", "AGENTS.md")
-	// Find the subdir line and assert it does not contain the abs path.
+	// And must NOT contain the absolute root path in any row.
+	absRoot := root + string(filepath.Separator)
 	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "project/subdir") &&
-			strings.Contains(line, absSubdir) {
-			t.Errorf("subdir row leaked absolute path:\n%s", line)
+		if strings.Contains(line, "project/root") && strings.Contains(line, absRoot) {
+			t.Errorf("project/root row leaked absolute path:\n%s", line)
 		}
 	}
 }
