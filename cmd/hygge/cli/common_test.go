@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 )
@@ -40,6 +43,39 @@ func (fakeProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 // fakeProviderFactory is the bootstrap-injectable factory variant.
 func fakeProviderFactory(_ map[string]any) (provider.Provider, error) {
 	return fakeProvider{}, nil
+}
+
+// optsCapture is a thread-safe map[string]any sink used by tests that
+// need to assert on what was passed to the provider factory.
+type optsCapture struct {
+	mu   sync.Mutex
+	last map[string]any
+}
+
+func (c *optsCapture) factory(opts map[string]any) (provider.Provider, error) {
+	c.mu.Lock()
+	// Shallow-copy so subsequent bootstrap mutations cannot taint the
+	// captured value.
+	cp := make(map[string]any, len(opts))
+	for k, v := range opts {
+		cp[k] = v
+	}
+	c.last = cp
+	c.mu.Unlock()
+	return fakeProvider{}, nil
+}
+
+func (c *optsCapture) snapshot() map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(c.last))
+	for k, v := range c.last {
+		cp[k] = v
+	}
+	return cp
 }
 
 // hermeticHome returns a fresh tempdir with the standard .config and
@@ -130,5 +166,144 @@ func TestBootstrapBuildsAllComponents(t *testing.T) {
 	}
 	if rt.Theme == nil {
 		t.Error("Theme nil")
+	}
+}
+
+// TestBootstrap_AuthStoreInjectsAPIKey verifies that with no
+// model.options.api_key in config and no env var set, a stored
+// auth.json credential is injected into the provider factory's opts.
+func TestBootstrap_AuthStoreInjectsAPIKey(t *testing.T) {
+	home := hermeticHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// Seed the auth store with an anthropic API key.
+	xdgState := filepath.Join(home, ".local", "state")
+	if err := auth.Set("anthropic",
+		auth.Credential{Type: auth.CredAPIKey, APIKey: "sk-from-store-1234"},
+		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("auth.Set: %v", err)
+	}
+
+	captured := &optsCapture{}
+	// Override the provider factory installed by hermeticHome so we
+	// capture the merged options.
+	SetTestOverrides(&bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    xdgState,
+		Pwd:             home,
+		ProviderFactory: captured.factory,
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		SkipTea:         true,
+	})
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	got := captured.snapshot()
+	if got == nil {
+		t.Fatal("factory was never called")
+	}
+	if got["api_key"] != "sk-from-store-1234" {
+		t.Errorf("opts[api_key]: got %v, want sk-from-store-1234", got["api_key"])
+	}
+}
+
+// TestBootstrap_EnvVarBeatsAuthStore verifies that when the canonical
+// env var is set, the auth store is not consulted — the adapter's own
+// env fallback gets to run.
+func TestBootstrap_EnvVarBeatsAuthStore(t *testing.T) {
+	home := hermeticHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env-9999")
+
+	xdgState := filepath.Join(home, ".local", "state")
+	if err := auth.Set("anthropic",
+		auth.Credential{Type: auth.CredAPIKey, APIKey: "sk-from-store-1234"},
+		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("auth.Set: %v", err)
+	}
+
+	captured := &optsCapture{}
+	SetTestOverrides(&bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    xdgState,
+		Pwd:             home,
+		ProviderFactory: captured.factory,
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		SkipTea:         true,
+	})
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	got := captured.snapshot()
+	if got == nil {
+		t.Fatal("factory was never called")
+	}
+	if v, ok := got["api_key"]; ok {
+		t.Errorf("opts[api_key]: got %v, want absent (env var should win and adapter handles it)", v)
+	}
+}
+
+// TestBootstrap_ConfigBeatsEnvAndStore verifies that an explicit
+// model.options.api_key in the user's config file overrides both the
+// env var and the auth store.
+func TestBootstrap_ConfigBeatsEnvAndStore(t *testing.T) {
+	home := hermeticHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env-9999")
+
+	xdgState := filepath.Join(home, ".local", "state")
+	if err := auth.Set("anthropic",
+		auth.Credential{Type: auth.CredAPIKey, APIKey: "sk-from-store-1234"},
+		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("auth.Set: %v", err)
+	}
+
+	// Write a user config with an explicit api_key.
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir cfg dir: %v", err)
+	}
+	cfgBody := `[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[model.options]
+api_key = "sk-from-config-explicit"
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	captured := &optsCapture{}
+	SetTestOverrides(&bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    xdgState,
+		Pwd:             home,
+		ProviderFactory: captured.factory,
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		SkipTea:         true,
+	})
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	got := captured.snapshot()
+	if got == nil {
+		t.Fatal("factory was never called")
+	}
+	if got["api_key"] != "sk-from-config-explicit" {
+		t.Errorf("opts[api_key]: got %v, want sk-from-config-explicit", got["api_key"])
 	}
 }
