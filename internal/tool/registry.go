@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/cfbender/hygge/internal/provider"
+	"github.com/cfbender/hygge/internal/skill"
 )
 
 // Registry holds a named set of tools and the cross-tool state they share
@@ -98,7 +99,25 @@ func (r *Registry) ReadTracker() *readTracker { //nolint:revive // exported inte
 // Default returns a Registry preloaded with the six v0.1 built-in tools:
 // read, write, edit, bash, grep, glob.  The returned registry owns its
 // own read-tracker; the built-ins are wired to use it.
+//
+// Equivalent to DefaultWith(DefaultOptions{}).
 func Default() *Registry {
+	return DefaultWith(DefaultOptions{})
+}
+
+// DefaultOptions configures DefaultWith.  Add fields here when a new
+// built-in needs caller-supplied dependencies.
+type DefaultOptions struct {
+	// SkillRegistry, when non-nil, causes the returned tool registry to
+	// include the "skill" tool wired to it.  When nil the skill tool is
+	// omitted; the model never sees it in the tool list.
+	SkillRegistry *skill.Registry
+}
+
+// DefaultWith returns a Registry preloaded with the six v0.1 built-in
+// tools, plus any optional tools enabled by opts.  Callers that need
+// the skill tool pass DefaultOptions{SkillRegistry: reg}.
+func DefaultWith(opts DefaultOptions) *Registry {
 	r := NewRegistry()
 	mustRegister(r, newReadTool(r.reads))
 	mustRegister(r, newWriteTool(r.reads))
@@ -106,6 +125,9 @@ func Default() *Registry {
 	mustRegister(r, newBashTool())
 	mustRegister(r, newGrepTool())
 	mustRegister(r, newGlobTool())
+	if opts.SkillRegistry != nil {
+		mustRegister(r, NewSkillTool(opts.SkillRegistry))
+	}
 	return r
 }
 
