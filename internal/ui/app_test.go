@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
@@ -441,6 +444,94 @@ func TestCtrlLClearsInput(t *testing.T) {
 		t.Errorf("Ctrl+L did not clear input, got %q", app.input.Value())
 	}
 }
+
+func TestEnsureSessionReturnsExisting(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.SessionID = "abc"
+	got, err := app.ensureSession(context.Background())
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
+	}
+	if got != "abc" {
+		t.Errorf("got %q, want abc", got)
+	}
+}
+
+func TestEnsureSessionLazilyCreates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	b := bus.New()
+	startSub := bus.Subscribe[bus.SessionStart](b, bus.SubscribeOptions{})
+	defer startSub.Unsubscribe()
+
+	var observed string
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "claude-sonnet-4.5",
+		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+		OnSessionCreated: func(id string) {
+			observed = id
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	id, err := app.ensureSession(ctx)
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
+	}
+	if id == "" {
+		t.Fatal("expected non-empty id")
+	}
+	if app.opts.SessionID != id {
+		t.Errorf("opts.SessionID = %q, want %q", app.opts.SessionID, id)
+	}
+	if observed != id {
+		t.Errorf("OnSessionCreated callback id = %q, want %q", observed, id)
+	}
+
+	select {
+	case ev := <-startSub.C():
+		if ev.SessionID != id {
+			t.Errorf("SessionStart id = %q, want %q", ev.SessionID, id)
+		}
+		if ev.Resumed {
+			t.Errorf("expected Resumed=false")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no SessionStart event received")
+	}
+
+	// Subsequent calls should be idempotent.
+	id2, err := app.ensureSession(ctx)
+	if err != nil {
+		t.Fatalf("ensureSession (second): %v", err)
+	}
+	if id2 != id {
+		t.Errorf("second call returned %q, want %q", id2, id)
+	}
+
+	if _, err := st.GetSession(ctx, id); err != nil {
+		t.Errorf("GetSession: %v", err)
+	}
+}
+
+// Touch session so the unused-import linter doesn't complain when the
+// only session use is via session.NewSession inside ensureSession.
+var _ = session.PartText
 
 func TestListenBusReadsAndReissues(t *testing.T) {
 	t.Parallel()
