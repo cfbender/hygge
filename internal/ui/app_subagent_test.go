@@ -25,10 +25,11 @@ func TestSubagentStarted_AddsCollapsedBlockUnderTaskMessage(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	// Simulate the parent's `task` tool call landing first.
+	// Simulate the parent's `task` tool call landing first WITH ToolUseID.
 	app.Handle(bus.ToolCallRequested{
 		SessionID: "fg-session",
 		ToolName:  "task",
+		ToolUseID: "tool_use_1",
 		Args:      []byte(`{"subagent_type":"general","description":"find LICENSE"}`),
 	})
 
@@ -420,5 +421,118 @@ func TestIsInForegroundChainEmptyParentReturnsFalse(t *testing.T) {
 	app, _ := makeForegroundApp(t)
 	if app.isInForegroundChain("") {
 		t.Errorf("empty parent id must not be considered in-chain")
+	}
+}
+
+// TestSubagentAnchor_ExactToolUseIDMatch verifies that when ToolUseID is
+// set on the task UIMessage, attachSubagentToTaskMessage uses it for
+// exact matching rather than the recency fallback.
+func TestSubagentAnchor_ExactToolUseIDMatch(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Two task tool calls for the same session with distinct ToolUseIDs.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "task",
+		ToolUseID: "tu-first",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "task",
+		ToolUseID: "tu-second",
+		Args:      []byte(`{}`),
+	})
+
+	// SubagentStarted referencing the FIRST tool use.
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-first",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "tu-first",
+		Type:            "general",
+		Description:     "first",
+		Model:           "x/y",
+		At:              time.Now().Add(-2 * time.Second),
+	})
+
+	// SubagentStarted referencing the SECOND tool use.
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-second",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "tu-second",
+		Type:            "general",
+		Description:     "second",
+		Model:           "x/y",
+		At:              time.Now().Add(-time.Second),
+	})
+
+	// Verify each UIMessage is bound to the correct subagent.
+	var firstMsg, secondMsg *uiMessage
+	for i := range app.messages {
+		msg := &app.messages[i]
+		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+			continue
+		}
+		switch msg.ToolUseID {
+		case "tu-first":
+			firstMsg = msg
+		case "tu-second":
+			secondMsg = msg
+		}
+	}
+	if firstMsg == nil {
+		t.Fatal("expected task UIMessage for tu-first")
+	}
+	if secondMsg == nil {
+		t.Fatal("expected task UIMessage for tu-second")
+	}
+	if firstMsg.SubagentID != "sub-first" {
+		t.Errorf("tu-first message bound to %q, want sub-first", firstMsg.SubagentID)
+	}
+	if secondMsg.SubagentID != "sub-second" {
+		t.Errorf("tu-second message bound to %q, want sub-second", secondMsg.SubagentID)
+	}
+}
+
+// TestSubagentAnchor_FallbackWarnsWhenToolUseIDAbsent verifies that when
+// SubagentStarted.ParentMessageID is empty (no ToolUseID), the
+// recency-heuristic fallback fires and the message is still attached.
+func TestSubagentAnchor_FallbackWarnsWhenToolUseIDAbsent(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// A task tool call WITHOUT ToolUseID (pre-ToolUseID-field scenario).
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "task",
+		ToolUseID: "", // intentionally empty — exercises fallback
+		Args:      []byte(`{}`),
+	})
+
+	// SubagentStarted also has empty ParentMessageID — forces the fallback.
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-fallback",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "", // intentionally empty
+		Type:            "general",
+		Description:     "fallback test",
+		Model:           "x/y",
+		At:              time.Now().Add(-time.Second),
+	})
+
+	// Fallback should still attach the subagent to the task message.
+	var taskMsg *uiMessage
+	for i := range app.messages {
+		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "task" {
+			taskMsg = &app.messages[i]
+			break
+		}
+	}
+	if taskMsg == nil {
+		t.Fatal("expected task UIMessage")
+	}
+	if taskMsg.SubagentID != "sub-fallback" {
+		t.Errorf("fallback did not attach subagent; SubagentID=%q, want sub-fallback", taskMsg.SubagentID)
 	}
 }

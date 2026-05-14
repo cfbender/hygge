@@ -269,6 +269,7 @@ func (a *Agent) executeToolCalls(
 		bus.Publish(a.opts.Bus, bus.ToolCallRequested{
 			SessionID: sessionID,
 			MessageID: asstMsg.ID,
+			ToolUseID: p.ToolID,
 			ToolName:  p.ToolName,
 			Args:      append([]byte(nil), p.ToolInput...),
 			At:        now(),
@@ -313,6 +314,7 @@ func (a *Agent) executeToolCalls(
 		bus.Publish(a.opts.Bus, bus.ToolCallCompleted{
 			SessionID:  sessionID,
 			MessageID:  asstMsg.ID,
+			ToolUseID:  p.ToolID,
 			ToolName:   p.ToolName,
 			Err:        errString,
 			DurationMs: durMs,
