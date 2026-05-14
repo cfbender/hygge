@@ -2078,7 +2078,13 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 		markerByBefore[mk.BeforeMessageID] = mk
 	}
 
-	// Build the flat message list.
+	// Pass 1: build a result index keyed by ToolUseID from all RoleTool rows.
+	// This handles the common persistence shape where PartToolUse lives inside
+	// an assistant message and PartToolResult lives in a separate tool message.
+	toolResults, toolUseIDs := buildToolResultIndex(storeMsgs)
+
+	// Pass 2: build the flat message list, passing the result index so that
+	// assistant messages can inline results for their PartToolUse parts.
 	var out []uiMessage
 	for _, m := range storeMsgs {
 		// Inject marker banner before this message if one targets it.
@@ -2089,7 +2095,7 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 				MarkerTokensSaved: mk.InputTokensSaved,
 			})
 		}
-		out = append(out, uiEntriesFromStoreMessage(m)...)
+		out = append(out, uiEntriesFromStoreMessage(m, toolResults, toolUseIDs)...)
 	}
 
 	// Handle markers whose BeforeMessageID no longer matches any message
@@ -2284,25 +2290,62 @@ func parseTypeDescFromSlug(slug string) (agentType, description string) {
 	return slug, ""
 }
 
+// buildToolResultIndex scans all store messages and returns:
+//   - results: PartToolResult parts keyed by ToolUseID (from any RoleTool row).
+//   - toolUseIDs: set of ToolIDs that appeared in PartToolUse parts of
+//     RoleAssistant messages.
+//
+// This supports the common persistence shape where PartToolUse lives inside
+// an assistant message and PartToolResult lives in a separate tool message.
+// If a ToolUseID appears in more than one result (should not happen in
+// practice), last-write wins and a warning is logged.
+func buildToolResultIndex(msgs []*session.Message) (results map[string]session.Part, toolUseIDs map[string]struct{}) {
+	results = make(map[string]session.Part)
+	toolUseIDs = make(map[string]struct{})
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		for _, p := range m.Parts {
+			switch p.Kind {
+			case session.PartToolResult:
+				if _, exists := results[p.ToolUseID]; exists {
+					slog.Warn("ui: buildToolResultIndex: duplicate tool_use_id; last writer wins",
+						"tool_use_id", p.ToolUseID)
+				}
+				results[p.ToolUseID] = p
+			case session.PartToolUse:
+				if m.Role == session.RoleAssistant {
+					toolUseIDs[p.ToolID] = struct{}{}
+				}
+			}
+		}
+	}
+	return results, toolUseIDs
+}
+
 // uiEntriesFromStoreMessage converts a persisted *session.Message into zero
 // or more uiMessages for the App's message buffer.  Multiple entries can be
-// returned from a single store row when the message has both thinking and text
-// parts (thinking entries precede text/tool entries within the same turn).
+// returned from a single store row when the message has thinking, text, and
+// tool-use parts (entries are emitted in part order within the turn).
+//
+// toolResults is the cross-message result index built by buildToolResultIndex.
+// toolUseIDs is the set of ToolIDs that appeared in PartToolUse parts of
+// assistant messages, also from buildToolResultIndex.
+// Both must not be nil; pass empty maps for the legacy combined-row path.
 //
 // The conversion mirrors the live-event path in handleBusEvent:
 //   - RoleUser / RoleSystem → plain text from the first PartText part.
-//   - RoleAssistant → optional RoleThinking entry from PartThinking parts
-//     (in declaration order), followed by a RoleAssistant entry from all
-//     PartText parts.  If there is no text at all but there are thinking parts,
-//     only the thinking entries are emitted.
-//   - RoleTool (PartToolUse + PartToolResult) → tool entry with name, target,
-//     and result.  Each PartToolUse is paired with its PartToolResult by ToolID.
-//
-// Tool messages in the store are stored as a single message row with one
-// PartToolUse and one PartToolResult part (the agent appends them together
-// after completion).  We emit one uiMessage per PartToolUse part, carrying
-// the matching result.
-func uiEntriesFromStoreMessage(m *session.Message) []uiMessage {
+//   - RoleAssistant → iterates parts in order:
+//   - PartThinking → RoleThinking entry.
+//   - PartText (consecutive) → single RoleAssistant entry (concatenated).
+//   - PartToolUse → RoleTool entry, result looked up from toolResults by
+//     ToolID.  Missing result → empty Raw (in-flight / interrupted).
+//   - RoleTool → if the row contains any PartToolUse, legacy combined-row
+//     path: pair each PartToolUse with its inline PartToolResult.  If the
+//     row has no PartToolUse (the common result-only shape), emit nothing —
+//     the result content was already inlined into the assistant turn above.
+func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]session.Part, toolUseIDs map[string]struct{}) []uiMessage {
 	if m == nil {
 		return nil
 	}
@@ -2316,31 +2359,83 @@ func uiEntriesFromStoreMessage(m *session.Message) []uiMessage {
 
 	case session.RoleAssistant:
 		var entries []uiMessage
-		// Emit RoleThinking entries for all PartThinking parts (in order).
+		// Accumulate consecutive PartText parts into a single assistant entry.
+		var textBuf strings.Builder
+		flushText := func() {
+			if s := textBuf.String(); s != "" {
+				entries = append(entries, uiMessage{Role: components.RoleAssistant, Raw: s})
+				textBuf.Reset()
+			}
+		}
 		for _, p := range m.Parts {
-			if p.Kind == session.PartThinking && p.Text != "" {
+			switch p.Kind {
+			case session.PartThinking:
+				if p.Text != "" {
+					flushText()
+					entries = append(entries, uiMessage{
+						Role: components.RoleThinking,
+						Raw:  p.Text,
+					})
+				}
+			case session.PartText:
+				textBuf.WriteString(p.Text)
+			case session.PartToolUse:
+				// Flush any accumulated text before emitting the tool row so
+				// the ordering (text before tool) is preserved.
+				flushText()
+				target := extractTarget(p.ToolInput)
+				raw := ""
+				isError := false
+				if res, ok := toolResults[p.ToolID]; ok {
+					raw = res.Content
+					isError = res.IsError
+				}
 				entries = append(entries, uiMessage{
-					Role: components.RoleThinking,
-					Raw:  p.Text,
+					Role:      components.RoleTool,
+					ToolName:  p.ToolName,
+					ToolUseID: p.ToolID,
+					Target:    target,
+					Raw:       raw,
+					IsError:   isError,
 				})
 			}
 		}
-		// Emit a RoleAssistant entry for all PartText parts concatenated.
-		text := allTextParts(m.Parts)
-		if text != "" {
-			entries = append(entries, uiMessage{Role: components.RoleAssistant, Raw: text})
-		}
+		flushText()
 		return entries
 
 	case session.RoleTool:
-		// Build a result index keyed by ToolUseID for O(n) pairing.
-		results := make(map[string]session.Part, len(m.Parts))
+		// Check whether this row contains any PartToolUse (legacy combined-row
+		// shape).  If so, pair each PartToolUse with its inline PartToolResult.
+		// If not (the common result-only shape produced by the current
+		// persistence model), emit nothing — results were already inlined by
+		// the assistant turn handling above.
+		hasUse := false
 		for _, p := range m.Parts {
-			if p.Kind == session.PartToolResult {
-				results[p.ToolUseID] = p
+			if p.Kind == session.PartToolUse {
+				hasUse = true
+				break
 			}
 		}
-		// Emit one uiMessage per PartToolUse.
+		if !hasUse {
+			// Result-only row: warn on truly orphaned results whose ToolUseID
+			// did not appear in any assistant message's PartToolUse part.
+			for _, p := range m.Parts {
+				if p.Kind == session.PartToolResult {
+					if _, found := toolUseIDs[p.ToolUseID]; !found {
+						slog.Warn("ui: uiEntriesFromStoreMessage: orphaned tool_result (no matching tool_use in any assistant message)",
+							"tool_use_id", p.ToolUseID)
+					}
+				}
+			}
+			return nil
+		}
+		// Legacy combined-row: pair each PartToolUse with its inline result.
+		inlineResults := make(map[string]session.Part, len(m.Parts))
+		for _, p := range m.Parts {
+			if p.Kind == session.PartToolResult {
+				inlineResults[p.ToolUseID] = p
+			}
+		}
 		var entries []uiMessage
 		for _, p := range m.Parts {
 			if p.Kind != session.PartToolUse {
@@ -2349,7 +2444,7 @@ func uiEntriesFromStoreMessage(m *session.Message) []uiMessage {
 			target := extractTarget(p.ToolInput)
 			raw := ""
 			isError := false
-			if res, ok := results[p.ToolID]; ok {
+			if res, ok := inlineResults[p.ToolID]; ok {
 				raw = res.Content
 				isError = res.IsError
 			}
@@ -2378,11 +2473,14 @@ func uiEntriesFromStoreMessage(m *session.Message) []uiMessage {
 
 // uiEntryFromStoreMessage is a compatibility shim retained for test
 // coverage of the single-entry path.  It delegates to
-// uiEntriesFromStoreMessage and returns the first entry when exactly one
-// is produced, or (zero, false) otherwise.  Tests for multi-entry paths
-// should call uiEntriesFromStoreMessage directly.
+// uiEntriesFromStoreMessage with an empty result index (covers the legacy
+// combined-row shape where both PartToolUse and PartToolResult appear in
+// the same message row) and returns the first non-thinking entry, or the
+// first entry if all are thinking, or (zero, false) when empty.
 func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
-	entries := uiEntriesFromStoreMessage(m)
+	empty := map[string]session.Part{}
+	emptyIDs := map[string]struct{}{}
+	entries := uiEntriesFromStoreMessage(m, empty, emptyIDs)
 	if len(entries) == 0 {
 		return uiMessage{}, false
 	}
@@ -2405,17 +2503,6 @@ func firstTextPart(parts []session.Part) string {
 		}
 	}
 	return ""
-}
-
-// allTextParts concatenates the Text of all PartText parts in parts.
-func allTextParts(parts []session.Part) string {
-	var sb strings.Builder
-	for _, p := range parts {
-		if p.Kind == session.PartText {
-			sb.WriteString(p.Text)
-		}
-	}
-	return sb.String()
 }
 
 // applyDeleteSession soft-deletes a session.  If it was the foreground,
