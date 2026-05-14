@@ -1,6 +1,9 @@
 package state
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // SetActiveProfile sets the active profile name and persists the change.
 func SetActiveProfile(name string, opts LoadOptions) error {
@@ -84,4 +87,50 @@ func IsConfigTrusted(absPath string, expectedSha256 string, opts LoadOptions) (b
 		return false, nil
 	}
 	return stored == expectedSha256, nil
+}
+
+// AddAllowRule appends rule to [State.AllowedRules] and persists.  If a rule
+// with the same Category and Pattern already exists, it is left in place and
+// the timestamp is not refreshed (idempotent).  The CreatedAt field is set
+// from time.Now if zero.
+func AddAllowRule(rule AllowRule, opts LoadOptions) error {
+	s, err := Load(opts)
+	if err != nil {
+		return fmt.Errorf("state: AddAllowRule: %w", err)
+	}
+	for _, existing := range s.AllowedRules {
+		if existing.Category == rule.Category && existing.Pattern == rule.Pattern {
+			return nil // already present; no-op
+		}
+	}
+	if rule.CreatedAt == 0 {
+		rule.CreatedAt = time.Now().UnixMilli()
+	}
+	s.AllowedRules = append(s.AllowedRules, rule)
+	return Save(s, opts)
+}
+
+// RemoveAllowRule removes any rules in [State.AllowedRules] whose Category and
+// Pattern match the supplied values.  Idempotent: removing a missing rule
+// returns nil.
+func RemoveAllowRule(category, pattern string, opts LoadOptions) error {
+	s, err := Load(opts)
+	if err != nil {
+		return fmt.Errorf("state: RemoveAllowRule: %w", err)
+	}
+	if len(s.AllowedRules) == 0 {
+		return nil
+	}
+	filtered := s.AllowedRules[:0:0]
+	for _, r := range s.AllowedRules {
+		if r.Category == category && r.Pattern == pattern {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	if len(filtered) == len(s.AllowedRules) {
+		return nil // nothing changed
+	}
+	s.AllowedRules = filtered
+	return Save(s, opts)
 }

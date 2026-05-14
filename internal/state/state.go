@@ -59,6 +59,26 @@ type State struct {
 	LastUsedModel  *ModelRef         `json:"last_used_model,omitempty"`
 	RecentSessions []string          `json:"recent_sessions,omitempty"`
 	TrustedConfigs map[string]string `json:"trusted_configs,omitempty"` // absolute path -> sha256 hex
+	AllowedRules   []AllowRule       `json:"allowed_rules,omitempty"`
+}
+
+// AllowRule is a persisted "always-allow" decision made by the user through a
+// permission prompt.  It is matched against incoming permission requests by
+// the permission engine.  Patterns are doublestar globs (the literal Target
+// from the original request is a valid pattern, since it matches itself).
+type AllowRule struct {
+	// Category is the permission category: "file.read", "file.write",
+	// "shell", or "network".
+	Category string `json:"category"`
+
+	// Pattern is the doublestar glob the rule applies to.  Typically this is
+	// the exact Target from the request that prompted the user, but
+	// mutators accept any valid glob.
+	Pattern string `json:"pattern"`
+
+	// CreatedAt is the unix-millisecond timestamp when the rule was
+	// recorded.
+	CreatedAt int64 `json:"created_at"`
 }
 
 // ModelRef identifies a provider and model name.
