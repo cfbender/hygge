@@ -1,0 +1,17 @@
+name = "bad-color"
+
+[colors]
+primary        = "purple"
+accent         = "5"
+muted          = "ansi:8"
+success        = "#9ECE6A"
+warn           = "#E0AF68"
+error          = "#F7768E"
+"code.fg"      = "7"
+"code.bg"      = ""
+"diff.add.bg"  = "22"
+"diff.del.bg"  = "52"
+"statusbar.fg" = "15"
+"statusbar.bg" = "8"
+"modal.bg"     = ""
+"modal.border" = "8"
