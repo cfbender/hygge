@@ -550,6 +550,7 @@ func TestRun_PublishesSubagentStartedAndCompleted(t *testing.T) {
 
 	res, err := r.Run(context.Background(), RunInput{
 		ParentSessionID: env.parentSessID,
+		ParentToolUseID: "tool_use_z",
 		Type:            "general",
 		Description:     "test",
 		Prompt:          "hi",
@@ -567,8 +568,17 @@ func TestRun_PublishesSubagentStartedAndCompleted(t *testing.T) {
 		if ev.ParentSessionID != env.parentSessID {
 			t.Fatalf("Started.ParentSessionID: got %q", ev.ParentSessionID)
 		}
+		if ev.ParentMessageID != "tool_use_z" {
+			t.Fatalf("Started.ParentMessageID: got %q want %q", ev.ParentMessageID, "tool_use_z")
+		}
 		if ev.Type != "general" {
 			t.Fatalf("Started.Type: got %q", ev.Type)
+		}
+		// Stage C: Model is populated as `<provider>/<model-id>`.
+		// The fake provider is named "fake" and ModelName is
+		// "fake-model".
+		if got, want := ev.Model, "fake/fake-model"; got != want {
+			t.Fatalf("Started.Model: got %q want %q", got, want)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for SubagentStarted")

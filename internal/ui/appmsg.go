@@ -30,3 +30,14 @@ type sendCompleted struct {
 
 // clearToastMsg fires after the modal toast's display duration elapses.
 type clearToastMsg struct{}
+
+// subagentTickMsg fires every second for an active sub-agent to drive
+// the elapsed-time counter in its rendered block.  The handler in
+// app.go re-issues the tick while the sub-agent is still running and
+// drops it once SubagentCompleted has arrived (the State.EndedAt
+// becomes non-zero).  This keeps redraws bounded to one tick per
+// active sub-agent per second instead of the whole-app spinner
+// cadence -- matches the "don't spam redraws" constraint.
+type subagentTickMsg struct {
+	SubSessionID string
+}

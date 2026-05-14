@@ -2,6 +2,7 @@ package components
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -26,13 +27,21 @@ const (
 // stops streaming.  While IsStreaming is true the View renders Raw verbatim
 // (no markdown) for snappy incremental updates.
 type UIMessage struct {
-	Role          MessageRole
-	ToolName      string // populated for RoleTool
+	Role      MessageRole
+	ToolName  string // populated for RoleTool
+	ToolUseID string // optional provider-assigned tool_use_id; lets the
+	// view correlate this message with a SubagentState
 	Target        string // optional tool target hint (path/cmd)
 	Raw           string // raw text (streaming buffer or plain content)
 	FinalMarkdown string // cached glamour output once streaming completes
 	IsStreaming   bool
 	IsError       bool // tool result error flag
+	// SubagentID is the SubSessionID of a sub-agent dispatched by this
+	// message.  When non-empty and the matching SubagentState is in
+	// MessageList.Subagents, the view renders a nested block under this
+	// message.  Set on the parent `task` tool UIMessage when
+	// bus.SubagentStarted arrives.
+	SubagentID string
 }
 
 // MessageList renders the conversation history.
@@ -40,11 +49,20 @@ type UIMessage struct {
 // Width is the terminal width; the gutter (`▌user`, etc.) is prepended to the
 // first line of each message.  Tool result blocks are collapsed to the first
 // CollapseLines lines, with a hint when the rest is hidden.
+//
+// Subagents, when populated, is a map from sub-session id to the rendering
+// state of an in-flight or completed sub-agent.  Messages whose SubagentID
+// is a key in this map get a nested SubagentBlock rendered under them.
 type MessageList struct {
 	Width         int
 	CollapseLines int // 0 → 8 (tool result collapse threshold)
 	Theme         *theme.Theme
 	Messages      []UIMessage
+	Subagents     map[string]*SubagentState
+	// Now is the wall-clock to use for elapsed-time math inside
+	// nested SubagentBlocks.  Zero means time.Now (production
+	// path); tests override it for deterministic output.
+	Now time.Time
 }
 
 // View renders all messages joined with a blank line between them.
@@ -64,7 +82,8 @@ func (m MessageList) View() string {
 	return strings.Join(parts, "\n\n")
 }
 
-// renderOne renders a single message with its gutter.
+// renderOne renders a single message with its gutter, plus any nested
+// subagent block bound to it.
 func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	gutter := m.gutter(msg)
 
@@ -80,7 +99,31 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 		body = m.collapseToolBody(body, collapseLimit)
 	}
 
-	return gutter + "\n" + body
+	rendered := gutter + "\n" + body
+
+	if nested := m.nestedFor(msg); nested != "" {
+		rendered += "\n" + nested
+	}
+	return rendered
+}
+
+// nestedFor returns the rendered nested subagent block bound to msg,
+// or "" when no block applies.
+func (m MessageList) nestedFor(msg UIMessage) string {
+	if msg.SubagentID == "" || m.Subagents == nil {
+		return ""
+	}
+	state, ok := m.Subagents[msg.SubagentID]
+	if !ok || state == nil {
+		return ""
+	}
+	block := SubagentBlock{
+		State: state,
+		Width: m.Width,
+		Theme: m.Theme,
+		Now:   m.Now,
+	}
+	return block.View()
 }
 
 // gutter renders the `▌user` / `▌assistant` / `▌tool: name (target)` header line.
