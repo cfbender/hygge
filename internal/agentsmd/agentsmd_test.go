@@ -205,14 +205,165 @@ func TestSourceString(t *testing.T) {
 	cases := map[Source]string{
 		SourceUserAgents:    "user/.agents",
 		SourceUserHygge:     "user/hygge",
+		SourceUserClaude:    "user/.claude",
 		SourceProjectAgents: "project/.agents",
 		SourceProjectRoot:   "project/root",
+		SourceProjectSubdir: "project/subdir",
 		Source(99):          "unknown(99)",
 	}
 	for src, want := range cases {
 		if got := src.String(); got != want {
 			t.Errorf("Source(%d).String() = %q, want %q", int(src), got, want)
 		}
+	}
+}
+
+// TestLoad_UserClaude verifies that ~/.claude/CLAUDE.md is picked up
+// at the user-level layer.
+func TestLoad_UserClaude(t *testing.T) {
+	home, pwd, _ := makeProject(t)
+	writeFile(t, filepath.Join(home, ".claude", "CLAUDE.md"), "user-level claude rules")
+
+	blocks, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	if blocks[0].Source != SourceUserClaude {
+		t.Errorf("Source = %v, want SourceUserClaude", blocks[0].Source)
+	}
+}
+
+// TestLoad_ProjectClaudeAndLocal verifies that <root>/CLAUDE.md and
+// <root>/CLAUDE.local.md both load as SourceProjectRoot alongside
+// AGENTS.md.
+func TestLoad_ProjectClaudeAndLocal(t *testing.T) {
+	home, pwd, root := makeProject(t)
+	writeFile(t, filepath.Join(root, "AGENTS.md"), "agents body")
+	writeFile(t, filepath.Join(root, "CLAUDE.md"), "claude body")
+	writeFile(t, filepath.Join(root, "CLAUDE.local.md"), "local override body")
+
+	blocks, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("len(blocks) = %d, want 3", len(blocks))
+	}
+	for _, b := range blocks {
+		if b.Source != SourceProjectRoot {
+			t.Errorf("block %q: Source = %v, want SourceProjectRoot", b.Path, b.Source)
+		}
+	}
+}
+
+// TestLoad_RecursiveSubdirAgents verifies that AGENTS.md files in
+// project subdirectories are picked up.
+func TestLoad_RecursiveSubdirAgents(t *testing.T) {
+	home, pwd, root := makeProject(t)
+	writeFile(t, filepath.Join(root, "internal", "skill", "AGENTS.md"), "skill subdir context")
+	writeFile(t, filepath.Join(root, "cmd", "hygge", "AGENTS.md"), "cmd subdir context")
+
+	blocks, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2; got %+v", len(blocks), blocks)
+	}
+	for _, b := range blocks {
+		if b.Source != SourceProjectSubdir {
+			t.Errorf("block %q: Source = %v, want SourceProjectSubdir", b.Path, b.Source)
+		}
+		if b.RelPath == "" {
+			t.Errorf("block %q: RelPath empty", b.Path)
+		}
+	}
+	// Order: by RelPath ascending.  "cmd/..." < "internal/..."
+	if !strings.HasPrefix(blocks[0].RelPath, "cmd") {
+		t.Errorf("blocks[0].RelPath = %q, want cmd/... first", blocks[0].RelPath)
+	}
+}
+
+// TestLoad_RecursiveSubdirClaude verifies CLAUDE.md is also picked up
+// during recursive descent.
+func TestLoad_RecursiveSubdirClaude(t *testing.T) {
+	home, pwd, root := makeProject(t)
+	writeFile(t, filepath.Join(root, "internal", "CLAUDE.md"), "claude in subdir")
+
+	blocks, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	if blocks[0].Source != SourceProjectSubdir {
+		t.Errorf("Source = %v, want SourceProjectSubdir", blocks[0].Source)
+	}
+}
+
+// TestLoad_RecursiveSkipsExcludedDirs verifies that node_modules /
+// .git / .agents / .hygge subtrees are pruned from the recursive walk.
+func TestLoad_RecursiveSkipsExcludedDirs(t *testing.T) {
+	home, pwd, root := makeProject(t)
+	writeFile(t, filepath.Join(root, "node_modules", "pkg", "AGENTS.md"), "should not load")
+	writeFile(t, filepath.Join(root, ".hygge", "skills", "x", "AGENTS.md"), "should not load")
+	writeFile(t, filepath.Join(root, "vendor", "sub", "AGENTS.md"), "should not load")
+	writeFile(t, filepath.Join(root, "internal", "AGENTS.md"), "should load")
+
+	blocks, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, b := range blocks {
+		if strings.Contains(b.Path, "node_modules") ||
+			strings.Contains(b.Path, "vendor") ||
+			strings.Contains(b.Path, ".hygge") {
+			t.Errorf("excluded path was loaded: %s", b.Path)
+		}
+	}
+	// At least the internal/AGENTS.md should appear.
+	found := false
+	for _, b := range blocks {
+		if strings.HasSuffix(b.Path, filepath.Join("internal", "AGENTS.md")) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("internal/AGENTS.md was not loaded")
+	}
+}
+
+// TestLoad_RootFilesNotDoubleLoaded verifies that AGENTS.md / CLAUDE.md
+// at the project root are loaded as SourceProjectRoot ONCE and not
+// re-added by the recursive descent.
+func TestLoad_RootFilesNotDoubleLoaded(t *testing.T) {
+	home, pwd, root := makeProject(t)
+	writeFile(t, filepath.Join(root, "AGENTS.md"), "root agents")
+	writeFile(t, filepath.Join(root, "CLAUDE.md"), "root claude")
+
+	blocks, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	rootCount := 0
+	subdirCount := 0
+	for _, b := range blocks {
+		switch b.Source {
+		case SourceProjectRoot:
+			rootCount++
+		case SourceProjectSubdir:
+			subdirCount++
+		}
+	}
+	if rootCount != 2 {
+		t.Errorf("rootCount = %d, want 2 (AGENTS.md + CLAUDE.md)", rootCount)
+	}
+	if subdirCount != 0 {
+		t.Errorf("subdirCount = %d, want 0 (no double-load)", subdirCount)
 	}
 }
 
