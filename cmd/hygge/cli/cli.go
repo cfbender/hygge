@@ -122,6 +122,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newProfileCmd(),
 		newConfigCmd(),
 		newThemeCmd(),
+		newProviderCmd(),
 	)
 
 	return root
