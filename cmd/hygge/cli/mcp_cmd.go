@@ -112,12 +112,22 @@ func newMCPPingCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			transport := mcp.NewStdio(mcp.StdioOptions{
-				Command: target.Command,
-				Args:    target.Args,
-				Env:     target.Env,
-				Dir:     target.Dir,
-			})
+			var transport mcp.Transport
+			switch target.Transport {
+			case "sse":
+				transport = mcp.NewSSE(mcp.SSEOptions{
+					ServerURL:  target.URL,
+					Headers:    target.Headers,
+					ServerName: target.Name,
+				})
+			default: // "stdio"
+				transport = mcp.NewStdio(mcp.StdioOptions{
+					Command: target.Command,
+					Args:    target.Args,
+					Env:     target.Env,
+					Dir:     target.Dir,
+				})
+			}
 			client := mcp.New(mcp.ClientOptions{
 				Transport:     transport,
 				Name:          target.Name,

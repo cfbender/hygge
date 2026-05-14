@@ -387,6 +387,42 @@ permission_category = "network"   # gate via the network category
 `$VAR` / `${VAR}` references in `command`, `args`, `env`, and `dir` are
 interpolated at load time so secrets can come from the environment.
 
+#### Configuring an SSE MCP server
+
+For hosted MCP servers that speak the SSE (Server-Sent Events) HTTP
+transport, set `transport = "sse"` and provide a `url`.  Bearer tokens
+and other credentials go in the `[servers.headers]` table; values
+support `$VAR` / `${VAR}` expansion:
+
+```toml
+[servers.linear]
+transport = "sse"
+url = "https://mcp.linear.app/sse"
+[servers.linear.headers]
+Authorization = "Bearer ${LINEAR_API_KEY}"
+
+[servers.notion]
+transport = "sse"
+url = "https://mcp.notion.so/sse"
+[servers.notion.headers]
+Authorization = "Bearer ${NOTION_TOKEN}"
+```
+
+SSE transport validation rules:
+- `transport = "sse"` requires `url`.
+- `transport = "stdio"` requires `command`.
+- Mismatched fields (e.g. `command` on an SSE server) log a warning and
+  are ignored.
+- `type` defaults to `stdio` so existing configs continue working without
+  modification.
+
+The SSE transport opens a long-lived GET connection to the server's SSE
+endpoint, waits for the `endpoint` event that names the POST URL, then
+routes each outgoing JSON-RPC request via HTTP POST to that URL.
+Server-initiated notifications arrive on the GET stream.  If the stream
+drops, the transport reconnects with exponential backoff (default:
+initial 500 ms, max 30 s, up to 5 attempts).
+
 Commands:
 
 - `hygge mcp list` — show configured servers and their boot-time
@@ -403,8 +439,8 @@ Permission gating: MCP tool calls go through the new `mcp` category
 `mcp.toml` if a particular server is better gated as `shell`,
 `network`, `file.read`, or `file.write`.
 
-Only the `stdio` transport is supported in v0.2. SSE and Streamable
-HTTP transports are deferred to v0.3.
+The `stdio` and `sse` transports are supported. Streamable HTTP (the
+2026 transport spec) is deferred to the next slice.
 
 ## Slash commands
 

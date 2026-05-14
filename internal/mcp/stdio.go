@@ -15,8 +15,8 @@ import (
 )
 
 // Transport is the wire-level interface a Client speaks to.  In v0.2
-// only the stdio implementation exists; SSE and Streamable HTTP land in
-// v0.3.
+// the stdio implementation exists; v0.3 adds the SSE transport.
+// Streamable HTTP (the 2026 spec) lands in the next slice.
 //
 // Transport implementations need not be safe for concurrent Send calls
 // from multiple goroutines — the Client serialises sends through its

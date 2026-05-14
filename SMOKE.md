@@ -333,6 +333,54 @@ These are deliberately deferred. Do not block v0.1 on them.
       the agent to use one of the advertised tools and verify the
       permission prompt fires under the `mcp` category.
 
+### SSE MCP transport smoke
+
+- [ ] **`hygge mcp list` shows transport column for SSE servers.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.git" "$tmp/.agents"
+      cat > "$tmp/.agents/mcp.toml" <<'EOF'
+      [[servers]]
+      name = "linear"
+      transport = "sse"
+      url = "https://mcp.linear.app/sse"
+      [servers.headers]
+      Authorization = "Bearer test-token"
+      EOF
+      (cd "$tmp" && ../bin/hygge mcp list)
+      ```
+      Output shows `linear` with TRANSPORT column `sse` and STATUS
+      `failed` (the token is invalid — that's expected here; transport
+      type and config parsing are the focus).
+
+- [ ] **`hygge mcp doctor` parses SSE config.**
+      Same setup as above, then:
+      ```
+      (cd "$tmp" && ../bin/hygge mcp doctor)
+      ```
+      Output shows the `.agents/mcp.toml` path with status `ok` and
+      1 server.
+
+- [ ] **SSE server live round-trip (manual; requires a real SSE MCP key).**
+      Configure a hosted SSE MCP server in `~/.config/hygge/mcp.toml`:
+      ```toml
+      [[servers]]
+      name = "linear"
+      transport = "sse"
+      url = "https://mcp.linear.app/sse"
+      [servers.headers]
+      Authorization = "Bearer ${LINEAR_API_KEY}"
+      ```
+      Set `LINEAR_API_KEY` in the environment, then:
+      ```
+      ./bin/hygge mcp ping linear
+      ./bin/hygge mcp tools linear
+      ```
+      `ping` should print `linear ready (...) — init Xms, ping Yms`.
+      `tools` should list the server's advertised tools. If a key is
+      not available, verify the unit tests in `internal/mcp/sse_test.go`
+      cover the handshake path via `httptest`.
+
 ### Reasoning models smoke
 
 - [ ] **`--reasoning` flag visible in help.**

@@ -210,6 +210,149 @@ func TestLoadConfigs_BadTransport(t *testing.T) {
 	}
 }
 
+func TestLoadConfigs_SSEBasic(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "linear"
+transport = "sse"
+url = "https://mcp.linear.app/sse"
+[servers.headers]
+Authorization = "Bearer mytoken"
+`)
+	configs, err := LoadConfigs(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(configs))
+	}
+	c := configs[0]
+	if c.Name != "linear" {
+		t.Fatalf("Name: got %q", c.Name)
+	}
+	if c.Transport != "sse" {
+		t.Fatalf("Transport: got %q", c.Transport)
+	}
+	if c.URL != "https://mcp.linear.app/sse" {
+		t.Fatalf("URL: got %q", c.URL)
+	}
+	if c.Headers["Authorization"] != "Bearer mytoken" {
+		t.Fatalf("Authorization header: got %q", c.Headers["Authorization"])
+	}
+	// Command should be empty for SSE.
+	if c.Command != "" {
+		t.Fatalf("Command should be empty for SSE, got %q", c.Command)
+	}
+}
+
+func TestLoadConfigs_SSEHeaderEnvExpansion(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "notion"
+transport = "sse"
+url = "https://mcp.notion.so/sse"
+[servers.headers]
+Authorization = "Bearer ${NOTION_TOKEN}"
+`)
+	configs, err := LoadConfigs(LoadOptions{
+		HomeDir: home,
+		Pwd:     pwd,
+		EnvLookup: func(k string) string {
+			return map[string]string{"NOTION_TOKEN": "tok-abc123"}[k]
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(configs))
+	}
+	if configs[0].Headers["Authorization"] != "Bearer tok-abc123" {
+		t.Fatalf("header env expansion failed: %q", configs[0].Headers["Authorization"])
+	}
+}
+
+func TestLoadConfigs_SSERequiresURL(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "broken"
+transport = "sse"
+`)
+	_, err := LoadConfigs(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err == nil {
+		t.Fatal("expected error when url is missing for sse transport")
+	}
+	if !strings.Contains(err.Error(), "url is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfigs_SSECommandWarnsIgnored(t *testing.T) {
+	// Providing command with type=sse should warn but succeed.
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "odd"
+transport = "sse"
+url = "https://mcp.example.com/sse"
+command = "mcp-binary"
+`)
+	configs, err := LoadConfigs(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(configs))
+	}
+	// Command is still stored (not cleared) but a warn was emitted.
+	if configs[0].Transport != "sse" {
+		t.Fatalf("Transport: got %q", configs[0].Transport)
+	}
+}
+
+func TestLoadConfigs_DefaultTransportIsStdio(t *testing.T) {
+	// Omitting transport should default to stdio.
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "legacy"
+command = "mcp-server-legacy"
+`)
+	configs, err := LoadConfigs(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(configs))
+	}
+	if configs[0].Transport != "stdio" {
+		t.Fatalf("expected default transport stdio, got %q", configs[0].Transport)
+	}
+}
+
 func TestLoadConfigs_InvalidPermissionCategoryFallsBack(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
