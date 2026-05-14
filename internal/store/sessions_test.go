@@ -68,6 +68,52 @@ func TestCreateSession_ParentRequiresForkMessage(t *testing.T) {
 	}
 }
 
+func TestCreateSession_SubagentSkipsForkMessageRequirement(t *testing.T) {
+	// Subagent sessions branch out of a tool_use, not a forked
+	// message, so the legacy "parent_id requires fork_message_id"
+	// rule is relaxed for KindSubagent.
+	s := newTestStore(t)
+	parent := mustCreateSession(t, s, "/p")
+	sub, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: "/p",
+		Model:      sampleModel(),
+		ParentID:   parent.ID,
+		Kind:       session.KindSubagent,
+	})
+	if err != nil {
+		t.Fatalf("subagent CreateSession should not require fork_message_id: %v", err)
+	}
+	if sub.Kind != session.KindSubagent {
+		t.Fatalf("Kind: got %q want %q", sub.Kind, session.KindSubagent)
+	}
+	if sub.ParentID != parent.ID {
+		t.Fatalf("ParentID: got %q want %q", sub.ParentID, parent.ID)
+	}
+	if sub.ForkMessageID != "" {
+		t.Fatalf("subagent should have empty fork_message_id, got %q", sub.ForkMessageID)
+	}
+}
+
+func TestCreateSession_RejectsUnknownKind(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: "/p",
+		Model:      sampleModel(),
+		Kind:       "bogus",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown kind")
+	}
+}
+
+func TestCreateSession_DefaultKindIsPrimary(t *testing.T) {
+	s := newTestStore(t)
+	sess := mustCreateSession(t, s, "/p")
+	if sess.Kind != session.KindPrimary {
+		t.Fatalf("default Kind: got %q want %q", sess.Kind, session.KindPrimary)
+	}
+}
+
 func TestGetSession_ReturnsZeroDeletedAt(t *testing.T) {
 	s := newTestStore(t)
 	sess := mustCreateSession(t, s, "/p")

@@ -249,6 +249,14 @@ func (a *Agent) executeToolCalls(
 	ctx context.Context, sessionID string, asstMsg *session.Message,
 ) error {
 	now := a.opts.Now
+	// modelName is recorded on the session row; the agent's runLoop
+	// already resolved it once at the top of the turn, but the loop
+	// keeps it local.  Re-resolving here so tools can read it via
+	// ExecContext keeps the agent loop's signature unchanged for now.
+	var modelName string
+	if sess, err := a.opts.Store.GetSession(ctx, sessionID); err == nil {
+		modelName = sess.Model.Name
+	}
 	for _, p := range asstMsg.Parts {
 		if p.Kind != session.PartToolUse {
 			continue
@@ -284,6 +292,7 @@ func (a *Agent) executeToolCalls(
 				Permission: a.opts.Permission,
 				ToolUseID:  p.ToolID,
 				MessageID:  asstMsg.ID,
+				ModelName:  modelName,
 				Now:        a.opts.Now,
 			}
 			result, toolErr = t.Execute(ctx, p.ToolInput, ec)

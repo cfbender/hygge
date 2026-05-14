@@ -113,6 +113,12 @@ type ExecContext struct {
 	// Forwarded to bus events.
 	MessageID string
 
+	// ModelName is the upstream model name the parent agent is using
+	// for the current turn.  Tools that delegate to a fresh agent
+	// (currently just `task`) read this so the sub-agent inherits
+	// the parent's model.  Other tools may ignore it.
+	ModelName string
+
 	// Now is an injectable time source.  Defaults to time.Now via
 	// ensureNow when zero.
 	Now func() time.Time

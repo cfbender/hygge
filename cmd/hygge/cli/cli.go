@@ -124,6 +124,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newThemeCmd(),
 		newProviderCmd(),
 		newSkillsCmd(),
+		newSubagentsCmd(),
 		newContextCmd(),
 		newMCPCmd(),
 	)

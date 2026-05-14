@@ -197,3 +197,44 @@ type ContextUsageUpdated struct {
 	// Populated by the caller; the bus does not set this field.
 	At time.Time
 }
+
+// SubagentStarted fires when the `task` tool dispatches a sub-agent.
+// Subscribers (Stage C TUI, audit log) use it to track nested
+// transcripts as they begin.
+type SubagentStarted struct {
+	// SubSessionID is the id of the freshly created sub-session.
+	SubSessionID string
+	// ParentSessionID is the dispatching (primary) session.
+	ParentSessionID string
+	// Type is the sub-agent type name (e.g. "general").
+	Type string
+	// Description is the short human-language mission label.
+	Description string
+	// At is the wall-clock time the sub-agent was dispatched.
+	At time.Time
+}
+
+// SubagentCompleted fires when a sub-agent finishes -- success,
+// iteration-limit abort, or hard failure.  Pairs 1:1 with
+// [SubagentStarted].
+type SubagentCompleted struct {
+	// SubSessionID is the id of the sub-session.
+	SubSessionID string
+	// ParentSessionID is the dispatching (primary) session.
+	ParentSessionID string
+	// Type is the sub-agent type name.
+	Type string
+	// Description is the short human-language mission label.
+	Description string
+	// DurationMs is the wall-clock elapsed time, in milliseconds.
+	DurationMs int64
+	// CostUSD is the sub-session's accumulated cost in USD.  Stage A
+	// does NOT roll this into the parent's totals; it is surfaced
+	// here so observers can show a per-sub-agent breakdown.
+	CostUSD float64
+	// HitIterLimit is true when the sub-agent loop terminated
+	// because it hit the configured iteration cap.
+	HitIterLimit bool
+	// At is the wall-clock time the sub-agent finished.
+	At time.Time
+}
