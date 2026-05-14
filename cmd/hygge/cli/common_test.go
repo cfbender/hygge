@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -305,5 +306,85 @@ api_key = "sk-from-config-explicit"
 	}
 	if got["api_key"] != "sk-from-config-explicit" {
 		t.Errorf("opts[api_key]: got %v, want sk-from-config-explicit", got["api_key"])
+	}
+}
+
+// TestBootstrap_SkillsAppearInSystemPrompt verifies that a skill file
+// dropped under .agents/skills/ is auto-discovered and surfaces in
+// the assembled system prompt.
+func TestBootstrap_SkillsAppearInSystemPrompt(t *testing.T) {
+	home := hermeticHome(t)
+
+	// Drop a skill at ~/.agents/skills/foo.md.
+	dir := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "---\nname: foo\ndescription: foo desc\nwhen_to_use: foo when\n---\nfoo body\n"
+	if err := os.WriteFile(filepath.Join(dir, "foo.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if rt.Skills == nil || rt.Skills.Len() != 1 {
+		t.Fatalf("Skills.Len() = %d, want 1", rt.Skills.Len())
+	}
+	if !strings.Contains(rt.SystemPrompt, "## Available skills") {
+		t.Errorf("SystemPrompt missing skills header:\n%s", rt.SystemPrompt)
+	}
+	if !strings.Contains(rt.SystemPrompt, "- foo:") {
+		t.Errorf("SystemPrompt missing foo entry:\n%s", rt.SystemPrompt)
+	}
+	if _, ok := rt.Tools.Get("skill"); !ok {
+		t.Error("skill tool not registered when a skill registry is present")
+	}
+}
+
+// TestBootstrap_AgentsMDAppearsInSystemPrompt verifies that an
+// AGENTS.md sitting next to .git in the project root is loaded and
+// appended to the system prompt under "## Project context".
+func TestBootstrap_AgentsMDAppearsInSystemPrompt(t *testing.T) {
+	home := hermeticHome(t)
+
+	// Build a project root with .git and an AGENTS.md sibling.
+	root := filepath.Join(home, "work", "proj")
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"),
+		[]byte("project rule: be conservative."), 0o600); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	// Repoint the test override's Pwd at the new project.
+	SetTestOverrides(&bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    filepath.Join(home, ".local", "state"),
+		Pwd:             root,
+		ProviderFactory: fakeProviderFactory,
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		SkipTea:         true,
+	})
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if len(rt.AgentsBlocks) != 1 {
+		t.Fatalf("len(AgentsBlocks) = %d, want 1", len(rt.AgentsBlocks))
+	}
+	if !strings.Contains(rt.SystemPrompt, "## Project context") {
+		t.Errorf("SystemPrompt missing project-context header:\n%s", rt.SystemPrompt)
+	}
+	if !strings.Contains(rt.SystemPrompt, "project rule: be conservative.") {
+		t.Errorf("SystemPrompt missing AGENTS.md body:\n%s", rt.SystemPrompt)
 	}
 }

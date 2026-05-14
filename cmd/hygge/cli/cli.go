@@ -123,6 +123,8 @@ manage sessions, profiles, configuration, and themes.`,
 		newConfigCmd(),
 		newThemeCmd(),
 		newProviderCmd(),
+		newSkillsCmd(),
+		newContextCmd(),
 	)
 
 	return root

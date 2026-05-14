@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cfbender/hygge/internal/agent"
+	"github.com/cfbender/hygge/internal/agentsmd"
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
@@ -31,6 +32,7 @@ import (
 	_ "github.com/cfbender/hygge/internal/provider/openai"     // self-register
 	_ "github.com/cfbender/hygge/internal/provider/openrouter" // self-register
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/skill"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/tool"
@@ -41,19 +43,22 @@ import (
 // from bootstrap.  Callers must defer Close to release the SQLite handle
 // and unblock the agent's per-session locks.
 type appRuntime struct {
-	Config     *config.Config
-	Provenance config.Provenance
-	State      *state.State
-	StateOpts  state.LoadOptions
-	Bus        *bus.Bus
-	Store      *store.Store
-	Provider   provider.Provider
-	Permission *permission.Engine
-	Tools      *tool.Registry
-	Catalog    *cost.Catalog
-	Agent      *agent.Agent
-	Theme      *theme.Theme
-	Pwd        string
+	Config       *config.Config
+	Provenance   config.Provenance
+	State        *state.State
+	StateOpts    state.LoadOptions
+	Bus          *bus.Bus
+	Store        *store.Store
+	Provider     provider.Provider
+	Permission   *permission.Engine
+	Tools        *tool.Registry
+	Catalog      *cost.Catalog
+	Agent        *agent.Agent
+	Theme        *theme.Theme
+	Skills       *skill.Registry
+	AgentsBlocks []agentsmd.Block
+	SystemPrompt string
+	Pwd          string
 }
 
 // bootstrapOptions feeds bootstrap.  Most fields are populated from
@@ -253,7 +258,6 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		return nil, fmt.Errorf("cli: build permission engine: %w", err)
 	}
 
-	tools := tool.Default()
 	catalog := cost.NewCatalog(cost.CatalogOptions{
 		Now:     opts.Now,
 		BaseURL: opts.CatalogBaseURL,
@@ -273,9 +277,42 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 
 	contextWindow := lookupContextWindow(ctx, prv, cfg.Model.Name)
 
+	// Skill registry and AGENTS.md blocks both feed into the system
+	// prompt.  Failures here are non-fatal — they degrade the prompt
+	// but should not block the CLI from starting.
+	skillReg, err := skill.Load(skill.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load skills", "err", err)
+		skillReg = &skill.Registry{}
+	}
+	agentsBlocks, err := agentsmd.Load(agentsmd.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load AGENTS.md", "err", err)
+		agentsBlocks = nil
+	}
+
+	// Build the tool registry now that the skill registry is in hand
+	// so the skill tool is registered when (and only when) skills are
+	// configured.
+	tools := tool.DefaultWith(tool.DefaultOptions{SkillRegistry: skillReg})
+
 	sysPrompt := opts.SystemPrompt
 	if sysPrompt == "" {
 		sysPrompt = defaultSystemPrompt
+	}
+	if extras := skill.BuildSystemPromptAdditions(skillReg); extras != "" {
+		sysPrompt += "\n\n" + extras
+	}
+	if extras := agentsmd.BuildSystemPromptAdditions(agentsBlocks); extras != "" {
+		sysPrompt += "\n\n" + extras
 	}
 
 	ag, err := agent.New(agent.Options{
@@ -298,19 +335,22 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	return &appRuntime{
-		Config:     cfg,
-		Provenance: prov,
-		State:      st,
-		StateOpts:  stateOpts,
-		Bus:        b,
-		Store:      stOpen,
-		Provider:   prv,
-		Permission: permEngine,
-		Tools:      tools,
-		Catalog:    catalog,
-		Agent:      ag,
-		Theme:      thm,
-		Pwd:        opts.Pwd,
+		Config:       cfg,
+		Provenance:   prov,
+		State:        st,
+		StateOpts:    stateOpts,
+		Bus:          b,
+		Store:        stOpen,
+		Provider:     prv,
+		Permission:   permEngine,
+		Tools:        tools,
+		Catalog:      catalog,
+		Agent:        ag,
+		Theme:        thm,
+		Skills:       skillReg,
+		AgentsBlocks: agentsBlocks,
+		SystemPrompt: sysPrompt,
+		Pwd:          opts.Pwd,
 	}, nil
 }
 
