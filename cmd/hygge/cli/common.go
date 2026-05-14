@@ -1022,6 +1022,38 @@ func findSessionByPrefix(ctx context.Context, rt *appRuntime, prefix string, inc
 	return "", fmt.Errorf("no session matches %q", prefix)
 }
 
+// findResumableSession returns the most recent non-deleted primary session
+// for resumption.  When projectDir is non-empty, the search is scoped to
+// that directory.  When allowAny is true, the project filter is ignored.
+// Returns ("", nil) when no eligible session exists.
+func findResumableSession(ctx context.Context, rt *appRuntime, projectDir string, allowAny bool) (string, error) {
+	opts := session.ListOpts{
+		Kind:  session.KindPrimary,
+		Limit: 1,
+	}
+	if !allowAny && projectDir != "" {
+		opts.ProjectDir = projectDir
+	}
+	sessions, err := rt.Store.ListSessions(ctx, opts)
+	if err != nil {
+		return "", fmt.Errorf("cli: list sessions: %w", err)
+	}
+	if len(sessions) == 0 {
+		return "", nil
+	}
+	return sessions[0].ID, nil
+}
+
+// lowerTrim returns s lowercased and with surrounding whitespace removed.
+func lowerTrim(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// hasLowerPrefix reports whether strings.ToLower(id) starts with lower.
+func hasLowerPrefix(id, lower string) bool {
+	return strings.HasPrefix(strings.ToLower(id), lower)
+}
+
 // buildCatalog constructs the shared [*catalog.Catalog] used by both
 // the cost lookups and every provider's model list.
 //

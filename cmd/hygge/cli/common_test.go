@@ -437,3 +437,131 @@ func TestResolveReasoning_NilConfigSafe(t *testing.T) {
 		t.Errorf("Effort=%q, want low", r.Effort)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// findResumableSession tests (T2.4)
+// ---------------------------------------------------------------------------
+
+// TestFindResumableSession_NoSessions returns "" when the store is empty.
+func TestFindResumableSession_NoSessions(t *testing.T) {
+	hermeticHome(t)
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	sid, err := findResumableSession(context.Background(), rt, rt.Pwd, false)
+	if err != nil {
+		t.Fatalf("findResumableSession: %v", err)
+	}
+	if sid != "" {
+		t.Errorf("expected empty sid, got %q", sid)
+	}
+}
+
+// TestFindResumableSession_ScopedToCwd only returns sessions whose
+// ProjectDir matches the current Pwd.
+func TestFindResumableSession_ScopedToCwd(t *testing.T) {
+	home := hermeticHome(t)
+	otherDir := t.TempDir()
+
+	// Seed a session for a DIFFERENT project directory.
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	_, err = rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: otherDir,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (other): %v", err)
+	}
+
+	// findResumableSession scoped to home (rt.Pwd) should return nothing.
+	sid, err := findResumableSession(context.Background(), rt, home, false)
+	if err != nil {
+		t.Fatalf("findResumableSession: %v", err)
+	}
+	if sid != "" {
+		t.Errorf("expected empty sid for different project dir, got %q", sid)
+	}
+}
+
+// TestFindResumableSession_ReturnsLatestForCwd returns the most recent
+// session whose ProjectDir matches the Pwd.
+func TestFindResumableSession_ReturnsLatestForCwd(t *testing.T) {
+	home := hermeticHome(t)
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// Seed two sessions for the same project dir.
+	_, err = rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession #1: %v", err)
+	}
+	sess2, err := rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession #2: %v", err)
+	}
+
+	sid, err := findResumableSession(context.Background(), rt, home, false)
+	if err != nil {
+		t.Fatalf("findResumableSession: %v", err)
+	}
+	// ListSessions returns newest-first, so the second session should be returned.
+	if sid != sess2.ID {
+		t.Errorf("expected latest session id %q, got %q", sess2.ID, sid)
+	}
+}
+
+// TestFindResumableSession_AllowAny ignores the project dir filter and
+// returns the globally most recent primary session.
+func TestFindResumableSession_AllowAny(t *testing.T) {
+	home := hermeticHome(t)
+	otherDir := t.TempDir()
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// Seed a session for home, then a newer one for otherDir.
+	_, err = rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (home): %v", err)
+	}
+	latest, err := rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: otherDir,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (other): %v", err)
+	}
+
+	// With allowAny=true, we expect the globally latest session.
+	sid, err := findResumableSession(context.Background(), rt, home, true)
+	if err != nil {
+		t.Fatalf("findResumableSession (allowAny): %v", err)
+	}
+	if sid != latest.ID {
+		t.Errorf("expected global latest %q, got %q", latest.ID, sid)
+	}
+}

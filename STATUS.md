@@ -2,6 +2,36 @@
 
 ## Shipped
 
+- **T2.4 — Smarter session resume with picker, `--continue`, `--new`.**
+
+  `hygge --continue` (or `-c`) auto-resumes the most recent session for
+  the current cwd.  `hygge resume` with no prefix in a project that has
+  multiple sessions now opens the T1.2 sessions picker instead of
+  resuming the global most-recent.  Configurable default via
+  `[session] resume_default = "new" | "continue" | "ask"`; default `"new"`
+  preserves existing behaviour.
+
+  `--any` on `hygge resume` opts back into the pre-T2.4 global scope.
+  `--new` on bare `hygge` forces fresh even when
+  `resume_default = "continue"`.
+
+  Picker reuses the sessions modal from T1.2 with an empty-list
+  "n for new session" affordance, so the first invocation in a fresh
+  project is graceful.  When `OpenSessionsModalOnStart` is true and the
+  user presses Esc with no foreground session bound, the App exits cleanly.
+
+  Bus subscriptions are gated on foreground-session presence: when the
+  picker opens before any session is selected, the bridge goroutines are
+  not started until the user picks (or the picker closes with a fresh-
+  session intent).
+
+  See `cmd/hygge/cli/run.go` (`--continue`/`-c`/`--new`),
+  `cmd/hygge/cli/resume.go` (`--any`, picker path),
+  `cmd/hygge/cli/common.go` (`findResumableSession`),
+  `internal/config/config.go` (`SessionConfig.ResumeDefault`),
+  `internal/ui/app.go` (`OpenSessionsModalOnStart`, gated bridge),
+  `internal/ui/components/sessions_modal.go` (`AllowNew`, `NewSessionAction`).
+
 - **T2.3 — Compaction UX with confirmation, threshold banner, toasts.**
   Compaction is no longer silent. `/compact` opens a confirmation modal
   showing message count, context usage %, and a destructive-action warning

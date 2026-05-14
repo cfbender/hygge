@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
@@ -553,4 +554,133 @@ func TestListenBusReadsAndReissues(t *testing.T) {
 		}
 	}
 	t.Fatal("never received event off bridge")
+}
+
+// ---------------------------------------------------------------------------
+// T2.4 — OpenSessionsModalOnStart tests
+// ---------------------------------------------------------------------------
+
+// newTestAppWithPicker builds an App that opens the sessions picker on start,
+// with an optional in-memory store for session loading.
+func newTestAppWithPicker(t *testing.T, st session.Store) (*App, *bus.Bus) {
+	t.Helper()
+	b := bus.New()
+	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
+	opts := AppOptions{
+		Bus:                      b,
+		Theme:                    theme.ShellTheme(),
+		ProjectDir:               "~/proj",
+		ModelProvider:            "anthropic",
+		ModelName:                "claude-sonnet-4-5",
+		ProfileName:              "default",
+		Now:                      now,
+		OpenSessionsModalOnStart: true,
+	}
+	if st != nil {
+		opts.Store = st
+	}
+	app, err := New(opts)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	return app, b
+}
+
+// TestOpenSessionsModalOnStart_InitOpensPicker verifies that the sessions
+// modal is active immediately after Init.
+func TestOpenSessionsModalOnStart_InitOpensPicker(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestAppWithPicker(t, nil)
+
+	// Init should schedule the modal open.
+	cmd := app.Init()
+	_ = cmd // execute init commands asynchronously; just verify state
+
+	if app.activeModal != "sessions" {
+		t.Errorf("expected activeModal=sessions after Init with OpenSessionsModalOnStart, got %q", app.activeModal)
+	}
+	if !app.sessionsModal.AllowNew {
+		t.Errorf("expected sessionsModal.AllowNew=true when opened on start")
+	}
+}
+
+// TestOpenSessionsModalOnStart_EscWithNoSessionQuitsApp verifies that
+// pressing Esc in the picker with no foreground session causes tea.Quit.
+func TestOpenSessionsModalOnStart_EscWithNoSessionQuitsApp(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestAppWithPicker(t, nil)
+	_ = app.Init()
+
+	// Simulate Esc key with no sessions loaded.
+	app.sessionsModal.Sessions = nil
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("expected a cmd from Esc (should be tea.Quit)")
+	}
+	// Execute the cmd and check for tea.QuitMsg.
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("expected tea.QuitMsg from Esc with no session, got %T", msg)
+	}
+}
+
+// TestOpenSessionsModalOnStart_NKeyWithNoSessionsStartsFresh verifies that
+// pressing 'n' with AllowNew=true and an empty list starts a fresh session.
+func TestOpenSessionsModalOnStart_NKeyWithNoSessionsStartsFresh(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestAppWithPicker(t, nil)
+	_ = app.Init()
+	app.sessionsModal.Sessions = nil
+
+	// Press 'n'.
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	// The modal should be closed.
+	if app.activeModal != "" {
+		t.Errorf("expected modal closed after 'n', got %q", app.activeModal)
+	}
+	// A cmd should have been returned (notice or batch).
+	_ = cmd
+}
+
+// TestOpenSessionsModalOnStart_SelectSessionSwitches verifies that selecting
+// a session in the picker calls applySwitchSession and sets opts.SessionID.
+func TestOpenSessionsModalOnStart_SelectSessionSwitches(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	// Seed a session.
+	sess, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	app, _ := newTestAppWithPicker(t, st)
+	_ = app.Init()
+
+	// Simulate sessions loaded.
+	app.Update(sessionsLoadedMsg{sessions: []*session.Session{sess}})
+
+	// Press Enter to select the first (only) session.
+	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// The modal should be closed and SessionID should be set.
+	if app.activeModal != "" {
+		t.Errorf("expected modal closed after selection, got %q", app.activeModal)
+	}
+	if app.opts.SessionID != sess.ID {
+		t.Errorf("expected SessionID=%q, got %q", sess.ID, app.opts.SessionID)
+	}
 }

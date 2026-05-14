@@ -64,6 +64,22 @@ type Config struct {
 	Permission PermissionConfig `mapstructure:"permission"`
 	Theme      ThemeConfig      `mapstructure:"theme"`
 	Compaction CompactionConfig `mapstructure:"compaction"`
+	Session    SessionConfig    `mapstructure:"session"`
+}
+
+// SessionConfig controls session-lifecycle behaviour.
+type SessionConfig struct {
+	// ResumeDefault controls the bare `hygge` invocation's default
+	// behaviour when no --continue or --new flag is set:
+	//
+	//   "new"      — always start a fresh session (default).
+	//   "continue" — resume the cwd's most recent session when one
+	//                exists; fall back to new when none does.
+	//   "ask"      — open the resume picker on launch.
+	//
+	// The comparison is case-insensitive.  Any other value warns and
+	// resets to "new".
+	ResumeDefault string `mapstructure:"resume_default"`
 }
 
 // CompactionConfig controls the compaction suggestion banner.
@@ -364,6 +380,21 @@ func validateConfig(cfg *Config) error {
 		slog.Warn("config: invalid compaction.threshold_pct, resetting to 80",
 			"value", cfg.Compaction.ThresholdPct)
 		cfg.Compaction.ThresholdPct = 80
+	}
+
+	// Session resume_default: accepts "new", "continue", "ask"
+	// case-insensitively.  Anything else warns and resets to "new".
+	switch strings.ToLower(strings.TrimSpace(cfg.Session.ResumeDefault)) {
+	case "", "new":
+		cfg.Session.ResumeDefault = "new"
+	case "continue":
+		cfg.Session.ResumeDefault = "continue"
+	case "ask":
+		cfg.Session.ResumeDefault = "ask"
+	default:
+		slog.Warn("config: invalid session.resume_default, resetting to new",
+			"value", cfg.Session.ResumeDefault)
+		cfg.Session.ResumeDefault = "new"
 	}
 
 	return nil

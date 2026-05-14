@@ -322,7 +322,73 @@ These are deliberately deferred. Do not block v0.1 on them.
 - History cycling on Up arrow.
 - Windows shell support in the `bash` tool.
 
-## T2.3 Compaction UX smoke
+## T2.4 Session resume UX smoke
+
+- [ ] **`hygge resume` picker opens for a project with multiple sessions.**
+      ```sh
+      tmp=$(mktemp -d)
+      git init -q "$tmp"
+      ```
+      Launch `hygge` twice from `$tmp` (each time start a session and quit)
+      so the store has at least two sessions for that project dir.  Then:
+      ```sh
+      (cd "$tmp" && ./bin/hygge resume)
+      ```
+      The sessions picker opens.  Navigate with `↑/↓`, pick one, confirm
+      the TUI opens for that session's history.
+
+- [ ] **`hygge --continue` resumes the most recent session.**
+      After the step above, run:
+      ```sh
+      (cd "$tmp" && ./bin/hygge --continue)
+      ```
+      The TUI opens directly on the most recent session for `$tmp`
+      (no picker; the prior conversation is visible).
+
+- [ ] **`hygge --new` forces a fresh session.**
+      Configure `resume_default = "continue"` in `.hygge/config.toml`
+      inside `$tmp`, then run:
+      ```sh
+      (cd "$tmp" && ./bin/hygge --new)
+      ```
+      A blank session starts.  The prior session history is NOT shown.
+
+- [ ] **`resume_default = "continue"` auto-resumes.**
+      With `resume_default = "continue"` configured:
+      ```sh
+      (cd "$tmp" && ./bin/hygge)
+      ```
+      Bare `hygge` resumes the most recent session without any picker.
+
+- [ ] **`resume_default = "ask"` opens picker on bare launch.**
+      Set `resume_default = "ask"`, then:
+      ```sh
+      (cd "$tmp" && ./bin/hygge)
+      ```
+      The sessions picker opens immediately on launch.
+
+- [ ] **Picker with no sessions shows new-session affordance.**
+      In a fresh project with zero sessions and `resume_default = "ask"`:
+      ```sh
+      tmp2=$(mktemp -d)
+      git init -q "$tmp2"
+      ```
+      Edit `$tmp2/.hygge/config.toml`:
+      ```toml
+      [session]
+      resume_default = "ask"
+      ```
+      Run `(cd "$tmp2" && ./bin/hygge)`. The picker opens with
+      `No sessions yet.  [n] new session   [esc] cancel` visible.
+      Press `n` — a blank session starts.
+
+- [ ] **`hygge resume --any` searches all projects.**
+      From a directory with no sessions, run:
+      ```sh
+      ./bin/hygge resume --any
+      ```
+      All sessions from all projects appear in the list (or the picker
+      auto-picks if there is exactly one globally).
 
 - [ ] **Threshold banner appears.** Send enough messages to push context usage
       above 80% (or lower `[compaction] threshold_pct` in `.hygge/config.toml`
