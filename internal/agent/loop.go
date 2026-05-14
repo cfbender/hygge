@@ -18,8 +18,8 @@ import (
 // runLoop drives the streaming provider/tool-execution loop until the
 // assistant returns a response with no tool_use blocks (final answer) or
 // the iteration cap is hit.  The user message has already been appended
-// by the caller (Send).
-func (a *Agent) runLoop(ctx context.Context, sessionID string) (*session.Message, error) {
+// by the caller (Send).  modelName is sourced from the session row.
+func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*session.Message, error) {
 	for iter := 1; iter <= a.opts.MaxIterations; iter++ {
 		// Honor cancellation between iterations promptly.
 		if err := ctx.Err(); err != nil {
@@ -35,11 +35,11 @@ func (a *Agent) runLoop(ctx context.Context, sessionID string) (*session.Message
 			msgs, marker,
 			a.opts.SystemPrompt,
 			a.opts.Tools.AsProviderTools(),
-			a.providerModelName(),
+			modelName,
 			nil,
 		)
 
-		asstMsg, hasTools, err := a.runOneTurn(ctx, sessionID, req)
+		asstMsg, hasTools, err := a.runOneTurn(ctx, sessionID, req, modelName)
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +89,7 @@ func (a *Agent) runLoop(ctx context.Context, sessionID string) (*session.Message
 // IS committed (text/thinking only — pending tool_use blocks are
 // discarded) and the wrapped error is returned.
 func (a *Agent) runOneTurn(
-	ctx context.Context, sessionID string, req provider.Request,
+	ctx context.Context, sessionID string, req provider.Request, modelName string,
 ) (*session.Message, bool, error) {
 	ch, err := a.opts.Provider.Stream(ctx, req)
 	if err != nil {
@@ -171,7 +171,7 @@ drain:
 		OutputTokens:     lastUsage.OutputTokens,
 		CacheReadTokens:  lastUsage.CacheReadTokens,
 		CacheWriteTokens: lastUsage.CacheWriteTokens,
-		CostUSD:          a.computeCost(ctx, lastUsage).USD,
+		CostUSD:          a.computeCost(ctx, modelName, lastUsage).USD,
 	})
 	if err != nil {
 		return nil, false, fmt.Errorf("agent: append assistant: %w", err)
@@ -182,7 +182,7 @@ drain:
 		Role:      string(session.RoleAssistant),
 		At:        a.opts.Now(),
 	})
-	a.recordUsage(ctx, sessionID, lastUsage)
+	a.recordUsage(ctx, sessionID, modelName, lastUsage)
 
 	if streamErr != nil {
 		return asstMsg, false, fmt.Errorf("agent: stream error: %w", streamErr)
@@ -316,12 +316,6 @@ func buildAssistantParts(text, thinking string, toolUses []toolCallEvent) []sess
 	return parts
 }
 
-// providerModelName returns the model name the agent uses for the
-// provider request.  For v0.1 we always pass an empty string and let
-// the provider adapter fill in its default; future versions will plumb
-// a per-session model selection through Options.
-func (a *Agent) providerModelName() string { return "" }
-
 // discardStream drains a provider stream until it closes.  Used after
 // context cancellation so the provider's goroutine can exit promptly.
 func discardStream(ch <-chan provider.Event) {
@@ -333,16 +327,17 @@ func discardStream(ch <-chan provider.Event) {
 // computes a Money for the supplied usage.  Pricing misses are absorbed
 // here and logged once per call site; the agent never fails a turn over
 // pricing.
-func (a *Agent) computeCost(ctx context.Context, u provider.Usage) cost.Money {
+func (a *Agent) computeCost(ctx context.Context, modelName string, u provider.Usage) cost.Money {
 	if u.InputTokens == 0 && u.OutputTokens == 0 &&
 		u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
 		return cost.Money{}
 	}
-	pricing, _, err := a.opts.Catalog.LookUp(ctx, a.opts.Provider.Name(), a.providerModelName())
+	pricing, _, err := a.opts.Catalog.LookUp(ctx, a.opts.Provider.Name(), modelName)
 	if err != nil {
 		if !errors.Is(err, cost.ErrModelNotPriced) {
 			slog.Warn("agent: catalog lookup failed",
 				"provider", a.opts.Provider.Name(),
+				"model", modelName,
 				"err", err,
 			)
 		}
