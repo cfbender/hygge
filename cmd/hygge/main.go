@@ -1,22 +1,14 @@
-// Package main is the entry point for the hygge CLI.
+// Package main is the hygge CLI entry point.  All wiring lives in the
+// cli subpackage; this file just dispatches and propagates the exit
+// code.
 package main
 
 import (
-	"flag"
-	"fmt"
 	"os"
+
+	"github.com/cfbender/hygge/cmd/hygge/cli"
 )
 
-const version = "0.0.0-dev"
-
 func main() {
-	versionFlag := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
-
-	if *versionFlag {
-		fmt.Printf("hygge %s\n", version)
-		os.Exit(0)
-	}
-
-	fmt.Println("not yet implemented")
+	os.Exit(cli.Execute())
 }
