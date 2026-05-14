@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -171,11 +172,20 @@ func collectWalkupSources(dir, homeDir string) ([]configSource, error) {
 // buildEnvMap reads HYGGE_* environment variables and converts them to a
 // nested map[string]any for merging.
 //
-// Mapping: HYGGE_MODEL_PROVIDER → model.provider
+// Mapping uses "__" (double underscore) as the path-segment separator.
+// Single underscores within a segment are preserved as part of the key name.
 //
-//	HYGGE_MODEL_OPTIONS_THINKING_BUDGET → model.options.thinking_budget
+//	HYGGE_model__provider=openai          → model.provider = "openai"
+//	HYGGE_permission__file_write=allow    → permission.file_write = "allow"
+//	HYGGE_model__options__thinking_budget=8000 → model.options.thinking_budget = 8000
 //
-// Segment separator is "_" between path parts; all lowercased 1:1.
+// The "HYGGE_" prefix is stripped first (single underscore separates the
+// prefix from the first path segment), then the remainder is split on "__".
+// Each segment is case-folded to lowercase for map key lookup.
+//
+// If splitting produces an empty segment (e.g. "HYGGE___foo"), the env var
+// is skipped with a slog.Warn and processing continues.
+//
 // Values are best-effort coerced: "true"/"false" → bool, integer strings →
 // int64, float strings → float64, else string.
 func buildEnvMap(opts LoadOptions) map[string]any {
@@ -200,7 +210,20 @@ func buildEnvMap(opts LoadOptions) map[string]any {
 			continue
 		}
 		rest := strings.TrimPrefix(env, prefix)
-		parts := strings.Split(strings.ToLower(rest), "_")
+		parts := strings.Split(strings.ToLower(rest), "__")
+
+		// Skip env vars that produce empty segments (e.g. HYGGE___foo).
+		valid := true
+		for _, p := range parts {
+			if p == "" {
+				slog.Warn("config: skipping malformed env var (empty segment)", "var", env)
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
 
 		val, ok := opts.EnvLookup(env)
 		if !ok {
@@ -267,7 +290,8 @@ func coerceEnvValue(s string) any {
 }
 
 // buildEnvMapFromKeys is a testable variant of buildEnvMap that works from
-// an explicit list of HYGGE_* key names.
+// an explicit list of HYGGE_* key names.  Uses "__" (double underscore) as
+// the path-segment separator; see buildEnvMap for full semantics.
 func buildEnvMapFromKeys(keys []string, lookup func(string) (string, bool)) map[string]any {
 	const prefix = "HYGGE_"
 	result := map[string]any{}
@@ -281,7 +305,20 @@ func buildEnvMapFromKeys(keys []string, lookup func(string) (string, bool)) map[
 			continue
 		}
 		rest := strings.TrimPrefix(env, prefix)
-		parts := strings.Split(strings.ToLower(rest), "_")
+		parts := strings.Split(strings.ToLower(rest), "__")
+
+		// Skip env vars that produce empty segments (e.g. HYGGE___foo).
+		valid := true
+		for _, p := range parts {
+			if p == "" {
+				slog.Warn("config: skipping malformed env var (empty segment)", "var", env)
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
 
 		cur := result
 		for i, part := range parts {

@@ -9,8 +9,15 @@
 //     Resolved recursively via the "extends" key (max depth 8, cycle-detected).
 //  4. Walk-up .hygge/config.toml starting from opts.Pwd going up to $HOME.
 //     Files closer to Pwd have higher precedence.
-//  5. Environment variables: HYGGE_MODEL_PROVIDER → model.provider.
-//     Nested keys use "_" as segment separator; values are best-effort coerced.
+//  5. Environment variables: HYGGE_model__provider → model.provider.
+//     Uses "__" (double underscore) as path-segment separator; single
+//     underscores within a segment are preserved as part of the key name.
+//     Format: HYGGE_<segment>__<segment>__<segment>=<value>
+//     Each segment is case-folded to lowercase for config key lookup.
+//     Examples:
+//     HYGGE_model__provider=openai         → model.provider
+//     HYGGE_permission__file_write=allow   → permission.file_write
+//     Values are best-effort coerced.
 //  6. CLI flags: opts.Flags (dotted-path map[string]any), merged last.
 //
 // # Unknown-keys policy

@@ -300,8 +300,8 @@ func TestLoad_EnvVarOverridesWalkup(t *testing.T) {
 shell = "allow"
 `)
 
-	// Simulate HYGGE_PERMISSION_SHELL=deny via t.Setenv (which updates os.Environ).
-	t.Setenv("HYGGE_PERMISSION_SHELL", "deny")
+	// Simulate HYGGE_permission__shell=deny via t.Setenv (which updates os.Environ).
+	t.Setenv("HYGGE_permission__shell", "deny")
 
 	opts := LoadOptions{
 		HomeDir:   tmp,
@@ -330,7 +330,7 @@ shell = "allow"
 func TestLoad_FlagOverridesEnv(t *testing.T) {
 	tmp := t.TempDir()
 
-	t.Setenv("HYGGE_PERMISSION_SHELL", "deny")
+	t.Setenv("HYGGE_permission__shell", "deny")
 
 	opts := LoadOptions{
 		HomeDir:   tmp,
