@@ -628,3 +628,326 @@ func (e *erroringProvider) CountTokens(_ context.Context, _ provider.Request) (i
 func (e *erroringProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 	return nil, nil
 }
+
+// ---------- Stage B: per-type model overrides ------------------------------
+
+// namedFakeProvider lets a test build an alternate fakeProvider that
+// reports a chosen Name(), so we can assert which provider the runner
+// actually used.
+func namedFakeProvider(name string, scripts ...fakeScript) *namedFake {
+	return &namedFake{name: name, fake: newFakeProvider(scripts...)}
+}
+
+type namedFake struct {
+	name string
+	fake *fakeProvider
+}
+
+func (n *namedFake) Name() string { return n.name }
+func (n *namedFake) Stream(ctx context.Context, req provider.Request) (<-chan provider.Event, error) {
+	return n.fake.Stream(ctx, req)
+}
+func (n *namedFake) CountTokens(ctx context.Context, req provider.Request) (int64, error) {
+	return n.fake.CountTokens(ctx, req)
+}
+func (n *namedFake) ListModels(ctx context.Context) ([]provider.Model, error) {
+	return n.fake.ListModels(ctx)
+}
+
+// loadRegistryWithModel writes a subagents.toml that pins a model
+// override on a single named type and returns the resolved registry.
+func loadRegistryWithModel(t *testing.T, typeName, modelRef string) *Registry {
+	t.Helper()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), fmt.Sprintf(`
+[subagents.%s]
+description = "pinned"
+prompt = "go"
+model = %q
+`, typeName, modelRef))
+	reg, err := Load(LoadOptions{
+		HomeDir:      home,
+		DefaultTools: []string{"read", "grep", "glob", "bash"},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return reg
+}
+
+func TestRun_ModelOverride_RoutesToResolverProvider(t *testing.T) {
+	env := newRunnerEnv(t)
+
+	// The resolver returns a *different* provider than the runner's
+	// parent provider.  The sub-session's persisted model id and
+	// provider name must reflect the override.
+	parentProv := newFakeProvider() // never used; resolver intercepts
+	altProv := namedFakeProvider("alt", scriptText("override worked"))
+
+	var resolverCalls int
+	var gotRef string
+	resolver := func(_ context.Context, ref string) (provider.Provider, string, error) {
+		resolverCalls++
+		gotRef = ref
+		_, id, err := ParseModelRef(ref)
+		if err != nil {
+			return nil, "", err
+		}
+		return altProv, id, nil
+	}
+
+	reg := loadRegistryWithModel(t, "fancy", "alt/cool-model")
+
+	r, err := NewRunner(RunnerOptions{
+		Bus:              env.bus,
+		Store:            env.store,
+		Provider:         parentProv,
+		Permission:       env.perm,
+		Catalog:          env.catalog,
+		Registry:         reg,
+		ParentTools:      env.parentTools,
+		Pwd:              env.pwd,
+		ProviderResolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+
+	res, err := r.Run(context.Background(), RunInput{
+		ParentSessionID: env.parentSessID,
+		Type:            "fancy",
+		Description:     "override",
+		Prompt:          "go",
+		ModelName:       "fake-model",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resolverCalls != 1 {
+		t.Errorf("resolver calls: got %d want 1", resolverCalls)
+	}
+	if gotRef != "alt/cool-model" {
+		t.Errorf("resolver got %q want %q", gotRef, "alt/cool-model")
+	}
+	if res.FinalText != "override worked" {
+		t.Errorf("FinalText: %q (alt provider should have produced it)", res.FinalText)
+	}
+	if parentProv.calls.Load() != 0 {
+		t.Errorf("parent provider should not have been called, got %d calls", parentProv.calls.Load())
+	}
+
+	// Persisted sub-session must use the resolved provider name and
+	// the bare model id (no provider prefix).
+	sub, err := env.store.GetSession(context.Background(), res.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sub.Model.Provider != "alt" {
+		t.Errorf("sub-session Provider: got %q want alt", sub.Model.Provider)
+	}
+	if sub.Model.Name != "cool-model" {
+		t.Errorf("sub-session Name: got %q want cool-model", sub.Model.Name)
+	}
+}
+
+func TestRun_NoModelOverride_UsesParentProvider(t *testing.T) {
+	env := newRunnerEnv(t)
+	parentProv := newFakeProvider(scriptText("parent ran"))
+
+	resolverCalls := 0
+	resolver := func(_ context.Context, _ string) (provider.Provider, string, error) {
+		resolverCalls++
+		return nil, "", fmt.Errorf("should not be called")
+	}
+
+	r, err := NewRunner(RunnerOptions{
+		Bus:              env.bus,
+		Store:            env.store,
+		Provider:         parentProv,
+		Permission:       env.perm,
+		Catalog:          env.catalog,
+		Registry:         mustLoad(t),
+		ParentTools:      env.parentTools,
+		Pwd:              env.pwd,
+		ProviderResolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+
+	res, err := r.Run(context.Background(), RunInput{
+		ParentSessionID: env.parentSessID,
+		Type:            "general", // no override
+		Description:     "x",
+		Prompt:          "go",
+		ModelName:       "fake-model",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resolverCalls != 0 {
+		t.Errorf("resolver should not be called when type has no override; got %d", resolverCalls)
+	}
+	if res.FinalText != "parent ran" {
+		t.Errorf("FinalText: %q", res.FinalText)
+	}
+	sub, _ := env.store.GetSession(context.Background(), res.SessionID)
+	if sub.Model.Provider != "fake" {
+		t.Errorf("sub-session Provider: got %q want fake", sub.Model.Provider)
+	}
+	if sub.Model.Name != "fake-model" {
+		t.Errorf("sub-session Name: got %q want fake-model", sub.Model.Name)
+	}
+}
+
+func TestRun_ResolverError_Surfaces(t *testing.T) {
+	env := newRunnerEnv(t)
+	parentProv := newFakeProvider()
+	boom := errors.New("no creds")
+	resolver := func(_ context.Context, _ string) (provider.Provider, string, error) {
+		return nil, "", boom
+	}
+
+	reg := loadRegistryWithModel(t, "fancy", "alt/cool-model")
+	r, err := NewRunner(RunnerOptions{
+		Bus:              env.bus,
+		Store:            env.store,
+		Provider:         parentProv,
+		Permission:       env.perm,
+		Catalog:          env.catalog,
+		Registry:         reg,
+		ParentTools:      env.parentTools,
+		Pwd:              env.pwd,
+		ProviderResolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	_, err = r.Run(context.Background(), RunInput{
+		ParentSessionID: env.parentSessID,
+		Type:            "fancy",
+		Description:     "x",
+		Prompt:          "go",
+		ModelName:       "fake-model",
+	})
+	if err == nil {
+		t.Fatal("expected error from resolver to bubble up")
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("error did not wrap resolver error: %v", err)
+	}
+	if parentProv.calls.Load() != 0 {
+		t.Errorf("parent provider should not have streamed when resolver failed")
+	}
+}
+
+func TestRun_MalformedStoredModel_FallsBackToParent(t *testing.T) {
+	// The registry strips malformed model strings at load time, but
+	// we exercise defence-in-depth: if some path ever produces a
+	// Registry with a malformed Model still attached, Run treats it
+	// as "use parent's" rather than aborting.
+	env := newRunnerEnv(t)
+	parentProv := newFakeProvider(scriptText("fell back to parent"))
+
+	// Build a registry by hand with a malformed Model on a type.
+	reg := &Registry{
+		byName: map[string]Type{
+			"general": builtinGeneral,
+			"hand": {
+				Name:         "hand",
+				Description:  "hand-rolled",
+				SystemPrompt: "go",
+				Source:       "test",
+				Model:        "this is not valid", // bypasses load-time validation
+			},
+		},
+		defaultTools: []string{"read"},
+	}
+	reg.types = []Type{reg.byName["general"], reg.byName["hand"]}
+
+	resolverCalls := 0
+	resolver := func(_ context.Context, _ string) (provider.Provider, string, error) {
+		resolverCalls++
+		return nil, "", fmt.Errorf("should not be called for malformed override")
+	}
+
+	r, err := NewRunner(RunnerOptions{
+		Bus:              env.bus,
+		Store:            env.store,
+		Provider:         parentProv,
+		Permission:       env.perm,
+		Catalog:          env.catalog,
+		Registry:         reg,
+		ParentTools:      env.parentTools,
+		Pwd:              env.pwd,
+		ProviderResolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	res, err := r.Run(context.Background(), RunInput{
+		ParentSessionID: env.parentSessID,
+		Type:            "hand",
+		Description:     "x",
+		Prompt:          "go",
+		ModelName:       "fake-model",
+	})
+	if err != nil {
+		t.Fatalf("Run should fall back, not fail: %v", err)
+	}
+	if resolverCalls != 0 {
+		t.Errorf("resolver should not be invoked for malformed stored override; got %d calls", resolverCalls)
+	}
+	if res.FinalText != "fell back to parent" {
+		t.Errorf("FinalText: %q", res.FinalText)
+	}
+}
+
+func TestRun_OverrideWithoutResolver_UsesParent(t *testing.T) {
+	// If a type pins a model but the CLI bootstrap did not wire a
+	// resolver, we degrade to the parent's provider rather than
+	// crashing.  Mirrors the documented behaviour in Runner.Run.
+	env := newRunnerEnv(t)
+	parentProv := newFakeProvider(scriptText("no resolver, used parent"))
+
+	reg := loadRegistryWithModel(t, "fancy", "alt/cool-model")
+	r, err := NewRunner(RunnerOptions{
+		Bus:         env.bus,
+		Store:       env.store,
+		Provider:    parentProv,
+		Permission:  env.perm,
+		Catalog:     env.catalog,
+		Registry:    reg,
+		ParentTools: env.parentTools,
+		Pwd:         env.pwd,
+		// ProviderResolver: nil (deliberate)
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	res, err := r.Run(context.Background(), RunInput{
+		ParentSessionID: env.parentSessID,
+		Type:            "fancy",
+		Description:     "x",
+		Prompt:          "go",
+		ModelName:       "fake-model",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.FinalText != "no resolver, used parent" {
+		t.Errorf("FinalText: %q", res.FinalText)
+	}
+}
+
+func mustLoad(t *testing.T) *Registry {
+	t.Helper()
+	reg, err := Load(LoadOptions{
+		HomeDir:      t.TempDir(),
+		DefaultTools: []string{"read", "grep", "glob", "bash"},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return reg
+}

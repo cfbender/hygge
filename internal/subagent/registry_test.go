@@ -204,7 +204,7 @@ prompt = "ok"
 	}
 }
 
-func TestLoad_ModelOverrideParsedButIgnored(t *testing.T) {
+func TestLoad_ModelOverrideParsedAndKept(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
 [subagents.fancy]
@@ -220,10 +220,46 @@ model = "anthropic/claude-haiku-4-5"
 	if !ok {
 		t.Fatal("fancy missing")
 	}
-	// Model is parsed and stored on the Type so Stage B can pick it
-	// up; runtime ignores it (Stage A) but the data is preserved.
 	if got.Model != "anthropic/claude-haiku-4-5" {
 		t.Fatalf("model field not parsed: %q", got.Model)
+	}
+}
+
+func TestLoad_MalformedModelOverrideDropped(t *testing.T) {
+	// The entry is still loaded -- just without the override.  The
+	// type falls back to the parent's model at runtime.
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{"no-slash", "anthropic-claude"},
+		{"empty-provider", "/claude"},
+		{"empty-model", "anthropic/"},
+		{"uppercase-provider", "Anthropic/claude"},
+		{"junk", "this is not a model"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeFile(t, filepath.Join(home, ".agents", "subagents.toml"),
+				`
+[subagents.fancy]
+description = "x"
+prompt = "x"
+model = "`+tt.model+`"
+`)
+			reg, err := Load(LoadOptions{HomeDir: home})
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			got, ok := reg.Get("fancy")
+			if !ok {
+				t.Fatal("type should still be loaded even with malformed model")
+			}
+			if got.Model != "" {
+				t.Fatalf("malformed model not stripped: %q", got.Model)
+			}
+		})
 	}
 }
 

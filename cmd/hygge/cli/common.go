@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cfbender/hygge/internal/agent"
@@ -332,7 +333,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	//
 	// The provider adapter's own resolveAPIKey chain is preserved
 	// unchanged; this code is purely about feeding it the right input.
-	modelOpts, err := resolveProviderOptions(cfg, stateOpts)
+	modelOpts, err := resolveProviderOptionsFor(cfg.Model.Provider, cfg, stateOpts)
 	if err != nil {
 		_ = stOpen.Close()
 		b.Close()
@@ -434,16 +435,17 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	subRunner, err := subagent.NewRunner(subagent.RunnerOptions{
-		Bus:           b,
-		Store:         stOpen,
-		Provider:      prv,
-		Permission:    permEngine,
-		Catalog:       catalog,
-		Registry:      subagentReg,
-		ParentTools:   tools,
-		Pwd:           opts.Pwd,
-		ContextWindow: contextWindow,
-		Now:           opts.Now,
+		Bus:              b,
+		Store:            stOpen,
+		Provider:         prv,
+		Permission:       permEngine,
+		Catalog:          catalog,
+		Registry:         subagentReg,
+		ParentTools:      tools,
+		Pwd:              opts.Pwd,
+		ContextWindow:    contextWindow,
+		ProviderResolver: buildProviderResolver(cfg, stateOpts, prv),
+		Now:              opts.Now,
 	})
 	if err != nil {
 		permEngine.Close()
@@ -601,6 +603,59 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 	return clients, configs, statuses
 }
 
+// buildProviderResolver returns a [subagent.ProviderResolver] closure
+// that constructs (or fetches a cached) provider for a "<provider>/
+// <model-id>" reference.  Behaviour:
+//
+//   - When providerName matches the parent's config, returns the
+//     parent provider unchanged — no second construction, no second
+//     credential lookup.
+//   - Otherwise, constructs the provider via [buildProviderFor],
+//     reusing the parent's cfg + stateOpts for credential resolution.
+//   - Successfully-constructed providers are cached by name so
+//     repeated invocations across many `task` calls share a single
+//     instance per provider.
+//   - Errors (unknown provider, missing credentials, invalid ref)
+//     bubble up to the caller; the Runner surfaces them as Run
+//     errors which the task tool renders as IsError results.
+//
+// The resolver is safe for concurrent use — the cache map is guarded
+// by a sync.Mutex.  Provider adapters themselves are required to be
+// concurrent-safe; this layer assumes that.
+func buildProviderResolver(cfg *config.Config, stateOpts state.LoadOptions, parent provider.Provider) subagent.ProviderResolver {
+	var mu sync.Mutex
+	cache := map[string]provider.Provider{}
+	if parent != nil && cfg != nil && cfg.Model.Provider != "" {
+		cache[cfg.Model.Provider] = parent
+	}
+	return func(_ context.Context, ref string) (provider.Provider, string, error) {
+		providerName, modelID, err := subagent.ParseModelRef(ref)
+		if err != nil {
+			return nil, "", err
+		}
+		mu.Lock()
+		cached, hit := cache[providerName]
+		mu.Unlock()
+		if hit {
+			return cached, modelID, nil
+		}
+		prv, err := buildProviderFor(providerName, cfg, stateOpts)
+		if err != nil {
+			return nil, "", err
+		}
+		mu.Lock()
+		// Double-check after racing constructors: keep whichever
+		// won the lock; the loser's provider is discarded.
+		if existing, ok := cache[providerName]; ok {
+			mu.Unlock()
+			return existing, modelID, nil
+		}
+		cache[providerName] = prv
+		mu.Unlock()
+		return prv, modelID, nil
+	}
+}
+
 // buildProvider returns the resolved Provider, preferring a caller-supplied
 // factory over the global provider registry.  modelOpts is the
 // caller-merged options map (config + injected credentials); the
@@ -624,10 +679,12 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 	return prv, nil
 }
 
-// resolveProviderOptions composes the options map passed to the
-// provider factory.  Order of precedence:
+// resolveProviderOptionsFor composes the options map passed to a
+// provider factory for the given providerName.  Order of precedence:
 //
-//  1. config model.options as-is (an explicit api_key wins).
+//  1. cfg.Model.Options as-is, but ONLY when providerName matches
+//     cfg.Model.Provider.  Options scoped to the parent's provider
+//     should not leak into an override provider with the same key.
 //  2. environment variable (deferred to the adapter — we leave
 //     opts["api_key"] absent so the adapter's own env fallback runs).
 //  3. credential store entry of type CredAPIKey (injected as
@@ -635,28 +692,30 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 //
 // CredOAuth entries are skipped with a warning — the OAuth flow is
 // scaffolded but not yet wired end-to-end.
-func resolveProviderOptions(cfg *config.Config, stateOpts state.LoadOptions) (map[string]any, error) {
-	// Start with a shallow copy of cfg.Model.Options so we never
-	// mutate the loaded config struct.
-	merged := make(map[string]any, len(cfg.Model.Options)+1)
-	for k, v := range cfg.Model.Options {
-		merged[k] = v
-	}
-
-	// 1) Explicit config override wins.
-	if v, ok := merged["api_key"]; ok {
-		if s, ok := v.(string); ok && s != "" {
-			slog.Debug("cli: api key from config", "provider", cfg.Model.Provider, "key", maskKey(s))
-			return merged, nil
+func resolveProviderOptionsFor(providerName string, cfg *config.Config, stateOpts state.LoadOptions) (map[string]any, error) {
+	merged := make(map[string]any, 1)
+	// 1) Inherit cfg.Model.Options only when this is the parent's
+	//    provider.  When a subagent override targets a different
+	//    provider, its options come solely from credentials + the
+	//    adapter's own defaults.
+	if providerName == cfg.Model.Provider {
+		for k, v := range cfg.Model.Options {
+			merged[k] = v
+		}
+		if v, ok := merged["api_key"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				slog.Debug("cli: api key from config", "provider", providerName, "key", maskKey(s))
+				return merged, nil
+			}
 		}
 	}
 
 	// 2) Environment variable: defer to the adapter.  If the canonical
 	//    env var is set we deliberately do not inject from the store,
 	//    so the env fallback chain in the adapter runs unchanged.
-	if envName := providerEnvVar(cfg.Model.Provider); envName != "" {
+	if envName := providerEnvVar(providerName); envName != "" {
 		if v, ok := os.LookupEnv(envName); ok && v != "" {
-			slog.Debug("cli: api key from env", "provider", cfg.Model.Provider, "var", envName, "key", maskKey(v))
+			slog.Debug("cli: api key from env", "provider", providerName, "var", envName, "key", maskKey(v))
 			return merged, nil
 		}
 	}
@@ -671,7 +730,7 @@ func resolveProviderOptions(cfg *config.Config, stateOpts state.LoadOptions) (ma
 	if err != nil {
 		return nil, fmt.Errorf("cli: load auth store: %w", err)
 	}
-	cred, ok := store.Get(cfg.Model.Provider)
+	cred, ok := store.Get(providerName)
 	if !ok {
 		return merged, nil
 	}
@@ -679,19 +738,46 @@ func resolveProviderOptions(cfg *config.Config, stateOpts state.LoadOptions) (ma
 	case auth.CredAPIKey:
 		if cred.APIKey == "" {
 			slog.Warn("cli: auth store entry has empty api_key; skipping",
-				"provider", cfg.Model.Provider)
+				"provider", providerName)
 			return merged, nil
 		}
 		merged["api_key"] = cred.APIKey
-		slog.Debug("cli: api key from auth store", "provider", cfg.Model.Provider, "key", maskKey(cred.APIKey))
+		slog.Debug("cli: api key from auth store", "provider", providerName, "key", maskKey(cred.APIKey))
 	case auth.CredOAuth:
 		slog.Warn("cli: auth store has OAuth credential but OAuth is not yet wired; falling back to adapter defaults",
-			"provider", cfg.Model.Provider)
+			"provider", providerName)
 	default:
 		slog.Warn("cli: auth store entry has unknown credential type; skipping",
-			"provider", cfg.Model.Provider, "type", cred.Type)
+			"provider", providerName, "type", cred.Type)
 	}
 	return merged, nil
+}
+
+// buildProviderFor constructs a provider by name.  Used by the
+// subagent ProviderResolver when a [subagent.Type] pins a provider
+// other than the parent's.  The configured cfg + stateOpts are
+// re-used for credential resolution so override providers inherit
+// the same auth-store + env-var precedence as the parent.
+//
+// Returns provider.ErrUnknownProvider (wrapped) when no factory has
+// been registered under name, or the factory's own error otherwise.
+func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.LoadOptions) (provider.Provider, error) {
+	if providerName == "" {
+		return nil, fmt.Errorf("cli: buildProviderFor: empty provider name")
+	}
+	opts, err := resolveProviderOptionsFor(providerName, cfg, stateOpts)
+	if err != nil {
+		return nil, err
+	}
+	factory, err := provider.Get(providerName)
+	if err != nil {
+		return nil, fmt.Errorf("cli: lookup provider %q: %w", providerName, err)
+	}
+	prv, err := factory(opts)
+	if err != nil {
+		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
+	}
+	return prv, nil
 }
 
 // providerEnvVar returns the canonical environment variable name a

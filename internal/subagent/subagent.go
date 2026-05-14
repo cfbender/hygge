@@ -26,14 +26,21 @@
 //   - [Runner]: the entry point that runs a single sub-agent invocation
 //     synchronously and returns the result.
 //
-// Two pieces are deliberately out of scope for Stage A:
+// # Stage B
 //
-//   - Per-type model overrides ([Type.Model] is parsed but ignored at
-//     runtime; a slog.Warn fires when a TOML entry sets it).  Stage B.
-//   - Live nested sub-transcripts in the TUI.  The TUI subscribes by
-//     session id and sub-agents run in their own sub-sessions, so the
-//     parent's UI naturally filters out the sub-agent's bus traffic.
-//     Stage C will render the nested transcript.
+// Per-type model overrides are honoured at runtime via the
+// [ProviderResolver] passed into [RunnerOptions].  When a [Type.Model]
+// is set the runner resolves the override -- typically to a different
+// provider entirely -- and runs the sub-agent against the returned
+// provider and bare model id.  Malformed overrides are stripped at
+// load time so the runtime always sees either an empty Model
+// (inherit parent's) or a well-formed "<provider>/<model-id>".
+//
+// Live nested sub-transcripts in the TUI remain out of scope.  The
+// TUI subscribes by session id and sub-agents run in their own
+// sub-sessions, so the parent's UI naturally filters out the
+// sub-agent's bus traffic.  Stage C will render the nested
+// transcript.
 //
 // # Recursion guard
 //
@@ -95,11 +102,13 @@ type Type struct {
 	// "project".
 	Source string
 
-	// Model, if non-empty, would override the parent's provider /
-	// model for this type.  RESERVED FOR STAGE B: the registry parses
-	// the value from TOML but the runtime emits a slog.Warn and falls
-	// back to the parent model.  Designing the field in now keeps
-	// Stage B a small, additive change.
+	// Model, if non-empty, overrides the parent's provider / model
+	// for this type.  Shape: "<provider>/<model-id>",
+	// e.g. "anthropic/claude-haiku-4-5".  Malformed values are
+	// stripped at TOML load time so the runtime only ever sees an
+	// empty Model (meaning "inherit parent's") or a well-formed
+	// reference.  The Runner resolves the override via the
+	// [ProviderResolver] supplied through [RunnerOptions].
 	Model string
 }
 
