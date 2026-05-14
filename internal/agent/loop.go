@@ -11,6 +11,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/tool"
@@ -240,6 +241,28 @@ drain:
 	if streamErr != nil {
 		return asstMsg, false, fmt.Errorf("agent: stream error: %w", streamErr)
 	}
+
+	// Post-message hook: always async (the registry coerces sync→async
+	// for post_message at load time).  Fire-and-forget; does not affect
+	// the return value.
+	if a.opts.Hooks != nil {
+		var asstText string
+		for _, p := range asstParts {
+			if p.Kind == session.PartText {
+				asstText += p.Text
+			}
+		}
+		hookIn := hook.Input{
+			Event:     hook.EventPostMessage,
+			SessionID: sessionID,
+			HookName:  "post_message",
+			Pwd:       a.opts.Pwd,
+			Message:   asstText,
+		}
+		_, warns := a.opts.Hooks.RunPost(ctx, hook.EventPostMessage, hookIn)
+		logHookWarns(warns)
+	}
+
 	return asstMsg, len(toolUses) > 0, nil
 }
 
@@ -258,6 +281,14 @@ func (a *Agent) executeToolCalls(
 	if sess, err := a.opts.Store.GetSession(ctx, sessionID); err == nil {
 		modelName = sess.Model.Name
 	}
+
+	pwd := a.opts.Pwd
+	if pwd == "" {
+		if wd, err := os.Getwd(); err == nil {
+			pwd = wd
+		}
+	}
+
 	for _, p := range asstMsg.Parts {
 		if p.Kind != session.PartToolUse {
 			continue
@@ -274,6 +305,61 @@ func (a *Agent) executeToolCalls(
 			Args:      append([]byte(nil), p.ToolInput...),
 			At:        now(),
 		})
+
+		// Pre-tool hook: may deny or modify tool input.
+		toolInput := p.ToolInput
+		if a.opts.Hooks != nil {
+			hookIn := hook.Input{
+				Event:     hook.EventPreTool,
+				SessionID: sessionID,
+				HookName:  "pre_tool",
+				Pwd:       pwd,
+				ToolName:  p.ToolName,
+				ToolInput: toolInput,
+			}
+			out, dec, denier, reason, warns := a.opts.Hooks.RunPre(ctx, hook.EventPreTool, hookIn)
+			logHookWarns(warns)
+			if dec == hook.DecisionDeny {
+				result := tool.Result{
+					IsError: true,
+					Content: fmt.Sprintf("hook %q denied tool call: %s", denier, reason),
+				}
+				durMs := int64(0)
+				bus.Publish(a.opts.Bus, bus.ToolCallCompleted{
+					SessionID:  sessionID,
+					MessageID:  asstMsg.ID,
+					ToolUseID:  p.ToolID,
+					ToolName:   p.ToolName,
+					Err:        result.Content,
+					DurationMs: durMs,
+					At:         now(),
+				})
+				toolMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
+					Role: session.RoleTool,
+					Parts: []session.Part{{
+						Kind:      session.PartToolResult,
+						ToolUseID: p.ToolID,
+						Content:   result.Content,
+						IsError:   true,
+					}},
+					DurationMs: durMs,
+				})
+				if err != nil {
+					return fmt.Errorf("agent: append hook-denied tool message: %w", err)
+				}
+				bus.Publish(a.opts.Bus, bus.MessageAppended{
+					SessionID: sessionID,
+					MessageID: toolMsg.ID,
+					Role:      string(session.RoleTool),
+					At:        now(),
+				})
+				continue
+			}
+			// Use the (possibly modified) tool input from the hook output.
+			if len(out.ToolInput) > 0 {
+				toolInput = out.ToolInput
+			}
+		}
 
 		t, ok := a.opts.Tools.Get(p.ToolName)
 		var (
@@ -297,7 +383,7 @@ func (a *Agent) executeToolCalls(
 				ModelName:  modelName,
 				Now:        a.opts.Now,
 			}
-			result, toolErr = t.Execute(ctx, p.ToolInput, ec)
+			result, toolErr = t.Execute(ctx, toolInput, ec)
 			if toolErr != nil {
 				result = tool.Result{
 					IsError: true,
@@ -306,6 +392,29 @@ func (a *Agent) executeToolCalls(
 			}
 		}
 		durMs := time.Since(started).Milliseconds()
+
+		// Post-tool hook: sync hooks can modify the result; async hooks
+		// run fire-and-forget.
+		if a.opts.Hooks != nil {
+			hookIn := hook.Input{
+				Event:     hook.EventPostTool,
+				SessionID: sessionID,
+				HookName:  "post_tool",
+				Pwd:       pwd,
+				ToolName:  p.ToolName,
+				ToolInput: toolInput,
+				ToolResult: &hook.ToolResult{
+					IsError: result.IsError,
+					Content: result.Content,
+				},
+			}
+			out, warns := a.opts.Hooks.RunPost(ctx, hook.EventPostTool, hookIn)
+			logHookWarns(warns)
+			if out.ToolResult != nil {
+				result.IsError = out.ToolResult.IsError
+				result.Content = out.ToolResult.Content
+			}
+		}
 
 		var errString string
 		if result.IsError {

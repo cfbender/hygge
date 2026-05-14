@@ -496,3 +496,63 @@ These are deliberately deferred. Do not block v0.1 on them.
       press Enter. The agent receives the rendered template as a
       user message and produces a normal response. `hygge commands
       list` shows `/review` with source `user`.
+
+### Hooks smoke (T1.4)
+
+- [ ] **`hygge hooks list` with no hooks configured.**
+      ```
+      HOME=$(mktemp -d) ./bin/hygge hooks list
+      ```
+      Output reads `(no hooks configured)`.
+
+- [ ] **`hygge hooks list` discovers hooks.toml.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.git" "$tmp/.agents"
+      cat > "$tmp/.agents/hooks.toml" <<'EOF'
+      [hooks.guard]
+      description = "Block dangerous commands"
+      events = ["pre_tool"]
+      command = "/usr/bin/true"
+      EOF
+      (cd "$tmp" && ../bin/hygge hooks list)
+      ```
+      Output lists `guard` with source `project`, events `pre_tool`, mode `sync`.
+
+- [ ] **`hygge hooks show` prints full detail.**
+      Same setup as above, then:
+      ```
+      (cd "$tmp" && ../bin/hygge hooks show guard)
+      ```
+      Output shows `name: guard`, `events: pre_tool`, `mode: sync`, `timeout: 5s`.
+
+- [ ] **`hygge hooks list --event post_tool` filters correctly.**
+      With both a `pre_tool` and a `post_tool` hook in `hooks.toml`,
+      running `hygge hooks list --event post_tool` shows only the
+      `post_tool` hook.
+
+- [ ] **Pre-tool hook deny blocks the tool call.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.git" "$tmp/.agents"
+      cat > "$tmp/deny-rm.sh" <<'EOF'
+      #!/bin/sh
+      input=$(cat -)
+      if echo "$input" | python3 -c "import json,sys; d=json.load(sys.stdin); cmd=d.get('tool_input',{}).get('command',''); exit(0 if 'rm -rf' in cmd else 1)" 2>/dev/null; then
+        printf '{"decision":"deny","reason":"rm -rf is blocked by policy"}'
+      fi
+      EOF
+      chmod +x "$tmp/deny-rm.sh"
+      cat > "$tmp/.agents/hooks.toml" <<EOF
+      [hooks.policy]
+      description = "Block rm -rf"
+      events = ["pre_tool"]
+      command = "$tmp/deny-rm.sh"
+      EOF
+      ```
+      With `ANTHROPIC_API_KEY` set, launch hygge in `$tmp` and ask:
+      "run bash with command 'rm -rf /tmp/test'". The hook fires and
+      the model receives an error result containing "rm -rf is blocked
+      by policy". A subsequent benign bash call (e.g. `ls /tmp`) works
+      without interference. Confirm via `hygge hooks list` that the
+      `policy` hook appears with source `project`.
