@@ -32,6 +32,7 @@ func modeToAction(m config.PermissionMode) Action {
 //  3. file.write anywhere -> permission.file_write
 //  4. shell anywhere -> permission.shell
 //  5. network anywhere -> permission.network
+//  6. mcp anywhere -> permission.mcp
 //
 // All synthesised rules carry Source = "default" so Decision.Reason can name
 // the origin.
@@ -51,6 +52,7 @@ func defaultRules(cfg *config.Config) []Rule {
 			{Category: CategoryFileWrite, Pattern: "**", Action: ActionAsk, Source: "default"},
 			{Category: CategoryShell, Pattern: "**", Action: ActionAsk, Source: "default"},
 			{Category: CategoryNetwork, Pattern: "**", Action: ActionDeny, Source: "default"},
+			{Category: CategoryMCP, Pattern: "**", Action: ActionAsk, Source: "default"},
 		}
 	}
 	p := cfg.Permission
@@ -84,6 +86,12 @@ func defaultRules(cfg *config.Config) []Rule {
 			Category: CategoryNetwork,
 			Pattern:  "**",
 			Action:   modeToAction(p.Network),
+			Source:   "default",
+		},
+		{
+			Category: CategoryMCP,
+			Pattern:  "**",
+			Action:   modeToAction(p.MCP),
 			Source:   "default",
 		},
 	}

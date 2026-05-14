@@ -54,12 +54,20 @@ import (
 // Category identifies the kind of action being gated.
 type Category string
 
-// The frozen v0.1 categories.
+// The frozen v0.1 categories plus the v0.2 mcp category.
 const (
 	CategoryFileRead  Category = "file.read"
 	CategoryFileWrite Category = "file.write"
 	CategoryShell     Category = "shell"
 	CategoryNetwork   Category = "network"
+	// CategoryMCP gates MCP tool calls.  Each MCP server's tools all
+	// belong to this category by default; users can override per
+	// server via the `permission_category` key in mcp.toml.
+	//
+	// The secrets denylist does NOT apply to CategoryMCP -- v0.2
+	// relies on the per-server permission gate to give users a
+	// granular consent decision when an MCP tool runs.
+	CategoryMCP Category = "mcp"
 )
 
 // Action is the decision outcome.
