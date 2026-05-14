@@ -1,5 +1,6 @@
 [tools]
 go = "1.26"
+golangci-lint = "2"
 
 [tasks.build]
 description = "Compile the hygge binary to ./bin/hygge"
