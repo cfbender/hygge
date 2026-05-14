@@ -87,14 +87,15 @@ func New(opts AppOptions) (*App, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
-		opts:    opts,
-		ctx:     ctx,
-		cancel:  cancel,
-		busCh:   make(chan any, 256),
-		input:   components.NewInput(opts.Theme),
-		spinner: spinner.New(),
-		width:   80,
-		height:  24,
+		opts:      opts,
+		ctx:       ctx,
+		cancel:    cancel,
+		busCh:     make(chan any, 256),
+		input:     components.NewInput(opts.Theme),
+		spinner:   spinner.New(),
+		width:     80,
+		height:    24,
+		subagents: make(map[string]*components.SubagentState),
 	}
 	a.spinner.Spinner = spinner.Dot
 	a.bridge()
@@ -142,6 +143,16 @@ type App struct {
 	// inflightCancel cancels the current Send.
 	inflightCancel context.CancelFunc
 
+	// subagents tracks every in-flight or completed sub-agent
+	// invocation whose root ancestor is opts.SessionID.  Keyed by
+	// sub-session id.  Populated on bus.SubagentStarted, updated by
+	// the sub-session's normal streaming events, finalised on
+	// bus.SubagentCompleted.  Stage A blocks recursion at the
+	// runtime layer so depth is currently at most 1 -- but
+	// isDescendant() below walks the chain so future relaxation
+	// does not break the filter.
+	subagents map[string]*components.SubagentState
+
 	// closed protects against double Close.
 	closeOnce sync.Once
 }
@@ -176,6 +187,17 @@ func (a *App) Close() error {
 // would otherwise land before any of the subscribers existed.  Each
 // goroutine exits when either the subscription channel is closed
 // (Bus.Close / Unsubscribe) or the App's context is cancelled.
+//
+// Subagent filtering strategy (approach A):
+//
+//	The App subscribes once per event type globally and filters per
+//	delivery against the active set of foreground + descendant
+//	session ids.  This is simpler than spawning per-sub-session
+//	subscribers on the fly (approach B in the design doc) and the
+//	per-message branch is O(1) for the depth bound we currently
+//	enforce in the runtime (≤1 level).  isDescendant walks the
+//	chain so the filter still works if recursion is ever
+//	relaxed.
 func (a *App) bridge() {
 	// Subscribe synchronously so that any Publish issued after New()
 	// returns is guaranteed to find a live subscriber.
@@ -188,6 +210,8 @@ func (a *App) bridge() {
 	subCtx := bus.Subscribe[bus.ContextUsageUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 64})
 	subPerm := bus.Subscribe[bus.PermissionAsked](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subIter := bus.Subscribe[bus.IterationLimitReached](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
+	subSubStart := bus.Subscribe[bus.SubagentStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
+	subSubDone := bus.Subscribe[bus.SubagentCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 
 	stop := a.ctx.Done()
 
@@ -204,6 +228,8 @@ func (a *App) bridge() {
 	go forward(subCtx.C(), a.busCh, stop, subCtx.Unsubscribe)
 	go forward(subPerm.C(), a.busCh, stop, subPerm.Unsubscribe)
 	go forward(subIter.C(), a.busCh, stop, subIter.Unsubscribe)
+	go forward(subSubStart.C(), a.busCh, stop, subSubStart.Unsubscribe)
+	go forward(subSubDone.C(), a.busCh, stop, subSubDone.Unsubscribe)
 }
 
 // forward pumps a single typed subscription channel into the shared any
@@ -276,9 +302,11 @@ func (a *App) View() string {
 	}.View()
 
 	ml := components.MessageList{
-		Width:    width,
-		Theme:    a.opts.Theme,
-		Messages: a.messages,
+		Width:     width,
+		Theme:     a.opts.Theme,
+		Messages:  a.messages,
+		Subagents: a.subagents,
+		Now:       a.opts.Now(),
 	}.View()
 
 	in := a.input.View()
@@ -340,6 +368,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.spinnerTick++
 		return a, cmd
 
+	case subagentTickMsg:
+		// Re-issue the tick if the sub-agent is still running;
+		// otherwise drop it.  No view-state change is needed -- the
+		// next View() reads opts.Now() to recompute the elapsed
+		// label.
+		if st, ok := a.subagents[m.SubSessionID]; ok && st.IsRunning() {
+			return a, a.subagentTick(m.SubSessionID)
+		}
+		return a, nil
+
 	case clearToastMsg:
 		a.modalToast = ""
 		return a, nil
@@ -394,6 +432,13 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 	case tea.KeyCtrlL:
 		a.input.Reset()
+		return a, nil
+	case tea.KeyCtrlT:
+		// Toggle the most recent sub-agent block.  Chosen over
+		// `tab` (would conflict with textarea tab-insertion) and
+		// over a bare letter key (would conflict with input mode).
+		// `ctrl+t` is otherwise unbound by the textarea bubble.
+		a.toggleLatestSubagent()
 		return a, nil
 	case tea.KeyEnter:
 		// Alt+Enter inserts a newline; we differentiate by Alt flag below.
@@ -541,19 +586,53 @@ func (a *App) ensureSession(ctx context.Context) (string, error) {
 }
 
 // handleBusEvent applies one event to the App state.
+//
+// Stage C routing: events tagged with a known descendant sub-session id
+// flow into the matching SubagentState; events tagged with the
+// foreground session id flow into the primary path; everything else
+// is dropped.  Events with no SessionID (e.g. IterationLimitReached
+// when the limit was hit by a sub-agent) are always routed to the
+// primary path on the assumption they describe the active focus.
 func (a *App) handleBusEvent(ev any) tea.Cmd {
 	switch e := ev.(type) {
 
+	case bus.SubagentStarted:
+		return a.onSubagentStarted(e)
+
+	case bus.SubagentCompleted:
+		return a.onSubagentCompleted(e)
+
 	case bus.AssistantTextDelta:
+		if a.routeToSubagent(e.SessionID) {
+			a.appendSubagentDelta(e.SessionID, e.Text)
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		a.appendAssistantDelta(e.Text)
 
 	case bus.AssistantThinkingDelta:
 		// v0.1: ignore.  Could be rendered as a faint sidebar in v0.2.
 
 	case bus.MessageAppended:
+		if a.routeToSubagent(e.SessionID) {
+			a.flushSubagentStream(e.SessionID, e.Role)
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		a.flushAssistantStream(e.Role)
 
 	case bus.ToolCallRequested:
+		if a.routeToSubagent(e.SessionID) {
+			a.appendSubagentTool(e.SessionID, e.ToolName, extractTarget(e.Args))
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		target := extractTarget(e.Args)
 		a.messages = append(a.messages, uiMessage{
 			Role:        components.RoleTool,
@@ -564,17 +643,41 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		})
 
 	case bus.ToolCallCompleted:
+		if a.routeToSubagent(e.SessionID) {
+			a.finishSubagentTool(e.SessionID, e)
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		a.updateLastTool(e)
 
 	case bus.CostUpdated:
+		if a.routeToSubagent(e.SessionID) {
+			a.updateSubagentCost(e.SessionID, e)
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		a.costDollars = e.DollarsTotal
 
 	case bus.ContextUsageUpdated:
+		// Context usage is a parent-level concern.  Sub-agents have
+		// their own context windows that are not surfaced in the
+		// primary footer.
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		a.usedTok = e.UsedTokens
 		a.maxTok = e.MaxTokens
 		a.pctUsed = e.PctUsed
 
 	case bus.PermissionAsked:
+		// Permission asks always pop the modal regardless of which
+		// session originated them -- they block tool execution and
+		// the user needs to decide either way.  The modal does not
+		// (yet) badge which session asked; that's a v0.3 polish.
 		a.pendingPerms = append(a.pendingPerms, components.PermissionRequest{
 			RequestID: e.RequestID,
 			ToolName:  e.ToolName,
@@ -583,12 +686,314 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		})
 
 	case bus.IterationLimitReached:
+		// Route iter-limit notices to a sub-agent when the session
+		// matches; otherwise it's a parent-loop event.  The matching
+		// SubagentCompleted will arrive right after with
+		// HitIterLimit=true, so this is mainly a UX nicety in case
+		// the order ever inverts.
+		if a.routeToSubagent(e.SessionID) {
+			if st := a.subagents[e.SessionID]; st != nil {
+				st.HitIterLimit = true
+			}
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
 		a.messages = append(a.messages, uiMessage{
 			Role: components.RoleSystem,
 			Raw:  fmt.Sprintf("iteration limit reached (%d)", e.Limit),
 		})
 	}
 	return nil
+}
+
+// foregroundID returns the current foreground session id, or "" if no
+// session has been bound yet.
+func (a *App) foregroundID() string {
+	return a.opts.SessionID
+}
+
+// isForeground reports whether sessionID is the App's active foreground
+// session.  An empty foreground id matches anything: this preserves the
+// pre-Stage-C behaviour where the App accepted all events because the
+// session was lazily created on first user input.
+func (a *App) isForeground(sessionID string) bool {
+	fg := a.foregroundID()
+	if fg == "" {
+		return true
+	}
+	return sessionID == fg
+}
+
+// routeToSubagent reports whether sessionID matches a tracked
+// sub-agent state.  Walks via the SubagentState chain so future
+// multi-level recursion remains supported even though the runtime
+// currently blocks it at depth 1.
+func (a *App) routeToSubagent(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	_, ok := a.subagents[sessionID]
+	return ok
+}
+
+// onSubagentStarted reacts to bus.SubagentStarted.  Filtering: only
+// track sub-agents whose parent chain roots at the foreground session.
+// The state is bound to the most-recent unfinished `task` tool message
+// (preferring an exact ToolUseID match, falling back to the most
+// recent streaming task entry) so the message list can render the
+// nested block in the right place.
+func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
+	if !a.isInForegroundChain(e.ParentSessionID) {
+		return nil
+	}
+	state := &components.SubagentState{
+		SubSessionID:    e.SubSessionID,
+		ParentSessionID: e.ParentSessionID,
+		ParentMessageID: e.ParentMessageID,
+		Type:            e.Type,
+		Description:     e.Description,
+		Model:           e.Model,
+		StartedAt:       e.At,
+	}
+	a.subagents[e.SubSessionID] = state
+
+	a.attachSubagentToTaskMessage(state)
+
+	// Drive the elapsed-time tick while running.  Coalesces with
+	// the spinner Tick that's already in flight; bubbletea handles
+	// multiple Tick'ers fine.
+	return a.subagentTick(e.SubSessionID)
+}
+
+// attachSubagentToTaskMessage walks the message buffer for the
+// matching `task` tool message and stamps SubagentID on it.  Tries an
+// exact ToolUseID match first; falls back to the most recent
+// streaming task message.  Doing nothing when no candidate exists
+// (the block then renders only once a future task message claims it,
+// which is fine -- the nested view is bound to the message, not the
+// state).
+func (a *App) attachSubagentToTaskMessage(state *components.SubagentState) {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		msg := &a.messages[i]
+		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+			continue
+		}
+		if state.ParentMessageID != "" && msg.ToolUseID != "" &&
+			msg.ToolUseID != state.ParentMessageID {
+			continue
+		}
+		if msg.SubagentID != "" && msg.SubagentID != state.SubSessionID {
+			continue
+		}
+		msg.SubagentID = state.SubSessionID
+		return
+	}
+}
+
+// onSubagentCompleted reacts to bus.SubagentCompleted.  Marks EndedAt,
+// freezes the running cost/usage with the event's authoritative
+// totals, and surfaces HitIterLimit on the state so the header
+// switches to the failed style.
+func (a *App) onSubagentCompleted(e bus.SubagentCompleted) tea.Cmd {
+	state, ok := a.subagents[e.SubSessionID]
+	if !ok {
+		return nil
+	}
+	end := e.At
+	if end.IsZero() {
+		end = a.opts.Now()
+	}
+	state.EndedAt = end
+	state.HitIterLimit = e.HitIterLimit
+	// CostUSD is the final authoritative cost.  Override the
+	// running counter even if it drifted (the design doc calls
+	// this out explicitly).
+	state.Cost = e.CostUSD
+	return nil
+}
+
+// isInForegroundChain reports whether parentSessionID is the foreground
+// session or any descendant of it.  Used to filter incoming
+// SubagentStarted events so a sub-agent dispatched by a non-foreground
+// session does not leak into the current view.
+func (a *App) isInForegroundChain(parentSessionID string) bool {
+	if parentSessionID == "" {
+		return false
+	}
+	fg := a.foregroundID()
+	if fg == "" {
+		// No foreground bound yet -- accept the dispatcher's
+		// session as the implicit root.  This preserves
+		// pre-Stage-C "no filtering" behaviour for the empty-id
+		// edge case.
+		return true
+	}
+	if parentSessionID == fg {
+		return true
+	}
+	// Walk known sub-agents.  Bounded by the size of the map; the
+	// runtime currently caps recursion at depth 1.
+	cur := parentSessionID
+	for i := 0; i < len(a.subagents)+1; i++ {
+		st, ok := a.subagents[cur]
+		if !ok {
+			return false
+		}
+		if st.ParentSessionID == fg {
+			return true
+		}
+		cur = st.ParentSessionID
+	}
+	return false
+}
+
+// subagentTick returns a tea.Cmd that fires a subagentTickMsg one
+// second from now if the named sub-agent is still running.  Update
+// re-issues the tick on every fire until the sub-agent completes.
+// The single global spinner Tick already drives spinner frames, but
+// the spinner tick is locked to the spinner.Model's own cadence;
+// dedicating a sub-agent tick lets the elapsed-time counter update
+// independently and stop when the sub-agent finishes.
+func (a *App) subagentTick(subSessionID string) tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return subagentTickMsg{SubSessionID: subSessionID}
+	})
+}
+
+// appendSubagentDelta streams text into the matching sub-agent's
+// transcript.  Mirrors appendAssistantDelta but scoped to a
+// SubagentState.
+func (a *App) appendSubagentDelta(subSessionID, text string) {
+	st, ok := a.subagents[subSessionID]
+	if !ok {
+		return
+	}
+	if n := len(st.Messages); n > 0 {
+		last := &st.Messages[n-1]
+		if last.Role == components.RoleAssistant && last.IsStreaming {
+			last.Raw += text
+			return
+		}
+	}
+	st.Messages = append(st.Messages, uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         text,
+		IsStreaming: true,
+	})
+}
+
+// flushSubagentStream marks the matching sub-agent's most recent
+// assistant message as final.  Mirrors flushAssistantStream; no
+// markdown rendering -- the nested view is plain text by design.
+func (a *App) flushSubagentStream(subSessionID, role string) {
+	if role != "assistant" {
+		return
+	}
+	st, ok := a.subagents[subSessionID]
+	if !ok {
+		return
+	}
+	n := len(st.Messages)
+	if n == 0 {
+		return
+	}
+	last := &st.Messages[n-1]
+	if last.Role != components.RoleAssistant {
+		return
+	}
+	last.IsStreaming = false
+}
+
+// appendSubagentTool appends a streaming tool entry to the matching
+// sub-agent's transcript.
+func (a *App) appendSubagentTool(subSessionID, toolName, target string) {
+	st, ok := a.subagents[subSessionID]
+	if !ok {
+		return
+	}
+	st.Messages = append(st.Messages, uiMessage{
+		Role:        components.RoleTool,
+		ToolName:    toolName,
+		Target:      target,
+		Raw:         "(running…)",
+		IsStreaming: true,
+	})
+}
+
+// finishSubagentTool finalises the most recent streaming tool entry
+// for a sub-agent, mirroring updateLastTool but scoped.
+func (a *App) finishSubagentTool(subSessionID string, e bus.ToolCallCompleted) {
+	st, ok := a.subagents[subSessionID]
+	if !ok {
+		return
+	}
+	for i := len(st.Messages) - 1; i >= 0; i-- {
+		msg := &st.Messages[i]
+		if msg.Role != components.RoleTool || !msg.IsStreaming {
+			continue
+		}
+		if msg.ToolName != e.ToolName {
+			continue
+		}
+		msg.IsStreaming = false
+		if e.Err != "" {
+			msg.IsError = true
+			msg.Raw = e.Err
+		} else {
+			msg.Raw = string(e.Result)
+		}
+		return
+	}
+	out := string(e.Result)
+	if e.Err != "" {
+		out = e.Err
+	}
+	st.Messages = append(st.Messages, uiMessage{
+		Role:     components.RoleTool,
+		ToolName: e.ToolName,
+		Raw:      out,
+		IsError:  e.Err != "",
+	})
+}
+
+// updateSubagentCost updates a sub-agent's running cost & token totals
+// from a bus.CostUpdated event.
+func (a *App) updateSubagentCost(subSessionID string, e bus.CostUpdated) {
+	st, ok := a.subagents[subSessionID]
+	if !ok {
+		return
+	}
+	st.Cost = e.DollarsTotal
+	st.InputTokens = e.InputTokens
+	st.OutputTokens = e.OutputTokens
+}
+
+// toggleLatestSubagent flips the Expanded flag on the most recently
+// started sub-agent block (running or completed).  No-op when no
+// sub-agent has been tracked yet.  Chosen as the simplest UX
+// consistent with the existing scroll-and-render TUI: a single
+// keybind toggles the obviously-latest block.  When cursor-based
+// navigation lands (v0.3), this should be replaced by a per-block
+// toggle keyed off the cursor selection.
+func (a *App) toggleLatestSubagent() {
+	if len(a.subagents) == 0 {
+		return
+	}
+	var latest *components.SubagentState
+	for _, st := range a.subagents {
+		if st == nil {
+			continue
+		}
+		if latest == nil || st.StartedAt.After(latest.StartedAt) {
+			latest = st
+		}
+	}
+	if latest == nil {
+		return
+	}
+	latest.Expanded = !latest.Expanded
 }
 
 // appendAssistantDelta appends text to the streaming assistant message, or

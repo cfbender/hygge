@@ -206,10 +206,24 @@ type SubagentStarted struct {
 	SubSessionID string
 	// ParentSessionID is the dispatching (primary) session.
 	ParentSessionID string
+	// ParentMessageID is the parent's `task` tool_use_id -- the
+	// stable provider-assigned identifier of the tool call that
+	// spawned this sub-agent.  Stage C uses it to anchor the
+	// rendered nested transcript under the right tool message.
+	// May be empty if the dispatcher did not supply one.
+	ParentMessageID string
 	// Type is the sub-agent type name (e.g. "general").
 	Type string
 	// Description is the short human-language mission label.
 	Description string
+	// Model is the resolved provider+model identifier the sub-agent
+	// is running under, in `<provider>/<model-id>` form (e.g.
+	// `anthropic/claude-haiku-4-5`).  The slash-separated form is
+	// chosen over the bare model id so the TUI's nested-block
+	// header makes the provider explicit when a per-type override
+	// pins something other than the parent's provider.  May be
+	// empty if the runner could not assemble the pair.
+	Model string
 	// At is the wall-clock time the sub-agent was dispatched.
 	At time.Time
 }

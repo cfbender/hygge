@@ -85,11 +85,26 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       Output lists both `general` (builtin) and `searcher` (source
       `project`).
 
-- [ ] **`task` tool dispatches a sub-agent and persists a sub-session.**
+- [ ] **`task` tool dispatches a sub-agent and persists a sub-session
+      with a live nested TUI block.**
       With `ANTHROPIC_API_KEY` set, launch hygge in a sample repo and
       ask: "use the task tool with subagent_type=general, description
       'find LICENSE', prompt 'find any file named LICENSE in this
-      repo'". After it returns:
+      repo'". While the sub-agent is working, watch the TUI:
+      - A new collapsed block appears under the `task` tool call line,
+        with header `▸ task[general] · anthropic/<model> · running ·
+        <elapsed> · <tokens> · $<cost>` and the description quoted on
+        the next line.
+      - Press `Ctrl+T` to expand the most recent block. Streamed
+        assistant text, tool calls (e.g. `grep`, `read`), and tool
+        results appear with a `│` gutter as the sub-agent works.
+      - Press `Ctrl+T` again to collapse.
+      - When the sub-agent finishes, the chevron flips to `▾` (or stays
+        `▸` if collapsed), the state changes to `done`, and the cost /
+        token totals freeze at the final values reported by the
+        `SubagentCompleted` event.
+
+      After the run returns:
       ```
       ./bin/hygge sessions list
       ```

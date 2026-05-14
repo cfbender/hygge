@@ -325,8 +325,10 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 	bus.Publish(r.bus, bus.SubagentStarted{
 		SubSessionID:    sub.ID,
 		ParentSessionID: in.ParentSessionID,
+		ParentMessageID: in.ParentToolUseID,
 		Type:            t.Name,
 		Description:     in.Description,
+		Model:           runProvider.Name() + "/" + runModelName,
 		At:              startedAt,
 	})
 

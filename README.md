@@ -208,6 +208,33 @@ Use `hygge subagents list` to see the registered types and `hygge
 subagents show <name>` to inspect a single type's system prompt and
 tool allowlist.
 
+#### TUI experience
+
+When you invoke the `task` tool from inside the TUI, the sub-agent's
+live transcript appears as a nested collapsible block underneath the
+`task` tool call line in the message list.
+
+- **Collapsed by default.** The header reads
+  `▸ task[<type>] · <provider>/<model> · <state> · <elapsed> · <tokens> · $<cost>`
+  followed by the description quote. The model label always shows the
+  resolved provider+model — handy when a per-type override pins
+  something different from the parent's model.
+- **Toggle with `Ctrl+T`.** Expands or collapses the most recently
+  started sub-agent block. Hygge does not yet have cursor-based
+  message navigation; when it lands (v0.3), `Ctrl+T` will become a
+  per-block toggle keyed off the cursor.
+- **Live updates.** Streaming assistant text, tool calls, and tool
+  results appear in real time inside the expanded block, indented
+  with a `│` gutter so the nesting reads cleanly. Running cost and
+  token totals update on the header as the sub-agent works.
+- **Final state.** On completion the chevron flips, the header shows
+  `done` with the final cost/usage, and the elapsed-time tick stops.
+  When the sub-agent hit its iteration cap the header reads
+  `failed (iteration limit)` in the error colour.
+
+Sub-agent events are routed by session id, so blocks from a previous
+foreground session never leak into the current view.
+
 ### Project context (AGENTS.md / CLAUDE.md)
 
 Project-context files describe house rules, terminology, and
