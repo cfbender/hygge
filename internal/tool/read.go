@@ -31,6 +31,10 @@ func newReadTool(r *readTracker) *readTool { return &readTool{reads: r} }
 
 func (t *readTool) Name() string { return "read" }
 
+// Parallelizable returns true: the read tool is a pure filesystem read with
+// no mutation, making it safe to run concurrently with other read-only tools.
+func (t *readTool) Parallelizable() bool { return true }
+
 func (t *readTool) Description() string {
 	return "Read a file from the local filesystem with optional line offset and limit. " +
 		"Returns line-numbered content; long lines are truncated with a marker. " +

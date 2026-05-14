@@ -24,6 +24,10 @@ func newWriteTool(r *readTracker) *writeTool { return &writeTool{reads: r} }
 
 func (t *writeTool) Name() string { return "write" }
 
+// Parallelizable returns false: write mutates the filesystem and must not
+// run concurrently with other tools that may read or write the same file.
+func (t *writeTool) Parallelizable() bool { return false }
+
 func (t *writeTool) Description() string {
 	return "Overwrite or create a file with the supplied content. Parent directories " +
 		"are created as needed. If the file already exists, it must have been read this " +

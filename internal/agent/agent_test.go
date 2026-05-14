@@ -1160,6 +1160,7 @@ func (c *countingTool) Description() string { return "counting" }
 func (c *countingTool) InputSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
+func (c *countingTool) Parallelizable() bool { return false }
 func (c *countingTool) Execute(_ context.Context, _ json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
 	c.counter.Add(1)
 	return tool.Result{Content: "ok"}, nil
@@ -1176,6 +1177,7 @@ func (c *capturingTool) Description() string { return "capturing" }
 func (c *capturingTool) InputSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
+func (c *capturingTool) Parallelizable() bool { return false }
 func (c *capturingTool) Execute(_ context.Context, input json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
 	*c.received = append([]byte(nil), input...)
 	return tool.Result{Content: "ok"}, nil

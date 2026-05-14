@@ -57,6 +57,10 @@ type mcpTool struct {
 
 func (t *mcpTool) Name() string { return t.fullName }
 
+// Parallelizable returns false: MCP tools call external services whose
+// side effects are unknown, so they are always executed serially.
+func (t *mcpTool) Parallelizable() bool { return false }
+
 func (t *mcpTool) Description() string {
 	desc := strings.TrimSpace(t.def.Description)
 	label := t.serverName

@@ -331,11 +331,12 @@ func (h *registryHost) RegisterTool(t PluginTool) error {
 	}
 
 	wrapped := &pluginToolAdapter{
-		pluginName:  h.pluginName,
-		name:        t.Name,
-		description: t.Description,
-		inputSchema: t.InputSchema,
-		execute:     t.Execute,
+		pluginName:     h.pluginName,
+		name:           t.Name,
+		description:    t.Description,
+		inputSchema:    t.InputSchema,
+		parallelizable: t.Parallelizable,
+		execute:        t.Execute,
 	}
 	if err := h.reg.opts.Tools.Register(wrapped); err != nil {
 		return fmt.Errorf("plugin: %s: register tool %q: %w", h.pluginName, t.Name, err)
@@ -552,15 +553,17 @@ func (h *registryHost) Config() map[string]any {
 
 // pluginToolAdapter wraps a plugin's PluginTool to satisfy tool.Tool.
 type pluginToolAdapter struct {
-	pluginName  string
-	name        string
-	description string
-	inputSchema json.RawMessage
-	execute     func(ctx context.Context, input json.RawMessage) (PluginToolResult, error)
+	pluginName     string
+	name           string
+	description    string
+	inputSchema    json.RawMessage
+	parallelizable bool
+	execute        func(ctx context.Context, input json.RawMessage) (PluginToolResult, error)
 }
 
-func (a *pluginToolAdapter) Name() string        { return a.name }
-func (a *pluginToolAdapter) Description() string { return a.description }
+func (a *pluginToolAdapter) Name() string         { return a.name }
+func (a *pluginToolAdapter) Description() string  { return a.description }
+func (a *pluginToolAdapter) Parallelizable() bool { return a.parallelizable }
 func (a *pluginToolAdapter) InputSchema() map[string]any {
 	if len(a.inputSchema) == 0 {
 		return map[string]any{"type": "object", "properties": map[string]any{}}

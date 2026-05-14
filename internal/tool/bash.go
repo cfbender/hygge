@@ -42,6 +42,10 @@ func newBashTool() *bashTool { return &bashTool{} }
 
 func (t *bashTool) Name() string { return "bash" }
 
+// Parallelizable returns false: bash executes arbitrary shell commands with
+// arbitrary side effects and must not run concurrently with other tools.
+func (t *bashTool) Parallelizable() bool { return false }
+
 func (t *bashTool) Description() string {
 	return "Run a shell command via `sh -c` with a timeout. Inherits only PATH/HOME/LANG/" +
 		"USER/TERM/LC_*. Streams stdout and stderr line-by-line as bus progress events. " +

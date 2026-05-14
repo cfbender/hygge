@@ -28,6 +28,7 @@ type stubTool struct {
 func (s *stubTool) Name() string                { return s.name }
 func (s *stubTool) Description() string         { return s.desc }
 func (s *stubTool) InputSchema() map[string]any { return s.schema }
+func (s *stubTool) Parallelizable() bool        { return false }
 func (s *stubTool) Execute(ctx context.Context, args json.RawMessage, ec ExecContext) (Result, error) {
 	if s.execute == nil {
 		return Result{}, nil

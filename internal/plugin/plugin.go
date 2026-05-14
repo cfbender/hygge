@@ -154,6 +154,19 @@ type PluginTool struct {
 	// empty object schema is synthesised.
 	InputSchema json.RawMessage
 
+	// Parallelizable controls whether the tool may be invoked concurrently
+	// with other parallelizable tools in the same turn.  Defaults to false
+	// for safety — plugin tools should only set this to true when their
+	// Execute function has no observable side effects beyond reading state
+	// (e.g. searching a local index, calling a read-only external API).
+	//
+	// Plugin tools registered with Parallelizable = true are subject to the
+	// same concurrency semantics as built-in parallel tools: their bus events
+	// arrive in undefined order relative to sibling parallel calls, and the
+	// gopher-lua LState mutex serialises execution within a single Lua plugin
+	// even when Parallelizable is true.
+	Parallelizable bool
+
 	// Execute runs the tool.
 	Execute func(ctx context.Context, input json.RawMessage) (PluginToolResult, error)
 }

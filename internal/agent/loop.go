@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cfbender/hygge/internal/bus"
@@ -266,17 +267,30 @@ drain:
 	return asstMsg, len(toolUses) > 0, nil
 }
 
-// executeToolCalls runs every tool_use block in the assistant message
-// sequentially, appending a tool_result message for each one.  Stops on
-// context cancellation and returns ctx.Err.
+// executeToolCalls runs every tool_use block in the assistant message,
+// appending a tool_result message for each one.  Stops on context
+// cancellation and returns ctx.Err.
+//
+// Execution policy: parallelizable tool calls run first as a concurrent
+// batch (all goroutines launched, then sync.WaitGroup.Wait()).  Sequential
+// (non-parallelizable) calls run serially after the parallel batch
+// completes.  Results are stitched back into the original call order
+// before being committed to the store, preserving the order the provider
+// expects.
+//
+// Bus events (ToolCallRequested, ToolCallProgress, ToolCallCompleted) fire
+// from within each call.  For the parallel batch, events from sibling
+// calls arrive in undefined order; subscribers must not rely on
+// intra-batch ordering.  Each individual tool's events still arrive in
+// order relative to that tool.
+//
+// A panic inside a parallelizable call is recovered: the slot receives an
+// IsError result with the panic message, and siblings still run to
+// completion.
 func (a *Agent) executeToolCalls(
 	ctx context.Context, sessionID string, asstMsg *session.Message,
 ) error {
 	now := a.opts.Now
-	// modelName is recorded on the session row; the agent's runLoop
-	// already resolved it once at the top of the turn, but the loop
-	// keeps it local.  Re-resolving here so tools can read it via
-	// ExecContext keeps the agent loop's signature unchanged for now.
 	var modelName string
 	if sess, err := a.opts.Store.GetSession(ctx, sessionID); err == nil {
 		modelName = sess.Model.Name
@@ -289,14 +303,37 @@ func (a *Agent) executeToolCalls(
 		}
 	}
 
+	// Collect all tool_use parts.
+	type callSlot struct {
+		part session.Part
+	}
+	var calls []callSlot
 	for _, p := range asstMsg.Parts {
-		if p.Kind != session.PartToolUse {
-			continue
+		if p.Kind == session.PartToolUse {
+			calls = append(calls, callSlot{part: p})
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+	}
+	if len(calls) == 0 {
+		return nil
+	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Results indexed by original position.
+	type slotResult struct {
+		content  string
+		isError  bool
+		durMs    int64
+		toolName string
+		toolID   string
+	}
+	results := make([]slotResult, len(calls))
+
+	// runOne executes a single tool_use part and writes into results[idx].
+	// It is safe to call from multiple goroutines concurrently.
+	runOne := func(idx int, p session.Part) {
 		bus.Publish(a.opts.Bus, bus.ToolCallRequested{
 			SessionID: sessionID,
 			MessageID: asstMsg.ID,
@@ -306,7 +343,7 @@ func (a *Agent) executeToolCalls(
 			At:        now(),
 		})
 
-		// Pre-tool hook: may deny or modify tool input.
+		// Pre-tool hook.
 		toolInput := p.ToolInput
 		if a.opts.Hooks != nil {
 			hookIn := hook.Input{
@@ -334,28 +371,15 @@ func (a *Agent) executeToolCalls(
 					DurationMs: durMs,
 					At:         now(),
 				})
-				toolMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
-					Role: session.RoleTool,
-					Parts: []session.Part{{
-						Kind:      session.PartToolResult,
-						ToolUseID: p.ToolID,
-						Content:   result.Content,
-						IsError:   true,
-					}},
-					DurationMs: durMs,
-				})
-				if err != nil {
-					return fmt.Errorf("agent: append hook-denied tool message: %w", err)
+				results[idx] = slotResult{
+					content:  result.Content,
+					isError:  true,
+					durMs:    durMs,
+					toolName: p.ToolName,
+					toolID:   p.ToolID,
 				}
-				bus.Publish(a.opts.Bus, bus.MessageAppended{
-					SessionID: sessionID,
-					MessageID: toolMsg.ID,
-					Role:      string(session.RoleTool),
-					At:        now(),
-				})
-				continue
+				return
 			}
-			// Use the (possibly modified) tool input from the hook output.
 			if len(out.ToolInput) > 0 {
 				toolInput = out.ToolInput
 			}
@@ -393,8 +417,7 @@ func (a *Agent) executeToolCalls(
 		}
 		durMs := time.Since(started).Milliseconds()
 
-		// Post-tool hook: sync hooks can modify the result; async hooks
-		// run fire-and-forget.
+		// Post-tool hook.
 		if a.opts.Hooks != nil {
 			hookIn := hook.Input{
 				Event:     hook.EventPostTool,
@@ -430,15 +453,96 @@ func (a *Agent) executeToolCalls(
 			At:         now(),
 		})
 
+		results[idx] = slotResult{
+			content:  result.Content,
+			isError:  result.IsError,
+			durMs:    durMs,
+			toolName: p.ToolName,
+			toolID:   p.ToolID,
+		}
+	}
+
+	// runOneSafe wraps runOne with panic recovery so a panicking tool does
+	// not abort sibling goroutines.
+	runOneSafe := func(idx int, p session.Part) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("tool panicked: %v", r)
+				slog.Error("agent: tool call panicked",
+					"tool", p.ToolName,
+					"session", sessionID,
+					"panic", r,
+				)
+				bus.Publish(a.opts.Bus, bus.ToolCallCompleted{
+					SessionID:  sessionID,
+					MessageID:  asstMsg.ID,
+					ToolUseID:  p.ToolID,
+					ToolName:   p.ToolName,
+					Err:        msg,
+					DurationMs: 0,
+					At:         now(),
+				})
+				results[idx] = slotResult{
+					content:  msg,
+					isError:  true,
+					durMs:    0,
+					toolName: p.ToolName,
+					toolID:   p.ToolID,
+				}
+			}
+		}()
+		runOne(idx, p)
+	}
+
+	// Partition into parallel and sequential groups by original index.
+	var parallel, sequential []int
+	for i, c := range calls {
+		t, ok := a.opts.Tools.Get(c.part.ToolName)
+		if ok && t.Parallelizable() {
+			parallel = append(parallel, i)
+		} else {
+			sequential = append(sequential, i)
+		}
+	}
+
+	// Phase 1: run parallel batch concurrently.
+	if len(parallel) > 0 {
+		var wg sync.WaitGroup
+		for _, idx := range parallel {
+			wg.Add(1)
+			idx := idx // capture
+			go func() {
+				defer wg.Done()
+				runOneSafe(idx, calls[idx].part)
+			}()
+		}
+		wg.Wait()
+	}
+
+	// Phase 2: run sequential group serially.
+	for _, idx := range sequential {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		runOne(idx, calls[idx].part)
+	}
+
+	// Commit results to the store in original call order.
+	for i, r := range results {
+		if r.toolName == "" {
+			// Slot was never filled (shouldn't happen, but guard).
+			r.toolName = calls[i].part.ToolName
+			r.toolID = calls[i].part.ToolID
+		}
 		toolMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
 			Role: session.RoleTool,
 			Parts: []session.Part{{
 				Kind:      session.PartToolResult,
-				ToolUseID: p.ToolID,
-				Content:   result.Content,
-				IsError:   result.IsError,
+				ToolUseID: r.toolID,
+				Content:   r.content,
+				IsError:   r.isError,
 			}},
-			DurationMs: durMs,
+			DurationMs: r.durMs,
 		})
 		if err != nil {
 			return fmt.Errorf("agent: append tool message: %w", err)
