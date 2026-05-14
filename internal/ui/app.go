@@ -274,6 +274,12 @@ func (a *App) Init() tea.Cmd {
 		}
 		cmds = append(cmds, a.openSessionsModal())
 	}
+	// When resuming an existing session, pre-populate the message list from
+	// the persisted store so the user sees history before typing anything.
+	if a.opts.SessionID != "" {
+		a.foregroundStack = []string{a.opts.SessionID}
+		a.hydrateMessagesFromStore(a.opts.SessionID)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -1855,6 +1861,7 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 	a.rendererW = 0
 	if id != "" {
 		a.resetForeground(id)
+		a.hydrateMessagesFromStore(id)
 	} else {
 		a.foregroundStack = nil
 	}
@@ -1937,6 +1944,133 @@ func (a *App) applyRenameSession(id, slug string) tea.Cmd {
 		}
 		return sessionsLoadedMsg{sessions: sessions}
 	}
+}
+
+// hydrateMessagesFromStore loads persisted history for sid and replaces
+// a.messages.  Respects the latest compaction marker so post-compaction
+// sessions show only the active conversation slice, matching what a
+// running agent would see.
+//
+// Idempotent: replaces the slice on every call; calling it twice for the
+// same session id produces the same result.
+//
+// The caller is responsible for clearing a.messages before calling this
+// when switching sessions; this function always writes from an empty base
+// (a.messages[:0]) so any prior content is discarded.
+func (a *App) hydrateMessagesFromStore(sid string) {
+	if a.opts.Store == nil || sid == "" {
+		return
+	}
+	msgs, _, err := a.opts.Store.MessagesSinceLatestMarker(a.ctx, sid)
+	if err != nil {
+		slog.Warn("ui: hydrateMessagesFromStore: failed to load history",
+			"session_id", sid, "err", err)
+		return
+	}
+	a.messages = a.messages[:0]
+	for _, m := range msgs {
+		if entry, ok := uiEntryFromStoreMessage(m); ok {
+			a.messages = append(a.messages, entry)
+		}
+	}
+}
+
+// uiEntryFromStoreMessage converts a persisted *session.Message into a
+// uiMessage for the App's message buffer.  Returns (entry, true) when the
+// message produces a renderable entry, (zero, false) for message types that
+// are not surfaced in the TUI (e.g. pure thinking blocks, empty parts).
+//
+// The conversion mirrors the live-event path in handleBusEvent:
+//   - RoleUser / RoleSystem → plain text from the first PartText part.
+//   - RoleAssistant → plain text from all PartText parts; no streaming flag.
+//   - RoleTool (PartToolUse + PartToolResult) → tool entry with name, target,
+//     and result.  Each PartToolUse is paired with its PartToolResult by ToolID.
+//
+// Tool messages in the store are stored as a single message row with one
+// PartToolUse and one PartToolResult part (the agent appends them together
+// after completion).  We emit one uiMessage per PartToolUse part, carrying
+// the matching result.
+func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
+	if m == nil {
+		return uiMessage{}, false
+	}
+	switch m.Role {
+	case session.RoleUser:
+		text := firstTextPart(m.Parts)
+		if text == "" {
+			return uiMessage{}, false
+		}
+		return uiMessage{Role: components.RoleUser, Raw: text}, true
+
+	case session.RoleAssistant:
+		text := allTextParts(m.Parts)
+		if text == "" {
+			return uiMessage{}, false
+		}
+		return uiMessage{Role: components.RoleAssistant, Raw: text}, true
+
+	case session.RoleTool:
+		// Build a result index keyed by ToolUseID for O(n) pairing.
+		results := make(map[string]session.Part, len(m.Parts))
+		for _, p := range m.Parts {
+			if p.Kind == session.PartToolResult {
+				results[p.ToolUseID] = p
+			}
+		}
+		// Emit one uiMessage per PartToolUse.
+		for _, p := range m.Parts {
+			if p.Kind != session.PartToolUse {
+				continue
+			}
+			target := extractTarget(p.ToolInput)
+			raw := ""
+			isError := false
+			if res, ok := results[p.ToolID]; ok {
+				raw = res.Content
+				isError = res.IsError
+			}
+			return uiMessage{
+				Role:      components.RoleTool,
+				ToolName:  p.ToolName,
+				ToolUseID: p.ToolID,
+				Target:    target,
+				Raw:       raw,
+				IsError:   isError,
+			}, true
+		}
+		return uiMessage{}, false
+
+	case session.RoleSystem:
+		text := firstTextPart(m.Parts)
+		if text == "" {
+			return uiMessage{}, false
+		}
+		return uiMessage{Role: components.RoleSystem, Raw: text}, true
+
+	default:
+		return uiMessage{}, false
+	}
+}
+
+// firstTextPart returns the Text of the first PartText part in parts, or "".
+func firstTextPart(parts []session.Part) string {
+	for _, p := range parts {
+		if p.Kind == session.PartText {
+			return p.Text
+		}
+	}
+	return ""
+}
+
+// allTextParts concatenates the Text of all PartText parts in parts.
+func allTextParts(parts []session.Part) string {
+	var sb strings.Builder
+	for _, p := range parts {
+		if p.Kind == session.PartText {
+			sb.WriteString(p.Text)
+		}
+	}
+	return sb.String()
 }
 
 // applyDeleteSession soft-deletes a session.  If it was the foreground,
