@@ -1,0 +1,26 @@
+[tools]
+go = "1.24"
+
+[tasks.build]
+description = "Compile the hygge binary to ./bin/hygge"
+run = "go build -o ./bin/hygge ./cmd/hygge"
+
+[tasks.test]
+description = "Run all tests with race detector"
+run = "go test ./... -race -count=1"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.tidy]
+description = "Tidy go modules"
+run = "go mod tidy"
+
+[tasks.clean]
+description = "Remove build artifacts and coverage output"
+run = "rm -rf ./bin ./coverage.out"
+
+[tasks.run]
+description = "Build and run the hygge binary (pass args after --)"
+run = ["mise run build", "./bin/hygge $@"]

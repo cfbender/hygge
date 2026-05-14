@@ -13,28 +13,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # TODO: windows-latest dropped — mise-action on Windows runners is
+        # experimental and has known PATH/shim issues that make it unreliable
+        # in CI. Re-add once mise Windows support stabilises.
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up mise (installs Go toolchain)
+        uses: jdx/mise-action@v4
         with:
-          go-version-file: go.mod
           cache: true
+          github_token: ${{ github.token }}
 
       - name: Download modules
         run: go mod download
 
       - name: Lint
         if: matrix.os == 'ubuntu-latest'
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+        run: mise run lint
 
       - name: Test
-        run: make test
+        run: mise run test
 
       - name: Build
-        run: make build
+        run: mise run build
