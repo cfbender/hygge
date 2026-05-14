@@ -460,7 +460,7 @@ func TestUiEntriesFromStoreMessage_ThinkingBeforeText(t *testing.T) {
 			{Kind: session.PartText, Text: "here is the answer"},
 		},
 	}
-	entries := uiEntriesFromStoreMessage(m)
+	entries := uiEntriesFromStoreMessage(m, map[string]session.Part{}, map[string]struct{}{})
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d: %+v", len(entries), entries)
 	}
@@ -966,4 +966,454 @@ func subagentIDs(m map[string]*components.SubagentState) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// ---------------------------------------------------------------------------
+// New tests: split-row tool calls (assistant + separate tool-result rows)
+// ---------------------------------------------------------------------------
+
+// TestHydrate_ToolCallSplitRows verifies the common persistence shape: a
+// PartToolUse in an assistant message paired with a PartToolResult in a
+// separate RoleTool message.  The result should produce: assistant-text row +
+// tool row with the result body populated.
+func TestHydrate_ToolCallSplitRows(t *testing.T) {
+	t.Parallel()
+	toolUseID := "toolu_split01"
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "read a file"}},
+		},
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartText, Text: "I will read the file."},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    toolUseID,
+					ToolName:  "read",
+					ToolInput: []byte(`{"path":"/etc/hosts"}`),
+				},
+			},
+		},
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{
+					Kind:      session.PartToolResult,
+					ToolUseID: toolUseID,
+					Content:   "127.0.0.1 localhost",
+				},
+			},
+		},
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "Done."}},
+		},
+	})
+	_ = app.Init()
+
+	// Expected: user, assistant (text), tool (with result), assistant (done)
+	if got := len(app.messages); got != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleUser {
+		t.Errorf("[0].Role = %q, want user", app.messages[0].Role)
+	}
+	if app.messages[1].Role != components.RoleAssistant {
+		t.Errorf("[1].Role = %q, want assistant", app.messages[1].Role)
+	}
+	if app.messages[1].Raw != "I will read the file." {
+		t.Errorf("[1].Raw = %q", app.messages[1].Raw)
+	}
+	if app.messages[2].Role != components.RoleTool {
+		t.Errorf("[2].Role = %q, want tool", app.messages[2].Role)
+	}
+	if app.messages[2].ToolName != "read" {
+		t.Errorf("[2].ToolName = %q, want read", app.messages[2].ToolName)
+	}
+	if app.messages[2].ToolUseID != toolUseID {
+		t.Errorf("[2].ToolUseID = %q, want %q", app.messages[2].ToolUseID, toolUseID)
+	}
+	if app.messages[2].Target != "/etc/hosts" {
+		t.Errorf("[2].Target = %q, want /etc/hosts", app.messages[2].Target)
+	}
+	if app.messages[2].Raw != "127.0.0.1 localhost" {
+		t.Errorf("[2].Raw = %q, want '127.0.0.1 localhost'", app.messages[2].Raw)
+	}
+	if app.messages[2].IsError {
+		t.Errorf("[2].IsError = true, want false")
+	}
+	if app.messages[3].Role != components.RoleAssistant {
+		t.Errorf("[3].Role = %q, want assistant", app.messages[3].Role)
+	}
+}
+
+// TestHydrate_TwoToolCallsSplitRows verifies an assistant message with two
+// PartToolUse parts, each paired with a PartToolResult in a single tool
+// message.  Should produce: assistant-text + 2 tool rows.
+func TestHydrate_TwoToolCallsSplitRows(t *testing.T) {
+	t.Parallel()
+	id1, id2 := "toolu_two01", "toolu_two02"
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartText, Text: "calling two tools"},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    id1,
+					ToolName:  "bash",
+					ToolInput: []byte(`{"command":"echo hello"}`),
+				},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    id2,
+					ToolName:  "bash",
+					ToolInput: []byte(`{"command":"echo world"}`),
+				},
+			},
+		},
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{Kind: session.PartToolResult, ToolUseID: id1, Content: "hello"},
+				{Kind: session.PartToolResult, ToolUseID: id2, Content: "world"},
+			},
+		},
+	})
+	_ = app.Init()
+
+	// Expected: assistant-text, tool1, tool2
+	if got := len(app.messages); got != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleAssistant {
+		t.Errorf("[0].Role = %q, want assistant", app.messages[0].Role)
+	}
+	if app.messages[1].Role != components.RoleTool {
+		t.Errorf("[1].Role = %q, want tool", app.messages[1].Role)
+	}
+	if app.messages[1].ToolUseID != id1 {
+		t.Errorf("[1].ToolUseID = %q, want %q", app.messages[1].ToolUseID, id1)
+	}
+	if app.messages[1].Raw != "hello" {
+		t.Errorf("[1].Raw = %q, want hello", app.messages[1].Raw)
+	}
+	if app.messages[2].Role != components.RoleTool {
+		t.Errorf("[2].Role = %q, want tool", app.messages[2].Role)
+	}
+	if app.messages[2].ToolUseID != id2 {
+		t.Errorf("[2].ToolUseID = %q, want %q", app.messages[2].ToolUseID, id2)
+	}
+	if app.messages[2].Raw != "world" {
+		t.Errorf("[2].Raw = %q, want world", app.messages[2].Raw)
+	}
+}
+
+// TestHydrate_ToolCallNoResult verifies that a PartToolUse in an assistant
+// message with no matching result (interrupted run) produces a tool row with
+// empty Raw and IsError=false.
+func TestHydrate_ToolCallNoResult(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartText, Text: "let me try"},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    "toolu_noresult",
+					ToolName:  "bash",
+					ToolInput: []byte(`{"command":"sleep 10"}`),
+				},
+			},
+		},
+		// No corresponding tool result row (interrupted).
+	})
+	_ = app.Init()
+
+	// Expected: assistant-text + tool (empty Raw)
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[1].Role != components.RoleTool {
+		t.Errorf("[1].Role = %q, want tool", app.messages[1].Role)
+	}
+	if app.messages[1].Raw != "" {
+		t.Errorf("[1].Raw = %q, want empty (no result)", app.messages[1].Raw)
+	}
+	if app.messages[1].IsError {
+		t.Errorf("[1].IsError = true, want false")
+	}
+	if app.messages[1].ToolUseID != "toolu_noresult" {
+		t.Errorf("[1].ToolUseID = %q", app.messages[1].ToolUseID)
+	}
+}
+
+// TestHydrate_ThinkingTextToolSplitRows verifies that an assistant message
+// with thinking + text + tool_use produces 3 entries in order: thinking, text,
+// tool — with the result from the split tool row.
+func TestHydrate_ThinkingTextToolSplitRows(t *testing.T) {
+	t.Parallel()
+	toolUseID := "toolu_think01"
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartThinking, Text: "planning…"},
+				{Kind: session.PartText, Text: "I'll grep for it."},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    toolUseID,
+					ToolName:  "grep",
+					ToolInput: []byte(`{"path":"/src"}`),
+				},
+			},
+		},
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{Kind: session.PartToolResult, ToolUseID: toolUseID, Content: "found it"},
+			},
+		},
+	})
+	_ = app.Init()
+
+	// Expected: thinking, assistant-text, tool
+	if got := len(app.messages); got != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleThinking {
+		t.Errorf("[0].Role = %q, want thinking", app.messages[0].Role)
+	}
+	if app.messages[0].Raw != "planning…" {
+		t.Errorf("[0].Raw = %q", app.messages[0].Raw)
+	}
+	if app.messages[1].Role != components.RoleAssistant {
+		t.Errorf("[1].Role = %q, want assistant", app.messages[1].Role)
+	}
+	if app.messages[1].Raw != "I'll grep for it." {
+		t.Errorf("[1].Raw = %q", app.messages[1].Raw)
+	}
+	if app.messages[2].Role != components.RoleTool {
+		t.Errorf("[2].Role = %q, want tool", app.messages[2].Role)
+	}
+	if app.messages[2].Raw != "found it" {
+		t.Errorf("[2].Raw = %q", app.messages[2].Raw)
+	}
+}
+
+// TestHydrate_LegacyCombinedToolRow verifies that the legacy combined-row
+// shape (PartToolUse + PartToolResult in the same RoleTool message) still
+// produces a tool uiMessage.  This is the shape tested by
+// TestUiEntryFromStoreMessage_Tool and used by existing subagent tests.
+func TestHydrate_LegacyCombinedToolRow(t *testing.T) {
+	t.Parallel()
+	toolUseID := "toolu_legacy01"
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    toolUseID,
+					ToolName:  "read",
+					ToolInput: []byte(`{"path":"/legacy"}`),
+				},
+				{
+					Kind:      session.PartToolResult,
+					ToolUseID: toolUseID,
+					Content:   "legacy content",
+				},
+			},
+		},
+	})
+	_ = app.Init()
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message for legacy combined row, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleTool {
+		t.Errorf("[0].Role = %q, want tool", app.messages[0].Role)
+	}
+	if app.messages[0].ToolName != "read" {
+		t.Errorf("[0].ToolName = %q, want read", app.messages[0].ToolName)
+	}
+	if app.messages[0].Raw != "legacy content" {
+		t.Errorf("[0].Raw = %q, want 'legacy content'", app.messages[0].Raw)
+	}
+}
+
+// TestHydrate_SplitRowSubagentTaskRow verifies the real-world pong-test shape:
+// user → assistant(text+task_tool_use) → tool(task_result) → assistant(text).
+// The task tool row must be present with ToolUseID set, so subagent
+// reconstruction can attach SubagentID to it.
+func TestHydrate_SplitRowSubagentTaskRow(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "hygge_test.db")
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	model := session.ModelRef{Provider: "anthropic", Name: "test-model"}
+	parent, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	toolUseID := "toolu_pong01"
+
+	// Mirrors the confirmed store shape from the bug report.
+	for _, nm := range []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "test a subagent with a pong"}},
+		},
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartText, Text: "I'll dispatch a subagent."},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    toolUseID,
+					ToolName:  "task",
+					ToolInput: []byte(`{"subagent_type":"general","description":"pong"}`),
+				},
+			},
+		},
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{Kind: session.PartToolResult, ToolUseID: toolUseID, Content: "pong"},
+			},
+		},
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "Subagent responded: **pong** ✅"}},
+		},
+	} {
+		if _, err := st.AppendMessage(ctx, parent.ID, nm); err != nil {
+			t.Fatalf("AppendMessage: %v", err)
+		}
+	}
+
+	// Create child subagent session.
+	child, err := st.CreateSession(ctx, session.NewSession{
+		ProjectDir: "/tmp/proj",
+		Model:      model,
+		ParentID:   parent.ID,
+		Kind:       session.KindSubagent,
+		Slug:       "general: pong [" + toolUseID + "]",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession child: %v", err)
+	}
+	if _, err := st.AppendMessage(ctx, child.ID, session.NewMessage{
+		Role:  session.RoleAssistant,
+		Parts: []session.Part{{Kind: session.PartText, Text: "pong"}},
+	}); err != nil {
+		t.Fatalf("AppendMessage child: %v", err)
+	}
+
+	b := bus.New()
+	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		ProfileName:   "default",
+		SessionID:     parent.ID,
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	_ = app.Init()
+
+	// Expected messages: user, assistant(text), tool(task), assistant(done)
+	if got := len(app.messages); got != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", got, app.messages)
+	}
+	if app.messages[1].Role != components.RoleAssistant {
+		t.Errorf("[1].Role = %q, want assistant", app.messages[1].Role)
+	}
+	toolMsg := app.messages[2]
+	if toolMsg.Role != components.RoleTool {
+		t.Fatalf("[2].Role = %q, want tool", toolMsg.Role)
+	}
+	if toolMsg.ToolName != "task" {
+		t.Errorf("[2].ToolName = %q, want task", toolMsg.ToolName)
+	}
+	if toolMsg.ToolUseID != toolUseID {
+		t.Errorf("[2].ToolUseID = %q, want %q", toolMsg.ToolUseID, toolUseID)
+	}
+	if toolMsg.Raw != "pong" {
+		t.Errorf("[2].Raw = %q, want pong", toolMsg.Raw)
+	}
+	// SubagentID must be stamped by reconstruction.
+	if toolMsg.SubagentID == "" {
+		t.Errorf("[2].SubagentID is empty; subagent reconstruction failed")
+	}
+	if toolMsg.SubagentID != child.ID {
+		t.Errorf("[2].SubagentID = %q, want %q", toolMsg.SubagentID, child.ID)
+	}
+	// Child subagent must be in app.subagents.
+	if _, ok := app.subagents[child.ID]; !ok {
+		t.Errorf("child session %q not in app.subagents", child.ID)
+	}
+}
+
+// TestHydrate_IdempotentWithToolCalls verifies that calling hydrateMessagesFromStore
+// twice for a session with split-row tool calls produces the same result both times.
+func TestHydrate_IdempotentWithToolCalls(t *testing.T) {
+	t.Parallel()
+	toolUseID := "toolu_idem01"
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartText, Text: "calling tool"},
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    toolUseID,
+					ToolName:  "bash",
+					ToolInput: []byte(`{"command":"echo hi"}`),
+				},
+			},
+		},
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{Kind: session.PartToolResult, ToolUseID: toolUseID, Content: "hi"},
+			},
+		},
+	})
+	_ = app.Init()
+	firstLen := len(app.messages)
+
+	// Call hydrate a second time.
+	app.hydrateMessagesFromStore(app.opts.SessionID)
+	secondLen := len(app.messages)
+
+	if firstLen != secondLen {
+		t.Errorf("hydration not idempotent: first=%d second=%d", firstLen, secondLen)
+	}
+	if firstLen != 2 {
+		t.Errorf("expected 2 messages (assistant text + tool), got %d", firstLen)
+	}
 }
