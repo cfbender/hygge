@@ -78,6 +78,8 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		ModelProvider: rt.Config.Model.Provider,
 		ModelName:     rt.Config.Model.Name,
 		ProfileName:   rt.Config.Profile,
+		Reasoning:     resolveReasoning(rt.Config, reasoningFlag),
+		Commands:      rt.Commands,
 		OnSessionCreated: func(id string) {
 			if err := state.AddRecentSession(id, rt.StateOpts); err != nil {
 				// State write failure is non-fatal for the running

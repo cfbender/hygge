@@ -26,6 +26,7 @@ import (
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/catalog"
+	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/mcp"
@@ -62,6 +63,7 @@ type appRuntime struct {
 	Skills         *skill.Registry
 	Subagents      *subagent.Registry
 	SubagentRunner *subagent.Runner
+	Commands       *command.Registry
 	AgentsBlocks   []agentsmd.Block
 	MCPClients     []*mcp.Client
 	MCPConfigs     []mcp.ServerConfig
@@ -481,6 +483,21 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// still works without any MCP tools.
 	mcpClients, mcpConfigs, mcpStatuses := bootstrapMCP(ctx, opts, xdgConfig, tools)
 
+	// Slash-command registry: built-in command set plus any
+	// TOML-declared prompt templates.  Failures degrade to the
+	// built-in set; the TUI is still usable without user
+	// commands.toml.
+	command.SetVersion(Version)
+	cmdReg, err := command.Load(command.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load commands.toml; built-ins only", "err", err)
+		cmdReg, _ = command.Load(command.LoadOptions{})
+	}
+
 	sysPrompt := opts.SystemPrompt
 	if sysPrompt == "" {
 		sysPrompt = defaultSystemPrompt
@@ -529,6 +546,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Skills:         skillReg,
 		Subagents:      subagentReg,
 		SubagentRunner: subRunner,
+		Commands:       cmdReg,
 		AgentsBlocks:   agentsBlocks,
 		MCPClients:     mcpClients,
 		MCPConfigs:     mcpConfigs,

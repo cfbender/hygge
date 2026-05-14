@@ -1,0 +1,256 @@
+package ui
+
+import (
+	"context"
+	"log/slog"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/provider"
+	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/ui/components"
+)
+
+// noticeLifetime is how long an ephemeral slash-command notice
+// remains visible.  Long enough to read; short enough to not
+// overstay its welcome.
+const noticeLifetime = 4 * time.Second
+
+// runSlashCommand parses text (which begins with "/"), looks the
+// command up in the registry, and returns a tea.Cmd that runs it
+// and applies the [command.Outcome] to the App.  Errors are
+// surfaced as a notice rather than a tea error: the input loop
+// should not crash when the user mistypes a command name.
+func (a *App) runSlashCommand(text string) tea.Cmd {
+	if a.opts.Commands == nil {
+		return a.setNotice("commands unavailable (no registry configured)")
+	}
+	name, body := splitSlash(text)
+	cmd, ok := a.opts.Commands.Get(name)
+	if !ok {
+		return a.setNotice("unknown command /" + name + " — try /help")
+	}
+	adapter := &commandAppAdapter{a: a}
+	// Synchronous: built-in commands never block; template
+	// commands do trivial string work.
+	out, err := cmd.Execute(a.ctx, adapter, body)
+	if err != nil {
+		return a.setNotice("command failed: " + err.Error())
+	}
+	return a.applyOutcome(out)
+}
+
+// splitSlash splits "/name rest of text" into ("name", "rest of text").
+// The leading slash is required and stripped; surrounding whitespace
+// on the command name and the body is trimmed.
+func splitSlash(text string) (name, body string) {
+	text = strings.TrimPrefix(text, "/")
+	idx := strings.IndexAny(text, " \t")
+	if idx < 0 {
+		return strings.TrimSpace(text), ""
+	}
+	return strings.TrimSpace(text[:idx]), strings.TrimLeft(text[idx:], " \t")
+}
+
+// applyOutcome interprets the fields of out and returns a single
+// tea.Cmd that performs every effect the outcome asked for.  Several
+// fields may be set on the same outcome (e.g. /clear sets both a
+// notice and ClearHistory); applyOutcome combines them with
+// tea.Batch.
+func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
+	var cmds []tea.Cmd
+
+	if out.ClearHistory {
+		a.messages = nil
+		a.subagents = map[string]*components.SubagentState{}
+		a.renderer = nil
+		a.rendererW = 0
+	}
+
+	if out.OpenModal != "" {
+		switch out.OpenModal {
+		case command.ModalHelp, command.ModalSessions:
+			a.activeModal = out.OpenModal
+		default:
+			slogWarnUnknownModal(out.OpenModal)
+		}
+	}
+
+	for k, v := range out.Updates {
+		a.applyUpdate(k, v)
+	}
+
+	if out.Compact && a.opts.Agent != nil && a.opts.SessionID != "" {
+		// Run compaction on a goroutine — it issues at least one
+		// provider call, which can be slow.  The result is folded
+		// back into the UI through the normal bus events.
+		sid := a.opts.SessionID
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+			defer cancel()
+			if _, err := a.opts.Agent.Compact(ctx, sid); err != nil {
+				return clearNoticeMsg{notice: ""} // no-op fallback
+			}
+			return nil
+		})
+	}
+
+	if out.Message != "" && a.opts.Agent != nil {
+		// Reuse the existing send path so streaming + cost events
+		// flow through unchanged.
+		cmds = append(cmds, a.startSend(out.Message))
+	}
+
+	if out.Notice != "" {
+		cmds = append(cmds, a.setNotice(out.Notice))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// applyUpdate dispatches a single Outcome.Updates entry.  v0.3
+// recognises Model and Reasoning; unknown keys are logged and
+// ignored.  Real switching is wired in subsequent slices (model
+// hot-swap lands with provider routing; reasoning is local).
+func (a *App) applyUpdate(key, value string) {
+	switch key {
+	case command.UpdateModel:
+		// Local cosmetic update so the status bar reflects the
+		// change immediately.  A full hot-swap (provider rebuild,
+		// agent re-wire) lands in a later slice — for v0.3 we
+		// surface the request and let the user re-launch hygge
+		// with the new model in config.
+		if provName, modelName, ok := splitModelRef(value); ok {
+			a.opts.ModelProvider = provName
+			a.opts.ModelName = modelName
+		}
+	case command.UpdateReasoning:
+		switch value {
+		case "off", "low", "medium", "high":
+			a.opts.Reasoning = provider.Reasoning{Effort: value}
+		}
+	case command.UpdateForkAt:
+		// TODO(T1.2): wire to the real fork flow.  For v0.3 we
+		// surface a notice via the command's Outcome.Notice; no
+		// state changes here.
+	default:
+		slogWarnUnknownUpdate(key, value)
+	}
+}
+
+// splitModelRef splits "provider/model" into its two halves.  Empty
+// halves or missing separators report not-ok and leave state
+// unchanged.
+func splitModelRef(ref string) (string, string, bool) {
+	idx := strings.Index(ref, "/")
+	if idx <= 0 || idx == len(ref)-1 {
+		return "", "", false
+	}
+	return ref[:idx], ref[idx+1:], true
+}
+
+// setNotice raises a new ephemeral status line and schedules its
+// clearing.  The scheduled clear carries the notice text so a fresher
+// one that overlaps the timer is not wiped.
+func (a *App) setNotice(text string) tea.Cmd {
+	a.notice = text
+	if text == "" {
+		return nil
+	}
+	captured := text
+	return tea.Tick(noticeLifetime, func(time.Time) tea.Msg {
+		return clearNoticeMsg{notice: captured}
+	})
+}
+
+// paletteMatches returns the current command-palette matches.  When
+// the input buffer does not start with "/" or no Commands registry
+// is wired up, returns nil.
+func (a *App) paletteMatches() []command.Command {
+	if a.opts.Commands == nil {
+		return nil
+	}
+	buf := a.input.Value()
+	if !strings.HasPrefix(buf, "/") {
+		return nil
+	}
+	// Filter by the head token: characters between the slash and
+	// the first space.  This way `/co` filters by "co" and
+	// `/model anth` still shows /model as the highlight while
+	// the user types args.
+	head, _ := splitSlash(buf)
+	return a.opts.Commands.LookupPrefix(head)
+}
+
+// clampedPaletteHighlight returns the current highlight clamped to
+// the bounds of matches, or -1 when matches is empty.
+func (a *App) clampedPaletteHighlight(matches []command.Command) int {
+	if len(matches) == 0 {
+		return -1
+	}
+	hi := a.paletteHighlight
+	if hi < 0 {
+		return 0
+	}
+	if hi >= len(matches) {
+		return len(matches) - 1
+	}
+	return hi
+}
+
+// movePaletteHighlight shifts the highlight index, snapping into
+// range against the current match set.  delta < 0 selects an earlier
+// row; delta > 0 selects a later row.
+func (a *App) movePaletteHighlight(delta int) {
+	matches := a.paletteMatches()
+	if len(matches) == 0 {
+		a.paletteHighlight = -1
+		return
+	}
+	hi := a.paletteHighlight
+	if hi < 0 {
+		hi = 0
+	}
+	hi += delta
+	if hi < 0 {
+		hi = 0
+	}
+	if hi >= len(matches) {
+		hi = len(matches) - 1
+	}
+	a.paletteHighlight = hi
+}
+
+// commandAppAdapter is the read-only [command.App] view onto the
+// running App.  Commands hold a pointer to the App but see only
+// this narrow interface, so they can never mutate state directly.
+type commandAppAdapter struct{ a *App }
+
+func (c *commandAppAdapter) SessionID() string             { return c.a.opts.SessionID }
+func (c *commandAppAdapter) Model() string                 { return c.a.opts.ModelProvider + "/" + c.a.opts.ModelName }
+func (c *commandAppAdapter) Reasoning() provider.Reasoning { return c.a.opts.Reasoning }
+func (c *commandAppAdapter) Cost() float64                 { return c.a.costDollars }
+func (c *commandAppAdapter) Sessions(ctx context.Context, limit int) ([]*session.Session, error) {
+	if c.a.opts.Store == nil {
+		return nil, nil
+	}
+	return c.a.opts.Store.ListSessions(ctx, session.ListOpts{Limit: limit})
+}
+
+// Compile-time guard that the adapter satisfies the interface.
+var _ command.App = (*commandAppAdapter)(nil)
+
+// slogWarnUnknownModal is a thin helper so the call site stays
+// readable; pulls the slog line into one place.
+func slogWarnUnknownModal(name string) {
+	slog.Warn("ui: slash command requested unknown modal; ignored", "modal", name)
+}
+
+// slogWarnUnknownUpdate logs a slash-command Updates entry whose key
+// hygge does not yet recognise.
+func slogWarnUnknownUpdate(key, value string) {
+	slog.Warn("ui: slash command requested unknown update; ignored", "key", key, "value", value)
+}
