@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +21,17 @@ import (
 // the iteration cap is hit.  The user message has already been appended
 // by the caller (Send).  modelName is sourced from the session row.
 func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*session.Message, error) {
+	// Resolve a stable working directory once per loop.  The agent's
+	// configured Pwd wins; if absent we fall back to os.Getwd so the
+	// lazy tracker can still resolve relative paths.  The fallback
+	// result is cached for the lifetime of the loop.
+	pwd := a.opts.Pwd
+	if pwd == "" {
+		if wd, err := os.Getwd(); err == nil {
+			pwd = wd
+		}
+	}
+
 	for iter := 1; iter <= a.opts.MaxIterations; iter++ {
 		// Honor cancellation between iterations promptly.
 		if err := ctx.Err(); err != nil {
@@ -31,12 +43,18 @@ func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*sess
 			return nil, fmt.Errorf("agent: load messages: %w", err)
 		}
 
+		// Drain any subdir context queued by the previous
+		// iteration's tool batch.  These ride along in the system
+		// prompt for THIS turn only — never persisted to history.
+		lazyBlocks := a.drainPendingLazy(sessionID)
+
 		req := buildRequest(
 			msgs, marker,
 			a.opts.SystemPrompt,
 			a.opts.Tools.AsProviderTools(),
 			modelName,
 			nil,
+			lazyBlocks,
 		)
 
 		asstMsg, hasTools, err := a.runOneTurn(ctx, sessionID, req, modelName)
@@ -53,6 +71,11 @@ func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*sess
 		if err := a.executeToolCalls(ctx, sessionID, asstMsg); err != nil {
 			return nil, err
 		}
+
+		// After the tool batch, harvest the directories the tools
+		// touched and queue any newly-discovered subdir context for
+		// the next iteration's system prompt.
+		a.collectLazyContext(sessionID, pwd, asstMsg)
 	}
 
 	// Iteration limit hit — publish the event and commit an abort note.
@@ -78,6 +101,35 @@ func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*sess
 		At:        a.opts.Now(),
 	})
 	return abortMsg, ErrIterationLimit
+}
+
+// collectLazyContext gathers the path-like arguments of every tool_use
+// part in asstMsg, hands them to the lazy tracker, and queues any
+// newly-discovered subdir AGENTS.md / CLAUDE.md blocks for the next
+// turn.  No-op when the lazy tracker is not configured.
+func (a *Agent) collectLazyContext(sessionID, pwd string, asstMsg *session.Message) {
+	if a.opts.LazyContext == nil || asstMsg == nil {
+		return
+	}
+	var paths []string
+	for _, p := range asstMsg.Parts {
+		if p.Kind != session.PartToolUse {
+			continue
+		}
+		paths = append(paths, touchedPaths(p.ToolName, p.ToolInput)...)
+	}
+	if len(paths) == 0 {
+		return
+	}
+	blocks := a.opts.LazyContext.Touch(pwd, paths)
+	if len(blocks) == 0 {
+		return
+	}
+	slog.Debug("agent: lazy context loaded for next turn",
+		"session", sessionID,
+		"blocks", len(blocks),
+	)
+	a.appendPendingLazy(sessionID, blocks)
 }
 
 // runOneTurn issues one provider Stream call, accumulates events, commits

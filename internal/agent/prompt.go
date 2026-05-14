@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 
+	"github.com/cfbender/hygge/internal/agentsmd"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 )
@@ -22,6 +23,12 @@ const markerPrefix = "Earlier in this conversation: "
 // conversation.  System-prompt augmentation keeps the on-screen
 // conversation pristine while still feeding the summary to the model.
 //
+// lazyBlocks, when non-empty, are formatted via
+// agentsmd.BuildLazyAddition and appended to the system prompt for
+// THIS TURN ONLY.  They are not persisted into session history; the
+// caller (the agent loop) is responsible for draining the pending
+// queue before invoking buildRequest.
+//
 // msgs is forwarded verbatim as Request.Messages — adapters dereference
 // the slice and translate parts into their wire format.  We pass values
 // (not pointers) because provider.Request.Messages is []session.Message;
@@ -39,6 +46,7 @@ func buildRequest(
 	tools []provider.Tool,
 	modelName string,
 	options map[string]any,
+	lazyBlocks []agentsmd.Block,
 ) provider.Request {
 	values := make([]session.Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -48,7 +56,7 @@ func buildRequest(
 		values = append(values, *m)
 	}
 
-	system := composeSystemPrompt(systemPrompt, marker)
+	system := composeSystemPrompt(systemPrompt, marker, lazyBlocks)
 
 	return provider.Request{
 		ModelName: modelName,
@@ -59,21 +67,38 @@ func buildRequest(
 	}
 }
 
-// composeSystemPrompt folds a compaction summary into a system prompt.
-// When marker is nil the prompt is returned unchanged.  When marker is
-// non-nil but systemPrompt is empty, the summary stands alone under the
-// markerPrefix.
-func composeSystemPrompt(systemPrompt string, marker *session.Marker) string {
-	if marker == nil || strings.TrimSpace(marker.Summary) == "" {
+// composeSystemPrompt folds a compaction summary and any lazy-loaded
+// subdir context into a system prompt.  Order is: base prompt, then
+// the marker summary (if any), then the lazy addition (if any).  Lazy
+// context goes last so it sits closest to the user/assistant turns —
+// the most recently surfaced material is the most relevant.
+//
+// When marker is nil and lazyBlocks is empty the prompt is returned
+// unchanged.
+func composeSystemPrompt(systemPrompt string, marker *session.Marker, lazyBlocks []agentsmd.Block) string {
+	hasMarker := marker != nil && strings.TrimSpace(marker.Summary) != ""
+	lazyAdd := agentsmd.BuildLazyAddition(lazyBlocks)
+
+	if !hasMarker && lazyAdd == "" {
 		return systemPrompt
 	}
-	if systemPrompt == "" {
-		return markerPrefix + marker.Summary
-	}
+
 	var b strings.Builder
-	b.WriteString(systemPrompt)
-	b.WriteString("\n\n")
-	b.WriteString(markerPrefix)
-	b.WriteString(marker.Summary)
+	if systemPrompt != "" {
+		b.WriteString(systemPrompt)
+	}
+	if hasMarker {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(markerPrefix)
+		b.WriteString(marker.Summary)
+	}
+	if lazyAdd != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(lazyAdd)
+	}
 	return b.String()
 }

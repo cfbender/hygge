@@ -321,11 +321,32 @@ func hasMarker(dir string) bool {
 // `project/root: CLAUDE.local.md`) so the model can locate the file
 // inside the working tree.
 func BuildSystemPromptAdditions(blocks []Block) string {
+	return buildBlocksWithHeader("## Project context", blocks)
+}
+
+// BuildLazyAddition formats lazy-loaded subdir context blocks for
+// injection into a single turn's system prompt.  Returns "" when
+// blocks is empty.
+//
+// The output is shaped like BuildSystemPromptAdditions but headered
+// "## Additional project context (loaded for this turn)" so it is
+// obvious to the model that this material was just brought in by a
+// tool call rather than being part of the startup prompt.
+func BuildLazyAddition(blocks []Block) string {
+	return buildBlocksWithHeader("## Additional project context (loaded for this turn)", blocks)
+}
+
+// buildBlocksWithHeader is the shared formatter behind
+// BuildSystemPromptAdditions and BuildLazyAddition.  It emits the
+// header, then each block with a source-comment label and a horizontal
+// rule between adjacent blocks.
+func buildBlocksWithHeader(header string, blocks []Block) string {
 	if len(blocks) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("## Project context\n\n")
+	b.WriteString(header)
+	b.WriteString("\n\n")
 	for i, blk := range blocks {
 		if i > 0 {
 			b.WriteString("\n---\n\n")

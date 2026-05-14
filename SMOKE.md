@@ -98,6 +98,30 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       `project/root` rows use project-relative PATH values
       (`AGENTS.md`, `CLAUDE.md`), not absolute paths.
 
+- [ ] **Lazy subdir AGENTS.md is injected on next turn.**
+      With a project layout like
+      ```
+      tmp=$(mktemp -d)
+      git init -q "$tmp"
+      mkdir -p "$tmp/pkg"
+      cat > "$tmp/pkg/AGENTS.md" <<'EOF'
+      # pkg-local rules
+      All identifiers in this package must be ALL_CAPS.
+      EOF
+      cat > "$tmp/pkg/code.go" <<'EOF'
+      package pkg
+      EOF
+      ```
+      run the TUI with debug logging enabled
+      (`HYGGE_LOG=debug ANTHROPIC_API_KEY=... ./bin/hygge` from `$tmp`)
+      and ask the agent to read `pkg/code.go`.  After it returns, check
+      the debug log for an `agent: lazy context loaded for next turn`
+      entry, then ask a follow-up about the package's identifier
+      convention — the model should know about the ALL_CAPS rule
+      because `pkg/AGENTS.md` rode along in the NEXT turn's system
+      prompt.  `hygge context list` should still show only the
+      project-root layers (the lazy block is transient, not persisted).
+
 ## TUI session
 
 - [ ] **TUI launches.**
