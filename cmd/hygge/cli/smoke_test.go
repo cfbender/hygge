@@ -1,0 +1,611 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/permission"
+	"github.com/cfbender/hygge/internal/provider"
+	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/state"
+)
+
+// TestSmoke_EndToEnd is the v0.1 "does this actually work?" gate.  It
+// boots the full runtime (bootstrap), wires a scripted fake provider
+// into the agent loop, lets the read tool execute against a real tempdir
+// file, and asserts the conversation lands in the store the way the TUI
+// would have committed it.
+//
+// What's exercised end-to-end:
+//
+//   - bootstrap() wires bus, store, permission, tools, catalog, agent
+//   - state.json on-disk write via OnSessionCreated → AddRecentSession
+//   - lazy session creation through store.CreateSession
+//   - agent.Send → provider.Stream (scripted) → tool.Execute → second
+//     provider.Stream → assistant final
+//   - cost catalog falls through to fallback pricing without panicking
+//     for an unknown model name (live fetch is shorted to a 500-server)
+//   - bus events fire in the documented order
+//
+// What is deliberately NOT exercised: bubbletea (no TTY).  The test
+// stands in for the TUI by calling Agent.Send the same way startSend
+// does inside internal/ui/app.go.
+func TestSmoke_EndToEnd(t *testing.T) {
+	ctx := context.Background()
+
+	// ---- hermetic env ---------------------------------------------------
+
+	home := t.TempDir()
+	xdgConfig := filepath.Join(home, ".config")
+	xdgState := filepath.Join(home, ".local", "state")
+
+	// Project dir for the session.  The fake read tool will read a file
+	// inside this dir — the default permission policy auto-allows reads
+	// inside Pwd, so no modal is needed (the auto-allow subscriber
+	// below catches anything that *does* slip through).
+	pwd := t.TempDir()
+	const readContents = "package main\n\nfunc main() {}\n"
+	readPath := filepath.Join(pwd, "main.go")
+	if err := os.WriteFile(readPath, []byte(readContents), 0o600); err != nil {
+		t.Fatalf("seed main.go: %v", err)
+	}
+
+	// 500-only catalog server so the runtime never reaches models.dev.
+	// LookUp falls back to the hard-coded table; for an unknown model
+	// (which we use below) that yields ErrModelNotPriced and the agent
+	// records cost = 0.
+	catSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(catSrv.Close)
+
+	// Fixed clock so timestamps in committed messages are deterministic.
+	now := func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+
+	// ---- scripted fake provider ----------------------------------------
+
+	// Use a model name that is not in the hard-coded fallback table so
+	// the catalog lookup falls through to ErrModelNotPriced and the
+	// agent records cost = 0.  (The task spec calls this case out
+	// explicitly — see deliverable 1, assertion 5.)
+	const fakeModel = "fake-smoke-model-vX"
+
+	readInput, err := json.Marshal(map[string]any{"path": readPath})
+	if err != nil {
+		t.Fatalf("marshal read input: %v", err)
+	}
+
+	scripts := []smokeScript{
+		// Turn 1: emit a read tool call against the seed file, then Done.
+		{events: []provider.Event{
+			{Type: provider.EventToolUse, ToolID: "tu-1", ToolName: "read", ToolInput: readInput},
+			{Type: provider.EventUsage, Usage: provider.Usage{InputTokens: 42, OutputTokens: 7}},
+			{Type: provider.EventDone},
+		}},
+		// Turn 2: emit text deltas, usage, Done.
+		{events: []provider.Event{
+			{Type: provider.EventTextDelta, Text: "the file "},
+			{Type: provider.EventTextDelta, Text: "has package declarations"},
+			{Type: provider.EventUsage, Usage: provider.Usage{InputTokens: 80, OutputTokens: 12}},
+			{Type: provider.EventDone},
+		}},
+	}
+
+	prov := newSmokeProvider("anthropic", fakeModel, scripts)
+
+	// ---- bootstrap overrides -------------------------------------------
+
+	SetTestOverrides(&bootstrapOptions{
+		HomeDir:        home,
+		XDGConfigHome:  xdgConfig,
+		XDGStateHome:   xdgState,
+		Pwd:            pwd,
+		Now:            now,
+		SkipTea:        true,
+		CatalogBaseURL: catSrv.URL,
+		ProviderFactory: func(_ map[string]any) (provider.Provider, error) {
+			return prov, nil
+		},
+		SystemPrompt: "smoke-test system prompt",
+	})
+	t.Cleanup(func() { SetTestOverrides(nil) })
+
+	rt, err := bootstrap(ctx, bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	// ---- recording subscribers (built before any Send) -----------------
+
+	rec := newBusRecorder(t, rt.Bus)
+	t.Cleanup(rec.stop)
+
+	// ---- auto-allow permission subscriber ------------------------------
+	//
+	// Default policy allows file.read inside Pwd, so the read tool call
+	// in this smoke test won't trigger a modal — but we wire the
+	// subscriber anyway so the test would survive a future change that
+	// moves the seed file outside Pwd.  Mimics the TUI's `y` keypress.
+	permDone := make(chan struct{})
+	permSub := bus.Subscribe[bus.PermissionAsked](rt.Bus, bus.SubscribeOptions{BufferSize: 16})
+	go func() {
+		for {
+			select {
+			case <-permDone:
+				return
+			case ev, ok := <-permSub.C():
+				if !ok {
+					return
+				}
+				bus.Publish(rt.Bus, bus.PermissionReplied{
+					RequestID: ev.RequestID,
+					Decision:  string(permission.ActionAllow),
+					Scope:     string(permission.ScopeOnce),
+					At:        now(),
+				})
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(permDone)
+		permSub.Unsubscribe()
+	})
+
+	// ---- mimic ui.App.ensureSession ------------------------------------
+	//
+	// The TUI lazily creates a session on first Send and then calls
+	// OnSessionCreated.  We do the same here so state.RecentSessions
+	// gets written exactly the way the TUI writes it.
+	sess, err := rt.Store.CreateSession(ctx, session.NewSession{
+		ProjectDir: pwd,
+		Model: session.ModelRef{
+			Provider: rt.Config.Model.Provider,
+			Name:     fakeModel,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	bus.Publish(rt.Bus, bus.SessionStart{
+		SessionID: sess.ID,
+		Resumed:   false,
+		At:        now(),
+	})
+	if err := state.AddRecentSession(sess.ID, rt.StateOpts); err != nil {
+		t.Fatalf("AddRecentSession: %v", err)
+	}
+
+	// Assertion 1: session created with the right ProjectDir and Model.
+	if sess.ProjectDir != pwd {
+		t.Errorf("session ProjectDir = %q, want %q", sess.ProjectDir, pwd)
+	}
+	if sess.Model.Provider != "anthropic" || sess.Model.Name != fakeModel {
+		t.Errorf("session Model = %+v, want {anthropic %s}", sess.Model, fakeModel)
+	}
+
+	// ---- the conversation ---------------------------------------------
+
+	final, err := rt.Agent.Send(ctx, sess.ID, []session.Part{
+		{Kind: session.PartText, Text: "what's in main.go?"},
+	})
+	if err != nil {
+		t.Fatalf("Agent.Send: %v", err)
+	}
+	if final == nil {
+		t.Fatalf("Agent.Send: nil final message")
+	}
+
+	// Give the bus recorder a tick to drain anything still queued before
+	// we assert on its contents.
+	time.Sleep(100 * time.Millisecond)
+
+	// ---- assertions ----------------------------------------------------
+
+	// Assertion 2: four messages in the documented order.
+	msgs, err := rt.Store.MessagesForSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("MessagesForSession: %v", err)
+	}
+	if got, want := len(msgs), 4; got != want {
+		t.Fatalf("len(messages) = %d, want %d. roles=%v", got, want, smokeRoles(msgs))
+	}
+	wantRoles := []string{
+		string(session.RoleUser),
+		string(session.RoleAssistant),
+		string(session.RoleTool),
+		string(session.RoleAssistant),
+	}
+	if got := smokeRoles(msgs); !reflect.DeepEqual(got, wantRoles) {
+		t.Fatalf("message roles = %v, want %v", got, wantRoles)
+	}
+
+	// Inner shape: assistant turn 1 must carry a tool_use part.
+	asst1 := msgs[1]
+	var sawToolUse bool
+	for _, p := range asst1.Parts {
+		if p.Kind == session.PartToolUse && p.ToolName == "read" && p.ToolID == "tu-1" {
+			sawToolUse = true
+		}
+	}
+	if !sawToolUse {
+		t.Errorf("assistant turn 1 missing read tool_use part: %+v", asst1.Parts)
+	}
+
+	// Assertion 3: tool message contains the file contents.
+	toolMsg := msgs[2]
+	if len(toolMsg.Parts) != 1 || toolMsg.Parts[0].Kind != session.PartToolResult {
+		t.Fatalf("tool message has unexpected parts: %+v", toolMsg.Parts)
+	}
+	if toolMsg.Parts[0].IsError {
+		t.Fatalf("tool result is_error=true; content=%q", toolMsg.Parts[0].Content)
+	}
+	if !strings.Contains(toolMsg.Parts[0].Content, "package main") {
+		t.Fatalf("tool result missing 'package main'; got: %q", toolMsg.Parts[0].Content)
+	}
+
+	// Final assistant turn carries the text deltas.
+	if !strings.Contains(final.Parts[0].Text, "package declarations") {
+		t.Errorf("final assistant text missing expected content; got %q",
+			final.Parts[0].Text)
+	}
+
+	// Assertion 4: cumulative input/output tokens are non-zero.
+	reloaded, err := rt.Store.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if reloaded.Totals.InputTokens == 0 {
+		t.Errorf("Totals.InputTokens = 0; want > 0 (got %+v)", reloaded.Totals)
+	}
+	if reloaded.Totals.OutputTokens == 0 {
+		t.Errorf("Totals.OutputTokens = 0; want > 0 (got %+v)", reloaded.Totals)
+	}
+
+	// Assertion 5: cost may be zero for an unknown model — but no panic.
+	// (The fact that we got here without panicking is the assertion.)
+	if reloaded.Totals.CostUSD < 0 {
+		t.Errorf("Totals.CostUSD = %v; want >= 0", reloaded.Totals.CostUSD)
+	}
+
+	// Assertion 6: bus events appeared in a sensible order.
+	rec.assertOrdered(t, sess.ID)
+
+	// Assertion 7: state.RecentSessions contains the new session id.
+	stReloaded, err := state.Load(rt.StateOpts)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+	var sawRecent bool
+	for _, id := range stReloaded.RecentSessions {
+		if id == sess.ID {
+			sawRecent = true
+			break
+		}
+	}
+	if !sawRecent {
+		t.Errorf("state.RecentSessions = %v; missing %s", stReloaded.RecentSessions, sess.ID)
+	}
+
+	// Sanity: provider was called exactly twice (one tool-use turn,
+	// one final-text turn).
+	if got := prov.calls.Load(); got != 2 {
+		t.Errorf("provider Stream calls = %d, want 2", got)
+	}
+}
+
+// ---------- smoke-test scaffolding -----------------------------------------
+
+// smokeScript is one provider turn's event sequence.
+type smokeScript struct {
+	events []provider.Event
+}
+
+// smokeProvider is a scripted, no-network provider used by the smoke test.
+// Each Stream call pops the next script off the front of the queue.
+type smokeProvider struct {
+	name    string
+	model   string
+	mu      sync.Mutex
+	scripts []smokeScript
+	calls   atomic.Int32
+}
+
+func newSmokeProvider(name, model string, scripts []smokeScript) *smokeProvider {
+	return &smokeProvider{name: name, model: model, scripts: scripts}
+}
+
+func (p *smokeProvider) Name() string { return p.name }
+
+func (p *smokeProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Event, error) {
+	p.calls.Add(1)
+	p.mu.Lock()
+	if len(p.scripts) == 0 {
+		p.mu.Unlock()
+		return nil, fmt.Errorf("smokeProvider: out of scripts")
+	}
+	s := p.scripts[0]
+	p.scripts = p.scripts[1:]
+	p.mu.Unlock()
+
+	ch := make(chan provider.Event, len(s.events)+1)
+	go func() {
+		defer close(ch)
+		for _, ev := range s.events {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- ev:
+			}
+		}
+	}()
+	return ch, nil
+}
+
+func (p *smokeProvider) CountTokens(_ context.Context, _ provider.Request) (int64, error) {
+	return 0, nil
+}
+
+func (p *smokeProvider) ListModels(_ context.Context) ([]provider.Model, error) {
+	return []provider.Model{{
+		Name:           p.model,
+		ContextWindow:  200_000,
+		MaxOutput:      8192,
+		SupportsTools:  true,
+		SupportsImages: true,
+	}}, nil
+}
+
+// busRecorder subscribes to the bus events that matter to the smoke
+// test and records each one with a monotonically-increasing sequence
+// number.  Lets the test assert event ordering after Send returns.
+type busRecorder struct {
+	mu     sync.Mutex
+	events []recordedEvent
+	subs   []interface{ Unsubscribe() }
+	done   chan struct{}
+	seq    atomic.Int64
+}
+
+type recordedEvent struct {
+	seq  int64
+	kind string
+	at   any
+}
+
+func newBusRecorder(t *testing.T, b *bus.Bus) *busRecorder {
+	t.Helper()
+	r := &busRecorder{done: make(chan struct{})}
+
+	startSub(b, r, "SessionStart", func(b *bus.Bus) (interface{ Unsubscribe() }, <-chan any) {
+		s := bus.Subscribe[bus.SessionStart](b, bus.SubscribeOptions{BufferSize: 32})
+		out := make(chan any, 32)
+		go func() {
+			for ev := range s.C() {
+				out <- ev
+			}
+			close(out)
+		}()
+		return s, out
+	})
+	startSub(b, r, "MessageAppended", func(b *bus.Bus) (interface{ Unsubscribe() }, <-chan any) {
+		s := bus.Subscribe[bus.MessageAppended](b, bus.SubscribeOptions{BufferSize: 32})
+		out := make(chan any, 32)
+		go func() {
+			for ev := range s.C() {
+				out <- ev
+			}
+			close(out)
+		}()
+		return s, out
+	})
+	startSub(b, r, "ToolCallRequested", func(b *bus.Bus) (interface{ Unsubscribe() }, <-chan any) {
+		s := bus.Subscribe[bus.ToolCallRequested](b, bus.SubscribeOptions{BufferSize: 32})
+		out := make(chan any, 32)
+		go func() {
+			for ev := range s.C() {
+				out <- ev
+			}
+			close(out)
+		}()
+		return s, out
+	})
+	startSub(b, r, "ToolCallCompleted", func(b *bus.Bus) (interface{ Unsubscribe() }, <-chan any) {
+		s := bus.Subscribe[bus.ToolCallCompleted](b, bus.SubscribeOptions{BufferSize: 32})
+		out := make(chan any, 32)
+		go func() {
+			for ev := range s.C() {
+				out <- ev
+			}
+			close(out)
+		}()
+		return s, out
+	})
+	startSub(b, r, "AssistantTextDelta", func(b *bus.Bus) (interface{ Unsubscribe() }, <-chan any) {
+		s := bus.Subscribe[bus.AssistantTextDelta](b, bus.SubscribeOptions{BufferSize: 64})
+		out := make(chan any, 64)
+		go func() {
+			for ev := range s.C() {
+				out <- ev
+			}
+			close(out)
+		}()
+		return s, out
+	})
+	return r
+}
+
+// startSub wires one subscription into the recorder.  The factory
+// returns the subscription handle (for Unsubscribe) and a chan of
+// type-erased events.
+func startSub(
+	b *bus.Bus,
+	r *busRecorder,
+	kind string,
+	factory func(*bus.Bus) (interface{ Unsubscribe() }, <-chan any),
+) {
+	sub, ch := factory(b)
+	r.mu.Lock()
+	r.subs = append(r.subs, sub)
+	r.mu.Unlock()
+	go func() {
+		for {
+			select {
+			case <-r.done:
+				return
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				r.record(kind, ev)
+			}
+		}
+	}()
+}
+
+func (r *busRecorder) record(kind string, ev any) {
+	seq := r.seq.Add(1)
+	r.mu.Lock()
+	r.events = append(r.events, recordedEvent{seq: seq, kind: kind, at: ev})
+	r.mu.Unlock()
+}
+
+func (r *busRecorder) stop() {
+	close(r.done)
+	r.mu.Lock()
+	subs := r.subs
+	r.subs = nil
+	r.mu.Unlock()
+	for _, s := range subs {
+		s.Unsubscribe()
+	}
+}
+
+// assertOrdered checks the documented per-iteration order for the
+// scripted conversation:
+//
+//	SessionStart
+//	MessageAppended (user)
+//	MessageAppended (assistant, tool_use)
+//	ToolCallRequested
+//	ToolCallCompleted
+//	MessageAppended (tool)
+//	MessageAppended (assistant, final)
+//
+// Other events (deltas, cost, context usage) interleave freely.  We
+// just check that the milestone events appear in this relative order.
+func (r *busRecorder) assertOrdered(t *testing.T, sessionID string) {
+	t.Helper()
+	r.mu.Lock()
+	events := append([]recordedEvent(nil), r.events...)
+	r.mu.Unlock()
+
+	type checkpoint struct {
+		name  string
+		match func(recordedEvent) bool
+	}
+	checkpoints := []checkpoint{
+		{"SessionStart", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.SessionStart)
+			return ok && ev.SessionID == sessionID
+		}},
+		{"MessageAppended(user)", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.MessageAppended)
+			return ok && ev.Role == string(session.RoleUser)
+		}},
+		{"MessageAppended(assistant#1)", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.MessageAppended)
+			return ok && ev.Role == string(session.RoleAssistant)
+		}},
+		{"ToolCallRequested", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.ToolCallRequested)
+			return ok && ev.ToolName == "read"
+		}},
+		{"ToolCallCompleted", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.ToolCallCompleted)
+			return ok && ev.ToolName == "read"
+		}},
+		{"MessageAppended(tool)", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.MessageAppended)
+			return ok && ev.Role == string(session.RoleTool)
+		}},
+		{"MessageAppended(assistant#2)", func(e recordedEvent) bool {
+			ev, ok := e.at.(bus.MessageAppended)
+			return ok && ev.Role == string(session.RoleAssistant)
+		}},
+	}
+
+	pos := 0
+	matched := make([]int64, 0, len(checkpoints))
+	for _, want := range checkpoints {
+		found := -1
+		for i := pos; i < len(events); i++ {
+			if want.match(events[i]) {
+				// Skip an assistant#1 match if we've already consumed
+				// it for that checkpoint — the recorder doesn't know
+				// "first" vs "second".  We rely on iteration order:
+				// the next assistant MessageAppended after pos is the
+				// next checkpoint.
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			t.Errorf("bus order: missing checkpoint %q at/after seq %d. events=%v",
+				want.name, pos, debugKinds(events))
+			return
+		}
+		matched = append(matched, events[found].seq)
+		pos = found + 1
+	}
+	// Optional sanity: assistant text deltas appeared between
+	// ToolCallCompleted and the final MessageAppended(assistant).
+	deltaSeen := false
+	if len(matched) >= 2 {
+		toolDone := matched[4]
+		finalAsst := matched[6]
+		for _, e := range events {
+			if e.seq <= toolDone || e.seq >= finalAsst {
+				continue
+			}
+			if _, ok := e.at.(bus.AssistantTextDelta); ok {
+				deltaSeen = true
+				break
+			}
+		}
+	}
+	if !deltaSeen {
+		t.Errorf("bus order: no AssistantTextDelta between tool completion and final assistant message")
+	}
+}
+
+func debugKinds(events []recordedEvent) []string {
+	out := make([]string, len(events))
+	for i, e := range events {
+		out[i] = e.kind
+	}
+	return out
+}
+
+// smokeRoles is a small helper mirroring the agent_test.go roles()
+// helper, scoped to this file to avoid leaking test-only helpers into
+// the cli package.
+func smokeRoles(msgs []*session.Message) []string {
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = string(m.Role)
+	}
+	return out
+}

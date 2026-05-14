@@ -62,6 +62,9 @@ func applyTestOverrides(o bootstrapOptions) bootstrapOptions {
 	if o.SystemPrompt == "" {
 		o.SystemPrompt = testOverrides.SystemPrompt
 	}
+	if o.CatalogBaseURL == "" {
+		o.CatalogBaseURL = testOverrides.CatalogBaseURL
+	}
 	return o
 }
 
