@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 )
@@ -931,4 +932,156 @@ func equalTypes(a, b []provider.EventType) bool {
 		}
 	}
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// T3.6 — Catalog-driven Anthropic reasoning detection
+// ---------------------------------------------------------------------------
+
+// catalogWithReasoning builds a minimal *catalog.Catalog whose
+// "anthropic" provider has exactly two entries: one with Reasoning=true
+// and one with Reasoning=false.  BackgroundRefresh is disabled for
+// determinism.
+func catalogWithReasoning(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	body := `{
+  "anthropic": {
+    "id": "anthropic",
+    "models": {
+      "claude-sonnet-4-5": {
+        "id": "claude-sonnet-4-5",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {"input": ["text"], "output": ["text"]},
+        "limit": {"context": 200000, "output": 64000},
+        "cost": {"input": 3, "output": 15}
+      },
+      "claude-haiku-no-reasoning": {
+        "id": "claude-haiku-no-reasoning",
+        "reasoning": false,
+        "tool_call": true,
+        "modalities": {"input": ["text"], "output": ["text"]},
+        "limit": {"context": 200000, "output": 4096},
+        "cost": {"input": 1, "output": 5}
+      }
+    }
+  }
+}`
+	// Use a fake HTTP server so catalog.Load gets a real network fetch path.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	bg := false
+	c, err := catalog.Load(catalog.LoadOptions{
+		StateDir:          t.TempDir(),
+		BaseURL:           srv.URL,
+		BackgroundRefresh: &bg,
+	})
+	if err != nil {
+		t.Fatalf("catalogWithReasoning: Load: %v", err)
+	}
+	// Refresh to populate from the test server.
+	if _, err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("catalogWithReasoning: Refresh: %v", err)
+	}
+	return c
+}
+
+// newAdapterWithCatalog builds an adapter with the package-level catalog
+// set to c (nil clears it).  It restores the previous catalog on cleanup.
+func newAdapterWithCatalog(t *testing.T, baseURL string, cat *catalog.Catalog) *adapter {
+	t.Helper()
+	// Save and restore the package-level catalog.
+	prev := catalogHandle()
+	SetCatalog(cat)
+	t.Cleanup(func() { SetCatalog(prev) })
+
+	p, err := New(map[string]any{
+		"api_key":  "test-key",
+		"base_url": baseURL,
+		"cache":    false,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p.(*adapter)
+}
+
+// TestBuildRequestBody_ReasoningCatalogDetection is a table-driven test
+// covering the four catalog × reasoning combinations specified in T3.6.
+func TestBuildRequestBody_ReasoningCatalogDetection(t *testing.T) {
+	cat := catalogWithReasoning(t)
+
+	baseMsg := []session.Message{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}},
+	}
+
+	cases := []struct {
+		name         string
+		modelName    string
+		reasoning    provider.Reasoning
+		cat          *catalog.Catalog // nil = no catalog
+		wantThinking bool
+	}{
+		{
+			name:         "reasoning on + model supports it → thinking block attached",
+			modelName:    "claude-sonnet-4-5",
+			reasoning:    provider.Reasoning{Effort: "medium"},
+			cat:          cat,
+			wantThinking: true,
+		},
+		{
+			name:         "reasoning on + model does not support it → thinking block dropped",
+			modelName:    "claude-haiku-no-reasoning",
+			reasoning:    provider.Reasoning{Effort: "medium"},
+			cat:          cat,
+			wantThinking: false,
+		},
+		{
+			name:         "reasoning on + model not in catalog → fail-open, block attached",
+			modelName:    "claude-unknown-model",
+			reasoning:    provider.Reasoning{Effort: "medium"},
+			cat:          cat,
+			wantThinking: true,
+		},
+		{
+			name:         "reasoning off → no thinking block regardless of catalog",
+			modelName:    "claude-sonnet-4-5",
+			reasoning:    provider.Reasoning{},
+			cat:          cat,
+			wantThinking: false,
+		},
+		{
+			name:         "catalog nil → fail-open, block attached",
+			modelName:    "claude-sonnet-4-5",
+			reasoning:    provider.Reasoning{Effort: "high"},
+			cat:          nil,
+			wantThinking: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAdapterWithCatalog(t, "http://unused", tc.cat)
+			body, err := a.buildRequestBody(provider.Request{
+				ModelName: tc.modelName,
+				Messages:  baseMsg,
+				Reasoning: tc.reasoning,
+			}, true)
+			if err != nil {
+				t.Fatalf("buildRequestBody: %v", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("unmarshal: %v: %s", err, body)
+			}
+			_, has := got["thinking"]
+			if has != tc.wantThinking {
+				t.Errorf("thinking present=%v, want %v; body=%s", has, tc.wantThinking, body)
+			}
+		})
+	}
 }

@@ -720,6 +720,9 @@ Three layers in the resolution cascade, in order:
 3. **Background refresh** kicked off on startup when the disk snapshot
    is older than 7 days.  Runs in a goroutine; never blocks startup;
    logs to `slog.Debug` on success and `slog.Warn` on failure.
+4. **Periodic refresh** — optional; configured via
+   `[catalog] refresh_interval` (see below).  Keeps a long-lived
+   hygge process up to date without a restart.
 
 Inspect or refresh the catalog from the CLI:
 
@@ -730,12 +733,33 @@ hygge catalog show anthropic/claude-sonnet-4-5  # all metadata
 hygge catalog refresh                           # pull a fresh snapshot
 ```
 
+#### Periodic catalog refresh
+
+Add to `~/.config/hygge/config.toml` (or any config layer):
+
+```toml
+[catalog]
+refresh_interval = "24h"   # any Go duration string, e.g. "1h", "30m"
+```
+
+When set, hygge fetches a fresh catalog snapshot at that cadence in the
+background.  The refresh runs in a goroutine and never blocks the TUI.
+Failures are logged as `slog.Warn` and leave the existing snapshot
+intact.  The default is empty (disabled) — the one-shot startup refresh
+still fires when the disk snapshot is stale.
+
 The same catalog drives reasoning-class detection in the OpenAI-compat
 adapter: when models.dev advertises `reasoning: true` for a model, the
 adapter switches to the `max_completion_tokens` / `reasoning_effort`
 request shape automatically.  A hardcoded name-prefix matcher (o1-*,
 o3-*, o4-*, reasoning-*) remains as a fallback for brand-new ids the
 local catalog hasn't been refreshed for.
+
+The Anthropic adapter also consults the catalog before attaching the
+`thinking` block: if the catalog says a model does not support reasoning,
+the block is dropped with a `slog.Warn`.  Unknown models (not in the
+catalog) default to attaching the block so a stale catalog never silently
+regresses a user who is actually using a reasoning-capable model.
 
 ## Hooks
 

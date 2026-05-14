@@ -48,6 +48,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 
@@ -65,6 +66,7 @@ type Config struct {
 	Theme      ThemeConfig      `mapstructure:"theme"`
 	Compaction CompactionConfig `mapstructure:"compaction"`
 	Session    SessionConfig    `mapstructure:"session"`
+	Catalog    CatalogConfig    `mapstructure:"catalog"`
 	// Plugins holds plugin source and per-plugin configuration.
 	// Sources is the list of plugin source URIs declared in [plugins].sources.
 	// PluginSettings maps plugin names to their [plugins.<name>] config tables.
@@ -136,6 +138,39 @@ type SessionConfig struct {
 	// The comparison is case-insensitive.  Any other value warns and
 	// resets to "new".
 	ResumeDefault string `mapstructure:"resume_default"`
+}
+
+// CatalogConfig controls the shared model catalog.
+type CatalogConfig struct {
+	// RefreshInterval is a Go duration string (e.g. "24h", "1h30m") that,
+	// when non-empty, schedules a periodic background refresh of the
+	// models.dev catalog.  Empty string (the default) means no periodic
+	// refresh — the one-shot startup refresh still fires.
+	//
+	// Values that cannot be parsed as a duration, or that are negative,
+	// are treated as empty with a slog.Warn.
+	RefreshInterval string `mapstructure:"refresh_interval"`
+}
+
+// RefreshIntervalDuration parses the RefreshInterval string into a
+// time.Duration.  Returns 0 when the string is empty.  Logs a Warn and
+// returns 0 when the value is unparseable or negative.
+func (c CatalogConfig) RefreshIntervalDuration() time.Duration {
+	if c.RefreshInterval == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.RefreshInterval)
+	if err != nil {
+		slog.Warn("config: invalid catalog.refresh_interval, disabling periodic refresh",
+			"value", c.RefreshInterval)
+		return 0
+	}
+	if d < 0 {
+		slog.Warn("config: negative catalog.refresh_interval, disabling periodic refresh",
+			"value", c.RefreshInterval)
+		return 0
+	}
+	return d
 }
 
 // CompactionConfig controls the compaction suggestion banner.
@@ -452,6 +487,21 @@ func validateConfig(cfg *Config) error {
 		slog.Warn("config: invalid session.resume_default, resetting to new",
 			"value", cfg.Session.ResumeDefault)
 		cfg.Session.ResumeDefault = "new"
+	}
+
+	// Catalog refresh_interval: validate by parsing; bad values warn and
+	// are reset to "" (disabled) so startup is never blocked.
+	if cfg.Catalog.RefreshInterval != "" {
+		d, err := time.ParseDuration(cfg.Catalog.RefreshInterval)
+		if err != nil {
+			slog.Warn("config: invalid catalog.refresh_interval, disabling periodic refresh",
+				"value", cfg.Catalog.RefreshInterval)
+			cfg.Catalog.RefreshInterval = ""
+		} else if d < 0 {
+			slog.Warn("config: negative catalog.refresh_interval, disabling periodic refresh",
+				"value", cfg.Catalog.RefreshInterval)
+			cfg.Catalog.RefreshInterval = ""
+		}
 	}
 
 	return nil

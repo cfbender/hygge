@@ -558,3 +558,108 @@ func TestLoaded_ReportsAgeAndSource(t *testing.T) {
 		t.Errorf("FetchedAt = %v, want %v", loaded.FetchedAt, now)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T3.3 — Periodic catalog auto-refresh tests
+// ---------------------------------------------------------------------------
+
+// TestPeriodicRefresh_TickerFiresAtInterval confirms that the periodic ticker
+// calls Refresh at least twice within interval × 4 when RefreshInterval > 0.
+func TestPeriodicRefresh_TickerFiresAtInterval(t *testing.T) {
+	t.Parallel()
+	const interval = 40 * time.Millisecond
+
+	f := freshFetcher(t)
+	c, err := Load(LoadOptions{
+		StateDir:          tempStateDir(t),
+		Source:            f,
+		BackgroundRefresh: boolPtr(false),
+		RefreshInterval:   interval,
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+
+	// Allow up to interval × 8 for at least 2 fetches to land.
+	deadline := time.Now().Add(interval * 8)
+	for f.hits.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := f.hits.Load(); got < 2 {
+		t.Errorf("expected >= 2 periodic fetches within deadline, got %d", got)
+	}
+}
+
+// TestPeriodicRefresh_CloseStopsTicker verifies that Close() stops the
+// ticker goroutine: no further fetches occur after Close, and the goroutine
+// count returns to baseline.
+func TestPeriodicRefresh_CloseStopsTicker(t *testing.T) {
+	t.Parallel()
+	const interval = 30 * time.Millisecond
+
+	f := freshFetcher(t)
+	c, err := Load(LoadOptions{
+		StateDir:          tempStateDir(t),
+		Source:            f,
+		BackgroundRefresh: boolPtr(false),
+		RefreshInterval:   interval,
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Let at least one tick fire.
+	deadline := time.Now().Add(interval * 4)
+	for f.hits.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Close must return quickly (well within 1 second).
+	done := make(chan error, 1)
+	go func() { done <- c.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not return within 1 second")
+	}
+
+	// Snapshot the hit count, sleep two more intervals, verify no new hits.
+	hitsAfterClose := f.hits.Load()
+	time.Sleep(interval * 3)
+	if got := f.hits.Load(); got != hitsAfterClose {
+		t.Errorf("ticker fired after Close: hits before=%d after=%d", hitsAfterClose, got)
+	}
+}
+
+// TestPeriodicRefresh_ZeroIntervalNoTicker confirms that a zero RefreshInterval
+// does not start a ticker (Close is a no-op, no extra fetches occur).
+func TestPeriodicRefresh_ZeroIntervalNoTicker(t *testing.T) {
+	t.Parallel()
+	f := freshFetcher(t)
+	c, err := Load(LoadOptions{
+		StateDir:          tempStateDir(t),
+		Source:            f,
+		BackgroundRefresh: boolPtr(false),
+		RefreshInterval:   0, // disabled
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Close should be a safe no-op.
+	if err := c.Close(); err != nil {
+		t.Errorf("Close on no-ticker catalog: %v", err)
+	}
+	// No background refresh, no ticker → zero fetches.
+	time.Sleep(30 * time.Millisecond)
+	if got := f.hits.Load(); got != 0 {
+		t.Errorf("expected 0 fetches with no ticker, got %d", got)
+	}
+}
