@@ -182,6 +182,23 @@ type App struct {
 	// does not break the filter.
 	subagents map[string]*components.SubagentState
 
+	// foregroundStack tracks the navigation history for the TUI.
+	// The bottom entry (index 0) is always the root session.
+	// The top entry (last index) is the currently-foregrounded session.
+	//
+	// Operations:
+	//   pushForeground(id): appends id to the top.
+	//   popForeground():    removes the top; no-op when len == 1 (never
+	//                       pops the root).
+	//   resetForeground(id): replaces the entire stack with [id]; used by
+	//                        the sessions modal "switch" action so the
+	//                        chosen session becomes the new root and
+	//                        breadcrumb is cleared.
+	//
+	// When the stack is empty (App not yet bound to a session), foregroundID()
+	// returns opts.SessionID to preserve the pre-T2.2 lazy-create behaviour.
+	foregroundStack []string
+
 	// closed protects against double Close.
 	closeOnce sync.Once
 }
@@ -330,10 +347,28 @@ func (a *App) View() string {
 		Theme:       a.opts.Theme,
 	}.View()
 
+	// T2.2 — breadcrumb: shown above the message list when depth > 1.
+	breadcrumb := components.Breadcrumb{
+		Segments: a.breadcrumbSegments(),
+		Width:    width,
+		Theme:    a.opts.Theme,
+	}.View()
+
+	// T2.2 — when the foreground is a sub-session, show that sub-session's
+	// transcript.  Otherwise show the primary message buffer.
+	visibleMessages := a.messages
+	foreID := a.foregroundID()
+	rootID := a.rootSessionID()
+	if foreID != rootID && foreID != "" {
+		if st, ok := a.subagents[foreID]; ok {
+			visibleMessages = st.Messages
+		}
+	}
+
 	ml := components.MessageList{
 		Width:     width,
 		Theme:     a.opts.Theme,
-		Messages:  a.messages,
+		Messages:  visibleMessages,
 		Subagents: a.subagents,
 		Now:       a.opts.Now(),
 	}.View()
@@ -382,6 +417,9 @@ func (a *App) View() string {
 	// renders the full buffer and the bottom of the terminal shows whatever
 	// fits.  Task 13's CLI will wrap us in `tea.WithAltScreen` if desired.
 	chrome := lipgloss.Height(sb) + lipgloss.Height(in) + lipgloss.Height(fr)
+	if breadcrumb != "" {
+		chrome += lipgloss.Height(breadcrumb)
+	}
 	if palette != "" {
 		chrome += lipgloss.Height(palette)
 	}
@@ -395,7 +433,11 @@ func (a *App) View() string {
 	bodyStyle := lipgloss.NewStyle().Height(bodyHeight)
 	body := bodyStyle.Render(ml)
 
-	sections := []string{sb, body}
+	sections := []string{sb}
+	if breadcrumb != "" {
+		sections = append(sections, breadcrumb)
+	}
+	sections = append(sections, body)
 	if palette != "" {
 		sections = append(sections, palette)
 	}
@@ -546,6 +588,10 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// `ctrl+t` is otherwise unbound by the textarea bubble.
 		a.toggleLatestSubagent()
 		return a, nil
+	case tea.KeyCtrlG:
+		// T2.2 — Ctrl+G: follow into the most-recently-started sub-agent.
+		// No-op with a notice when no sub-agents have been tracked.
+		return a, a.followIntoLatestSubagent()
 	case tea.KeyEnter:
 		// Alt+Enter inserts a newline; we differentiate by Alt flag below.
 		if k.Alt {
@@ -579,9 +625,14 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 	case tea.KeyEsc:
-		// Esc dismisses the command palette without changing input.
-		// Outside slash mode it falls through (the textarea has no
-		// Esc binding by default, so this is a no-op there).
+		// T2.2 — Esc pops the foreground stack when depth > 1.
+		// At depth 1 (root) the existing Esc behaviour applies
+		// (dismiss command palette / no-op).
+		if len(a.foregroundStack) > 1 {
+			a.popForeground()
+			return a, a.setNotice("back to parent session")
+		}
+		// Existing Esc: dismisses the command palette without changing input.
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.input.Reset()
 			return a, nil
@@ -796,14 +847,20 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		a.updateLastTool(e)
 
 	case bus.CostUpdated:
+		// T2.1 cost roll-up: always update subagent cost tracking so the
+		// nested block header stays current for any sub-session event.
 		if a.routeToSubagent(e.SessionID) {
 			a.updateSubagentCost(e.SessionID, e)
-			return nil
+			// Also fall through to check if this is the root, to keep
+			// costDollars correct.
 		}
-		if !a.isForeground(e.SessionID) {
-			return nil
+		// The footer always shows the ROOT session's rolled-up total.
+		// rootSessionID() returns opts.SessionID when the stack is empty
+		// (pre-T2.2 path), preserving existing behaviour.
+		rootID := a.rootSessionID()
+		if rootID == "" || e.SessionID == rootID {
+			a.costDollars = e.DollarsTotal
 		}
-		a.costDollars = e.DollarsTotal
 
 	case bus.ContextUsageUpdated:
 		// Context usage is a parent-level concern.  Sub-agents have
@@ -851,10 +908,151 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 	return nil
 }
 
-// foregroundID returns the current foreground session id, or "" if no
-// session has been bound yet.
+// foregroundID returns the current foreground session id (top of the
+// navigation stack).  Falls back to opts.SessionID when the stack is
+// empty so the pre-T2.2 lazy-create path still works.
 func (a *App) foregroundID() string {
+	if n := len(a.foregroundStack); n > 0 {
+		return a.foregroundStack[n-1]
+	}
 	return a.opts.SessionID
+}
+
+// rootSessionID returns the session id at the bottom of the foreground
+// stack — the original primary session.  Used by the TUI footer and the
+// cost event handler so the rolled-up total is always visible regardless
+// of which level the user is viewing.
+//
+// Falls back to opts.SessionID when the stack is empty.
+func (a *App) rootSessionID() string {
+	if len(a.foregroundStack) > 0 {
+		return a.foregroundStack[0]
+	}
+	return a.opts.SessionID
+}
+
+// pushForeground appends id to the top of the foreground stack.
+// If the stack is currently empty, the current foreground (opts.SessionID)
+// is used as the implicit root and pushed first, so the stack always has
+// the root at index 0 before the new entry.
+// Refreshes the message list from the in-memory subagent buffer (for
+// now; a future version may reload from the store for the full history).
+func (a *App) pushForeground(id string) {
+	// Seed the root entry if the stack hasn't been explicitly initialised.
+	if len(a.foregroundStack) == 0 && a.opts.SessionID != "" {
+		a.foregroundStack = []string{a.opts.SessionID}
+	}
+	// Guard: do not double-push the same id.
+	if a.foregroundID() == id {
+		return
+	}
+	a.foregroundStack = append(a.foregroundStack, id)
+	a.refreshMessagesForForeground()
+}
+
+// popForeground removes the top of the foreground stack.  No-op when the
+// stack would otherwise lose its root entry (depth == 1).
+func (a *App) popForeground() {
+	if len(a.foregroundStack) <= 1 {
+		return
+	}
+	a.foregroundStack = a.foregroundStack[:len(a.foregroundStack)-1]
+	a.refreshMessagesForForeground()
+}
+
+// resetForeground replaces the entire stack with [id].  Used by the
+// sessions modal "switch" action: the chosen session becomes the new root
+// and the breadcrumb is cleared (stack depth == 1).
+func (a *App) resetForeground(id string) {
+	a.foregroundStack = []string{id}
+	a.refreshMessagesForForeground()
+}
+
+// refreshMessagesForForeground updates the messages buffer to show the
+// foregrounded session.  If the foregrounded session is a known subagent,
+// the subagent's transcript is loaded.  Otherwise the primary message
+// list is kept as-is (the in-memory buffer is already the primary view).
+//
+// NOTE: A future version will reload from the store so previously-stored
+// messages are visible when following into a completed subagent.
+func (a *App) refreshMessagesForForeground() {
+	id := a.foregroundID()
+	if id == a.rootSessionID() {
+		// Returning to the root — keep the primary message buffer.
+		return
+	}
+	// Following into a sub-session: show that session's transcript.
+	st, ok := a.subagents[id]
+	if !ok {
+		return
+	}
+	// Replace the primary message buffer with the sub-session's messages
+	// so the MessageList renders the sub-session's conversation.
+	// On pop we restore the primary buffer — but since we only swap
+	// a.messages we need to stash it.  Use the foregrounded session
+	// approach: when depth > 1 we source from the subagent state.
+	// To keep it simple: messages are NOT swapped here; the View()
+	// method checks foregroundStack depth and renders accordingly.
+	_ = st // used by View() directly
+}
+
+// breadcrumbSegments builds the label slice for the Breadcrumb component.
+// It reads session labels from opts.Store if available, otherwise uses
+// short ids.
+func (a *App) breadcrumbSegments() []string {
+	if len(a.foregroundStack) <= 1 {
+		return nil
+	}
+	segs := make([]string, 0, len(a.foregroundStack))
+	for _, id := range a.foregroundStack {
+		label := id
+		if a.opts.Store != nil {
+			sess, err := a.opts.Store.GetSession(a.ctx, id)
+			if err == nil {
+				label = components.SessionLabel(sess.Slug, sess.FirstMessagePreview, id)
+			}
+		}
+		segs = append(segs, label)
+	}
+	return segs
+}
+
+// latestSubagentID returns the sub-session id of the most recently started
+// sub-agent, or "" when no sub-agents have been tracked.  This is the
+// "most recent" heuristic shared with toggleLatestSubagent / Ctrl+T.
+func (a *App) latestSubagentID() string {
+	var latest *components.SubagentState
+	for _, st := range a.subagents {
+		if st == nil {
+			continue
+		}
+		if latest == nil || st.StartedAt.After(latest.StartedAt) {
+			latest = st
+		}
+	}
+	if latest == nil {
+		return ""
+	}
+	return latest.SubSessionID
+}
+
+// followIntoLatestSubagent pushes the most-recently-started sub-agent's
+// session onto the foreground stack.  If no sub-agents are tracked, a
+// notice is set and the call is a no-op.  Returns the notice tea.Cmd.
+func (a *App) followIntoLatestSubagent() tea.Cmd {
+	id := a.latestSubagentID()
+	if id == "" {
+		return a.setNotice("no subagent to follow (Ctrl+G)")
+	}
+	// Reject push onto deleted sessions — the subagent map only contains
+	// sessions created in this process lifetime, so they are never deleted
+	// in practice; the check is defensive.
+	a.pushForeground(id)
+	shortID := id
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	return a.setNotice(fmt.Sprintf("following sub-session %s (Esc to go back)", shortID))
 }
 
 // isForeground reports whether sessionID is the App's active foreground
@@ -869,12 +1067,18 @@ func (a *App) isForeground(sessionID string) bool {
 	return sessionID == fg
 }
 
-// routeToSubagent reports whether sessionID matches a tracked
-// sub-agent state.  Walks via the SubagentState chain so future
-// multi-level recursion remains supported even though the runtime
-// currently blocks it at depth 1.
+// routeToSubagent reports whether sessionID matches a tracked sub-agent
+// state AND the user has NOT followed into that session (i.e. it is not
+// the current foreground).  When the user has pressed Ctrl+G to follow
+// into a sub-session, that sub-session's events flow into the primary
+// message path rather than the nested block path.
 func (a *App) routeToSubagent(sessionID string) bool {
 	if sessionID == "" {
+		return false
+	}
+	// If this session is the current foreground (the user has followed
+	// into it), treat it as the primary path.
+	if a.isForeground(sessionID) {
 		return false
 	}
 	_, ok := a.subagents[sessionID]
@@ -1357,13 +1561,28 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 }
 
 // applySwitchSession changes the foreground session and resets the UI state.
+// The sessions modal "switch" action (Enter) resets the entire foreground
+// stack to [id] via resetForeground so the breadcrumb is cleared.  Use
+// Ctrl+G to follow into a sub-session without losing the current root.
 func (a *App) applySwitchSession(id string) tea.Cmd {
 	a.opts.SessionID = id
 	a.messages = nil
 	a.subagents = map[string]*components.SubagentState{}
 	a.renderer = nil
 	a.rendererW = 0
-	return a.setNotice(fmt.Sprintf("switched to session %s", id[:8]))
+	if id != "" {
+		a.resetForeground(id)
+	} else {
+		a.foregroundStack = nil
+	}
+	noticeID := id
+	if len(id) > 8 {
+		noticeID = id[:8]
+	}
+	if id == "" {
+		return a.setNotice("foreground cleared; next input creates a new session")
+	}
+	return a.setNotice(fmt.Sprintf("switched to session %s", noticeID))
 }
 
 // applyForkSession forks a session.  If messageID is "", it resolves the

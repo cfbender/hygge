@@ -2,6 +2,31 @@
 
 ## Shipped
 
+- **T2.1 — Cost roll-up + T2.2 — Foreground-switch into sub-sessions.**
+  Sub-session token and cost totals now roll up into the parent chain
+  via `store.PropagateTotals`, which uses a recursive CTE (capped at 32
+  hops) inside a single transaction.  A `CostUpdated` event is published
+  for every ancestor so the TUI footer — which subscribes to the ROOT
+  session id — always shows the total spend across the dispatch tree.
+  Sessions created before this change keep their un-rolled-up totals;
+  only new turns are propagated.  Per-session breakdowns remain visible
+  in the Sessions modal.
+
+  The TUI gains a foreground navigation stack (`foregroundStack []string`).
+  `Ctrl+G` follows into the most-recently-started sub-agent, swapping the
+  message list to the sub-session's transcript and rendering a breadcrumb
+  (`root › sub-session`).  `Esc` pops the stack; at root depth it falls
+  through to the existing `Esc` behaviour.  The Sessions modal "switch"
+  action resets the entire stack to the chosen session (no breadcrumb).
+  The agent's depth-1 recursion cap remains; the UI is intentionally
+  general for future relaxation.
+
+  See `internal/store/sessions.go` (`PropagateTotals`),
+  `internal/agent/cost.go` (switch to `PropagateTotals`),
+  `internal/ui/app.go` (`foregroundStack`, `Ctrl+G`, `Esc` pop,
+  `rootSessionID`, breadcrumb rendering), and
+  `internal/ui/components/breadcrumb.go` (new component).
+
 - **Hooks framework (v0.3 T1.4) — Tier-1 complete.**
   A four-event hooks framework (`pre_tool`, `post_tool`, `pre_message`,
   `post_message`) backed by subprocess hooks invoked via JSON-over-stdio.
@@ -93,17 +118,10 @@
 
 ## Sub-agent follow-ups (v0.3 backlog)
 
-- **Foreground-switch into a sub-session.** Today the nested block is
-  read-only and the user cannot focus a sub-session as the primary
-  view. A future keybind (e.g. `Ctrl+G`) could "follow" a sub-agent —
-  swap the foreground id and surface the sub-session's full
-  transcript in the main message list with a breadcrumb back to the
-  parent.
-- **Sub-session cost roll-up.** Stage C surfaces per-sub-agent cost
-  inside the nested block, but the parent footer still excludes
-  sub-agent dollars. When `SubagentCompleted` lands, the parent's
-  `costDollars` should accumulate the sub-agent's final `CostUSD` so
-  the footer reflects total spend across the dispatch tree.
+- **Foreground-switch into a sub-session — shipped (T2.2).** See
+  `Ctrl+G` / `Esc` in the TUI.  Breadcrumb rendered for depth > 1.
+- **Sub-session cost roll-up — shipped (T2.1).** Parent totals
+  updated via `PropagateTotals`; footer subscribes to root id.
 - **Cursor-based message navigation.** A cursor would replace the
   "toggle the latest block" affordance with a per-block toggle keyed
   off the selected message. Required before multi-level recursion is

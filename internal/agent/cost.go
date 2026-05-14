@@ -13,6 +13,14 @@ import (
 // recordUsage applies token usage to the session's running totals and
 // publishes the cost-/context-related bus events.  Pricing failures are
 // absorbed here and never propagate as agent errors — see the package doc.
+//
+// T2.1 — cost roll-up: PropagateTotals walks the parent chain atomically so
+// the primary session's running total stays correct even when the caller is a
+// sub-agent.  A CostUpdated event is published for EVERY ancestor so the TUI
+// footer, which subscribes to the root id, sees the rolled-up number.  The
+// delta published at each level is the SAME per-turn delta (not a cumulative
+// sum): each row in the chain accumulates the delta independently, so
+// multi-level nesting doesn't multiply counts — it just updates each row once.
 func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u provider.Usage) {
 	if u.InputTokens == 0 && u.OutputTokens == 0 &&
 		u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
@@ -30,33 +38,59 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 		CacheWriteTokens: u.CacheWriteTokens,
 		CostUSD:          money.USD,
 	}
-	if err := a.opts.Store.UpdateSessionTotals(ctx, sessionID, delta); err != nil {
-		// A failure to bump totals is logged but not fatal: the
-		// per-message usage was already persisted by AppendMessage,
-		// so the data is not lost — it just won't be reflected in the
-		// session's running totals.  Still emit the bus events from
-		// the totals view we just attempted to write.
-		slog.Warn("agent: update session totals failed",
-			"session_id", sessionID, "err", err)
-	}
 
-	totalsForEvent, err := a.opts.Store.GetSession(ctx, sessionID)
+	// PropagateTotals walks the parent chain (leaf → root) and applies the
+	// delta to each row atomically.  On failure, we log and continue —
+	// per-message usage data is already persisted by AppendMessage so the
+	// data is not lost.
+	ancestors, err := a.opts.Store.PropagateTotals(ctx, sessionID, delta)
 	if err != nil {
-		slog.Warn("agent: load session for cost event failed",
+		slog.Warn("agent: propagate session totals failed",
 			"session_id", sessionID, "err", err)
-		return
+		// Fall back to single-session update so at minimum the source
+		// session is still updated.
+		if updateErr := a.opts.Store.UpdateSessionTotals(ctx, sessionID, delta); updateErr != nil {
+			slog.Warn("agent: fallback update session totals also failed",
+				"session_id", sessionID, "err", updateErr)
+		}
+		// Publish a single CostUpdated for the leaf session only.
+		if totalsForEvent, getErr := a.opts.Store.GetSession(ctx, sessionID); getErr == nil {
+			bus.Publish(a.opts.Bus, bus.CostUpdated{
+				SessionID:        sessionID,
+				InputTokens:      totalsForEvent.Totals.InputTokens,
+				OutputTokens:     totalsForEvent.Totals.OutputTokens,
+				CacheReadTokens:  totalsForEvent.Totals.CacheReadTokens,
+				CacheWriteTokens: totalsForEvent.Totals.CacheWriteTokens,
+				ReasoningTokens:  u.ReasoningTokens,
+				DollarsTotal:     totalsForEvent.Totals.CostUSD,
+				At:               a.opts.Now(),
+			})
+		}
+	} else {
+		// Publish CostUpdated for each updated session (leaf first, root last).
+		// The TUI footer subscribes to the root id; sub-agent block headers
+		// subscribe to the leaf id.  Subscribing to intermediate ancestors is
+		// not done today — those rows silently accumulate in the DB and are
+		// visible in the sessions modal's per-row breakdown.
+		for _, ancestorID := range ancestors {
+			totalsForEvent, getErr := a.opts.Store.GetSession(ctx, ancestorID)
+			if getErr != nil {
+				slog.Warn("agent: load session for cost event failed",
+					"session_id", ancestorID, "err", getErr)
+				continue
+			}
+			bus.Publish(a.opts.Bus, bus.CostUpdated{
+				SessionID:        ancestorID,
+				InputTokens:      totalsForEvent.Totals.InputTokens,
+				OutputTokens:     totalsForEvent.Totals.OutputTokens,
+				CacheReadTokens:  totalsForEvent.Totals.CacheReadTokens,
+				CacheWriteTokens: totalsForEvent.Totals.CacheWriteTokens,
+				ReasoningTokens:  u.ReasoningTokens,
+				DollarsTotal:     totalsForEvent.Totals.CostUSD,
+				At:               a.opts.Now(),
+			})
+		}
 	}
-
-	bus.Publish(a.opts.Bus, bus.CostUpdated{
-		SessionID:        sessionID,
-		InputTokens:      totalsForEvent.Totals.InputTokens,
-		OutputTokens:     totalsForEvent.Totals.OutputTokens,
-		CacheReadTokens:  totalsForEvent.Totals.CacheReadTokens,
-		CacheWriteTokens: totalsForEvent.Totals.CacheWriteTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		DollarsTotal:     totalsForEvent.Totals.CostUSD,
-		At:               a.opts.Now(),
-	})
 
 	used := u.InputTokens + u.OutputTokens
 	maxTok := a.opts.ContextWindow

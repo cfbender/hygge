@@ -205,10 +205,14 @@ fine-grained control after the umbrella "launch the sub-agent" prompt.
 Sub-agent runs are persisted as their own sessions with `kind =
 subagent` and a `parent_id` link back to the dispatching session.
 They are auditable and replayable via the standard `hygge sessions`
-plumbing. Tokens and cost accumulate on the sub-session row; Stage A
-does not aggregate them into the parent's running totals — the `task`
-tool surfaces them in its metadata so the model (and you) can see
-what the run cost.
+plumbing. Tokens and cost accumulate on the sub-session row; the
+parent session's running totals are automatically rolled up via
+`PropagateTotals` so the TUI footer always shows the total spend
+across the entire dispatch tree.  Sessions created before T2.1
+keep their existing (un-rolled-up) totals — only new turns are
+propagated.  Per-sub-session breakdowns are visible in the Sessions
+modal (`/sessions`), which shows the per-row totals rather than
+the rolled-up figure.
 
 Use `hygge subagents list` to see the registered types and `hygge
 subagents show <name>` to inspect a single type's system prompt and
@@ -240,6 +244,30 @@ live transcript appears as a nested collapsible block underneath the
 
 Sub-agent events are routed by session id, so blocks from a previous
 foreground session never leak into the current view.
+
+#### Following into a sub-session (T2.2)
+
+While viewing a sub-agent block you can "follow" the sub-session:
+
+- **`Ctrl+G`** — Follow into the most recently started sub-agent.
+  The foreground stack is pushed, the message list switches to the
+  sub-session's full transcript, and a breadcrumb appears above the
+  messages: `<root-label> › <sub-label>`.  When no sub-agents are
+  running or finished, a notice is shown and the key is a no-op.
+- **`Esc`** (while in a sub-session) — Pop the foreground stack and
+  return to the parent session.  At root depth, `Esc` has its
+  normal behaviour (clears the slash-command palette / no-op).
+
+The navigation stack supports arbitrary depth so if the recursion
+limit is ever relaxed, the stack will Just Work.  The Sessions modal
+(`/sessions`) **Enter** action is a stack *reset*: it replaces the
+entire stack with the chosen session (no breadcrumb).  Use `Ctrl+G`
+to follow into a sub-session; use the Sessions modal only to switch
+to an unrelated session.
+
+**Footer cost** always shows the ROOT session's rolled-up total,
+regardless of which level you are viewing.  The breadcrumb is hidden
+when you are at the root level (depth 1).
 
 ### Project context (AGENTS.md / CLAUDE.md)
 
