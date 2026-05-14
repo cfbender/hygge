@@ -381,7 +381,55 @@ These are deliberately deferred. Do not block v0.1 on them.
       not available, verify the unit tests in `internal/mcp/sse_test.go`
       cover the handshake path via `httptest`.
 
-### Reasoning models smoke
+### Streamable HTTP MCP transport smoke (T1.3b)
+
+- [ ] **`hygge mcp list` shows transport column as `http` for Streamable HTTP servers.**
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.git" "$tmp/.agents"
+      cat > "$tmp/.agents/mcp.toml" <<'EOF'
+      [[servers]]
+      name = "github"
+      transport = "http"
+      url = "https://api.githubcopilot.com/mcp/"
+      [servers.github.headers]
+      Authorization = "Bearer test-pat"
+      EOF
+      (cd "$tmp" && ../bin/hygge mcp list)
+      ```
+      Output shows `github` with TRANSPORT column `http` and STATUS
+      `failed` (invalid token — that's expected; transport type and
+      config parsing are the focus).
+
+- [ ] **`hygge mcp doctor` parses Streamable HTTP config.**
+      Same setup as above, then:
+      ```
+      (cd "$tmp" && ../bin/hygge mcp doctor)
+      ```
+      Output shows the `.agents/mcp.toml` path with status `ok` and
+      1 server.
+
+- [ ] **Streamable HTTP server live round-trip (manual; requires a real PAT).**
+      Configure the GitHub Copilot MCP server in
+      `~/.config/hygge/mcp.toml`:
+      ```toml
+      [[servers]]
+      name = "github"
+      transport = "http"
+      url = "https://api.githubcopilot.com/mcp/"
+      [servers.github.headers]
+      Authorization = "Bearer ${GITHUB_PAT}"
+      ```
+      Set `GITHUB_PAT` in the environment, then:
+      ```
+      ./bin/hygge mcp ping github
+      ./bin/hygge mcp tools github
+      ```
+      `ping` should print `github ready (...) — init Xms, ping Yms`.
+      `tools` should list the server's advertised tools.  If a PAT is
+      not available, verify the unit tests in
+      `internal/mcp/streamable_test.go` cover the happy-path via
+      `httptest`.
 
 - [ ] **`--reasoning` flag visible in help.**
       `./bin/hygge --help` lists `--reasoning` with the

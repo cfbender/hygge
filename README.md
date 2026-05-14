@@ -389,32 +389,26 @@ interpolated at load time so secrets can come from the environment.
 
 #### Configuring an SSE MCP server
 
-For hosted MCP servers that speak the SSE (Server-Sent Events) HTTP
-transport, set `transport = "sse"` and provide a `url`.  Bearer tokens
-and other credentials go in the `[servers.headers]` table; values
-support `$VAR` / `${VAR}` expansion:
+For hosted MCP servers that speak the **SSE (Server-Sent Events)** HTTP
+transport (2024-11-05 spec), set `transport = "sse"` and provide a
+`url`.  Bearer tokens and other credentials go in the
+`[servers.headers]` table; values support `$VAR` / `${VAR}` expansion:
 
 ```toml
-[servers.linear]
+[[servers]]
+name = "linear"
 transport = "sse"
 url = "https://mcp.linear.app/sse"
 [servers.linear.headers]
 Authorization = "Bearer ${LINEAR_API_KEY}"
 
-[servers.notion]
+[[servers]]
+name = "notion"
 transport = "sse"
 url = "https://mcp.notion.so/sse"
 [servers.notion.headers]
 Authorization = "Bearer ${NOTION_TOKEN}"
 ```
-
-SSE transport validation rules:
-- `transport = "sse"` requires `url`.
-- `transport = "stdio"` requires `command`.
-- Mismatched fields (e.g. `command` on an SSE server) log a warning and
-  are ignored.
-- `type` defaults to `stdio` so existing configs continue working without
-  modification.
 
 The SSE transport opens a long-lived GET connection to the server's SSE
 endpoint, waits for the `endpoint` event that names the POST URL, then
@@ -422,6 +416,64 @@ routes each outgoing JSON-RPC request via HTTP POST to that URL.
 Server-initiated notifications arrive on the GET stream.  If the stream
 drops, the transport reconnects with exponential backoff (default:
 initial 500 ms, max 30 s, up to 5 attempts).
+
+#### Configuring a Streamable HTTP MCP server
+
+For hosted MCP servers that speak the **Streamable HTTP** transport
+(2025-03-26 spec, the current spec), set `transport = "http"` and
+provide a `url`.  This is the preferred transport for new servers — it
+is simpler to run behind a stateless load balancer and supports both
+immediate JSON responses and SSE-streamed responses from a single
+endpoint.
+
+```toml
+[[servers]]
+name = "github"
+transport = "http"
+url = "https://api.githubcopilot.com/mcp/"
+[servers.github.headers]
+Authorization = "Bearer ${GITHUB_PAT}"
+
+[[servers]]
+name = "sentry"
+transport = "http"
+url = "https://mcp.sentry.dev/mcp"
+[servers.sentry.headers]
+Authorization = "Bearer ${SENTRY_TOKEN}"
+
+# Some servers do not support the optional GET notifications stream.
+# Set open_notifications_stream = false to suppress the GET request
+# (otherwise the server may return 405 and log a warning).
+# [[servers]]
+# name = "myserver"
+# transport = "http"
+# url = "https://mcp.example.com/mcp"
+# open_notifications_stream = false
+```
+
+**Difference between SSE and Streamable HTTP:**
+
+| | SSE (`transport = "sse"`) | Streamable HTTP (`transport = "http"`) |
+|---|---|---|
+| Spec | 2024-11-05 (older) | 2025-03-26 (current, preferred) |
+| Handshake | Initial GET returns `endpoint` event | No pre-flight; session established by first POST |
+| Responses | Always SSE stream | JSON or SSE per-request |
+| Notifications | Via GET stream | Via optional long-lived GET |
+| Session | n/a | `Mcp-Session-Id` header |
+| Termination | Close connection | HTTP DELETE |
+
+Use `transport = "sse"` for servers that only implement the older spec
+(Linear, some older Notion integrations).  Use `transport = "http"` for
+new deployments (GitHub Copilot, Sentry, and any server built with the
+2025-03-26 SDK).
+
+Validation rules (both transports):
+- `transport = "sse"` or `transport = "http"` requires `url`.
+- `transport = "stdio"` requires `command`.
+- Mismatched fields (e.g. `command` on an HTTP server) log a warning and
+  are ignored.
+- `transport` defaults to `stdio` so existing configs work without
+  modification.
 
 Commands:
 
@@ -439,8 +491,9 @@ Permission gating: MCP tool calls go through the new `mcp` category
 `mcp.toml` if a particular server is better gated as `shell`,
 `network`, `file.read`, or `file.write`.
 
-The `stdio` and `sse` transports are supported. Streamable HTTP (the
-2026 transport spec) is deferred to the next slice.
+The `stdio`, `sse`, and `http` transports are supported. `http`
+(Streamable HTTP, 2025-03-26 spec) is preferred for new servers; `sse`
+(2024-11-05 spec) remains available for older deployments.
 
 ## Slash commands
 

@@ -555,6 +555,14 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 				ServerName: cfg.Name,
 			})
 			status.CommandLabel = transport.ServerLabel()
+		case "http":
+			transport = mcp.NewStreamable(mcp.StreamableOptions{
+				ServerURL:               cfg.URL,
+				Headers:                 cfg.Headers,
+				ServerName:              cfg.Name,
+				OpenNotificationsStream: true,
+			})
+			status.CommandLabel = transport.ServerLabel()
 		default: // "stdio"
 			transport = mcp.NewStdio(mcp.StdioOptions{
 				Command: cfg.Command,

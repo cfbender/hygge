@@ -198,8 +198,18 @@
   backoff (capped at 5 attempts by default) on transient drops.
   See `internal/mcp/sse.go` and `cmd/hygge/cli/common.go`.
 
-- **MCP: Streamable HTTP (T1.3b) — next slice.** The 2026
-  Streamable HTTP transport spec is intentionally out of scope
-  here.  When it lands it will follow the same `Transport`
-  interface, extend `validTransports` with `"streamable-http"`,
-  and reuse the SSE scanner for the response body.
+- **MCP: Streamable HTTP (T1.3b) — shipped.** Hygge now supports
+  the Streamable HTTP transport (MCP 2025-03-26 spec), the current
+  and preferred transport for new MCP servers.  Configured via
+  `transport = "http"` and `url = "..."` in `mcp.toml` — same
+  `url`/`headers` schema as SSE.  The transport handles both
+  response modes from a POST: immediate `application/json` and
+  `text/event-stream` SSE streams carrying multiple messages.
+  Server-assigned `Mcp-Session-Id` is captured on the first POST
+  and propagated on every subsequent request.  An optional
+  long-lived GET stream (`open_notifications_stream`, default
+  true) receives server-initiated notifications with `Last-Event-Id`
+  resumption on reconnect.  Session is cleanly terminated with an
+  HTTP DELETE on `Close()`.  The SSE parser from `sse.go` is reused.
+  MCP transport surface is now complete for v0.3.
+  See `internal/mcp/streamable.go` and `cmd/hygge/cli/common.go`.
