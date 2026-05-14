@@ -133,6 +133,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newMCPCmd(),
 		newCatalogCmd(),
 		newHooksCmd(),
+		newPluginsCmd(),
 	)
 
 	return root

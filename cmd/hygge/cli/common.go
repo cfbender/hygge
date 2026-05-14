@@ -32,6 +32,7 @@ import (
 	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/mcp"
 	"github.com/cfbender/hygge/internal/permission"
+	"github.com/cfbender/hygge/internal/plugin"
 	"github.com/cfbender/hygge/internal/provider"
 	anthropicShim "github.com/cfbender/hygge/internal/provider/anthropic"
 	openaiShim "github.com/cfbender/hygge/internal/provider/openai"
@@ -72,6 +73,11 @@ type appRuntime struct {
 	MCPStatuses    []MCPServerStatus
 	SystemPrompt   string
 	Pwd            string
+	// Plugins is the plugin registry (nil when no plugins are configured).
+	Plugins *plugin.Registry
+	// PluginPM is the package manager used by the plugins registry.
+	// Exposed for CLI commands that need to inspect cache directories.
+	PluginPM *plugin.PackageManager
 }
 
 // MCPServerStatus summarises the boot-time outcome of one MCP server
@@ -138,6 +144,11 @@ func (r *appRuntime) Close() error {
 		return nil
 	}
 	var firstErr error
+	if r.Plugins != nil {
+		if err := r.Plugins.Close(context.Background()); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	if r.Agent != nil {
 		if err := r.Agent.Close(); err != nil && firstErr == nil {
 			firstErr = err
@@ -477,6 +488,30 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		hookReg = hook.New()
 	}
 
+	// Plugin registry: load all plugins declared in [plugins].sources.
+	// Failures are non-fatal per-plugin (LoadAll skips bad ones with a warn).
+	var pluginReg *plugin.Registry
+	var pluginPM *plugin.PackageManager
+	if len(cfg.Plugins.Sources) > 0 {
+		pluginCacheDir := filepath.Join(xdgState, "hygge", "plugins")
+		pluginReg, err = plugin.NewRegistry(plugin.RegistryOptions{
+			CacheDir:      pluginCacheDir,
+			Tools:         tools,
+			Hooks:         hookReg,
+			Commands:      cmdReg,
+			Subagents:     subagentReg,
+			Permission:    permEngine,
+			PluginConfigs: cfg.RawPluginSettings(),
+			Pwd:           opts.Pwd,
+		})
+		if err != nil {
+			slog.Warn("cli: failed to create plugin registry; plugins disabled for this run", "err", err)
+		} else {
+			pluginPM = pluginReg.PM()
+			pluginReg.LoadAll(context.Background(), cfg.Plugins.Sources)
+		}
+	}
+
 	ag, err := agent.New(agent.Options{
 		Bus:           b,
 		Store:         stOpen,
@@ -497,6 +532,15 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		_ = stOpen.Close()
 		b.Close()
 		return nil, fmt.Errorf("cli: build agent: %w", err)
+	}
+
+	// Wire InjectMessage into the plugin registry now that the agent
+	// is available.  The late-bind avoids a circular dependency between
+	// plugin.Registry and agent.Agent.
+	if pluginReg != nil {
+		pluginReg.SetInjectMessage(func(ctx context.Context, sessionID, role, content string) error {
+			return ag.InjectMessage(ctx, "plugin", sessionID, role, content)
+		})
 	}
 
 	return &appRuntime{
@@ -523,6 +567,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		MCPStatuses:    mcpStatuses,
 		SystemPrompt:   sysPrompt,
 		Pwd:            opts.Pwd,
+		Plugins:        pluginReg,
+		PluginPM:       pluginPM,
 	}, nil
 }
 

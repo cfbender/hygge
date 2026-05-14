@@ -2,6 +2,44 @@
 
 ## Shipped
 
+- **T2.5 — Lua plugin host with github/local sourcing.**
+
+  Adds `internal/plugin`: a `Plugin` / `Host` / `Loader` abstraction with a
+  gopher-lua implementation. Plugins are portable `.lua` scripts (or directories
+  with `plugin.toml`) that register tools, hooks, slash commands, and sub-agent
+  types into hygge's existing registries through a neovim-style `hygge.*` global
+  module.
+
+  Sources are declared in `config.toml` as `github:` or `local:` URIs:
+
+  ```toml
+  [plugins]
+  sources = [
+    "github:cfbender/hygge-policy-guard@v1.2.3",
+    "local:/Users/cfb/code/my-plugin",
+  ]
+  ```
+
+  Managed via `hygge plugins install/update/remove/list/show`. Per-plugin TOML
+  config flows in through `hygge.config` inside the script.
+
+  Plugin tools fall into a new `CategoryPlugin` permission category (ask-once-per-
+  session by default). `exec()` and `send_message()` pass through the existing
+  permission engine and per-turn caps (10/turn/plugin) to contain runaway loops.
+
+  The `Loader` abstraction reserves room for a future subprocess JSON-RPC runtime;
+  only the Lua loader is shipped in v0.3. A stub `SubprocessLoader` placeholder is
+  included with a clear error message.
+
+  Deferred to v0.4+:
+  - `npm:` source support
+  - `hygge.store.get/set` per-plugin persistent state
+  - `hygge.session.entries()` read session history from Lua
+  - Lifecycle callbacks `on_session_start/end/shutdown` (use hooks instead)
+  - Subprocess JSON-RPC plugin loader (`T2.5b`)
+  - `UnregisterAll(pluginName)` for plugin reload / hot-swap
+  - Config rewrite on `plugins install/remove` (manual config.toml edit required)
+
 - **T2.4 — Smarter session resume with picker, `--continue`, `--new`.**
 
   `hygge --continue` (or `-c`) auto-resumes the most recent session for

@@ -74,6 +74,11 @@ const (
 	// against the SAME engine, so the user retains granular control
 	// even after approving the umbrella sub-agent dispatch.
 	CategoryAgent Category = "agent"
+	// CategoryPlugin gates plugin-registered tool calls.  Plugin tools
+	// default to "ask" so the user is notified the first time a plugin
+	// tool runs.  Users can promote to "allow" or "deny" with the same
+	// session / always scope as other categories.
+	CategoryPlugin Category = "plugin"
 )
 
 // Action is the decision outcome.
