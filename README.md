@@ -12,8 +12,11 @@ v0.1-dev. The core loop is working:
   (`once` / `session` / `always`), and a `.hygge/config.toml` walk-up.
 - SQLite-backed session store with resume.
 - TOML config with profile inheritance and `state.json` for runtime data.
-- Cost tracking via the [models.dev](https://models.dev) catalog with a
-  hard-coded fallback table for offline use.
+- Cost tracking via the [models.dev](https://models.dev) catalog with an
+  embedded snapshot for offline use.
+- Unified model catalog (`internal/catalog`) sourced from models.dev,
+  driving cost lookups, provider model lists, and capability detection
+  (reasoning, tools, vision).
 
 ## Quick start
 
@@ -39,6 +42,7 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge skills list` / `show <name>` / `doctor` — inspect loaded skills.
 - `hygge subagents list` / `show <name>` — inspect registered sub-agent types invokable by the `task` tool.
 - `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
+- `hygge catalog list [<provider>]` / `show <provider>/<model>` / `refresh` — inspect and refresh the models.dev-backed model catalog.
 - `hygge version` — print version, Go version, OS/arch.
 
 ## Configuration
@@ -400,6 +404,43 @@ Permission gating: MCP tool calls go through the new `mcp` category
 
 Only the `stdio` transport is supported in v0.2. SSE and Streamable
 HTTP transports are deferred to v0.3.
+
+## Model catalog
+
+Hygge's model metadata — pricing, capabilities, context-window limits —
+is sourced from [models.dev](https://models.dev) through a unified
+catalog in `internal/catalog`. The catalog is the single source of
+truth: cost lookups, provider model lists (`ListModels`), and reasoning
+capability detection all flow through it.
+
+Three layers in the resolution cascade, in order:
+
+1. **Disk snapshot** at `$XDG_STATE_HOME/hygge/catalog.json` —
+   refreshed by `hygge catalog refresh`.
+2. **Embedded snapshot** compiled into the binary at build time.
+   ~270 KiB; covers the major providers (anthropic, openai,
+   openrouter, google, mistral, groq, deepseek, xai, …) and ~860
+   models.  Bedrock fallback so hygge always has a usable catalog,
+   even with no network and no on-disk cache.
+3. **Background refresh** kicked off on startup when the disk snapshot
+   is older than 7 days.  Runs in a goroutine; never blocks startup;
+   logs to `slog.Debug` on success and `slog.Warn` on failure.
+
+Inspect or refresh the catalog from the CLI:
+
+```sh
+hygge catalog list                              # per-provider summary
+hygge catalog list anthropic                    # per-model table
+hygge catalog show anthropic/claude-sonnet-4-5  # all metadata
+hygge catalog refresh                           # pull a fresh snapshot
+```
+
+The same catalog drives reasoning-class detection in the OpenAI-compat
+adapter: when models.dev advertises `reasoning: true` for a model, the
+adapter switches to the `max_completion_tokens` / `reasoning_effort`
+request shape automatically.  A hardcoded name-prefix matcher (o1-*,
+o3-*, o4-*, reasoning-*) remains as a fallback for brand-new ids the
+local catalog hasn't been refreshed for.
 
 ## Development
 

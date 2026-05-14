@@ -255,6 +255,26 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       Disable network access and launch `./bin/hygge`. Send one message —
       the cost line still renders using fallback prices. No fatal error.
 
+- [ ] **`hygge catalog list` shows the embedded snapshot.**
+      `HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) ./bin/hygge catalog list`
+      prints a per-provider summary including at least `anthropic`,
+      `openai`, and `openrouter` rows with non-zero model counts.
+
+- [ ] **`hygge catalog list anthropic` shows the flagship models.**
+      Run the command and confirm `claude-sonnet-4-5`,
+      `claude-opus-4-5`, and `claude-haiku-4-5` all appear with a
+      `reasoning` capability flag and a 200K (or 1M) context.
+
+- [ ] **`hygge catalog show openai/o3-mini` shows `reasoning: true`.**
+      The detail block must include a `reasoning: true` line.  This
+      is what wires automatic detection in the openaicompat adapter.
+
+- [ ] **`hygge catalog refresh` writes the on-disk snapshot.**
+      `./bin/hygge catalog refresh` prints a `refreshed: N providers /
+      M models` summary and creates
+      `$XDG_STATE_HOME/hygge/catalog.json`.  Re-running `hygge catalog
+      list` now reports source `disk`.
+
 ## Test suite
 
 - [ ] **Race detector clean.**

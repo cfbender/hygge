@@ -103,21 +103,60 @@
   changes. Exposed as `model.reasoning` / `model.reasoning_budget`
   in config and `--reasoning {off|low|medium|high}` on the CLI.
 
-  Detection of reasoning-class models currently uses a hardcoded
-  prefix matcher in `internal/provider/openaicompat`. Once
-  "models-catalog-driven model lists" lands, this should move to a
-  catalog capability flag — the prefix matcher will become a
-  fallback for ids the catalog doesn't yet know about.
+  Detection of reasoning-class models reads the new catalog's
+  capability flag first (sourced from models.dev's `reasoning: true`
+  field) and falls back to the hardcoded name-prefix matcher
+  (`o1*`/`o3*`/`o4-*`/`reasoning-*`) only when the catalog has no
+  entry for the id — so brand-new models are still handled correctly
+  before the next `hygge catalog refresh`.
+
+- **Models-catalog-driven model + capability metadata (v0.2).** A new
+  `internal/catalog` package is the single source of truth for model
+  metadata: pricing, capabilities (reasoning, tool-calling, vision,
+  attachments), and context-window limits.  Sourced from models.dev
+  with a disk-cached snapshot at
+  `$XDG_STATE_HOME/hygge/catalog.json` and an embedded
+  `snapshot.json` so hygge keeps working fully offline.  Background
+  refresh fires on startup when the disk snapshot is older than 7
+  days and never blocks startup.
+
+  Downstream wiring:
+  - `internal/cost.Catalog` is now a thin wrapper around
+    `catalog.Catalog`; `cost.ErrModelNotPriced` is preserved as the
+    not-found sentinel so the agent loop and subagent runner did not
+    have to change.
+  - Each provider package's `Models()` derives its list from the
+    catalog when one is wired (via `SetCatalog`), with a small
+    hardcoded fallback for tests and for the (defensive) case where
+    even the embedded snapshot is unavailable.
+  - `internal/provider/openaicompat`'s reasoning-model detection
+    consults the catalog capability metadata first and falls back to
+    the legacy `o*`-prefix matcher only when the catalog has no
+    entry — handling brand-new ids without a refresh.
+
+  CLI surface: `hygge catalog list [<provider>]` /
+  `hygge catalog show <provider>/<model>` / `hygge catalog refresh`.
 
 ## Follow-ups
 
-- **Models-catalog-driven reasoning detection.** The OpenAI-compat
-  adapter currently identifies reasoning-class models by hardcoded
-  name prefix (`o1*`, `o3*`, `o4-*`, `reasoning-*`). When the
-  catalog work lands, swap this for a catalog capability lookup with
-  the prefix matcher as a fallback so the adapter handles ids the
-  catalog hasn't been refreshed for. Search for
-  `TODO(catalog)` in `internal/provider/openaicompat`.
+- **Catalog: openrouter alias resolution.** Openrouter ids are
+  namespaced as `<vendor>/<model>` (e.g. `openai/o3-mini`).  Today
+  the openaicompat reasoning lookup falls back to a bare-id lookup
+  against the `openai` provider when the namespaced id misses under
+  `openrouter`; a fuller solution would resolve aliases by walking
+  the catalog's `openrouter` entry and matching its embedded
+  upstream id.  Deferred until a real-world miss is reported.
+- **Catalog: custom-endpoint catalogs.** Self-hosted / proxy
+  gateways (Azure OpenAI, LiteLLM, etc.) don't appear on
+  models.dev.  Users currently rely on the provider-level
+  hardcoded defaults for those endpoints.  A `[catalog.custom]`
+  table in `config.toml` that injects extra entries would close
+  the gap.
+- **Catalog: periodic auto-refresh.** Today the background refresh
+  fires on startup only.  A long-lived TUI session keeps the
+  in-memory snapshot for the lifetime of the process.  Adding a
+  periodic refresh (daily?) would surface upstream pricing changes
+  to a running session.
 - Bash `cwd` argument: the bash tool currently has no explicit
   working-directory argument, so `touchedPaths` returns nil for it.
   When bash grows a `cwd` field, wire it into `touchedPaths` so

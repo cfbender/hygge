@@ -130,6 +130,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newSubagentsCmd(),
 		newContextCmd(),
 		newMCPCmd(),
+		newCatalogCmd(),
 	)
 
 	return root

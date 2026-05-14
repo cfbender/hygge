@@ -56,10 +56,12 @@ func New(opts map[string]any) (provider.Provider, error) {
 	}
 	baseURL := stringOpt(opts, "base_url", defaultBaseURL)
 	return openaicompat.New(openaicompat.Config{
-		Name:    "openai",
-		BaseURL: baseURL,
-		APIKey:  key,
-		Models:  Models(),
+		Name:            "openai",
+		BaseURL:         baseURL,
+		APIKey:          key,
+		Models:          Models(),
+		Catalog:         catalogHandle(),
+		CatalogProvider: "openai",
 	})
 }
 

@@ -25,14 +25,15 @@ import (
 	"github.com/cfbender/hygge/internal/agentsmd"
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/mcp"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
-	_ "github.com/cfbender/hygge/internal/provider/anthropic"  // self-register
-	_ "github.com/cfbender/hygge/internal/provider/openai"     // self-register
-	_ "github.com/cfbender/hygge/internal/provider/openrouter" // self-register
+	anthropicShim "github.com/cfbender/hygge/internal/provider/anthropic"
+	openaiShim "github.com/cfbender/hygge/internal/provider/openai"
+	openrouterShim "github.com/cfbender/hygge/internal/provider/openrouter"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/skill"
 	"github.com/cfbender/hygge/internal/state"
@@ -364,9 +365,18 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		return nil, fmt.Errorf("cli: build permission engine: %w", err)
 	}
 
+	catSrc := buildCatalog(xdgState, opts)
+	// Wire the shared catalog into each provider package so their
+	// Models() lists come from the live snapshot rather than the
+	// hardcoded fallbacks.  Passing nil is fine (tests sometimes
+	// deliberately do this); the provider shims tolerate it.
+	anthropicShim.SetCatalog(catSrc)
+	openaiShim.SetCatalog(catSrc)
+	openrouterShim.SetCatalog(catSrc)
+
 	catalog := cost.NewCatalog(cost.CatalogOptions{
+		Catalog: catSrc,
 		Now:     opts.Now,
-		BaseURL: opts.CatalogBaseURL,
 	})
 
 	thm, err := theme.Load(cfg.Theme.Name, theme.LoadOptions{
@@ -1002,4 +1012,42 @@ func findSessionByPrefix(ctx context.Context, rt *appRuntime, prefix string, inc
 		}
 	}
 	return "", fmt.Errorf("no session matches %q", prefix)
+}
+
+// buildCatalog constructs the shared [*catalog.Catalog] used by both
+// the cost lookups and every provider's model list.
+//
+// The catalog is loaded with background refresh enabled in production
+// (so a stale disk snapshot self-heals on the next run) but disabled
+// in tests (so output is deterministic).  Tests can also redirect the
+// catalog at an httptest server via [bootstrapOptions.CatalogBaseURL].
+//
+// Returns nil only when [catalog.Load] catastrophically fails — which
+// in practice means the binary's embedded snapshot is malformed.  Each
+// provider shim already tolerates nil.
+func buildCatalog(xdgState string, opts bootstrapOptions) *catalog.Catalog {
+	stateDir := filepath.Join(xdgState, "hygge")
+	// Tests sometimes provide a Now func; honor it so disk-snapshot
+	// freshness checks are deterministic.
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	// Tests point CatalogBaseURL at an httptest server.  We also
+	// disable the background refresh in that case so the test
+	// surface stays deterministic.
+	bg := opts.CatalogBaseURL == ""
+	loadOpts := catalog.LoadOptions{
+		StateDir:          stateDir,
+		BaseURL:           opts.CatalogBaseURL,
+		Now:               now,
+		BackgroundRefresh: &bg,
+	}
+	c, err := catalog.Load(loadOpts)
+	if err != nil {
+		slog.Warn("cli: catalog.Load failed; model lists will fall back to hardcoded defaults",
+			"err", err)
+		return nil
+	}
+	return c
 }

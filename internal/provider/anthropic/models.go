@@ -1,4 +1,4 @@
-package openai
+package anthropic
 
 import (
 	"sync"
@@ -8,7 +8,7 @@ import (
 )
 
 // catalogMu guards access to packageCatalog so SetCatalog from the CLI
-// bootstrap is safe to race against ongoing Models calls.
+// bootstrap is safe to race against ongoing ListModels calls.
 var (
 	catalogMu      sync.RWMutex
 	packageCatalog *catalog.Catalog
@@ -31,24 +31,21 @@ func catalogHandle() *catalog.Catalog {
 	return packageCatalog
 }
 
-// Models returns the static catalog of OpenAI models this shim advertises.
+// Models returns the model list this adapter advertises.  When a
+// catalog is wired, models are derived from it; the hardcoded
+// defaultModels below are returned only when the catalog has no
+// entries for the "anthropic" provider id.
 //
-// When a [*catalog.Catalog] is wired via [SetCatalog], the list is
-// derived from the catalog's "openai" entries.  When no catalog is
-// wired, or it has no OpenAI entries, a small hardcoded "minimum
-// guaranteed set" is returned so the TUI keeps working with no
-// catalog at all.
-//
-// Adding entries to the hardcoded list: pick well-known model IDs
-// only, no invented version numbers.  Anything experimental or
-// preview-tier belongs in a user override (`hygge config set
-// model.name ...`) rather than this list.
+// The hardcoded list is a "minimum guaranteed set" so the TUI can
+// still pick a model when running fully offline against a bare repo
+// (no disk catalog, no embedded catalog — which shouldn't happen, but
+// belt-and-braces).
 func Models() []provider.Model {
 	c := catalogHandle()
 	if c == nil {
 		return defaultModels()
 	}
-	entries := c.Models("openai")
+	entries := c.Models("anthropic")
 	if len(entries) == 0 {
 		return defaultModels()
 	}
@@ -67,29 +64,33 @@ func Models() []provider.Model {
 }
 
 // defaultModels is the hardcoded fallback returned when no catalog is
-// wired.  Mirrors the v0.1 hardcoded list verbatim.
+// wired (or the catalog has no anthropic entries).  Mirrors the v0.1
+// hardcoded list verbatim.
 func defaultModels() []provider.Model {
 	return []provider.Model{
 		{
-			Name:           "gpt-5",
-			ContextWindow:  200_000,
-			MaxOutput:      16_384,
-			SupportsTools:  true,
-			SupportsImages: true,
+			Name:              "claude-sonnet-4-5",
+			ContextWindow:     200_000,
+			MaxOutput:         8192,
+			SupportsTools:     true,
+			SupportsImages:    true,
+			SupportsReasoning: true,
 		},
 		{
-			Name:           "gpt-4o",
-			ContextWindow:  128_000,
-			MaxOutput:      16_384,
-			SupportsTools:  true,
-			SupportsImages: true,
+			Name:              "claude-opus-4-5",
+			ContextWindow:     200_000,
+			MaxOutput:         8192,
+			SupportsTools:     true,
+			SupportsImages:    true,
+			SupportsReasoning: true,
 		},
 		{
-			Name:           "gpt-4o-mini",
-			ContextWindow:  128_000,
-			MaxOutput:      16_384,
-			SupportsTools:  true,
-			SupportsImages: true,
+			Name:              "claude-haiku-4-5",
+			ContextWindow:     200_000,
+			MaxOutput:         8192,
+			SupportsTools:     true,
+			SupportsImages:    true,
+			SupportsReasoning: true,
 		},
 	}
 }
