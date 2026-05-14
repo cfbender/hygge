@@ -342,3 +342,20 @@ func TestOpenAIRegistered(t *testing.T) {
 		t.Errorf("openai env var mapping missing")
 	}
 }
+
+// TestOpenRouterRegistered confirms the openrouter shim is wired into the
+// CLI via the blank import in common.go.  Without this guard, removing
+// the import would silently break `hygge config set model.provider =
+// openrouter`.
+func TestOpenRouterRegistered(t *testing.T) {
+	f, err := provider.Get("openrouter")
+	if err != nil {
+		t.Fatalf("provider.Get(openrouter): %v", err)
+	}
+	if f == nil {
+		t.Fatal("factory is nil")
+	}
+	if providerEnvVar("openrouter") != "OPENROUTER_API_KEY" {
+		t.Errorf("openrouter env var mapping missing")
+	}
+}

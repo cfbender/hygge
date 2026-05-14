@@ -27,8 +27,9 @@ import (
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
-	_ "github.com/cfbender/hygge/internal/provider/anthropic" // self-register
-	_ "github.com/cfbender/hygge/internal/provider/openai"    // self-register
+	_ "github.com/cfbender/hygge/internal/provider/anthropic"  // self-register
+	_ "github.com/cfbender/hygge/internal/provider/openai"     // self-register
+	_ "github.com/cfbender/hygge/internal/provider/openrouter" // self-register
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/store"
