@@ -76,6 +76,10 @@ type bootstrapOptions struct {
 	// SkipTea, when true, makes runTUI build the App but skip the
 	// tea.Program.Run loop.  Test-only.
 	SkipTea bool
+	// CatalogBaseURL overrides the cost catalog's models.dev host.
+	// Tests point this at an httptest server (typically a 500-returning
+	// stub) so no live network call is ever made.  Test-only.
+	CatalogBaseURL string
 }
 
 // defaultSystemPrompt is the v0.1 hardcoded system prompt.  Two sentences.
@@ -232,7 +236,10 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	tools := tool.Default()
-	catalog := cost.NewCatalog(cost.CatalogOptions{Now: opts.Now})
+	catalog := cost.NewCatalog(cost.CatalogOptions{
+		Now:     opts.Now,
+		BaseURL: opts.CatalogBaseURL,
+	})
 
 	thm, err := theme.Load(cfg.Theme.Name, theme.LoadOptions{
 		ConfigHome: xdgConfig,
