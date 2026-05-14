@@ -32,5 +32,8 @@ func defaultConfig() map[string]any {
 		"theme": map[string]any{
 			"name": "shell",
 		},
+		"compaction": map[string]any{
+			"threshold_pct": float64(80),
+		},
 	}
 }

@@ -538,7 +538,8 @@ The built-in command set:
 |-------------|--------------------------------------------------|
 | `/help`     | List every registered command (built-in + user). `/help <name>` shows full detail. |
 | `/clear`    | Clear the rendered session history.              |
-| `/compact`  | Trigger a session compaction now.                |
+| `/compact`  | Open the compaction confirmation modal (see Compaction below). |
+| `/compact --force` | Skip the modal and compact immediately (power-user path). |
 | `/cost`     | Show running session cost.                       |
 | `/sessions` | Open the sessions picker (rich UI lands in T1.2). |
 | `/fork`     | Fork the session at a message id (T1.2 will wire). |
@@ -602,7 +603,63 @@ Inspect what's loaded with `hygge commands list` (`--source builtin`
 / `user` / `project` to filter) and `hygge commands show <name>` for
 the full detail.
 
-## Model catalog
+## Compaction
+
+Session compaction summarises older messages into a 2-3 paragraph digest
+so the model's context window doesn't fill up on long sessions.
+
+### Confirmation flow
+
+`/compact` opens a confirmation modal showing:
+
+- Number of messages since the last compaction marker.
+- Current context usage (% of the model's window).
+- A reminder that compaction is destructive — the original messages are
+  replaced by the summary for future turns.
+
+Press `y` to confirm; `n` or `Esc` to cancel.
+
+`/compact --force` skips the modal and runs immediately — a power-user
+escape hatch for scripts or users who know what they're doing.
+
+### Threshold suggestion banner
+
+When context usage climbs above the configured threshold, a non-blocking
+advisory banner appears above the input:
+
+```
+⚠  Context usage at 84%. /compact to summarise older messages.  [Ctrl+X] dismiss
+```
+
+This fires **once per crossing** (not on every turn while above the
+threshold). After compaction completes, or after usage drops back below
+the threshold minus a 5-percentage-point hysteresis window and rises
+again, the banner may reappear for the next crossing.
+
+Dismiss it for the current crossing with **Ctrl+X**.
+
+### Configuration
+
+```toml
+[compaction]
+# threshold_pct is the percentage of the model's context window at
+# which the advisory suggestion banner appears.
+# 0 disables the suggestion entirely.  Default: 80.  Valid: 0-99.
+# Values ≥ 100 warn and reset to the default.
+threshold_pct = 80
+```
+
+### Visual feedback
+
+| Phase                 | What you see                                              |
+|-----------------------|-----------------------------------------------------------|
+| Threshold crossed     | Banner above input (dismissible with Ctrl+X).             |
+| `/compact` invoked    | Confirmation modal (y/n/Esc).                             |
+| Compaction running    | `⌛  Compacting N messages…` notice above input.          |
+| Compaction succeeded  | `✓  Compacted N messages → M tokens summary.  Marker …`  |
+| Compaction failed     | `✕  Compaction failed: <reason>.`                        |
+
+
 
 Hygge's model metadata — pricing, capabilities, context-window limits —
 is sourced from [models.dev](https://models.dev) through a unified

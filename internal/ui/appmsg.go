@@ -57,3 +57,33 @@ type subagentTickMsg struct {
 type switchSessionMsg struct {
 	ID string
 }
+
+// --- Compaction messages ----------------------------------------------------
+// Internal messages for the compaction modal, banner, and in-flight notice.
+
+// compactionRunMsg fires when the user accepts the compaction modal.
+// The App handles it by calling Agent.Compact asynchronously.
+type compactionRunMsg struct {
+	SessionID string
+}
+
+// compactionCompleteMsg fires when Agent.Compact returns (success or fail).
+// Used to clear the "compacting…" in-flight notice and show the toast.
+type compactionCompleteMsg struct {
+	// Err is non-nil on failure.
+	Err error
+	// MarkerID is the id of the persisted marker on success.
+	MarkerID string
+	// MessagesCompacted is the number of messages that were summarised.
+	MessagesCompacted int
+	// SummaryTokens is the token count of the generated summary.
+	SummaryTokens int64
+}
+
+// clearCompactionToastMsg fires after the post-compaction toast display
+// duration (5 seconds) to hide it.
+type clearCompactionToastMsg struct{}
+
+// dismissBannerMsg asks the App to hide the threshold suggestion banner for
+// the current crossing.  Fired when the user presses Ctrl+X.
+type dismissBannerMsg struct{}

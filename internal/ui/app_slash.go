@@ -83,6 +83,17 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 				ShowDeleted:   false,
 			}
 			return tea.Batch(append(cmds, a.openSessionsModal())...)
+		case command.ModalCompactConfirm:
+			// Populate the modal with live session metadata.
+			msgCount := a.resolveCompactionMessageCount()
+			a.compactionModal = components.CompactionModal{
+				Theme:         a.opts.Theme,
+				SessionID:     a.foregroundID(),
+				MessageCount:  msgCount,
+				ContextPct:    a.pctUsed * 100,
+				ContextWindow: a.opts.ContextWindow,
+			}
+			a.activeModal = command.ModalCompactConfirm
 		default:
 			slogWarnUnknownModal(out.OpenModal)
 		}
@@ -286,4 +297,19 @@ func slogWarnUnknownModal(name string) {
 // hygge does not yet recognise.
 func slogWarnUnknownUpdate(key, value string) {
 	slog.Warn("ui: slash command requested unknown update; ignored", "key", key, "value", value)
+}
+
+// resolveCompactionMessageCount returns the number of messages since the
+// latest compaction marker for the foreground session.  Falls back to 0
+// when the store is unavailable or an error occurs.
+func (a *App) resolveCompactionMessageCount() int {
+	sid := a.foregroundID()
+	if sid == "" || a.opts.Store == nil {
+		return 0
+	}
+	msgs, _, err := a.opts.Store.MessagesSinceLatestMarker(a.ctx, sid)
+	if err != nil {
+		return 0
+	}
+	return len(msgs)
 }

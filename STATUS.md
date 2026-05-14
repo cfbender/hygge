@@ -2,6 +2,30 @@
 
 ## Shipped
 
+- **T2.3 — Compaction UX with confirmation, threshold banner, toasts.**
+  Compaction is no longer silent. `/compact` opens a confirmation modal
+  showing message count, context usage %, and a destructive-action warning
+  before running. The agent emits a `CompactionRequested → CompactionStarted
+  → CompactionCompleted (or Failed)` event chain the TUI uses to render a
+  "compacting…" notice during the run and a "compacted N messages → M tokens
+  summary" toast on completion.
+
+  A threshold-suggestion banner ("Context usage at 84%. /compact to summarise
+  older messages.") fires once per crossing of the configurable threshold
+  (default 80% of context window), with 5-percentage-point hysteresis to
+  prevent flicker. Configured via `[compaction] threshold_pct` in
+  `config.toml`; 0 disables the suggestion.
+
+  The legacy `/compact` direct path is preserved as `/compact --force` for
+  power users who want to skip the modal.
+
+  See `internal/bus/events.go` (4 new events), `internal/agent/cost.go`
+  (lifecycle events + threshold debounce), `internal/config/config.go`
+  (`CompactionConfig`), `internal/ui/components/compaction_modal.go`,
+  `internal/ui/components/compaction_banner.go`, and `internal/ui/app.go`.
+
+  **Auto-compact at hard threshold (95%)** is deferred to v0.4+.
+
 - **T2.1 — Cost roll-up + T2.2 — Foreground-switch into sub-sessions.**
   Sub-session token and cost totals now roll up into the parent chain
   via `store.PropagateTotals`, which uses a recursive CTE (capped at 32
@@ -46,7 +70,7 @@
   for inspecting the registry at runtime.
 
   Tier-1 (v0.3) is now complete.  v0.3 enters Tier-2: cost roll-up,
-  foreground switch, compaction UX, and the WASM plugin host (T2.5) which
+  foreground switch, compaction UX (T2.3 — shipped), and the WASM plugin host (T2.5) which
   shares conceptual surface with this hooks framework.  See "Follow-ups"
   below for the hand-off notes to the plugin host.
 
@@ -66,8 +90,8 @@
   prefix-filtered matches, Up/Down navigation, Tab completion, Esc
   dismissal, and an overflow indicator past 8 rows. Also adds
   `hygge commands list [--source ...]` / `hygge commands show
-  <name>` for inspection. T1.2 (session-management UI) and T2.3
-  (compaction UX) are now unblocked. See `internal/command/`,
+  <name>` for inspection. T1.2 (session-management UI) is now unblocked (T2.3
+  (compaction UX) shipped in T2.3). See `internal/command/`,
   `internal/ui/app_slash.go`, `internal/ui/components/command_palette.go`,
   and `cmd/hygge/cli/commands_cmd.go`.
 

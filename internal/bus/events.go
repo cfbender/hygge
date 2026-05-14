@@ -251,6 +251,72 @@ type SubagentStarted struct {
 	At time.Time
 }
 
+// CompactionRequested fires when compaction has been requested but not yet
+// started.  The source field identifies who raised it:
+//   - "user"      — the user ran /compact (TUI should open the confirmation modal).
+//   - "threshold" — context usage crossed the configured threshold (TUI should
+//     show the suggestion banner; user must still confirm before anything runs).
+//
+// The TUI filters on this event type to decide which affordance to show; it
+// does NOT auto-start compaction on "threshold".
+type CompactionRequested struct {
+	// SessionID is the session for which compaction is being considered.
+	SessionID string
+	// Source is "user" when the user explicitly requested compaction, or
+	// "threshold" when the advisory suggestion fires from the usage monitor.
+	Source string
+	// UsagePct is the current context-window usage as a percentage (0–100).
+	UsagePct float64
+	// At is the wall-clock time the event was created.
+	At time.Time
+}
+
+// CompactionStarted fires when Agent.Compact begins generating the summary.
+// The TUI shows a "compacting…" notice from this point until Completed or
+// Failed arrives.
+type CompactionStarted struct {
+	// SessionID is the session being compacted.
+	SessionID string
+	// MessagesToCompact is the number of messages since the latest marker.
+	MessagesToCompact int
+	// InputTokensBefore is the cumulative session input-token count before
+	// compaction.  The TUI may display this in the confirmation modal.
+	InputTokensBefore int64
+	// At is the wall-clock time compaction started.
+	At time.Time
+}
+
+// CompactionCompleted fires when a compaction marker has been persisted.
+// The TUI uses this event to clear the "compacting…" notice and show a
+// 5-second toast summarising the result.
+type CompactionCompleted struct {
+	// SessionID is the session that was compacted.
+	SessionID string
+	// MarkerID is the ULID of the newly created compaction marker.
+	MarkerID string
+	// SummaryTokens is the number of input tokens used to generate the summary.
+	SummaryTokens int64
+	// InputTokensAfter is the estimated remaining context usage after the
+	// marker is folded into the system prompt on the next turn.
+	InputTokensAfter int64
+	// DurationMs is the wall-clock elapsed time in milliseconds.
+	DurationMs int64
+	// At is the wall-clock time compaction completed.
+	At time.Time
+}
+
+// CompactionFailed fires when Agent.Compact returns a hard error (anything
+// other than [agent.ErrNothingToCompact], which is a clean no-op).  The TUI
+// shows an error toast and clears the "compacting…" notice.
+type CompactionFailed struct {
+	// SessionID is the session for which compaction failed.
+	SessionID string
+	// Reason is the human-readable error message.
+	Reason string
+	// At is the wall-clock time the failure was detected.
+	At time.Time
+}
+
 // SubagentCompleted fires when a sub-agent finishes -- success,
 // iteration-limit abort, or hard failure.  Pairs 1:1 with
 // [SubagentStarted].

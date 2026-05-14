@@ -75,8 +75,9 @@ const (
 // The TUI is free to ignore unknown names; commands should stick to
 // this set.
 const (
-	ModalHelp     = "help"
-	ModalSessions = "sessions"
+	ModalHelp           = "help"
+	ModalSessions       = "sessions"
+	ModalCompactConfirm = "compact-confirm"
 )
 
 // App is the read-only handle commands use to inspect live TUI state.

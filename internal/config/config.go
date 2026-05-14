@@ -63,6 +63,16 @@ type Config struct {
 	Model      ModelConfig      `mapstructure:"model"`
 	Permission PermissionConfig `mapstructure:"permission"`
 	Theme      ThemeConfig      `mapstructure:"theme"`
+	Compaction CompactionConfig `mapstructure:"compaction"`
+}
+
+// CompactionConfig controls the compaction suggestion banner.
+type CompactionConfig struct {
+	// ThresholdPct is the percentage of the model's context window at which
+	// the advisory suggestion banner appears.  0 disables the suggestion
+	// entirely.  Valid range: 0–99.  Values ≥ 100 warn and reset to the
+	// default (80).  Default: 80.
+	ThresholdPct float64 `mapstructure:"threshold_pct"`
 }
 
 // ModelConfig holds model selection and provider-specific knobs.
@@ -347,6 +357,15 @@ func validateConfig(cfg *Config) error {
 			"value", cfg.Model.ReasoningBudget)
 		cfg.Model.ReasoningBudget = 0
 	}
+
+	// Compaction threshold: 0 is valid (disables suggestion); ≥ 100 warns and
+	// resets to the default 80.
+	if cfg.Compaction.ThresholdPct >= 100 {
+		slog.Warn("config: invalid compaction.threshold_pct, resetting to 80",
+			"value", cfg.Compaction.ThresholdPct)
+		cfg.Compaction.ThresholdPct = 80
+	}
+
 	return nil
 }
 

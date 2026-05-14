@@ -147,6 +147,14 @@ type Options struct {
 	// A nil Hooks means "no hooks" — the agent loop treats it as a
 	// no-op without any nil-deref risk.
 	Hooks *hook.Registry
+	// CompactionThresholdPct, when > 0, enables the advisory compaction
+	// suggestion.  After each turn the agent checks context usage against
+	// this percentage.  If usage is at or above the threshold and the flag
+	// has not already fired for this session × crossing, it publishes a
+	// [bus.CompactionRequested] with Source="threshold".  Valid range 1–99;
+	// 0 disables the suggestion.  Default 80 (supplied by cmd/hygge/cli
+	// from config.Compaction.ThresholdPct).
+	CompactionThresholdPct float64
 }
 
 // Agent is the orchestrator.  Construct via [New]; the zero value is not
@@ -154,7 +162,7 @@ type Options struct {
 type Agent struct {
 	opts Options
 
-	// mu guards closed, locks, and pendingLazy.
+	// mu guards closed, locks, pendingLazy, and thresholdFired.
 	mu     sync.Mutex
 	closed bool
 	locks  map[string]*sync.Mutex
@@ -162,6 +170,14 @@ type Agent struct {
 	// the next provider turn.  Drained before each buildRequest in
 	// runLoop.  Guarded by mu.
 	pendingLazy map[string][]agentsmd.Block
+	// thresholdFired tracks which sessions have already received the
+	// advisory compaction suggestion for the current threshold crossing.
+	// Keyed by session id.  The flag is set the first time usage climbs
+	// above CompactionThresholdPct and is reset when:
+	//   - usage drops back below (threshold - 5) pp hysteresis, or
+	//   - Agent.Compact completes successfully for that session.
+	// Guarded by mu.
+	thresholdFired map[string]bool
 }
 
 // New constructs an Agent.  Returns an error if any required option is nil.
@@ -194,9 +210,10 @@ func New(opts Options) (*Agent, error) {
 		opts.CompactionMaxTokens = 1024
 	}
 	return &Agent{
-		opts:        opts,
-		locks:       make(map[string]*sync.Mutex),
-		pendingLazy: make(map[string][]agentsmd.Block),
+		opts:           opts,
+		locks:          make(map[string]*sync.Mutex),
+		pendingLazy:    make(map[string][]agentsmd.Block),
+		thresholdFired: make(map[string]bool),
 	}, nil
 }
 

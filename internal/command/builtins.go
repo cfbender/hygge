@@ -198,11 +198,23 @@ func (*clearCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
 type compactCmd struct{}
 
 func (*compactCmd) Name() string        { return "compact" }
-func (*compactCmd) Description() string { return "Run session compaction now" }
+func (*compactCmd) Description() string { return "Compact the session (opens confirmation modal)" }
 func (*compactCmd) Source() string      { return "builtin" }
-func (*compactCmd) Args() []ArgSpec     { return nil }
-func (*compactCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
-	return Outcome{Compact: true}, nil
+func (*compactCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "force", Description: "--force skips the modal and compacts immediately", Required: false}}
+}
+func (*compactCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	// /compact --force bypasses the modal (power-user escape hatch).
+	if strings.TrimSpace(input) == "--force" {
+		return Outcome{Compact: true}, nil
+	}
+	// Default: open the confirmation modal.  The TUI instantiates
+	// components.CompactionModal with the foreground session's metadata.
+	// On [y], the App calls Agent.Compact directly.
+	return Outcome{
+		OpenModal: ModalCompactConfirm,
+		Notice:    "review compaction details",
+	}, nil
 }
 
 // --- /cost ----------------------------------------------------------------

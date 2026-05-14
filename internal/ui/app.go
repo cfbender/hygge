@@ -64,6 +64,9 @@ type AppOptions struct {
 	Reasoning     provider.Reasoning
 	Commands      *command.Registry // slash-command registry; nil disables slash routing
 	Now           func() time.Time
+	// ContextWindow is the model's maximum context size in tokens.  Used by
+	// the compaction modal to display usage info.  0 means unknown.
+	ContextWindow int64
 
 	// OnSessionCreated, if non-nil, is invoked after the App lazily
 	// creates a new session on first Send.  The CLI uses this to record
@@ -199,6 +202,37 @@ type App struct {
 	// returns opts.SessionID to preserve the pre-T2.2 lazy-create behaviour.
 	foregroundStack []string
 
+	// --- Compaction state (T2.3) ---
+
+	// compactionModal holds the live state of the compaction confirmation
+	// modal when activeModal == command.ModalCompactConfirm.
+	compactionModal components.CompactionModal
+
+	// compactionInFlight is true while Agent.Compact is running (between
+	// CompactionStarted and Completed/Failed events).
+	compactionInFlight bool
+
+	// compactionInFlightCount is the number of messages being compacted,
+	// carried from CompactionStarted so the Completed toast can display it.
+	compactionInFlightCount int
+
+	// compactionToast is the post-compaction result message shown for 5s.
+	// Empty means no toast is showing.
+	compactionToast string
+
+	// bannerVisible is true when the threshold-suggestion banner should be
+	// shown above the input.
+	bannerVisible bool
+
+	// bannerPct is the context-usage percentage carried into the banner.
+	bannerPct float64
+
+	// bannerDismissed is true when the user pressed Ctrl+X to dismiss the
+	// banner for the current crossing.  Cleared when compaction completes or
+	// usage crosses below the hysteresis level (reset by a new
+	// CompactionRequested{Source: "threshold"} event).
+	bannerDismissed bool
+
 	// closed protects against double Close.
 	closeOnce sync.Once
 }
@@ -258,6 +292,10 @@ func (a *App) bridge() {
 	subIter := bus.Subscribe[bus.IterationLimitReached](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subSubStart := bus.Subscribe[bus.SubagentStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subSubDone := bus.Subscribe[bus.SubagentCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
+	subCmpReq := bus.Subscribe[bus.CompactionRequested](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
+	subCmpStart := bus.Subscribe[bus.CompactionStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
+	subCmpDone := bus.Subscribe[bus.CompactionCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
+	subCmpFail := bus.Subscribe[bus.CompactionFailed](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 
 	stop := a.ctx.Done()
 
@@ -276,6 +314,10 @@ func (a *App) bridge() {
 	go forward(subIter.C(), a.busCh, stop, subIter.Unsubscribe)
 	go forward(subSubStart.C(), a.busCh, stop, subSubStart.Unsubscribe)
 	go forward(subSubDone.C(), a.busCh, stop, subSubDone.Unsubscribe)
+	go forward(subCmpReq.C(), a.busCh, stop, subCmpReq.Unsubscribe)
+	go forward(subCmpStart.C(), a.busCh, stop, subCmpStart.Unsubscribe)
+	go forward(subCmpDone.C(), a.busCh, stop, subCmpDone.Unsubscribe)
+	go forward(subCmpFail.C(), a.busCh, stop, subCmpFail.Unsubscribe)
 }
 
 // forward pumps a single typed subscription channel into the shared any
@@ -402,6 +444,34 @@ func (a *App) View() string {
 		notice = style.Render(a.notice)
 	}
 
+	// Compaction in-flight notice: shown while Agent.Compact is running.
+	compactingNotice := ""
+	if a.compactionInFlight {
+		style := lipgloss.NewStyle()
+		if a.opts.Theme != nil {
+			style = a.opts.Theme.Style(theme.AtomMuted)
+		}
+		compactingNotice = style.Render(fmt.Sprintf("⌛  Compacting %d messages…", a.compactionInFlightCount))
+	}
+
+	// Post-compaction toast (shown for ~5s after Compact completes).
+	compactToast := ""
+	if a.compactionToast != "" {
+		style := lipgloss.NewStyle()
+		if a.opts.Theme != nil {
+			style = a.opts.Theme.Style(theme.AtomMuted)
+		}
+		compactToast = style.Render(a.compactionToast)
+	}
+
+	// Threshold-suggestion banner.
+	bannerView := components.CompactionBanner{
+		Width:   width,
+		Theme:   a.opts.Theme,
+		Visible: a.bannerVisible && !a.bannerDismissed,
+		Pct:     a.bannerPct,
+	}.View()
+
 	fr := components.Footer{
 		Width:   width,
 		Theme:   a.opts.Theme,
@@ -426,6 +496,15 @@ func (a *App) View() string {
 	if notice != "" {
 		chrome += lipgloss.Height(notice)
 	}
+	if compactingNotice != "" {
+		chrome += lipgloss.Height(compactingNotice)
+	}
+	if compactToast != "" {
+		chrome += lipgloss.Height(compactToast)
+	}
+	if bannerView != "" {
+		chrome += lipgloss.Height(bannerView)
+	}
 	bodyHeight := height - chrome
 	if bodyHeight < 1 {
 		bodyHeight = 1
@@ -438,10 +517,19 @@ func (a *App) View() string {
 		sections = append(sections, breadcrumb)
 	}
 	sections = append(sections, body)
+	if bannerView != "" {
+		sections = append(sections, bannerView)
+	}
 	if palette != "" {
 		sections = append(sections, palette)
 	}
 	sections = append(sections, in)
+	if compactingNotice != "" {
+		sections = append(sections, compactingNotice)
+	}
+	if compactToast != "" {
+		sections = append(sections, compactToast)
+	}
 	if notice != "" {
 		sections = append(sections, notice)
 	}
@@ -466,6 +554,13 @@ func (a *App) View() string {
 		a.sessionsModal.Height = height
 		a.sessionsModal.Now = a.opts.Now()
 		return a.sessionsModal.View()
+	}
+
+	// Compaction confirmation modal overlay.
+	if a.activeModal == command.ModalCompactConfirm {
+		a.compactionModal.Width = width
+		a.compactionModal.Height = height
+		return a.compactionModal.View()
 	}
 
 	return main
@@ -503,6 +598,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearToastMsg:
 		a.modalToast = ""
 		return a, nil
+
+	case clearCompactionToastMsg:
+		a.compactionToast = ""
+		return a, nil
+
+	case dismissBannerMsg:
+		a.bannerDismissed = true
+		return a, nil
+
+	case compactionRunMsg:
+		return a, a.startCompaction(m.SessionID)
+
+	case compactionCompleteMsg:
+		a.compactionInFlight = false
+		a.compactionInFlightCount = 0
+		if m.Err != nil {
+			a.compactionToast = fmt.Sprintf("✕  Compaction failed: %s", m.Err.Error())
+		} else {
+			a.compactionToast = fmt.Sprintf("✓  Compacted %d messages → %d tokens summary.  Marker %s",
+				m.MessagesCompacted, m.SummaryTokens, shortID(m.MarkerID))
+		}
+		return a, tea.Tick(5*time.Second, func(time.Time) tea.Msg { return clearCompactionToastMsg{} })
 
 	case clearNoticeMsg:
 		// Only clear when we are still showing the same notice the
@@ -571,6 +688,10 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleSessionsModalKey(k)
 	}
 
+	if a.activeModal == command.ModalCompactConfirm {
+		return a.handleCompactionModalKey(k)
+	}
+
 	switch k.Type {
 	case tea.KeyCtrlC:
 		if a.busy && a.inflightCancel != nil {
@@ -581,6 +702,12 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlL:
 		a.input.Reset()
 		return a, nil
+	case tea.KeyCtrlX:
+		// Dismiss the compaction threshold-suggestion banner for this crossing.
+		if a.bannerVisible && !a.bannerDismissed {
+			a.bannerDismissed = true
+			return a, nil
+		}
 	case tea.KeyCtrlT:
 		// Toggle the most recent sub-agent block.  Chosen over
 		// `tab` (would conflict with textarea tab-insertion) and
@@ -904,6 +1031,48 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Role: components.RoleSystem,
 			Raw:  fmt.Sprintf("iteration limit reached (%d)", e.Limit),
 		})
+
+	// --- Compaction events (T2.3) ---
+
+	case bus.CompactionRequested:
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		if e.Source == "threshold" {
+			// Advisory suggestion: show the banner (or reset dismiss for a new
+			// crossing — the agent only fires this once per crossing, so
+			// receiving it again means usage dropped and came back).
+			a.bannerVisible = true
+			a.bannerPct = e.UsagePct
+			a.bannerDismissed = false
+		}
+		// Source "user" is handled by applyOutcome via the modal outcome path;
+		// the bus event is not used to open the modal (that's the slash command's
+		// job).
+
+	case bus.CompactionStarted:
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		a.compactionInFlight = true
+		a.compactionInFlightCount = e.MessagesToCompact
+
+	case bus.CompactionCompleted:
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		// The compactionCompleteMsg path handles toast rendering.
+		// Here we also clear the banner since compaction has finished.
+		a.bannerVisible = false
+		a.bannerDismissed = false
+
+	case bus.CompactionFailed:
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		// compactionCompleteMsg will carry the error for toast display.
+		// Nothing extra to do here — the in-flight notice is cleared by
+		// compactionCompleteMsg handling.
 	}
 	return nil
 }
@@ -1473,6 +1642,69 @@ func extractTarget(args []byte) string {
 		}
 	}
 	return ""
+}
+
+// --- Compaction modal integration -----------------------------------------
+
+// handleCompactionModalKey routes key presses when the compaction
+// confirmation modal is open.
+func (a *App) handleCompactionModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch k.Type {
+	case tea.KeyEsc:
+		a.activeModal = ""
+		return a, nil
+	case tea.KeyRunes:
+		if len(k.Runes) != 1 {
+			return a, nil
+		}
+		switch k.Runes[0] {
+		case 'y', 'Y':
+			if a.compactionModal.NothingToCompact() {
+				// Disable y — nothing to compact.
+				return a, nil
+			}
+			sid := a.foregroundID()
+			a.activeModal = ""
+			return a, func() tea.Msg { return compactionRunMsg{SessionID: sid} }
+		case 'n', 'N':
+			a.activeModal = ""
+			return a, nil
+		}
+	}
+	return a, nil
+}
+
+// startCompaction runs Agent.Compact asynchronously and returns a tea.Cmd
+// that delivers compactionCompleteMsg when it finishes.
+func (a *App) startCompaction(sessionID string) tea.Cmd {
+	if a.opts.Agent == nil || sessionID == "" {
+		return a.setNotice("compact: no agent or session")
+	}
+	msgCount := a.compactionModal.MessageCount
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(a.ctx, 120*time.Second)
+		defer cancel()
+		marker, err := a.opts.Agent.Compact(ctx, sessionID)
+		if err != nil {
+			if errors.Is(err, agent.ErrNothingToCompact) {
+				return compactionCompleteMsg{Err: errors.New("nothing to compact (fewer than 4 messages since last marker)")}
+			}
+			return compactionCompleteMsg{Err: err}
+		}
+		return compactionCompleteMsg{
+			MarkerID:          marker.ID,
+			MessagesCompacted: msgCount,
+			SummaryTokens:     marker.InputTokensSaved,
+		}
+	}
+}
+
+// shortID returns a short (12-char) prefix of a ULID for display in toasts.
+func shortID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12] + "…"
 }
 
 // --- Sessions modal integration --------------------------------------------

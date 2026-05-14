@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -142,5 +144,335 @@ func TestRecordUsage_EmptyUsageSkipped(t *testing.T) {
 		t.Errorf("unexpected CostUpdated for empty usage: %+v", ev)
 	case <-time.After(50 * time.Millisecond):
 		// Correct: no event.
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T2.3 Compaction lifecycle event tests
+// ---------------------------------------------------------------------------
+
+// TestCompact_PublishesStartedCompleted verifies that a successful Compact call
+// publishes CompactionStarted followed by CompactionCompleted with the expected
+// field values.
+func TestCompact_PublishesStartedCompleted(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	// Seed ≥4 messages so Compact doesn't return ErrNothingToCompact.
+	prov := newFakeProvider("fake",
+		scriptText("a1", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a2", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a3", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		// Compaction summary turn.
+		fakeScript{events: []provider.Event{
+			{Type: provider.EventTextDelta, Text: "compact summary"},
+			{Type: provider.EventUsage, Usage: provider.Usage{InputTokens: 20}},
+			{Type: provider.EventDone},
+		}},
+	)
+	a := env.newAgent(prov)
+
+	for i := 0; i < 3; i++ {
+		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
+			t.Fatalf("Send %d: %v", i, err)
+		}
+	}
+
+	startedCh := make(chan bus.CompactionStarted, 4)
+	completedCh := make(chan bus.CompactionCompleted, 4)
+	startedSub := bus.Subscribe[bus.CompactionStarted](env.Bus, bus.SubscribeOptions{BufferSize: 4})
+	completedSub := bus.Subscribe[bus.CompactionCompleted](env.Bus, bus.SubscribeOptions{BufferSize: 4})
+	defer startedSub.Unsubscribe()
+	defer completedSub.Unsubscribe()
+
+	go func() {
+		for ev := range startedSub.C() {
+			startedCh <- ev
+		}
+	}()
+	go func() {
+		for ev := range completedSub.C() {
+			completedCh <- ev
+		}
+	}()
+
+	marker, err := a.Compact(ctx, env.sessionID)
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if marker == nil {
+		t.Fatal("Compact returned nil marker")
+	}
+
+	// Give relay goroutines a moment to forward events.
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify CompactionStarted.
+	var started bus.CompactionStarted
+	select {
+	case started = <-startedCh:
+	default:
+		t.Fatal("CompactionStarted not received")
+	}
+	if started.SessionID != env.sessionID {
+		t.Errorf("CompactionStarted.SessionID = %q, want %q", started.SessionID, env.sessionID)
+	}
+	if started.MessagesToCompact < 4 {
+		t.Errorf("CompactionStarted.MessagesToCompact = %d, want ≥4", started.MessagesToCompact)
+	}
+
+	// Verify CompactionCompleted.
+	var completed bus.CompactionCompleted
+	select {
+	case completed = <-completedCh:
+	default:
+		t.Fatal("CompactionCompleted not received")
+	}
+	if completed.SessionID != env.sessionID {
+		t.Errorf("CompactionCompleted.SessionID = %q, want %q", completed.SessionID, env.sessionID)
+	}
+	if completed.MarkerID != marker.ID {
+		t.Errorf("CompactionCompleted.MarkerID = %q, want %q", completed.MarkerID, marker.ID)
+	}
+	if completed.DurationMs < 0 {
+		t.Errorf("CompactionCompleted.DurationMs = %d, want ≥0", completed.DurationMs)
+	}
+}
+
+// TestCompact_PublishesStartedFailed verifies that a Compact call which fails
+// during summary generation publishes CompactionStarted then CompactionFailed.
+func TestCompact_PublishesStartedFailed(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	// Seed ≥4 messages.
+	seeder := newFakeProvider("fake",
+		scriptText("a1", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a2", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a3", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+	)
+	a := env.newAgent(seeder)
+	for i := 0; i < 3; i++ {
+		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
+			t.Fatalf("Send %d: %v", i, err)
+		}
+	}
+
+	// Replace the provider with one that returns a stream init error during
+	// the compaction summary turn.
+	failProv := newFakeProvider("fake",
+		fakeScript{initErr: errors.New("provider explosion")},
+	)
+	a.opts.Provider = failProv
+
+	startedCh := make(chan bus.CompactionStarted, 4)
+	failedCh := make(chan bus.CompactionFailed, 4)
+	startedSub := bus.Subscribe[bus.CompactionStarted](env.Bus, bus.SubscribeOptions{BufferSize: 4})
+	failedSub := bus.Subscribe[bus.CompactionFailed](env.Bus, bus.SubscribeOptions{BufferSize: 4})
+	defer startedSub.Unsubscribe()
+	defer failedSub.Unsubscribe()
+	go func() {
+		for ev := range startedSub.C() {
+			startedCh <- ev
+		}
+	}()
+	go func() {
+		for ev := range failedSub.C() {
+			failedCh <- ev
+		}
+	}()
+
+	_, err := a.Compact(ctx, env.sessionID)
+	if err == nil {
+		t.Fatal("expected error from Compact, got nil")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	select {
+	case <-startedCh:
+	default:
+		t.Fatal("CompactionStarted not received on failure path")
+	}
+	select {
+	case failed := <-failedCh:
+		if failed.SessionID != env.sessionID {
+			t.Errorf("CompactionFailed.SessionID = %q, want %q", failed.SessionID, env.sessionID)
+		}
+		if failed.Reason == "" {
+			t.Error("CompactionFailed.Reason should not be empty")
+		}
+	default:
+		t.Fatal("CompactionFailed not received")
+	}
+}
+
+// TestCompact_NothingToCompact_NoEvents verifies that ErrNothingToCompact
+// produces NO CompactionStarted or CompactionFailed events.
+func TestCompact_NothingToCompact_NoEvents(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake",
+		scriptText("only one turn", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+	)
+	a := env.newAgent(prov)
+	if _, err := a.Send(ctx, env.sessionID, userText("q")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	startedSub := bus.Subscribe[bus.CompactionStarted](env.Bus, bus.SubscribeOptions{BufferSize: 4})
+	failedSub := bus.Subscribe[bus.CompactionFailed](env.Bus, bus.SubscribeOptions{BufferSize: 4})
+	defer startedSub.Unsubscribe()
+	defer failedSub.Unsubscribe()
+
+	_, err := a.Compact(ctx, env.sessionID)
+	if !errors.Is(err, ErrNothingToCompact) {
+		t.Fatalf("want ErrNothingToCompact, got %v", err)
+	}
+
+	// Give events a chance to arrive (they shouldn't).
+	time.Sleep(30 * time.Millisecond)
+
+	select {
+	case ev := <-startedSub.C():
+		t.Errorf("unexpected CompactionStarted: %+v", ev)
+	default:
+	}
+	select {
+	case ev := <-failedSub.C():
+		t.Errorf("unexpected CompactionFailed: %+v", ev)
+	default:
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T2.3 Threshold suggestion tests
+// ---------------------------------------------------------------------------
+
+// collectThresholdEvents drains CompactionRequested events from sub for up
+// to d, returning those with Source=="threshold" for the given sessionID.
+func collectThresholdEvents(sub *bus.Subscription[bus.CompactionRequested], sessionID string, d time.Duration) []bus.CompactionRequested {
+	var out []bus.CompactionRequested
+	deadline := time.After(d)
+	for {
+		select {
+		case ev, ok := <-sub.C():
+			if !ok {
+				return out
+			}
+			if ev.SessionID == sessionID && ev.Source == "threshold" {
+				out = append(out, ev)
+			}
+		case <-deadline:
+			return out
+		}
+	}
+}
+
+// TestThreshold_FiresOnce verifies that the threshold-suggestion event fires
+// exactly once when usage first crosses the threshold, not on every subsequent
+// call while above it.
+func TestThreshold_FiresOnce(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	// Context window = 1000 tokens; threshold at 80% (800 tokens).
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+		o.CompactionThresholdPct = 80
+	})
+
+	reqSub := bus.Subscribe[bus.CompactionRequested](env.Bus, bus.SubscribeOptions{BufferSize: 8})
+	defer reqSub.Unsubscribe()
+
+	// Simulate three turns above threshold: 850, 900, 950 input tokens used.
+	for _, tok := range []int64{850, 900, 950} {
+		a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: tok})
+	}
+
+	events := collectThresholdEvents(reqSub, env.sessionID, 100*time.Millisecond)
+	if len(events) != 1 {
+		t.Errorf("threshold suggestion fired %d times, want exactly 1", len(events))
+	}
+}
+
+// TestThreshold_ReiresAfterHysteresis verifies that after usage drops below
+// threshold - 5 and then rises again, the suggestion fires a second time.
+func TestThreshold_ReiresAfterHysteresis(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	// Context window = 1000; threshold 80% = 800.
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+		o.CompactionThresholdPct = 80
+	})
+
+	reqSub := bus.Subscribe[bus.CompactionRequested](env.Bus, bus.SubscribeOptions{BufferSize: 8})
+	defer reqSub.Unsubscribe()
+
+	// First crossing: above threshold (85%).
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 850})
+
+	// Drop below threshold - 5 = 75%: 740 tokens (< 750).
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 740})
+
+	// Second crossing: back above threshold (85%).
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 850})
+
+	events := collectThresholdEvents(reqSub, env.sessionID, 100*time.Millisecond)
+	if len(events) != 2 {
+		t.Errorf("expected 2 threshold suggestions (one per crossing), got %d", len(events))
+	}
+}
+
+// TestThreshold_RefiresAfterCompaction verifies that after a successful Compact
+// the threshold-fired flag is cleared, so the suggestion fires again if usage
+// is still above threshold.
+func TestThreshold_RefiresAfterCompaction(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake",
+		scriptText("a1", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a2", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a3", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		fakeScript{events: []provider.Event{
+			{Type: provider.EventTextDelta, Text: "summary"},
+			{Type: provider.EventUsage, Usage: provider.Usage{InputTokens: 10}},
+			{Type: provider.EventDone},
+		}},
+	)
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+		o.CompactionThresholdPct = 80
+	})
+
+	for i := 0; i < 3; i++ {
+		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
+			t.Fatalf("Send %d: %v", i, err)
+		}
+	}
+
+	reqSub := bus.Subscribe[bus.CompactionRequested](env.Bus, bus.SubscribeOptions{BufferSize: 8})
+	defer reqSub.Unsubscribe()
+
+	// First threshold crossing.
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 850})
+
+	// Compact — this resets the thresholdFired flag.
+	if _, err := a.Compact(ctx, env.sessionID); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+
+	// Second crossing with same agent — should fire again.
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 850})
+
+	events := collectThresholdEvents(reqSub, env.sessionID, 100*time.Millisecond)
+	if len(events) < 2 {
+		t.Errorf("expected ≥2 threshold suggestions (one before, one after compact), got %d", len(events))
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/provider"
@@ -21,6 +22,12 @@ import (
 // delta published at each level is the SAME per-turn delta (not a cumulative
 // sum): each row in the chain accumulates the delta independently, so
 // multi-level nesting doesn't multiply counts — it just updates each row once.
+//
+// T2.3 — threshold suggestion: after each turn, if usage crosses
+// CompactionThresholdPct for the first time this crossing, a
+// [bus.CompactionRequested] with Source="threshold" is published once.
+// The flag is reset when usage falls below (threshold - 5) percentage points
+// or when compaction completes (see Compact).
 func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u provider.Usage) {
 	if u.InputTokens == 0 && u.OutputTokens == 0 &&
 		u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
@@ -106,6 +113,35 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 		ReasoningTokens: u.ReasoningTokens,
 		At:              a.opts.Now(),
 	})
+
+	// T2.3 threshold suggestion: fire once per crossing.
+	// pct is in [0.0, 1.0]; threshold is in [0, 99] as a percentage.
+	threshold := a.opts.CompactionThresholdPct
+	if threshold > 0 && maxTok > 0 {
+		pctAs100 := pct * 100
+		hysteresis := 5.0
+
+		a.mu.Lock()
+		fired := a.thresholdFired[sessionID]
+		if !fired && pctAs100 >= threshold {
+			// First crossing: fire the advisory suggestion.
+			a.thresholdFired[sessionID] = true
+			a.mu.Unlock()
+			bus.Publish(a.opts.Bus, bus.CompactionRequested{
+				SessionID: sessionID,
+				Source:    "threshold",
+				UsagePct:  pctAs100,
+				At:        a.opts.Now(),
+			})
+		} else if fired && pctAs100 < (threshold-hysteresis) {
+			// Usage has dropped enough below threshold — reset so the
+			// banner will re-appear if it climbs back above threshold.
+			a.thresholdFired[sessionID] = false
+			a.mu.Unlock()
+		} else {
+			a.mu.Unlock()
+		}
+	}
 }
 
 // Compact summarises the session's pre-marker history and writes a new
@@ -114,11 +150,17 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 //
 // Returns [ErrNothingToCompact] if there are fewer than 4 messages since
 // the latest marker — summarising 1–3 messages is not worth a provider
-// round-trip.
+// round-trip.  ErrNothingToCompact does NOT publish any events.
 //
-// Compact is permission-free (it uses no tools) and emits no bus events.
-// It does, however, serialise against Send on the same session through
-// the per-session lock.
+// Bus events published in order:
+//
+//   - [bus.CompactionStarted] — before the provider call (always, unless
+//     ErrNothingToCompact is returned).
+//   - [bus.CompactionCompleted] — after the marker is persisted (success).
+//   - [bus.CompactionFailed] — if any error occurs after Started was published.
+//
+// Compact is permission-free (it uses no tools) and serialises against Send
+// on the same session through the per-session lock.
 func (a *Agent) Compact(ctx context.Context, sessionID string) (*session.Marker, error) {
 	if a.isClosed() {
 		return nil, ErrClosed
@@ -148,16 +190,53 @@ func (a *Agent) Compact(ctx context.Context, sessionID string) (*session.Marker,
 		return nil, fmt.Errorf("agent: Compact: load session: %w", err)
 	}
 
+	// Publish CompactionStarted before the provider call so the TUI can
+	// show the "compacting…" notice as early as possible.
+	startedAt := a.opts.Now()
+	bus.Publish(a.opts.Bus, bus.CompactionStarted{
+		SessionID:         sessionID,
+		MessagesToCompact: len(msgs),
+		InputTokensBefore: sess.Totals.InputTokens,
+		At:                startedAt,
+	})
+
 	summary, usage, err := a.generateCompactionSummary(ctx, sess.Model.Name, msgs)
 	if err != nil {
+		bus.Publish(a.opts.Bus, bus.CompactionFailed{
+			SessionID: sessionID,
+			Reason:    err.Error(),
+			At:        a.opts.Now(),
+		})
 		return nil, fmt.Errorf("agent: Compact: generate summary: %w", err)
 	}
 
 	beforeID := msgs[len(msgs)-1].ID
 	marker, err := a.opts.Store.AddCompactionMarker(ctx, sessionID, beforeID, summary, usage.InputTokens)
 	if err != nil {
+		bus.Publish(a.opts.Bus, bus.CompactionFailed{
+			SessionID: sessionID,
+			Reason:    err.Error(),
+			At:        a.opts.Now(),
+		})
 		return nil, fmt.Errorf("agent: Compact: add marker: %w", err)
 	}
+
+	durationMs := time.Since(startedAt).Milliseconds()
+	bus.Publish(a.opts.Bus, bus.CompactionCompleted{
+		SessionID:        sessionID,
+		MarkerID:         marker.ID,
+		SummaryTokens:    usage.InputTokens,
+		InputTokensAfter: usage.InputTokens, // estimate: summary becomes the new context
+		DurationMs:       durationMs,
+		At:               a.opts.Now(),
+	})
+
+	// Reset the threshold-fired flag so the suggestion re-appears if usage
+	// climbs back above threshold after compaction.
+	a.mu.Lock()
+	delete(a.thresholdFired, sessionID)
+	a.mu.Unlock()
+
 	return marker, nil
 }
 

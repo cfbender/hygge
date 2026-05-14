@@ -783,3 +783,73 @@ reasoning = "MEDIUM"
 		t.Errorf("reasoning value should be lower-cased, got %q", cfg.Model.Reasoning)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Compaction threshold config tests (T2.3)
+// ---------------------------------------------------------------------------
+
+// TestLoad_Compaction_Default verifies that the default threshold_pct is 80.
+func TestLoad_Compaction_Default(t *testing.T) {
+	tmp := t.TempDir()
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Compaction.ThresholdPct != 80 {
+		t.Errorf("compaction.threshold_pct default: got %v, want 80", cfg.Compaction.ThresholdPct)
+	}
+}
+
+// TestLoad_Compaction_ZeroDisables verifies that threshold_pct=0 is valid
+// (it disables the suggestion) and is accepted without a warning.
+func TestLoad_Compaction_ZeroDisables(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[compaction]
+threshold_pct = 0
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Compaction.ThresholdPct != 0 {
+		t.Errorf("compaction.threshold_pct: got %v, want 0", cfg.Compaction.ThresholdPct)
+	}
+}
+
+// TestLoad_Compaction_ValidRange verifies an in-range value (e.g. 70) parses
+// correctly.
+func TestLoad_Compaction_ValidRange(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[compaction]
+threshold_pct = 70
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Compaction.ThresholdPct != 70 {
+		t.Errorf("compaction.threshold_pct: got %v, want 70", cfg.Compaction.ThresholdPct)
+	}
+}
+
+// TestLoad_Compaction_InvalidHighValueReset verifies that a value ≥100 does
+// NOT fail the load — it warns and resets to 80.
+func TestLoad_Compaction_InvalidHighValueReset(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[compaction]
+threshold_pct = 110
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load should not fail for out-of-range threshold_pct, got: %v", err)
+	}
+	if cfg.Compaction.ThresholdPct != 80 {
+		t.Errorf("out-of-range threshold_pct should reset to 80, got %v", cfg.Compaction.ThresholdPct)
+	}
+}
