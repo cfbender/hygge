@@ -73,9 +73,19 @@ func TestSubagentStarted_AddsCollapsedBlockUnderTaskMessage(t *testing.T) {
 	}
 
 	out := app.View().Content
-	for _, want := range []string{"▸", "task[general]", "anthropic/claude-haiku-4-5", "running"} {
+	for _, want := range []string{
+		"General Subagent \u2014 find LICENSE", // new compact heading
+		"ctrl+g",                               // hint
+		"view subagent",                        // hint label
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q in:\n%s", want, out)
+		}
+	}
+	// Old format must be gone.
+	for _, bad := range []string{"task[general]", "anthropic/claude-haiku-4-5", "running"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("view should not contain old format string %q in:\n%s", bad, out)
 		}
 	}
 }
@@ -104,8 +114,9 @@ func TestSubagentToggleExpandsLatest(t *testing.T) {
 		t.Errorf("expected Expanded=true after Ctrl+T")
 	}
 	out := app.View().Content
-	if !strings.Contains(out, "▾") {
-		t.Errorf("expected expanded chevron in view, got:\n%s", out)
+	// The compact subagent block should still render regardless of Expanded state.
+	if !strings.Contains(out, "General Subagent") {
+		t.Errorf("expected subagent block in view after Ctrl+T, got:\n%s", out)
 	}
 
 	// Toggle back.
@@ -688,5 +699,46 @@ func TestFooterCostSubscribesToRoot(t *testing.T) {
 	})
 	if app.costDollars != 0.12 {
 		t.Errorf("root cost event should update footer; got %v, want 0.12", app.costDollars)
+	}
+}
+
+// TestSubagentAnimLifecycle verifies:
+// - SubagentStarted creates an Anim in subagentAnims.
+// - SubagentCompleted removes it (stops ticking).
+// - Resumed (hydrated) sessions never create an Anim (EndedAt already set).
+func TestSubagentAnimLifecycle(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Before any sub-agent, anims map should be empty.
+	if len(app.subagentAnims) != 0 {
+		t.Errorf("expected empty subagentAnims initially, got %d", len(app.subagentAnims))
+	}
+
+	// SubagentStarted: anim must be created.
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-anim",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "anim test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+	if len(app.subagentAnims) != 1 {
+		t.Errorf("expected 1 anim after SubagentStarted, got %d", len(app.subagentAnims))
+	}
+	if app.subagentAnims["sub-anim"] == nil {
+		t.Error("expected non-nil Anim for sub-anim after SubagentStarted")
+	}
+
+	// SubagentCompleted: anim must be removed.
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-anim",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+	if len(app.subagentAnims) != 0 {
+		t.Errorf("expected 0 anims after SubagentCompleted, got %d", len(app.subagentAnims))
 	}
 }

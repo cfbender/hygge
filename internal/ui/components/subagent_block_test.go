@@ -8,119 +8,161 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-func TestSubagentBlockCollapsedRunning(t *testing.T) {
+// TestSubagentBlockDoneState verifies the DONE compact layout.
+func TestSubagentBlockDoneState(t *testing.T) {
 	t.Parallel()
-	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	end := start.Add(4*time.Second + 200*time.Millisecond)
 	st := &SubagentState{
 		SubSessionID: "sub-1",
 		Type:         "general",
-		Model:        "anthropic/claude-haiku-4-5",
-		Description:  "Find LICENSE files",
-		StartedAt:    now.Add(-4200 * time.Millisecond),
+		Description:  "ping test",
+		StartedAt:    start,
+		EndedAt:      end,
+		Cost:         0.0042,
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read"},
+			{Role: RoleTool, ToolName: "bash"},
+			{Role: RoleTool, ToolName: "grep"},
+		},
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: now}.View()
+	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
 	for _, want := range []string{
-		"▸",                          // collapsed chevron
-		"task[general]",              // type label
-		"anthropic/claude-haiku-4-5", // model
-		"running",                    // state
-		"4.2s",                       // elapsed
-		"0 tokens",                   // tokens
-		"$0.0000",                    // cost
-		`"Find LICENSE files"`,       // description quoted
+		"General Subagent \u2014 ping test", // heading with em dash
+		"3 toolcalls",                       // tool count
+		"4.2s",                              // duration
+		"$0.0042",                           // cost
+		"ctrl+g",                            // hint
+		"view subagent",                     // hint label
+		"\u2502",                            // │ gutter
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("collapsed-running missing %q in:\n%s", want, out)
+			t.Errorf("DONE view missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "│") {
-		t.Errorf("collapsed view should NOT contain transcript gutter, got:\n%s", out)
+	// Must NOT contain the old format strings.
+	for _, bad := range []string{
+		"task[general]",
+		"\u25b8", // ▸ old chevron
+		"running",
+		"tokens",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("DONE view should not contain %q in:\n%s", bad, out)
+		}
 	}
 }
 
-func TestSubagentBlockExpandedRunningRendersTranscript(t *testing.T) {
+// TestSubagentBlockRunningState verifies the RUNNING compact layout.
+func TestSubagentBlockRunningState(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	st := &SubagentState{
 		SubSessionID: "sub-1",
 		Type:         "general",
-		Model:        "anthropic/claude-haiku-4-5",
-		Description:  "find license",
-		StartedAt:    now.Add(-time.Second),
-		Expanded:     true,
+		Description:  "ping test",
+		StartedAt:    now.Add(-2 * time.Second),
 		Messages: []UIMessage{
-			{Role: RoleAssistant, Raw: "I'll search for LICENSE files.", IsStreaming: false},
-			{Role: RoleTool, ToolName: "grep", Target: "LICENSE", Raw: "./LICENSE:1:MIT"},
+			{Role: RoleTool, ToolName: "read", Target: "internal/ui/app.go"},
 		},
 	}
 	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: now}.View()
 	for _, want := range []string{
-		"▾",                       // expanded chevron
-		"I'll search for LICENSE", // assistant message body
-		"tool grep: LICENSE",      // tool row
-		"./LICENSE:1:MIT",         // tool result body
-		"│",                       // gutter
+		"General Subagent \u2014 ping test",
+		"read internal/ui/app.go", // latest tool label
+		"ctrl+g",
+		"view subagent",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("expanded view missing %q in:\n%s", want, out)
+			t.Errorf("RUNNING view missing %q in:\n%s", want, out)
 		}
 	}
 }
 
-func TestSubagentBlockExpandedRunningEmptyTranscriptPlaceholder(t *testing.T) {
+// TestSubagentBlockRunningNoToolsPlaceholder verifies "working…" when no tool calls yet.
+func TestSubagentBlockRunningNoToolsPlaceholder(t *testing.T) {
 	t.Parallel()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	st := &SubagentState{
 		SubSessionID: "sub-1",
 		Type:         "general",
-		Model:        "anthropic/claude-haiku-4-5",
-		Description:  "look",
-		StartedAt:    time.Now(),
-		Expanded:     true,
+		Description:  "go",
+		StartedAt:    now.Add(-time.Second),
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme()}.View()
-	if !strings.Contains(out, "no output yet") {
-		t.Errorf("expected placeholder when expanded with no messages, got:\n%s", out)
+	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: now}.View()
+	if !strings.Contains(out, "working") {
+		t.Errorf("RUNNING with no tools should show working placeholder; got:\n%s", out)
 	}
 }
 
-func TestSubagentBlockCollapsedDoneShowsCostAndTokens(t *testing.T) {
+// TestSubagentBlockFailedState verifies the FAILED (HitIterLimit) layout.
+func TestSubagentBlockFailedState(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	end := start.Add(12*time.Second + 400*time.Millisecond)
+	end := start.Add(4*time.Second + 200*time.Millisecond)
 	st := &SubagentState{
+		SubSessionID: "sub-1",
 		Type:         "general",
-		Model:        "anthropic/claude-haiku-4-5",
-		Description:  "done mission",
+		Description:  "ping test",
 		StartedAt:    start,
 		EndedAt:      end,
-		Cost:         0.0041,
-		InputTokens:  4_800,
-		OutputTokens: 1_000,
+		HitIterLimit: true,
+		Cost:         0.0042,
 	}
 	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
-	for _, want := range []string{"▸", "done", "12.4s", "5.8k tokens", "$0.0041"} {
+	for _, want := range []string{
+		"General Subagent \u2014 ping test",
+		"failed (iteration limit)",
+		"4.2s",
+		"$0.0042",
+		"ctrl+g",
+	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("done view missing %q in:\n%s", want, out)
+			t.Errorf("FAILED view missing %q in:\n%s", want, out)
 		}
 	}
 }
 
-func TestSubagentBlockHitIterLimitShowsFailedBanner(t *testing.T) {
+// TestSubagentBlockEmptyDescriptionFallback verifies no em-dash when no description.
+func TestSubagentBlockEmptyDescriptionFallback(t *testing.T) {
 	t.Parallel()
+	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	end := start.Add(time.Second)
 	st := &SubagentState{
+		SubSessionID: "sub-1",
 		Type:         "general",
-		Model:        "anthropic/claude-haiku-4-5",
-		Description:  "looped",
-		StartedAt:    time.Now().Add(-30 * time.Second),
-		EndedAt:      time.Now(),
-		HitIterLimit: true,
+		StartedAt:    start,
+		EndedAt:      end,
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme()}.View()
-	if !strings.Contains(out, "failed (iteration limit)") {
-		t.Errorf("expected failed-banner in iter-limit view, got:\n%s", out)
+	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
+	if !strings.Contains(out, "General Subagent") {
+		t.Errorf("empty-description view should contain 'General Subagent'; got:\n%s", out)
+	}
+	if strings.Contains(out, "\u2014") { // em dash should be absent
+		t.Errorf("empty-description view should NOT contain em dash; got:\n%s", out)
 	}
 }
 
+// TestSubagentBlockLongDescriptionTruncated verifies truncation with ellipsis.
+func TestSubagentBlockLongDescriptionTruncated(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	end := start.Add(time.Second)
+	longDesc := strings.Repeat("x", 200)
+	st := &SubagentState{
+		SubSessionID: "sub-1",
+		Type:         "general",
+		Description:  longDesc,
+		StartedAt:    start,
+		EndedAt:      end,
+	}
+	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Width: 60, Now: end}.View()
+	if !strings.Contains(out, "\u2026") { // ellipsis
+		t.Errorf("long description should be truncated with ellipsis; got:\n%s", out)
+	}
+}
+
+// TestSubagentBlockNilStateReturnsEmpty verifies nil state renders empty.
 func TestSubagentBlockNilStateReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	if got := (SubagentBlock{}).View(); got != "" {
@@ -128,15 +170,22 @@ func TestSubagentBlockNilStateReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestMessageListRendersNestedSubagentBlock(t *testing.T) {
+// TestMessageListTaskWithSubagentRendersBlockOnly verifies that a task tool
+// message with SubagentID renders ONLY the subagent block (no "▌tool: task" gutter).
+func TestMessageListTaskWithSubagentRendersBlockOnly(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-time.Second)
+	end := now
+
 	st := &SubagentState{
 		SubSessionID: "sub-1",
 		Type:         "general",
-		Model:        "anthropic/claude-haiku-4-5",
 		Description:  "find LICENSE",
-		StartedAt:    now.Add(-time.Second),
+		StartedAt:    start,
+		EndedAt:      end,
+		Cost:         0.001,
+		Messages:     []UIMessage{{Role: RoleTool, ToolName: "grep"}},
 	}
 	ml := MessageList{
 		Width: 100,
@@ -155,17 +204,64 @@ func TestMessageListRendersNestedSubagentBlock(t *testing.T) {
 		Subagents: map[string]*SubagentState{"sub-1": st},
 	}
 	out := ml.View()
+
+	// Must contain the new compact block format.
 	for _, want := range []string{
-		"▌tool: task",
-		"task[general]",
-		"running",
+		"General Subagent \u2014 find LICENSE",
+		"1 toolcalls",
+		"ctrl+g",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("messagelist nested view missing %q in:\n%s", want, out)
 		}
 	}
+	// Must NOT contain the old format.
+	for _, bad := range []string{
+		"\u25cctools: task", // ▌tool: task
+		"task[general]",
+	} {
+		if strings.Contains(out, bad) {
+			t.Errorf("messagelist should not render %q for task+SubagentID; got:\n%s", bad, out)
+		}
+	}
+	// Must NOT contain "▌tool: task" specifically (check the actual gutter prefix).
+	if strings.Contains(out, "\u258ctool: task") {
+		t.Errorf("messagelist should not render '▌tool: task' for task+SubagentID; got:\n%s", out)
+	}
 }
 
+// TestMessageListTaskWithSubagentNoGutter: ensure the "▌tool: task" gutter is absent.
+func TestMessageListTaskWithSubagentNoGutter(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	st := &SubagentState{
+		SubSessionID: "sub-1",
+		Type:         "general",
+		StartedAt:    now.Add(-time.Second),
+		EndedAt:      now,
+	}
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Now:   now,
+		Messages: []UIMessage{
+			{
+				Role:       RoleTool,
+				ToolName:   "task",
+				Raw:        "",
+				SubagentID: "sub-1",
+			},
+		},
+		Subagents: map[string]*SubagentState{"sub-1": st},
+	}
+	out := ml.View()
+	// The old "▌tool: task" gutter must not appear.
+	if strings.Contains(out, "tool: task") {
+		t.Errorf("task+subagent row must not render 'tool: task' gutter; got:\n%s", out)
+	}
+}
+
+// TestMessageListNoNestedWhenSubagentIDMissing verifies non-task tools render normally.
 func TestMessageListNoNestedWhenSubagentIDMissing(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
@@ -174,14 +270,20 @@ func TestMessageListNoNestedWhenSubagentIDMissing(t *testing.T) {
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "task", Raw: "(running…)"},
 		},
-		// no Subagents map
+		// no Subagents map, no SubagentID
 	}
 	out := ml.View()
+	// A plain task tool message (no SubagentID) renders the regular gutter.
 	if strings.Contains(out, "task[") {
 		t.Errorf("expected no nested block when SubagentID empty, got:\n%s", out)
 	}
+	// The regular gutter should still appear.
+	if !strings.Contains(out, "tool: task") {
+		t.Errorf("plain task tool message should still render gutter; got:\n%s", out)
+	}
 }
 
+// TestFormatElapsedRanges ensures formatElapsed covers the spec cases.
 func TestFormatElapsedRanges(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -201,6 +303,7 @@ func TestFormatElapsedRanges(t *testing.T) {
 	}
 }
 
+// TestFormatSubagentTokensRanges retains coverage of the helper.
 func TestFormatSubagentTokensRanges(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
