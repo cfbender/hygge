@@ -48,3 +48,12 @@ type clearNoticeMsg struct {
 type subagentTickMsg struct {
 	SubSessionID string
 }
+
+// --- Session modal messages -------------------------------------------------
+// These are emitted by the sessions modal component and handled in app.go.
+// App applies store + agent side effects and updates foreground state.
+
+// switchSessionMsg asks the App to change the foreground session.
+type switchSessionMsg struct {
+	ID string
+}

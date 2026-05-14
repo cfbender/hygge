@@ -72,8 +72,17 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 
 	if out.OpenModal != "" {
 		switch out.OpenModal {
-		case command.ModalHelp, command.ModalSessions:
+		case command.ModalHelp:
 			a.activeModal = out.OpenModal
+		case command.ModalSessions:
+			a.activeModal = out.OpenModal
+			a.sessionsModal = components.SessionsModal{
+				Theme:         a.opts.Theme,
+				ForegroundID:  a.opts.SessionID,
+				ShowSubagents: false,
+				ShowDeleted:   false,
+			}
+			return tea.Batch(append(cmds, a.openSessionsModal())...)
 		default:
 			slogWarnUnknownModal(out.OpenModal)
 		}
@@ -102,6 +111,15 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 		// Reuse the existing send path so streaming + cost events
 		// flow through unchanged.
 		cmds = append(cmds, a.startSend(out.Message))
+	}
+
+	// Drain the pending fork intent set by applyUpdate for UpdateForkAt.
+	if a.forkPendingID != "" {
+		fromID := a.forkPendingID
+		msgID := a.forkPendingMsgID
+		a.forkPendingID = ""
+		a.forkPendingMsgID = ""
+		cmds = append(cmds, a.applyForkSession(fromID, msgID))
 	}
 
 	if out.Notice != "" {
@@ -133,9 +151,24 @@ func (a *App) applyUpdate(key, value string) {
 			a.opts.Reasoning = provider.Reasoning{Effort: value}
 		}
 	case command.UpdateForkAt:
-		// TODO(T1.2): wire to the real fork flow.  For v0.3 we
-		// surface a notice via the command's Outcome.Notice; no
-		// state changes here.
+		// Wire the fork-at action.  "latest" (or empty) resolves to the
+		// foreground session's most recent user message.
+		if a.opts.SessionID == "" {
+			break
+		}
+		fromID := a.opts.SessionID
+		// Enqueue the fork as a cmd — cannot return it from applyUpdate directly.
+		// The caller (applyOutcome) collects cmds separately; store in a
+		// deferred cmd via a side channel.  We set a flag on the app and the
+		// next applyOutcome call picks it up.
+		//
+		// Simpler approach: just run the fork inline here as a goroutine-based
+		// tea.Cmd.  applyUpdate can't return a cmd, so stash it.
+		_ = fromID // used below when we generate the notice
+		// The fork is triggered by returning a cmd from applyOutcome, not here.
+		// We signal via the forkPending flag which applyOutcome checks.
+		a.forkPendingID = fromID
+		a.forkPendingMsgID = value
 	default:
 		slogWarnUnknownUpdate(key, value)
 	}

@@ -14,18 +14,27 @@ import (
 func newSessionsCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "sessions",
-		Short: "List, inspect, and delete sessions",
+		Short: "List, inspect, rename, and delete sessions",
 	}
-	root.AddCommand(newSessionsListCmd(), newSessionsShowCmd(), newSessionsDeleteCmd())
+	root.AddCommand(
+		newSessionsListCmd(),
+		newSessionsShowCmd(),
+		newSessionsRenameCmd(),
+		newSessionsDeleteCmd(),
+	)
 	return root
 }
 
 // newSessionsListCmd builds `hygge sessions list`.
 func newSessionsListCmd() *cobra.Command {
 	var (
-		here           bool
-		includeDeleted bool
-		limit          int
+		here             bool
+		includeDeleted   bool
+		includeSubagents bool
+		limit            int
+		query            string
+		kind             string
+		parentID         string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -46,9 +55,17 @@ func newSessionsListCmd() *cobra.Command {
 			opts := session.ListOpts{
 				IncludeDeleted: includeDeleted,
 				Limit:          limit,
+				Query:          query,
+				ParentID:       parentID,
 			}
 			if here {
 				opts.ProjectDir = rt.Pwd
+			}
+			if kind != "" {
+				opts.Kind = session.Kind(kind)
+			} else if !includeSubagents {
+				// Default: hide subagent sessions from top-level listing.
+				opts.Kind = session.KindPrimary
 			}
 			sessions, err := rt.Store.ListSessions(context.Background(), opts)
 			if err != nil {
@@ -59,7 +76,7 @@ func newSessionsListCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "ID\tCREATED\tMODEL\tSLUG\tPROJECT")
+			writeln(tw, "ID\tCREATED\tMODEL\tSLUG\tPROJECT\tKIND")
 			home := homeDirFromRuntime(rt)
 			for _, s := range sessions {
 				slug := s.Slug
@@ -70,7 +87,7 @@ func newSessionsListCmd() *cobra.Command {
 				if !s.DeletedAt.IsZero() {
 					marker = " (deleted)"
 				}
-				printf(tw, "%s%s\t%s\t%s/%s\t%s\t%s\n",
+				printf(tw, "%s%s\t%s\t%s/%s\t%s\t%s\t%s\n",
 					shortID(s.ID),
 					marker,
 					s.CreatedAt.Format("2006-01-02 15:04"),
@@ -78,6 +95,7 @@ func newSessionsListCmd() *cobra.Command {
 					s.Model.Name,
 					slug,
 					abbreviatePath(s.ProjectDir, home),
+					string(s.Kind),
 				)
 			}
 			return tw.Flush()
@@ -85,7 +103,11 @@ func newSessionsListCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&here, "here", false, "only sessions whose project_dir matches the current pwd")
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", false, "include soft-deleted sessions")
+	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "include subagent sessions (hidden by default)")
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum number of sessions to list")
+	cmd.Flags().StringVar(&query, "query", "", "case-insensitive substring filter on slug, project_dir, first message")
+	cmd.Flags().StringVar(&kind, "kind", "", "filter by kind: primary | subagent (default: primary unless --include-subagents)")
+	cmd.Flags().StringVar(&parentID, "parent", "", "filter to children of this session id")
 	return cmd
 }
 
@@ -127,8 +149,16 @@ func newSessionsShowCmd() *cobra.Command {
 			printf(out(cmd), "updated:      %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05"))
 			printf(out(cmd), "model:        %s/%s\n", sess.Model.Provider, sess.Model.Name)
 			printf(out(cmd), "project_dir:  %s\n", abbreviatePath(sess.ProjectDir, home))
+			printf(out(cmd), "kind:         %s\n", string(sess.Kind))
 			if sess.Slug != "" {
 				printf(out(cmd), "slug:         %s\n", sess.Slug)
+			}
+			if sess.FirstMessagePreview != "" {
+				preview := sess.FirstMessagePreview
+				if len(preview) > 60 {
+					preview = preview[:57] + "..."
+				}
+				printf(out(cmd), "first_msg:    %s\n", preview)
 			}
 			if sess.ParentID != "" {
 				printf(out(cmd), "parent:       %s (forked at %s)\n", shortID(sess.ParentID), shortID(sess.ForkMessageID))
@@ -140,6 +170,39 @@ func newSessionsShowCmd() *cobra.Command {
 			printf(out(cmd), "input_tokens: %d\n", sess.Totals.InputTokens)
 			printf(out(cmd), "output_tokens:%d\n", sess.Totals.OutputTokens)
 			printf(out(cmd), "cost_usd:     $%.4f\n", sess.Totals.CostUSD)
+			return nil
+		},
+	}
+}
+
+// newSessionsRenameCmd builds `hygge sessions rename <id-prefix> <slug>`.
+func newSessionsRenameCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <id-prefix> <slug>",
+		Short: "Set a slug on a session",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rt, err := bootstrap(context.Background(), bootstrapOptions{
+				ConfigFile:      rootFlags.ConfigFile,
+				ProfileName:     rootFlags.Profile,
+				Pwd:             rootFlags.Pwd,
+				ProviderFactory: stubProviderFactory,
+			})
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rt.Close() }()
+
+			ctx := context.Background()
+			id, err := findSessionByPrefix(ctx, rt, args[0], false)
+			if err != nil {
+				return die(cmd, "%s", err)
+			}
+			slug := args[1]
+			if err := rt.Store.RenameSession(ctx, id, slug); err != nil {
+				return fmt.Errorf("cli: rename session: %w", err)
+			}
+			printf(out(cmd), "renamed %s → %q\n", shortID(id), slug)
 			return nil
 		},
 	}

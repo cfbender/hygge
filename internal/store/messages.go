@@ -14,6 +14,11 @@ import (
 // AppendMessage inserts a new message row.  The parts slice is encoded via
 // session.MarshalParts; an invalid parts payload would be rejected by the
 // CHECK (json_valid(parts)) constraint on the messages table.
+//
+// When the message is the first user-role message for the session, the
+// session's first_message_preview column is populated with up to 256
+// chars of the message's first text part.  This supports fast substring
+// filtering in ListSessions without a per-query JOIN.
 func (s *Store) AppendMessage(
 	ctx context.Context, sessionID string, in session.NewMessage,
 ) (*session.Message, error) {
@@ -49,6 +54,24 @@ func (s *Store) AppendMessage(
 		return nil, fmt.Errorf("store: AppendMessage: %w", err)
 	}
 
+	// Populate first_message_preview on the session row when this is the
+	// first user-role message (first_message_preview IS NULL).  Best-effort:
+	// failure here is logged and swallowed so the caller's append still
+	// succeeds.  We extract the text from the first PartText part.
+	if in.Role == session.RoleUser {
+		preview := extractTextPreview(in.Parts, 256)
+		if preview != "" {
+			if _, upErr := s.db.ExecContext(ctx,
+				`UPDATE sessions SET first_message_preview = ?
+				 WHERE id = ? AND first_message_preview IS NULL`,
+				preview, sessionID,
+			); upErr != nil {
+				slog.Warn("store: AppendMessage: failed to set first_message_preview",
+					"session_id", sessionID, "err", upErr)
+			}
+		}
+	}
+
 	return &session.Message{
 		ID:               id,
 		SessionID:        sessionID,
@@ -62,6 +85,20 @@ func (s *Store) AppendMessage(
 		DurationMs:       in.DurationMs,
 		CreatedAt:        now,
 	}, nil
+}
+
+// extractTextPreview returns up to maxLen chars from the first PartText
+// part in parts.  Returns "" when no text part is found.
+func extractTextPreview(parts []session.Part, maxLen int) string {
+	for _, p := range parts {
+		if p.Kind == session.PartText && p.Text != "" {
+			if len(p.Text) <= maxLen {
+				return p.Text
+			}
+			return p.Text[:maxLen]
+		}
+	}
+	return ""
 }
 
 // nullableInt maps 0 -> NULL on write paths.  We treat 0 as "unset" because

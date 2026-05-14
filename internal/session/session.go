@@ -94,18 +94,19 @@ type Totals struct {
 
 // Session is a single conversation, optionally rooted at a parent fork point.
 type Session struct {
-	ID            string
-	ParentID      string // "" = root session
-	ForkMessageID string // "" if no parent
-	Slug          string
-	ProjectDir    string
-	Model         ModelRef
-	Kind          Kind // "primary" or "subagent"; empty on read means "primary"
-	Totals        Totals
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     time.Time // zero value if not deleted
-	Metadata      json.RawMessage
+	ID                  string
+	ParentID            string // "" = root session
+	ForkMessageID       string // "" if no parent
+	Slug                string
+	ProjectDir          string
+	Model               ModelRef
+	Kind                Kind // "primary" or "subagent"; empty on read means "primary"
+	Totals              Totals
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	DeletedAt           time.Time // zero value if not deleted
+	Metadata            json.RawMessage
+	FirstMessagePreview string // "" when no user message exists yet
 }
 
 // Role identifies who produced a message.
@@ -177,6 +178,21 @@ type ListOpts struct {
 	ProjectDir     string // filter; "" = all directories
 	IncludeDeleted bool
 	Limit          int // 0 = use default (50)
+
+	// Kind filters by session kind.  Empty matches all kinds (existing
+	// behaviour).  Pass KindPrimary to hide subagent sessions from a
+	// top-level listing.
+	Kind Kind
+
+	// ParentID filters to children of the given session.  "" matches
+	// sessions regardless of parent.  Combine with Kind=KindSubagent
+	// to list a parent's subagent invocations.
+	ParentID string
+
+	// Query is a case-insensitive substring filter matched against
+	// slug, project_dir, and the first user-message preview text.
+	// Empty matches all sessions.  Applied in Go after the SQL scan.
+	Query string
 }
 
 // DefaultListLimit is the cap applied by ListSessions when ListOpts.Limit is 0.
@@ -210,6 +226,18 @@ type Store interface {
 	// SoftDeleteSession marks the session and bumps UpdatedAt.  Already
 	// deleted sessions are left untouched (no error).
 	SoftDeleteSession(ctx context.Context, id string) error
+
+	// RenameSession sets a new slug on an existing session and bumps
+	// UpdatedAt.  An empty slug clears the slug.  Returns ErrNotFound
+	// when id is unknown.  A no-op when the new slug is identical to
+	// the current one (UpdatedAt is not bumped in that case).
+	RenameSession(ctx context.Context, id, slug string) error
+
+	// LatestUserMessageID returns the id of the most recent non-deleted
+	// user-role message in sessionID, or ("", nil) when none exist.
+	// Used by the fork-at-latest path to resolve the fork point without
+	// requiring the caller to walk the full message list.
+	LatestUserMessageID(ctx context.Context, sessionID string) (string, error)
 
 	// ForkSession creates a new child session that inherits history from
 	// fromSessionID up to and including fromMessageID.

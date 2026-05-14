@@ -265,11 +265,11 @@ func TestBuiltinOutcomes(t *testing.T) {
 			name:    "fork-no-id",
 			cmdName: "fork",
 			check: func(t *testing.T, o Outcome) {
-				if !strings.Contains(o.Notice, "pass a message id") {
-					t.Errorf("expected hint notice, got %q", o.Notice)
+				if !strings.Contains(o.Notice, "latest message") {
+					t.Errorf("expected latest-message notice, got %q", o.Notice)
 				}
-				if len(o.Updates) != 0 {
-					t.Errorf("no updates expected without id, got %v", o.Updates)
+				if got := o.Updates[UpdateForkAt]; got != "latest" {
+					t.Errorf("Updates[%q]=%q, want %q", UpdateForkAt, got, "latest")
 				}
 			},
 		},
