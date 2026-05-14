@@ -172,10 +172,9 @@ func (t *LazyTracker) walkUp(start string) (blocks []Block, hitCap bool, firstSk
 	// nothing.  The walk still marks them seen so we don't re-scan.
 	excludedFrom := excludedAncestor(start, t.projectRoot)
 
-	dir := start
-	for {
+	WalkUp(start, WalkOption{ExcludeDirs: nil}, func(dir string) WalkAction {
 		if _, seen := t.seenDirs[dir]; seen {
-			return blocks, false, ""
+			return WalkStop
 		}
 		t.seenDirs[dir] = struct{}{}
 
@@ -201,7 +200,9 @@ func (t *LazyTracker) walkUp(start string) (blocks []Block, hitCap bool, firstSk
 				size := info.Size()
 				if t.totalFiles+1 > MaxLazyContextFiles ||
 					int64(t.totalBytes)+size > int64(MaxLazyContextBytes) {
-					return blocks, true, p
+					hitCap = true
+					firstSkipped = p
+					return WalkStop
 				}
 				data, err := os.ReadFile(p) //nolint:gosec // path comes from discovered project tree
 				if err != nil {
@@ -225,14 +226,12 @@ func (t *LazyTracker) walkUp(start string) (blocks []Block, hitCap bool, firstSk
 		}
 
 		if dir == t.projectRoot {
-			return blocks, false, ""
+			return WalkStop
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return blocks, false, ""
-		}
-		dir = parent
-	}
+		return WalkContinue
+	})
+
+	return blocks, hitCap, firstSkipped
 }
 
 // excludedAncestor returns the lowest excluded ancestor of start

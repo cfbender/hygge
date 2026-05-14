@@ -263,21 +263,12 @@ func relTo(root, path string) string {
 // the filesystem root.  homeStop bounds the walk so the user-level
 // directories under $HOME are not interpreted as project roots.
 func findProjectRoot(start, homeStop string) string {
-	dir := filepath.Clean(start)
-	homeStop = filepath.Clean(homeStop)
-	for {
-		if homeStop != "" && dir == homeStop {
-			return ""
-		}
+	return WalkUp(start, WalkOption{HomeStop: homeStop}, func(dir string) WalkAction {
 		if hasMarker(dir) {
-			return dir
+			return WalkStop
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
+		return WalkContinue
+	})
 }
 
 // hasMarker reports whether dir contains any of the project-root

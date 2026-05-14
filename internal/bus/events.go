@@ -41,6 +41,11 @@ type ToolCallRequested struct {
 	SessionID string
 	// MessageID is the message that contains the tool-call request.
 	MessageID string
+	// ToolUseID is the provider-assigned identifier for this tool call.
+	// Matches the ToolUseID on the corresponding ToolCallProgress and
+	// ToolCallCompleted events so subscribers can correlate all events
+	// for a single tool invocation without relying on ordering.
+	ToolUseID string
 	// ToolName is the name of the tool being invoked.
 	ToolName string
 	// Args is the raw JSON arguments; consumers decode as needed.
@@ -80,6 +85,11 @@ type ToolCallCompleted struct {
 	SessionID string
 	// MessageID is the message associated with the tool call.
 	MessageID string
+	// ToolUseID is the provider-assigned identifier for this tool call.
+	// Matches the ToolUseID on the corresponding ToolCallRequested and
+	// ToolCallProgress events so subscribers can correlate all events
+	// for a single tool invocation without relying on ordering.
+	ToolUseID string
 	// ToolName is the name of the tool that ran.
 	ToolName string
 	// Result is the raw JSON result; nil on error.

@@ -167,7 +167,7 @@ func (r *appRuntime) Close() error {
 // seen-dir set with every directory whose context was already loaded
 // at bootstrap so those files are never re-injected.
 func buildLazyTracker(homeDir, pwd string, loaded []agentsmd.Block) *agentsmd.LazyTracker {
-	root := discoverProjectRoot(pwd, homeDir)
+	root := agentsmd.FindProjectRootFrom(pwd)
 	if root == "" {
 		slog.Warn("cli: lazy context disabled (no project root found)",
 			"pwd", pwd)
@@ -181,52 +181,6 @@ func buildLazyTracker(homeDir, pwd string, loaded []agentsmd.Block) *agentsmd.La
 		seenDirs = append(seenDirs, filepath.Dir(b.Path))
 	}
 	return agentsmd.NewLazyTracker(homeDir, root, seenDirs)
-}
-
-// discoverProjectRoot walks parents of pwd looking for any of the
-// project-root markers Load uses (AGENTS.md, CLAUDE.md, .git, .agents,
-// .hygge).  Returns "" when no marker is found before $HOME or the
-// filesystem root.  Mirrors agentsmd.findProjectRoot deliberately — see
-// STATUS.md for why we don't share a helper yet.
-func discoverProjectRoot(pwd, homeStop string) string {
-	if pwd == "" {
-		return ""
-	}
-	dir := filepath.Clean(pwd)
-	homeStop = filepath.Clean(homeStop)
-	for {
-		if homeStop != "" && dir == homeStop {
-			return ""
-		}
-		if hasProjectMarker(dir) {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-// hasProjectMarker reports whether dir contains any of the
-// project-root markers: AGENTS.md / CLAUDE.md, .git, .agents/, .hygge/.
-func hasProjectMarker(dir string) bool {
-	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
-			return true
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		return true
-	}
-	if info, err := os.Stat(filepath.Join(dir, ".agents")); err == nil && info.IsDir() {
-		return true
-	}
-	if info, err := os.Stat(filepath.Join(dir, ".hygge")); err == nil && info.IsDir() {
-		return true
-	}
-	return false
 }
 
 // bootstrap builds every component the CLI commands need from a single
