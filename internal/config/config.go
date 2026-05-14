@@ -43,7 +43,6 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -51,6 +50,8 @@ import (
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
+
+	"github.com/cfbender/hygge/internal/state"
 )
 
 // Config is the typed, fully-resolved configuration.
@@ -232,21 +233,26 @@ func xdgStateDir(opts LoadOptions) string {
 }
 
 // resolveProfileName picks the active profile name via the precedence:
-// opts.Profile → state file → "default".
+// opts.Profile → state file (active_profile) → "default".
 func resolveProfileName(opts LoadOptions, xdgStateHome string) (string, error) {
 	if opts.Profile != "" {
 		return opts.Profile, nil
 	}
 
-	stateFile := filepath.Join(xdgStateHome, "hygge", "state.json")
-	data, err := os.ReadFile(stateFile) //nolint:gosec // intentional: path is XDG state dir
-	if err == nil {
-		var s struct {
-			Profile string `json:"profile"`
-		}
-		if jsonErr := json.Unmarshal(data, &s); jsonErr == nil && s.Profile != "" {
-			return s.Profile, nil
-		}
+	st, err := state.Load(state.LoadOptions{
+		HomeDir:      opts.HomeDir,
+		XDGStateHome: xdgStateHome,
+	})
+	if err != nil {
+		// A corrupt or unreadable state file is non-fatal for profile
+		// resolution: fall through to "default" and log a warning so the
+		// user knows something unexpected happened.
+		slog.Warn("config: could not read state file, using default profile",
+			"err", err)
+		return "default", nil
+	}
+	if st.ActiveProfile != "" {
+		return st.ActiveProfile, nil
 	}
 
 	return "default", nil
