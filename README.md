@@ -37,7 +37,7 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge config explain [key]` — print the effective config with provenance.
 - `hygge theme list` / `hygge theme show <name>` — inspect available themes.
 - `hygge skills list` / `show <name>` / `doctor` — inspect loaded skills.
-- `hygge context show` / `paths` — inspect the `AGENTS.md` files contributing to the system prompt.
+- `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
 - `hygge version` — print version, Go version, OS/arch.
 
 ## Configuration
@@ -134,25 +134,45 @@ fetched on demand via the built-in `skill` tool. Use `hygge skills
 list` to see what is loaded, `hygge skills show <name>` to inspect one,
 and `hygge skills doctor` to diagnose files that failed to parse.
 
-### AGENTS.md
+### Project context (AGENTS.md / CLAUDE.md)
 
-`AGENTS.md` is the conventional file for project-specific context the
-model should always have in mind (house rules, terminology, things to
-avoid). Unlike skills, its contents are appended to the system prompt
-unconditionally on every turn.
+Project-context files describe house rules, terminology, and
+conventions the model should always have in mind. Unlike skills,
+their contents are appended to the system prompt unconditionally on
+every turn. Hygge treats `AGENTS.md` and `CLAUDE.md` (and
+`CLAUDE.local.md`) as first-class equivalents so the same repo can
+be used by either tool without duplication.
 
-Hygge looks for `AGENTS.md` in:
+Hygge discovers context files across eight layers, in precedence
+order (lowest first; all that exist are concatenated, none override
+each other):
 
-1. `~/.agents/AGENTS.md`
-2. `~/.config/hygge/AGENTS.md`
-3. `<project-root>/.agents/AGENTS.md`
-4. `<project-root>/AGENTS.md`
+1. `~/.agents/AGENTS.md` — vendor-neutral, per-user.
+2. `~/.config/hygge/AGENTS.md` — hygge-native, per-user.
+3. `~/.claude/CLAUDE.md` — CLAUDE-format compat, per-user.
+4. `<project-root>/.agents/AGENTS.md` — vendor-neutral, per-project.
+5. `<project-root>/AGENTS.md` — conventional project root file.
+6. `<project-root>/CLAUDE.md` — CLAUDE-format compat at project root.
+7. `<project-root>/CLAUDE.local.md` — local CLAUDE override (ignored from VCS).
+8. `<project-root>/**/{AGENTS.md,CLAUDE.md,CLAUDE.local.md}` —
+   recursive descent into subdirectories.
 
-All discovered files are concatenated in that order. The project-root
-walk-up stops at the first directory containing `AGENTS.md`, `.git`,
-`.agents/`, or `.hygge/`. Use `hygge context show` to see exactly what
-hygge is appending and `hygge context paths` for a script-friendly
-list.
+The project-root walk-up stops at the first directory containing
+`AGENTS.md`, `CLAUDE.md`, `.git`, `.agents/`, or `.hygge/`, and never
+climbs into `$HOME`.
+
+The recursive descent (layer 8) skips common dependency / build
+directories — `.git`, `.agents`, `.hygge`, `node_modules`, `vendor`,
+`.venv`, `__pycache__`, `dist`, `target`, `bin`, `build` — and is
+bounded to **50 files** and **256 KB** total to keep the system
+prompt from blowing up in a misconfigured workspace. The first file
+or byte over each cap is logged via `slog.Warn`.
+
+Use:
+
+- `hygge context list` — tabular summary (source layer, path, bytes, lines).
+- `hygge context show` — print every loaded file, in precedence order, exactly as the system prompt sees it.
+- `hygge context paths` — one absolute path per line for shell pipelines.
 
 ### Provider credentials
 
