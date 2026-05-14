@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/cfbender/hygge/internal/bus"
-	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
@@ -528,10 +527,6 @@ func TestEnsureSessionLazilyCreates(t *testing.T) {
 		t.Errorf("GetSession: %v", err)
 	}
 }
-
-// Touch session so the unused-import linter doesn't complain when the
-// only session use is via session.NewSession inside ensureSession.
-var _ = session.PartText
 
 func TestListenBusReadsAndReissues(t *testing.T) {
 	t.Parallel()
