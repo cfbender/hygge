@@ -1,0 +1,6 @@
+[model]
+provider = "openai"
+name = "gpt-4o"
+
+[permission]
+shell = "deny"

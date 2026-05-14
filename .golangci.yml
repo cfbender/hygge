@@ -11,21 +11,29 @@ linters:
     - errorlint
   disable:
     - lll
+  exclusions:
+    rules:
+      # Don't require error checks on test helpers that rarely fail.
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+        text: "Error return value of .*(t\\.Setenv|t\\.Chdir|os\\.Setenv).*is not checked"
+      # gosec: integer overflow conversion in test files is acceptable.
+      - path: "_test\\.go"
+        linters:
+          - gosec
+        text: "G115"
+      # gosec: test helpers use standard 0755/0644 permissions for temp directories and files.
+      - path: "_test\\.go"
+        linters:
+          - gosec
+        text: "Expect directory permissions to be 0750 or less"
+      - path: "_test\\.go"
+        linters:
+          - gosec
+        text: "Expect WriteFile permissions to be 0600 or less"
 
 formatters:
   enable:
     - gofmt
     - goimports
-
-issues:
-  exclude-rules:
-    # Don't require error checks on test helpers that rarely fail.
-    - path: "_test\\.go"
-      linters:
-        - errcheck
-      text: "Error return value of .*(t\\.Setenv|t\\.Chdir|os\\.Setenv).*is not checked"
-    # gosec: integer overflow conversion in test files is acceptable.
-    - path: "_test\\.go"
-      linters:
-        - gosec
-      text: "G115"
