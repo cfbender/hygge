@@ -34,10 +34,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cfbender/hygge/internal/agent"
 	"github.com/cfbender/hygge/internal/bus"
@@ -404,7 +404,7 @@ func (a *App) Handle(ev any) tea.Cmd {
 }
 
 // View renders the App.
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	width := a.width
 	if width <= 0 {
 		width = 80
@@ -581,7 +581,10 @@ func (a *App) View() string {
 			Request: a.pendingPerms[0],
 			Toast:   a.modalToast,
 		}.View()
-		return modal
+		v := tea.NewView(modal)
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+		return v
 	}
 
 	// Sessions modal overlay.
@@ -589,17 +592,26 @@ func (a *App) View() string {
 		a.sessionsModal.Width = width
 		a.sessionsModal.Height = height
 		a.sessionsModal.Now = a.opts.Now()
-		return a.sessionsModal.View()
+		v := tea.NewView(a.sessionsModal.View())
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+		return v
 	}
 
 	// Compaction confirmation modal overlay.
 	if a.activeModal == command.ModalCompactConfirm {
 		a.compactionModal.Width = width
 		a.compactionModal.Height = height
-		return a.compactionModal.View()
+		v := tea.NewView(a.compactionModal.View())
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+		return v
 	}
 
-	return main
+	v := tea.NewView(main)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 // Update is the bubbletea Update method.
@@ -697,7 +709,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return a.handleKey(m)
 
 	case busDelivery:
@@ -715,7 +727,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKey dispatches a key.  When the modal is open, only the modal
 // keybinds work; everything else is dropped.
-func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if len(a.pendingPerms) > 0 {
 		return a.handleModalKey(k)
 	}
@@ -728,36 +740,36 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleCompactionModalKey(k)
 	}
 
-	switch k.Type {
-	case tea.KeyCtrlC:
+	switch k.String() {
+	case "ctrl+c":
 		if a.busy && a.inflightCancel != nil {
 			a.inflightCancel()
 			return a, nil
 		}
 		return a, tea.Quit
-	case tea.KeyCtrlL:
+	case "ctrl+l":
 		a.input.Reset()
 		return a, nil
-	case tea.KeyCtrlX:
+	case "ctrl+x":
 		// Dismiss the compaction threshold-suggestion banner for this crossing.
 		if a.bannerVisible && !a.bannerDismissed {
 			a.bannerDismissed = true
 			return a, nil
 		}
-	case tea.KeyCtrlT:
+	case "ctrl+t":
 		// Toggle the most recent sub-agent block.  Chosen over
 		// `tab` (would conflict with textarea tab-insertion) and
 		// over a bare letter key (would conflict with input mode).
 		// `ctrl+t` is otherwise unbound by the textarea bubble.
 		a.toggleLatestSubagent()
 		return a, nil
-	case tea.KeyCtrlG:
+	case "ctrl+g":
 		// T2.2 — Ctrl+G: follow into the most-recently-started sub-agent.
 		// No-op with a notice when no sub-agents have been tracked.
 		return a, a.followIntoLatestSubagent()
-	case tea.KeyEnter:
+	case "enter":
 		// Alt+Enter inserts a newline; we differentiate by Alt flag below.
-		if k.Alt {
+		if k.Mod.Contains(tea.ModAlt) {
 			break // fall through to textarea.Update so it inserts a newline
 		}
 		if a.busy {
@@ -773,7 +785,7 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		a.input.Reset()
 		return a, a.startSend(text)
-	case tea.KeyTab:
+	case "tab":
 		// Tab completes the currently-highlighted command palette
 		// entry when the input is in slash mode.  Outside slash
 		// mode it falls through to the textarea (default insert).
@@ -787,7 +799,7 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
-	case tea.KeyEsc:
+	case "esc":
 		// T2.2 — Esc pops the foreground stack when depth > 1.
 		// At depth 1 (root) the existing Esc behaviour applies
 		// (dismiss command palette / no-op).
@@ -800,12 +812,12 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.input.Reset()
 			return a, nil
 		}
-	case tea.KeyUp:
+	case "up":
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(-1)
 			return a, nil
 		}
-	case tea.KeyDown:
+	case "down":
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(+1)
 			return a, nil
@@ -818,7 +830,7 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleModalKey routes keys to the permission modal.
-func (a *App) handleModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if len(a.pendingPerms) == 0 {
 		return a, nil
 	}
@@ -835,16 +847,16 @@ func (a *App) handleModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch k.Type {
-	case tea.KeyEsc:
+	switch k.String() {
+	case "esc":
 		a.pendingPerms = a.pendingPerms[1:]
 		a.modalToast = ""
 		return a, reply("deny", "once")
-	case tea.KeyRunes:
-		if len(k.Runes) != 1 {
+	default:
+		if len(k.Text) != 1 {
 			return a, nil
 		}
-		switch k.Runes[0] {
+		switch rune(k.Text[0]) {
 		case 'y':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
@@ -1741,16 +1753,16 @@ func extractTarget(args []byte) string {
 
 // handleCompactionModalKey routes key presses when the compaction
 // confirmation modal is open.
-func (a *App) handleCompactionModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch k.Type {
-	case tea.KeyEsc:
+func (a *App) handleCompactionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch k.String() {
+	case "esc":
 		a.activeModal = ""
 		return a, nil
-	case tea.KeyRunes:
-		if len(k.Runes) != 1 {
+	default:
+		if len(k.Text) != 1 {
 			return a, nil
 		}
-		switch k.Runes[0] {
+		switch rune(k.Text[0]) {
 		case 'y', 'Y':
 			if a.compactionModal.NothingToCompact() {
 				// Disable y — nothing to compact.
@@ -1826,28 +1838,28 @@ type sessionsLoadedMsg struct {
 }
 
 // handleSessionsModalKey routes a key press into the sessions modal.
-func (a *App) handleSessionsModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleSessionsModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	sk := components.SessionsKey{
-		Name:  k.Type.String(),
-		Runes: k.Runes,
+		Name:  k.String(),
+		Runes: []rune(k.Text),
 	}
-	// Map bubbletea key type names to the strings our modal expects.
-	switch k.Type {
-	case tea.KeyUp:
+	// Map bubbletea key strings to the strings our modal expects.
+	switch k.String() {
+	case "up":
 		sk.Name = "up"
-	case tea.KeyDown:
+	case "down":
 		sk.Name = "down"
-	case tea.KeyEnter:
+	case "enter":
 		sk.Name = "enter"
-	case tea.KeyEsc:
+	case "esc":
 		sk.Name = "esc"
-	case tea.KeyTab:
+	case "tab":
 		sk.Name = "tab"
-	case tea.KeyBackspace, tea.KeyDelete:
+	case "backspace", "delete":
 		sk.Name = "backspace"
-	case tea.KeyRunes:
-		if len(k.Runes) == 1 {
-			sk.Name = string(k.Runes)
+	default:
+		if len(k.Text) == 1 {
+			sk.Name = k.Text
 		}
 	}
 

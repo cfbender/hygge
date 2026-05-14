@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/cfbender/hygge/internal/state"
@@ -161,7 +161,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		defer logCloser()
 	}
 
-	prog := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	prog := tea.NewProgram(app, tea.WithContext(ctx))
 
 	// Translate SIGINT/SIGTERM into a clean Quit so deferred Close runs.
 	sigCh := make(chan os.Signal, 1)

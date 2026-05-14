@@ -1,8 +1,8 @@
 package components
 
 import (
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
@@ -31,8 +31,10 @@ func NewInput(t *theme.Theme) *Input {
 	// Match the rest of the chrome via theme atoms.
 	if t != nil {
 		muted := t.Style(theme.AtomMuted)
-		ta.FocusedStyle.Placeholder = muted
-		ta.BlurredStyle.Placeholder = muted
+		styles := ta.Styles()
+		styles.Focused.Placeholder = muted
+		styles.Blurred.Placeholder = muted
+		ta.SetStyles(styles)
 	}
 	ta.Focus()
 	return &Input{Textarea: ta, Theme: t}

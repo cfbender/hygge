@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/session"
@@ -54,8 +54,8 @@ func TestNewValidatesBus(t *testing.T) {
 func TestColdStartEmptyState(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
-	out := app.View()
-	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4-5", "Type a message", "$0.0000", "no messages"} {
+	out := app.View().Content
+	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4-5", "ype a message", "$0.0000", "no messages"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
@@ -68,14 +68,14 @@ func TestUserSubmitClearsInputAndStartsSend(t *testing.T) {
 
 	// Type "hello".
 	for _, r := range "hello" {
-		app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	if got := app.input.Value(); got != "hello" {
 		t.Fatalf("input value = %q, want %q", got, "hello")
 	}
 
 	// Press Enter.
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd from Enter")
 	}
@@ -104,7 +104,7 @@ func TestStreamingAssistantText(t *testing.T) {
 	app.Handle(bus.AssistantTextDelta{Text: "hello "})
 	app.Handle(bus.AssistantTextDelta{Text: "world"})
 
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "hello world") {
 		t.Errorf("expected streamed text in view, got:\n%s", out)
 	}
@@ -164,7 +164,7 @@ func TestToolCallDisplay(t *testing.T) {
 		t.Errorf("expected result in Raw, got %q", app.messages[0].Raw)
 	}
 
-	out := app.View()
+	out := app.View().Content
 	for _, want := range []string{"▌tool: read", "/etc/passwd", "line1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("tool view missing %q in:\n%s", want, out)
@@ -182,7 +182,7 @@ func TestPermissionModalAppears(t *testing.T) {
 		Target:    "/Users/cfb/.aws/credentials",
 		ToolName:  "read",
 	})
-	out := app.View()
+	out := app.View().Content
 	for _, want := range []string{"permission request", "Tool:", "read", "/Users/cfb/.aws/credentials", "[y]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("modal view missing %q in:\n%s", want, out)
@@ -199,7 +199,7 @@ func TestPermissionModalYAllowsOnce(t *testing.T) {
 
 	app.Handle(bus.PermissionAsked{RequestID: "r1", ToolName: "read", Target: "/x"})
 
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd == nil {
 		t.Fatal("expected reply cmd")
 	}
@@ -226,7 +226,7 @@ func TestPermissionModalAllowsAlways(t *testing.T) {
 	defer repliedCh.Unsubscribe()
 
 	app.Handle(bus.PermissionAsked{RequestID: "r2", ToolName: "bash", Target: "ls"})
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	cmd()
 	select {
 	case reply := <-repliedCh.C():
@@ -245,7 +245,7 @@ func TestPermissionModalDeny(t *testing.T) {
 	defer repliedCh.Unsubscribe()
 
 	app.Handle(bus.PermissionAsked{RequestID: "r3", ToolName: "write", Target: "/etc/passwd"})
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	cmd()
 
 	select {
@@ -265,7 +265,7 @@ func TestPermissionModalEscDenies(t *testing.T) {
 	defer repliedCh.Unsubscribe()
 
 	app.Handle(bus.PermissionAsked{RequestID: "r4", ToolName: "x", Target: "y"})
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	cmd()
 	select {
 	case reply := <-repliedCh.C():
@@ -282,14 +282,14 @@ func TestPermissionModalEditShowsToast(t *testing.T) {
 	app, _ := newTestApp(t)
 
 	app.Handle(bus.PermissionAsked{RequestID: "r5", ToolName: "x", Target: "y"})
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 	if app.modalToast == "" {
 		t.Errorf("expected toast after 'e' key")
 	}
 	if len(app.pendingPerms) != 1 {
 		t.Errorf("'e' should NOT dismiss the modal; pending=%d", len(app.pendingPerms))
 	}
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "edit not yet implemented") {
 		t.Errorf("expected toast in view, got:\n%s", out)
 	}
@@ -309,18 +309,18 @@ func TestPermissionModalStacks(t *testing.T) {
 	}
 
 	// First View shows the first request.
-	if !strings.Contains(app.View(), "/a") {
+	if !strings.Contains(app.View().Content, "/a") {
 		t.Errorf("expected first request /a in view")
 	}
 
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	cmd()
 	<-repliedCh.C()
 
 	if len(app.pendingPerms) != 1 {
 		t.Fatalf("expected 1 pending after dismiss, got %d", len(app.pendingPerms))
 	}
-	if !strings.Contains(app.View(), "/b") {
+	if !strings.Contains(app.View().Content, "/b") {
 		t.Errorf("expected second request /b in view after first dismissed")
 	}
 }
@@ -351,13 +351,13 @@ func TestStatusBarSpinnerDuringSend(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Update(sendStarted{})
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "●") {
 		t.Errorf("expected spinner glyph during send, got:\n%s", out)
 	}
 
 	app.Update(sendCompleted{})
-	out = app.View()
+	out = app.View().Content
 	if strings.Contains(out, "●") {
 		t.Errorf("did not expect spinner glyph after send completed, got:\n%s", out)
 	}
@@ -397,7 +397,7 @@ func TestCostUpdatesFooter(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.CostUpdated{DollarsTotal: 0.1234})
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "$0.1234") {
 		t.Errorf("expected updated cost in view, got:\n%s", out)
 	}
@@ -407,7 +407,7 @@ func TestIterationLimitAppendsSystemMessage(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.IterationLimitReached{Limit: 25})
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "iteration limit reached") {
 		t.Errorf("expected system message in view, got:\n%s", out)
 	}
@@ -417,7 +417,7 @@ func TestModalBlocksInputKeys(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.PermissionAsked{RequestID: "rb", ToolName: "x", Target: "y"})
-	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	app.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if app.input.Value() != "" {
 		t.Errorf("expected modal to swallow typing, got %q", app.input.Value())
 	}
@@ -429,7 +429,7 @@ func TestCtrlCCancelsInflight(t *testing.T) {
 	cancelled := false
 	app.busy = true
 	app.inflightCancel = func() { cancelled = true }
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !cancelled {
 		t.Errorf("expected Ctrl+C to call inflightCancel")
 	}
@@ -439,7 +439,7 @@ func TestCtrlLClearsInput(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.input.Textarea.SetValue("garbage")
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if app.input.Value() != "" {
 		t.Errorf("Ctrl+L did not clear input, got %q", app.input.Value())
 	}
@@ -618,7 +618,7 @@ func TestOpenSessionsModalOnStart_EscWithNoSessionQuitsApp(t *testing.T) {
 
 	// Simulate Esc key with no sessions loaded.
 	app.sessionsModal.Sessions = nil
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("expected a cmd from Esc (should be tea.Quit)")
 	}
@@ -638,7 +638,7 @@ func TestOpenSessionsModalOnStart_NKeyWithNoSessionsStartsFresh(t *testing.T) {
 	app.sessionsModal.Sessions = nil
 
 	// Press 'n'.
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	// The modal should be closed.
 	if app.activeModal != "" {
 		t.Errorf("expected modal closed after 'n', got %q", app.activeModal)
@@ -674,7 +674,7 @@ func TestOpenSessionsModalOnStart_SelectSessionSwitches(t *testing.T) {
 	app.Update(sessionsLoadedMsg{sessions: []*session.Session{sess}})
 
 	// Press Enter to select the first (only) session.
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// The modal should be closed and SessionID should be set.
 	if app.activeModal != "" {

@@ -2,11 +2,12 @@ package theme
 
 import (
 	"fmt"
+	"image/color"
 	"log/slog"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // colorKind distinguishes the three concrete kinds a Color can hold.
@@ -47,9 +48,9 @@ func (c Color) String() string {
 	}
 }
 
-// lipglossColor returns the lipgloss.Color for this Color.
+// lipglossColor returns the color.Color for this Color.
 // Callers must resolve inherit references before calling this.
-func (c Color) lipglossColor() lipgloss.Color {
+func (c Color) lipglossColor() color.Color {
 	return lipgloss.Color(c.raw)
 }
 

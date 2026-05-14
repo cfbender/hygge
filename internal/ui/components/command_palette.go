@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/ui/theme"
