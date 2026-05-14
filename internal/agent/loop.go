@@ -1,0 +1,357 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/provider"
+	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/tool"
+)
+
+// runLoop drives the streaming provider/tool-execution loop until the
+// assistant returns a response with no tool_use blocks (final answer) or
+// the iteration cap is hit.  The user message has already been appended
+// by the caller (Send).
+func (a *Agent) runLoop(ctx context.Context, sessionID string) (*session.Message, error) {
+	for iter := 1; iter <= a.opts.MaxIterations; iter++ {
+		// Honor cancellation between iterations promptly.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		msgs, marker, err := a.opts.Store.MessagesSinceLatestMarker(ctx, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("agent: load messages: %w", err)
+		}
+
+		req := buildRequest(
+			msgs, marker,
+			a.opts.SystemPrompt,
+			a.opts.Tools.AsProviderTools(),
+			a.providerModelName(),
+			nil,
+		)
+
+		asstMsg, hasTools, err := a.runOneTurn(ctx, sessionID, req)
+		if err != nil {
+			return nil, err
+		}
+
+		if !hasTools {
+			return asstMsg, nil
+		}
+
+		// Execute tool_use blocks one at a time, persisting each
+		// tool_result back to the session.  Stop on context cancel.
+		if err := a.executeToolCalls(ctx, sessionID, asstMsg); err != nil {
+			return nil, err
+		}
+	}
+
+	// Iteration limit hit — publish the event and commit an abort note.
+	bus.Publish(a.opts.Bus, bus.IterationLimitReached{
+		SessionID: sessionID,
+		Limit:     a.opts.MaxIterations,
+		At:        a.opts.Now(),
+	})
+	abortMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
+		Role: session.RoleAssistant,
+		Parts: []session.Part{{
+			Kind: session.PartText,
+			Text: fmt.Sprintf("iteration limit reached (%d)", a.opts.MaxIterations),
+		}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent: append abort message: %w", err)
+	}
+	bus.Publish(a.opts.Bus, bus.MessageAppended{
+		SessionID: sessionID,
+		MessageID: abortMsg.ID,
+		Role:      string(session.RoleAssistant),
+		At:        a.opts.Now(),
+	})
+	return abortMsg, ErrIterationLimit
+}
+
+// runOneTurn issues one provider Stream call, accumulates events, commits
+// an assistant message, and emits the cost/context bus events.  The
+// returned bool reports whether the assistant requested any tool calls.
+//
+// On context cancellation mid-stream, nothing is committed and the error
+// is returned.  On a mid-stream EventError, a partial assistant message
+// IS committed (text/thinking only — pending tool_use blocks are
+// discarded) and the wrapped error is returned.
+func (a *Agent) runOneTurn(
+	ctx context.Context, sessionID string, req provider.Request,
+) (*session.Message, bool, error) {
+	ch, err := a.opts.Provider.Stream(ctx, req)
+	if err != nil {
+		return nil, false, fmt.Errorf("agent: provider stream: %w", err)
+	}
+
+	var (
+		textBuf, thinkBuf strings.Builder
+		toolUses          []toolCallEvent
+		lastUsage         provider.Usage
+		streamErr         error
+	)
+
+drain:
+	for {
+		select {
+		case <-ctx.Done():
+			// Drain in the background so the provider can release
+			// its goroutine, but do not commit anything.
+			go discardStream(ch)
+			return nil, false, ctx.Err()
+		case ev, ok := <-ch:
+			if !ok {
+				break drain
+			}
+			switch ev.Type {
+			case provider.EventTextDelta:
+				textBuf.WriteString(ev.Text)
+				bus.Publish(a.opts.Bus, bus.AssistantTextDelta{
+					SessionID: sessionID,
+					Text:      ev.Text,
+					At:        a.opts.Now(),
+				})
+			case provider.EventThinkingDelta:
+				thinkBuf.WriteString(ev.Text)
+				bus.Publish(a.opts.Bus, bus.AssistantThinkingDelta{
+					SessionID: sessionID,
+					Text:      ev.Text,
+					At:        a.opts.Now(),
+				})
+			case provider.EventToolUse:
+				toolUses = append(toolUses, toolCallEvent{
+					ID:    ev.ToolID,
+					Name:  ev.ToolName,
+					Input: append([]byte(nil), ev.ToolInput...),
+				})
+			case provider.EventUsage, provider.EventMessageStart:
+				if ev.Usage.InputTokens != 0 || ev.Usage.OutputTokens != 0 ||
+					ev.Usage.CacheReadTokens != 0 || ev.Usage.CacheWriteTokens != 0 {
+					lastUsage = ev.Usage
+				}
+			case provider.EventError:
+				streamErr = ev.Err
+				// Discard any pending tool_use blocks: we want a
+				// clean failure boundary, not a half-executed tool
+				// call against a model that errored out.
+				toolUses = nil
+				break drain
+			case provider.EventDone:
+				break drain
+			}
+		}
+	}
+
+	asstParts := buildAssistantParts(textBuf.String(), thinkBuf.String(), toolUses)
+
+	// Even on stream error we commit whatever partial content we have
+	// (provided it has any content at all) so the user can see what the
+	// model managed to say before it failed.  If there is nothing at all,
+	// skip the commit and just surface the error.
+	if streamErr != nil && len(asstParts) == 0 {
+		return nil, false, fmt.Errorf("agent: stream error: %w", streamErr)
+	}
+
+	asstMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
+		Role:             session.RoleAssistant,
+		Parts:            asstParts,
+		InputTokens:      lastUsage.InputTokens,
+		OutputTokens:     lastUsage.OutputTokens,
+		CacheReadTokens:  lastUsage.CacheReadTokens,
+		CacheWriteTokens: lastUsage.CacheWriteTokens,
+		CostUSD:          a.computeCost(ctx, lastUsage).USD,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("agent: append assistant: %w", err)
+	}
+	bus.Publish(a.opts.Bus, bus.MessageAppended{
+		SessionID: sessionID,
+		MessageID: asstMsg.ID,
+		Role:      string(session.RoleAssistant),
+		At:        a.opts.Now(),
+	})
+	a.recordUsage(ctx, sessionID, lastUsage)
+
+	if streamErr != nil {
+		return asstMsg, false, fmt.Errorf("agent: stream error: %w", streamErr)
+	}
+	return asstMsg, len(toolUses) > 0, nil
+}
+
+// executeToolCalls runs every tool_use block in the assistant message
+// sequentially, appending a tool_result message for each one.  Stops on
+// context cancellation and returns ctx.Err.
+func (a *Agent) executeToolCalls(
+	ctx context.Context, sessionID string, asstMsg *session.Message,
+) error {
+	now := a.opts.Now
+	for _, p := range asstMsg.Parts {
+		if p.Kind != session.PartToolUse {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		bus.Publish(a.opts.Bus, bus.ToolCallRequested{
+			SessionID: sessionID,
+			MessageID: asstMsg.ID,
+			ToolName:  p.ToolName,
+			Args:      append([]byte(nil), p.ToolInput...),
+			At:        now(),
+		})
+
+		t, ok := a.opts.Tools.Get(p.ToolName)
+		var (
+			result  tool.Result
+			toolErr error
+		)
+		started := time.Now()
+		if !ok {
+			result = tool.Result{
+				IsError: true,
+				Content: fmt.Sprintf("unknown tool: %s", p.ToolName),
+			}
+		} else {
+			ec := tool.ExecContext{
+				SessionID:  sessionID,
+				Pwd:        a.opts.Pwd,
+				Bus:        a.opts.Bus,
+				Permission: a.opts.Permission,
+				ToolUseID:  p.ToolID,
+				MessageID:  asstMsg.ID,
+				Now:        a.opts.Now,
+			}
+			result, toolErr = t.Execute(ctx, p.ToolInput, ec)
+			if toolErr != nil {
+				result = tool.Result{
+					IsError: true,
+					Content: toolErr.Error(),
+				}
+			}
+		}
+		durMs := time.Since(started).Milliseconds()
+
+		var errString string
+		if result.IsError {
+			errString = result.Content
+		}
+		bus.Publish(a.opts.Bus, bus.ToolCallCompleted{
+			SessionID:  sessionID,
+			MessageID:  asstMsg.ID,
+			ToolName:   p.ToolName,
+			Err:        errString,
+			DurationMs: durMs,
+			At:         now(),
+		})
+
+		toolMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
+			Role: session.RoleTool,
+			Parts: []session.Part{{
+				Kind:      session.PartToolResult,
+				ToolUseID: p.ToolID,
+				Content:   result.Content,
+				IsError:   result.IsError,
+			}},
+			DurationMs: durMs,
+		})
+		if err != nil {
+			return fmt.Errorf("agent: append tool message: %w", err)
+		}
+		bus.Publish(a.opts.Bus, bus.MessageAppended{
+			SessionID: sessionID,
+			MessageID: toolMsg.ID,
+			Role:      string(session.RoleTool),
+			At:        now(),
+		})
+	}
+	return nil
+}
+
+// toolCallEvent is the agent's internal copy of a provider.EventToolUse.
+// We hold our own copy so the provider's channel buffer can be released
+// before we commit anything.
+type toolCallEvent struct {
+	ID    string
+	Name  string
+	Input []byte
+}
+
+// buildAssistantParts assembles a Parts slice in the order: text,
+// thinking, tool_use blocks.  Empty buffers are omitted.
+//
+// The order is not preserved relative to the provider's emission order:
+// for v0.1 we always serialise text first, then thinking, then tool calls.
+// Anthropic does not require strict interleaving in subsequent turns; the
+// provider just sees a transcript that includes the assistant's content
+// blocks in some order before the next user/tool_result turn.
+func buildAssistantParts(text, thinking string, toolUses []toolCallEvent) []session.Part {
+	parts := make([]session.Part, 0, 1+1+len(toolUses))
+	if text != "" {
+		parts = append(parts, session.Part{Kind: session.PartText, Text: text})
+	}
+	if thinking != "" {
+		parts = append(parts, session.Part{Kind: session.PartThinking, Text: thinking})
+	}
+	for _, tu := range toolUses {
+		parts = append(parts, session.Part{
+			Kind:      session.PartToolUse,
+			ToolID:    tu.ID,
+			ToolName:  tu.Name,
+			ToolInput: tu.Input,
+		})
+	}
+	return parts
+}
+
+// providerModelName returns the model name the agent uses for the
+// provider request.  For v0.1 we always pass an empty string and let
+// the provider adapter fill in its default; future versions will plumb
+// a per-session model selection through Options.
+func (a *Agent) providerModelName() string { return "" }
+
+// discardStream drains a provider stream until it closes.  Used after
+// context cancellation so the provider's goroutine can exit promptly.
+func discardStream(ch <-chan provider.Event) {
+	for range ch { //nolint:revive // intentional drain
+	}
+}
+
+// computeCost looks up pricing for the configured provider+model and
+// computes a Money for the supplied usage.  Pricing misses are absorbed
+// here and logged once per call site; the agent never fails a turn over
+// pricing.
+func (a *Agent) computeCost(ctx context.Context, u provider.Usage) cost.Money {
+	if u.InputTokens == 0 && u.OutputTokens == 0 &&
+		u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+		return cost.Money{}
+	}
+	pricing, _, err := a.opts.Catalog.LookUp(ctx, a.opts.Provider.Name(), a.providerModelName())
+	if err != nil {
+		if !errors.Is(err, cost.ErrModelNotPriced) {
+			slog.Warn("agent: catalog lookup failed",
+				"provider", a.opts.Provider.Name(),
+				"err", err,
+			)
+		}
+		pricing = cost.Pricing{}
+	}
+	return cost.Calculate(cost.Usage{
+		InputTokens:      u.InputTokens,
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+	}, pricing)
+}
