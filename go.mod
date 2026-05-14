@@ -1,6 +1,6 @@
 module github.com/cfbender/hygge
 
-go 1.24
+go 1.26
 
 require (
 	github.com/mitchellh/mapstructure v1.5.0
