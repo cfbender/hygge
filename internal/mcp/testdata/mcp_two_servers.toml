@@ -1,0 +1,12 @@
+[[servers]]
+name = "github"
+transport = "stdio"
+command = "mcp-server-github"
+
+[[servers]]
+name = "postgres"
+transport = "stdio"
+command = "mcp-server-postgres"
+args = ["postgres://localhost/mydb"]
+enabled = false
+permission_category = "network"

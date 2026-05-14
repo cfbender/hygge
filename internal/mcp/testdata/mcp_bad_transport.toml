@@ -1,0 +1,4 @@
+[[servers]]
+name = "bogus"
+transport = "lasers"
+command = "true"
