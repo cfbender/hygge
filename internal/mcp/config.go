@@ -44,11 +44,20 @@ func (s Source) String() string {
 }
 
 // validTransports is the set of transport identifiers accepted in
-// mcp.toml.  Anything else is rejected at load time.  v0.3 adds "sse";
-// "streamable-http" is deferred to the next slice.
+// mcp.toml.  Anything else is rejected at load time.
+//
+// Supported values:
+//
+//   - "stdio"    — subprocess over stdin/stdout (default).
+//   - "sse"      — SSE transport (2024-11-05 spec); use `url` to point at
+//     the SSE endpoint.
+//   - "http"     — Streamable HTTP transport (2025-03-26 spec, preferred
+//     for new servers); use `url` to point at the single MCP
+//     endpoint URL.
 var validTransports = map[string]bool{
 	"stdio": true,
 	"sse":   true,
+	"http":  true,
 }
 
 // validPermissionCategories is the set of permission category names
@@ -71,12 +80,13 @@ type ServerConfig struct {
 	Env       map[string]string
 	Dir       string
 
-	// URL is the SSE endpoint URL.  Required when Transport is "sse".
+	// URL is the SSE or Streamable HTTP endpoint URL.  Required when
+	// Transport is "sse" or "http".
 	URL string
 
-	// Headers are sent on every HTTP request for SSE transports.
-	// Values may reference $VAR / ${VAR} which are expanded at load
-	// time via os.LookupEnv.
+	// Headers are sent on every HTTP request for SSE and Streamable
+	// HTTP transports.  Values may reference $VAR / ${VAR} which are
+	// expanded at load time via os.LookupEnv.
 	Headers map[string]string
 
 	// Enabled defaults to true when unset.  Disabled servers are
@@ -257,7 +267,7 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 		transport = "stdio"
 	}
 	if !validTransports[transport] {
-		return ServerConfig{}, fmt.Errorf("unknown transport %q (supported: stdio, sse)", transport)
+		return ServerConfig{}, fmt.Errorf("unknown transport %q (supported: stdio, sse, http)", transport)
 	}
 
 	// Transport-specific validation.
@@ -277,12 +287,12 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 			slog.Warn("mcp: headers field is ignored for stdio transport",
 				"path", path, "server", name)
 		}
-	case "sse":
+	case "sse", "http":
 		if strings.TrimSpace(sseURL) == "" {
 			return ServerConfig{}, fmt.Errorf("url is required for transport %q", transport)
 		}
 		if command != "" {
-			slog.Warn("mcp: command field is ignored for sse transport",
+			slog.Warn("mcp: command field is ignored for http/sse transport",
 				"path", path, "server", name)
 		}
 	}

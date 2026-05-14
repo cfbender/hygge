@@ -120,6 +120,13 @@ func newMCPPingCmd() *cobra.Command {
 					Headers:    target.Headers,
 					ServerName: target.Name,
 				})
+			case "http":
+				transport = mcp.NewStreamable(mcp.StreamableOptions{
+					ServerURL:               target.URL,
+					Headers:                 target.Headers,
+					ServerName:              target.Name,
+					OpenNotificationsStream: true,
+				})
 			default: // "stdio"
 				transport = mcp.NewStdio(mcp.StdioOptions{
 					Command: target.Command,

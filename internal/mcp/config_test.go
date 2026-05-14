@@ -210,6 +210,97 @@ func TestLoadConfigs_BadTransport(t *testing.T) {
 	}
 }
 
+func TestLoadConfigs_HTTPBasic(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "github"
+transport = "http"
+url = "https://api.githubcopilot.com/mcp/"
+[servers.headers]
+Authorization = "Bearer mytoken"
+`)
+	configs, err := LoadConfigs(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(configs))
+	}
+	c := configs[0]
+	if c.Name != "github" {
+		t.Fatalf("Name: got %q", c.Name)
+	}
+	if c.Transport != "http" {
+		t.Fatalf("Transport: got %q", c.Transport)
+	}
+	if c.URL != "https://api.githubcopilot.com/mcp/" {
+		t.Fatalf("URL: got %q", c.URL)
+	}
+	if c.Headers["Authorization"] != "Bearer mytoken" {
+		t.Fatalf("Authorization header: got %q", c.Headers["Authorization"])
+	}
+	if c.Command != "" {
+		t.Fatalf("Command should be empty for http transport, got %q", c.Command)
+	}
+}
+
+func TestLoadConfigs_HTTPHeaderEnvExpansion(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "sentry"
+transport = "http"
+url = "https://mcp.sentry.dev/mcp"
+[servers.headers]
+Authorization = "Bearer ${SENTRY_TOKEN}"
+`)
+	configs, err := LoadConfigs(LoadOptions{
+		HomeDir: home,
+		Pwd:     pwd,
+		EnvLookup: func(k string) string {
+			return map[string]string{"SENTRY_TOKEN": "sentry-abc123"}[k]
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(configs))
+	}
+	if configs[0].Headers["Authorization"] != "Bearer sentry-abc123" {
+		t.Fatalf("header env expansion failed: %q", configs[0].Headers["Authorization"])
+	}
+}
+
+func TestLoadConfigs_HTTPRequiresURL(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	mustMkdirAll(t, filepath.Join(pwd, ".git"))
+	mustMkdirAll(t, filepath.Join(pwd, ".agents"))
+	writeFile(t, filepath.Join(pwd, ".agents", "mcp.toml"), `
+[[servers]]
+name = "broken"
+transport = "http"
+`)
+	_, err := LoadConfigs(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err == nil {
+		t.Fatal("expected error when url is missing for http transport")
+	}
+	if !strings.Contains(err.Error(), "url is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadConfigs_SSEBasic(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
