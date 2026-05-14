@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -17,12 +19,12 @@ import (
 // Lifecycle:
 //
 //   - Created when bus.SubagentStarted arrives.  StartedAt set, EndedAt
-//     zero, Messages empty, Expanded false.
+//     zero, Messages empty.
 //   - Updated as the sub-session's events flow through (text deltas,
 //     tool calls, cost updates).  Caller appends to Messages and
 //     overwrites Cost / InputTokens / OutputTokens.
 //   - Finalised when bus.SubagentCompleted arrives.  EndedAt is set;
-//     HitIterLimit toggles the header to "failed".
+//     HitIterLimit toggles the subtitle to "failed".
 type SubagentState struct {
 	// SubSessionID is the sub-session's id; the map key in App.
 	SubSessionID string
@@ -41,23 +43,21 @@ type SubagentState struct {
 	// Type is the sub-agent type name (e.g. "general").
 	Type string
 
-	// Description is the short mission label.  Echoed under the
-	// header line in italics.
+	// Description is the short mission label shown in the heading.
 	Description string
 
-	// Model is the resolved provider/model string, used as the
-	// label in the collapsed header.
+	// Model is the resolved provider/model string.  Kept for the
+	// detail view accessed via Ctrl+G; not rendered in the compact block.
 	Model string
 
 	// StartedAt and EndedAt bound the wall-clock elapsed time.
-	// EndedAt is the zero value while the sub-agent is still
-	// running.
+	// EndedAt is the zero value while the sub-agent is still running.
 	StartedAt time.Time
 	EndedAt   time.Time
 
 	// HitIterLimit is true after a Completed event reports the
 	// sub-agent loop hit its iteration cap.  Renders as
-	// "failed (iteration limit)" instead of "done".
+	// "failed (iteration limit)" instead of the normal subtitle.
 	HitIterLimit bool
 
 	// Cost / InputTokens / OutputTokens are running totals tagged
@@ -69,12 +69,13 @@ type SubagentState struct {
 	OutputTokens int64
 
 	// Messages is the streaming buffer of nested sub-messages,
-	// in chronological order.  The component renders them with
-	// a left gutter when Expanded.
+	// in chronological order.  Used to derive the tool-count
+	// subtitle and the latest-tool hint in the running state.
 	Messages []UIMessage
 
-	// Expanded toggles between the collapsed one-line header and
-	// the full nested transcript view.  Default false (collapsed).
+	// Expanded is retained for Ctrl+T toggle compatibility.
+	// In the compact layout it controls whether the transcript view
+	// is shown when the user follows into the subagent via Ctrl+G.
 	Expanded bool
 }
 
@@ -84,137 +85,171 @@ func (s *SubagentState) IsRunning() bool {
 	return s != nil && s.EndedAt.IsZero()
 }
 
-// SubagentBlock renders a single nested sub-agent state.  Width is
-// the available column count for the parent message list; Theme is
-// the active theme; Now is the wall-clock to use for elapsed-time
-// math while the state is still running.
+// SubagentBlock renders a single nested sub-agent state in the compact
+// heading + subtitle + hint layout.
+//
+// Layout:
+//
+//	│ {Type} Subagent — {Description}
+//	│ {subtitle}
+//	│
+//	│ ctrl+g  view subagent
+//
+// Width is the available column count for the parent message list; Theme
+// is the active theme; Now is the wall-clock used for elapsed-time math
+// while the state is still running.  Anim is the optional animation
+// component for the running state (nil renders a static placeholder).
 type SubagentBlock struct {
 	State *SubagentState
 	Width int
 	Theme *theme.Theme
 	Now   time.Time
+	Anim  *anim.Anim
 }
 
-// View renders the block.  Returns the empty string when State is
-// nil.  Layout:
-//
-//	▸ task[<type>] · <model> · <state> · <elapsed> · <tokens> · <cost>
-//	  "<description>"
-//
-// When Expanded, the description is followed by the indented sub-
-// messages joined with a gutter line.
+// View renders the compact block.  Returns the empty string when State is nil.
 func (b SubagentBlock) View() string {
 	if b.State == nil {
 		return ""
 	}
-	muted := b.muted()
 
-	chevron := "▸"
-	if b.State.Expanded {
-		chevron = "▾"
-	}
-
-	state := "running"
-	switch {
-	case b.State.HitIterLimit:
-		state = "failed (iteration limit)"
-	case !b.State.EndedAt.IsZero():
-		state = "done"
-	}
-
-	header := fmt.Sprintf(
-		"%s task[%s] · %s · %s · %s · %s · %s",
-		chevron,
-		b.State.Type,
-		b.State.Model,
-		state,
-		formatElapsed(b.elapsed()),
-		formatSubagentTokens(b.State.InputTokens+b.State.OutputTokens),
-		formatDollars(b.State.Cost),
-	)
-	headerStyled := b.headerStyle().Render(header)
-
-	var out strings.Builder
-	out.WriteString(headerStyled)
-
-	if b.State.Description != "" {
-		out.WriteString("\n  ")
-		out.WriteString(muted.Italic(true).Render(`"` + b.State.Description + `"`))
-	}
-
-	if b.State.Expanded {
-		out.WriteString("\n")
-		out.WriteString(b.renderTranscript())
-	}
-
-	return out.String()
-}
-
-// renderTranscript renders the indented sub-messages.  Each sub-
-// message gets a leading "│ " gutter so the nesting reads like a
-// GitHub thread.  Empty when no messages have arrived yet.
-func (b SubagentBlock) renderTranscript() string {
 	muted := b.muted()
 	gutter := muted.Render("│")
 
-	if len(b.State.Messages) == 0 {
-		// Show a placeholder so the expanded state looks alive
-		// even before the first delta arrives.
-		return gutter + " " + muted.Italic(true).Render("(no output yet…)")
-	}
+	// Heading: "{Type} Subagent — {Description}" or "{Type} Subagent"
+	heading := b.heading()
 
-	var rows []string
-	rows = append(rows, gutter)
+	// Subtitle: state-dependent one-liner.
+	subtitle := b.subtitle()
 
-	for _, m := range b.State.Messages {
-		body := strings.TrimRight(renderUIMessageBody(m), "\n")
-		if body == "" {
-			continue
-		}
-		// One-line header for the sub-message role.
-		var roleLine string
-		switch m.Role {
-		case RoleAssistant:
-			roleLine = muted.Render("assistant:")
-		case RoleTool:
-			label := "tool " + m.ToolName
-			if m.Target != "" {
-				label += ": " + m.Target
-			}
-			if m.IsError {
-				label += " — error"
-			}
-			roleLine = muted.Render(label)
-		case RoleUser:
-			roleLine = muted.Render("user:")
-		case RoleSystem:
-			roleLine = muted.Render("system:")
-		default:
-			roleLine = muted.Render(string(m.Role) + ":")
-		}
-		rows = append(rows, gutter+" "+roleLine)
-		// Indent every body line so the gutter persists.
-		for _, line := range strings.Split(body, "\n") {
-			rows = append(rows, gutter+" "+line)
-		}
-		rows = append(rows, gutter)
-	}
-	// Drop the trailing empty gutter row for tidy output.
-	if len(rows) > 0 && rows[len(rows)-1] == gutter {
-		rows = rows[:len(rows)-1]
-	}
-	return strings.Join(rows, "\n")
+	// Hint line.
+	hint := b.hintLine()
+
+	var out strings.Builder
+	out.WriteString(gutter + " " + heading)
+	out.WriteString("\n" + gutter + " " + subtitle)
+	out.WriteString("\n" + gutter)
+	out.WriteString("\n" + gutter + " " + hint)
+	return out.String()
 }
 
-// renderUIMessageBody picks the right field to display for one nested
-// sub-message.  Mirrors the primary message renderer but kept simple:
-// no markdown rendering in the nested view -- the gutter would
-// fight glamour's own indentation anyway.
-func renderUIMessageBody(m UIMessage) string {
-	if !m.IsStreaming && m.FinalMarkdown != "" {
-		return m.FinalMarkdown
+// heading builds "{TypeTitleCase} Subagent — {Description}" truncated to fit.
+func (b SubagentBlock) heading() string {
+	typeName := titleCase(b.State.Type)
+	if typeName == "" {
+		typeName = "Subagent"
 	}
-	return m.Raw
+	base := typeName + " Subagent"
+
+	if b.State.Description == "" {
+		return b.headingStyle().Render(base)
+	}
+
+	full := base + " \u2014 " + b.State.Description // em dash
+
+	// Only truncate when a meaningful width constraint is provided.
+	if b.Width > 0 {
+		// Available width: terminal width minus "│ " gutter (2 runes) and
+		// leave a small margin.
+		avail := b.Width - 2
+		if utf8.RuneCountInString(full) > avail && avail >= 5 {
+			// Truncate description with ellipsis.
+			emDashPrefix := base + " \u2014 "
+			prefixLen := utf8.RuneCountInString(emDashPrefix)
+			descAllowed := avail - prefixLen - 1 // 1 for ellipsis
+			if descAllowed < 1 {
+				return b.headingStyle().Render(base)
+			}
+			descRunes := []rune(b.State.Description)
+			if len(descRunes) > descAllowed {
+				descRunes = descRunes[:descAllowed]
+			}
+			return b.headingStyle().Render(emDashPrefix + string(descRunes) + "\u2026")
+		}
+	}
+
+	return b.headingStyle().Render(full)
+}
+
+// subtitle renders the state-appropriate second line.
+func (b SubagentBlock) subtitle() string {
+	switch {
+	case b.State.HitIterLimit:
+		// FAILED state.
+		parts := []string{"failed (iteration limit)"}
+		elapsed := b.elapsed()
+		if elapsed > 0 {
+			parts = append(parts, formatElapsed(elapsed))
+		}
+		if b.State.Cost > 0 {
+			parts = append(parts, formatDollars(b.State.Cost))
+		}
+		return b.errorStyle().Render(strings.Join(parts, " \u00b7 "))
+
+	case b.State.IsRunning():
+		// RUNNING state: anim + latest tool label.
+		animStr := b.animStr()
+		label := b.latestToolLabel()
+		return b.muted().Render(animStr + " " + label)
+
+	default:
+		// DONE state.
+		toolCount := b.toolCallCount()
+		parts := []string{fmt.Sprintf("%d toolcalls", toolCount)}
+		elapsed := b.elapsed()
+		if elapsed > 0 {
+			parts = append(parts, formatElapsed(elapsed))
+		}
+		if b.State.Cost > 0 {
+			parts = append(parts, formatDollars(b.State.Cost))
+		}
+		return b.muted().Render(strings.Join(parts, " \u00b7 "))
+	}
+}
+
+// animStr returns either the anim's current Render() or a static placeholder.
+func (b SubagentBlock) animStr() string {
+	if b.Anim != nil {
+		return b.Anim.Render()
+	}
+	// Static fallback: 8-cell block when no anim is wired.
+	return "░▒▓█▓▒░·"
+}
+
+// latestToolLabel returns "{toolname} {target}" for the last RoleTool entry,
+// or "working…" when no tool calls have arrived yet.
+func (b SubagentBlock) latestToolLabel() string {
+	for i := len(b.State.Messages) - 1; i >= 0; i-- {
+		m := b.State.Messages[i]
+		if m.Role != RoleTool {
+			continue
+		}
+		label := m.ToolName
+		if m.Target != "" {
+			label += " " + m.Target
+		}
+		return label
+	}
+	return "working\u2026" // "working…"
+}
+
+// toolCallCount returns the number of RoleTool entries in Messages.
+func (b SubagentBlock) toolCallCount() int {
+	n := 0
+	for _, m := range b.State.Messages {
+		if m.Role == RoleTool {
+			n++
+		}
+	}
+	return n
+}
+
+// hintLine renders "ctrl+g  view subagent" with a styled keybind.
+func (b SubagentBlock) hintLine() string {
+	muted := b.muted()
+	key := b.keyStyle().Render("ctrl+g")
+	desc := muted.Render("  view subagent")
+	return key + desc
 }
 
 // elapsed returns the wall-clock duration the sub-agent has been
@@ -234,10 +269,8 @@ func (b SubagentBlock) elapsed() time.Duration {
 	return d
 }
 
-// headerStyle returns the lipgloss style for the chevron + label line.
-// Running states use the accent atom (alive); completed states use the
-// muted atom (settled background detail).
-func (b SubagentBlock) headerStyle() lipgloss.Style {
+// headingStyle returns a bold style for the heading line.
+func (b SubagentBlock) headingStyle() lipgloss.Style {
 	if b.Theme == nil {
 		return lipgloss.NewStyle().Bold(true)
 	}
@@ -247,11 +280,10 @@ func (b SubagentBlock) headerStyle() lipgloss.Style {
 	if b.State.HitIterLimit {
 		return b.Theme.Style(theme.AtomError).Bold(true)
 	}
-	return b.Theme.Style(theme.AtomMuted).Bold(true)
+	return b.Theme.Style(theme.AtomPrimary).Bold(true)
 }
 
-// muted returns the muted body style used for the gutter and the
-// description quote.
+// muted returns the muted style for gutter lines and subtitles.
 func (b SubagentBlock) muted() lipgloss.Style {
 	if b.Theme == nil {
 		return lipgloss.NewStyle().Faint(true)
@@ -259,9 +291,36 @@ func (b SubagentBlock) muted() lipgloss.Style {
 	return b.Theme.Style(theme.AtomMuted)
 }
 
-// formatElapsed renders a duration compactly: 4.2s, 1m12s, 2h05m.
-// Keeps the header line short so the description still fits at
-// typical terminal widths.
+// errorStyle returns the error style for the FAILED subtitle.
+func (b SubagentBlock) errorStyle() lipgloss.Style {
+	if b.Theme == nil {
+		return lipgloss.NewStyle()
+	}
+	return b.Theme.Style(theme.AtomError)
+}
+
+// keyStyle returns a slightly-highlighted style for keybinding text.
+func (b SubagentBlock) keyStyle() lipgloss.Style {
+	if b.Theme == nil {
+		return lipgloss.NewStyle().Bold(true)
+	}
+	return b.Theme.Style(theme.AtomMuted).Bold(true)
+}
+
+// titleCase uppercases the first letter of s (ASCII only).
+func titleCase(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	if r[0] >= 'a' && r[0] <= 'z' {
+		r[0] = r[0] - 'a' + 'A'
+	}
+	return string(r)
+}
+
+// formatElapsed renders a duration compactly.
+// Spec: <seconds>s for <60s (e.g. "4.2s"), "<m>m <s>s" for >= 60s.
 func formatElapsed(d time.Duration) string {
 	if d < 0 {
 		d = 0
@@ -283,10 +342,16 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dh%02dm", h, m)
 }
 
-// formatSubagentTokens renders integer token counts as 0, 24, 1.2k,
-// 5.8k, 1.2M with the "tokens" suffix used in the nested header.
-// Distinct from footer.formatTokens which uses different rounding
-// and no suffix.
+// formatDollars renders a USD amount with four decimal places.
+func formatDollars(d float64) string {
+	if d < 0 {
+		d = 0
+	}
+	return fmt.Sprintf("$%.4f", d)
+}
+
+// formatSubagentTokens renders integer token counts compactly.
+// Kept for backward compatibility; not used in the compact block.
 func formatSubagentTokens(n int64) string {
 	if n < 0 {
 		n = 0
@@ -299,15 +364,4 @@ func formatSubagentTokens(n int64) string {
 	default:
 		return fmt.Sprintf("%.1fM tokens", float64(n)/1_000_000)
 	}
-}
-
-// formatDollars renders a USD amount with four decimal places (we
-// surface sub-cent precision because sub-agents are often very
-// short-lived and the rounded value would look identically zero
-// for too many of them).
-func formatDollars(d float64) string {
-	if d < 0 {
-		d = 0
-	}
-	return fmt.Sprintf("$%.4f", d)
 }

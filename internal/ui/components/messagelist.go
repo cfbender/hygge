@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -73,6 +74,10 @@ type MessageList struct {
 	Theme         *theme.Theme
 	Messages      []UIMessage
 	Subagents     map[string]*SubagentState
+	// AnimFor, when non-nil, maps SubSessionID to the running Anim for
+	// that sub-agent.  Passed through to SubagentBlock so the running
+	// state can display the animated spinner.
+	AnimFor map[string]*anim.Anim
 	// Now is the wall-clock to use for elapsed-time math inside
 	// nested SubagentBlocks.  Zero means time.Now (production
 	// path); tests override it for deterministic output.
@@ -114,6 +119,16 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	// RoleMarker: prominent banner-style compaction section break.
 	if msg.Role == RoleMarker {
 		return m.renderMarker(msg)
+	}
+
+	// task tool call with a bound subagent: render ONLY the SubagentBlock —
+	// no "▌tool: task" gutter row, no tool-result body.
+	if msg.Role == RoleTool && msg.ToolName == "task" && msg.SubagentID != "" {
+		if nested := m.nestedFor(msg); nested != "" {
+			return nested
+		}
+		// SubagentID set but no matching state yet (edge case during hydration):
+		// fall through to the normal gutter render so nothing is lost.
 	}
 
 	gutter := m.gutter(msg)
@@ -188,11 +203,16 @@ func (m MessageList) nestedFor(msg UIMessage) string {
 	if !ok || state == nil {
 		return ""
 	}
+	var an *anim.Anim
+	if m.AnimFor != nil {
+		an = m.AnimFor[msg.SubagentID]
+	}
 	block := SubagentBlock{
 		State: state,
 		Width: m.Width,
 		Theme: m.Theme,
 		Now:   m.Now,
+		Anim:  an,
 	}
 	return block.View()
 }

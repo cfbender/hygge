@@ -46,6 +46,7 @@ import (
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
+	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -102,15 +103,16 @@ func New(opts AppOptions) (*App, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
-		opts:      opts,
-		ctx:       ctx,
-		cancel:    cancel,
-		busCh:     make(chan any, 256),
-		input:     components.NewInput(opts.Theme),
-		spinner:   spinner.New(),
-		width:     80,
-		height:    24,
-		subagents: make(map[string]*components.SubagentState),
+		opts:          opts,
+		ctx:           ctx,
+		cancel:        cancel,
+		busCh:         make(chan any, 256),
+		input:         components.NewInput(opts.Theme),
+		spinner:       spinner.New(),
+		width:         80,
+		height:        24,
+		subagents:     make(map[string]*components.SubagentState),
+		subagentAnims: make(map[string]*anim.Anim),
 	}
 	a.spinner.Spinner = spinner.Dot
 	// Only subscribe to bus events when there's a concrete foreground
@@ -198,6 +200,12 @@ type App struct {
 	// isDescendant() below walks the chain so future relaxation
 	// does not break the filter.
 	subagents map[string]*components.SubagentState
+
+	// subagentAnims holds one Anim per running sub-agent, keyed by
+	// SubSessionID.  Created on SubagentStarted (live events only —
+	// resumed sessions always have EndedAt set and never create an Anim).
+	// Deleted on SubagentCompleted to stop unnecessary ticking.
+	subagentAnims map[string]*anim.Anim
 
 	// foregroundStack tracks the navigation history for the TUI.
 	// The bottom entry (index 0) is always the root session.
@@ -448,6 +456,7 @@ func (a *App) View() tea.View {
 		Theme:     a.opts.Theme,
 		Messages:  visibleMessages,
 		Subagents: a.subagents,
+		AnimFor:   a.subagentAnims,
 		Now:       a.opts.Now(),
 	}.View()
 
@@ -632,6 +641,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.spinner, cmd = a.spinner.Update(m)
 		a.spinnerTick++
 		return a, cmd
+
+	case anim.StepMsg:
+		// Route to the matching sub-agent anim.  The anims are keyed by
+		// SubSessionID, but StepMsg.ID is the anim's own internal id.
+		// Search the map to find the right anim.  If the sub-agent has
+		// completed, the anim is already deleted; the StepMsg is dropped.
+		for subID, an := range a.subagentAnims {
+			updated, cmd := an.Update(m)
+			if cmd != nil {
+				// This anim consumed the message.
+				a.subagentAnims[subID] = updated
+				return a, cmd
+			}
+		}
+		return a, nil
 
 	case subagentTickMsg:
 		// Re-issue the tick if the sub-agent is still running;
@@ -1350,10 +1374,19 @@ func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 
 	a.attachSubagentToTaskMessage(state)
 
+	// Create an Anim for the running sub-agent.  Resumed sessions are
+	// never live-started (they arrive via hydrateMessagesFromStore with
+	// EndedAt already set), so we only create Anims here.
+	an := anim.New(anim.Settings{
+		Width: 8,
+		Theme: a.opts.Theme,
+	})
+	a.subagentAnims[e.SubSessionID] = an
+
 	// Drive the elapsed-time tick while running.  Coalesces with
 	// the spinner Tick that's already in flight; bubbletea handles
 	// multiple Tick'ers fine.
-	return a.subagentTick(e.SubSessionID)
+	return tea.Batch(a.subagentTick(e.SubSessionID), an.Start())
 }
 
 // attachSubagentToTaskMessage walks the message buffer for the
@@ -1423,6 +1456,9 @@ func (a *App) onSubagentCompleted(e bus.SubagentCompleted) tea.Cmd {
 	// running counter even if it drifted (the design doc calls
 	// this out explicitly).
 	state.Cost = e.CostUSD
+	// Stop the anim ticking for this sub-agent: delete from the map so
+	// future anim.StepMsg arrivals are silently dropped.
+	delete(a.subagentAnims, e.SubSessionID)
 	return nil
 }
 
@@ -1926,6 +1962,7 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 	a.opts.SessionID = id
 	a.messages = nil
 	a.subagents = map[string]*components.SubagentState{}
+	a.subagentAnims = map[string]*anim.Anim{}
 	a.renderer = nil
 	a.rendererW = 0
 	if id != "" {
