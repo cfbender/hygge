@@ -34,13 +34,16 @@ import (
 // newProviderCmd builds the `hygge provider` subcommand group.
 func newProviderCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "provider",
-		Short: "Manage per-machine provider credentials",
+		Use:     "provider",
+		Aliases: []string{"auth"},
+		Short:   "Manage per-machine provider credentials",
 		Long: `Manage per-machine provider credentials.
 
 Credentials live at $XDG_STATE_HOME/hygge/auth.json (mode 0600).  They
 are intentionally separate from the human-edited TOML config so the
-config can be checked into a dotfiles repository safely.`,
+config can be checked into a dotfiles repository safely.
+
+Available as either "hygge provider …" or "hygge auth …".`,
 	}
 	root.AddCommand(
 		newProviderAuthCmd(),
