@@ -32,6 +32,13 @@ linters:
         linters:
           - gosec
         text: "Expect WriteFile permissions to be 0600 or less"
+      # gosec: test files reference well-known credential file paths as
+      # fixtures (e.g. .aws/credentials, .ssh/id_rsa) for the permission
+      # secrets-denylist tests.  These are paths, not real credentials.
+      - path: "_test\\.go"
+        linters:
+          - gosec
+        text: "G101"
 
 formatters:
   enable:
