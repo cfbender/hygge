@@ -1,0 +1,31 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosec
+    - revive
+    - errorlint
+  disable:
+    - lll
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  exclude-rules:
+    # Don't require error checks on test helpers that rarely fail.
+    - path: "_test\\.go"
+      linters:
+        - errcheck
+      text: "Error return value of .*(t\\.Setenv|t\\.Chdir|os\\.Setenv).*is not checked"
+    # gosec: integer overflow conversion in test files is acceptable.
+    - path: "_test\\.go"
+      linters:
+        - gosec
+      text: "G115"
