@@ -14,6 +14,10 @@
 //  3. An optional background refresh kicked off at [Load] time when the
 //     disk cache is missing or older than [LoadOptions.MaxStaleness].
 //     The refresh runs in a goroutine and NEVER blocks startup.
+//  4. An optional periodic ticker, started when [LoadOptions.RefreshInterval]
+//     is positive, that calls [Catalog.Refresh] at that cadence.  This
+//     lets a long-lived hygge process pick up upstream catalog changes
+//     without a restart.  The ticker exits promptly on [Catalog.Close].
 //
 // # Schema
 //
@@ -46,6 +50,10 @@
 //
 // [Catalog] is safe for concurrent reads.  Refresh holds an internal
 // write lock for the duration of the network fetch and disk write.
+// The periodic-refresh ticker runs in its own goroutine; concurrent
+// calls to Refresh (from the ticker, from backgroundRefresh, and from
+// `hygge catalog refresh`) are serialised by the internal refreshing
+// mutex so only one network fetch is in flight at a time.
 //
 // # Boundaries
 //
@@ -219,6 +227,15 @@ type LoadOptions struct {
 	// considered stale and triggers the background refresh.  Zero
 	// defaults to [DefaultMaxStaleness].
 	MaxStaleness time.Duration
+
+	// RefreshInterval, when positive, starts a background ticker that
+	// calls [Catalog.Refresh] at that cadence.  Zero (the default)
+	// means no periodic refresh — the one-shot background refresh
+	// still fires on startup when BackgroundRefresh is enabled.
+	//
+	// The ticker exits promptly when [Catalog.Close] is called.
+	// Configured via [catalog] refresh_interval in config.toml.
+	RefreshInterval time.Duration
 }
 
 // Fetcher is the source interface the Catalog uses to obtain a fresh
@@ -274,6 +291,11 @@ type Catalog struct {
 	// refreshing serialises Refresh calls and the background-refresh
 	// goroutine so we never issue two concurrent network fetches.
 	refreshing sync.Mutex
+
+	// ticker fields for periodic refresh.  All three are nil/zero
+	// when RefreshInterval was not set.
+	tickerCancel context.CancelFunc
+	tickerDone   chan struct{}
 }
 
 // Load constructs a Catalog.  Always returns a usable handle: even when
@@ -348,6 +370,15 @@ func Load(opts LoadOptions) (*Catalog, error) {
 	if bgRefresh && c.shouldBackgroundRefresh() {
 		go c.backgroundRefresh()
 	}
+
+	// 4. Start periodic ticker when configured.
+	if opts.RefreshInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		c.tickerCancel = cancel
+		c.tickerDone = make(chan struct{})
+		go c.tickerLoop(ctx, opts.RefreshInterval)
+	}
+
 	return c, nil
 }
 
@@ -378,6 +409,38 @@ func (c *Catalog) backgroundRefresh() {
 	slog.Debug("catalog: background refresh succeeded",
 		"providers", result.Providers,
 		"models", result.Models)
+}
+
+// tickerLoop runs in a goroutine and calls Refresh at the given interval
+// until ctx is cancelled.  It is started by Load when RefreshInterval > 0
+// and exits promptly when Close is called (which cancels ctx).
+func (c *Catalog) tickerLoop(ctx context.Context, d time.Duration) {
+	defer close(c.tickerDone)
+	t := time.NewTicker(d)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if _, err := c.Refresh(ctx); err != nil {
+				slog.Warn("catalog: periodic refresh failed", "err", err)
+			}
+		}
+	}
+}
+
+// Close stops the periodic-refresh ticker (if any) and waits for its
+// goroutine to exit.  Idempotent.  Returns nil.
+//
+// Callers that hold a long-lived Catalog (e.g. the CLI runtime) should
+// defer Close so the ticker goroutine is not leaked after shutdown.
+func (c *Catalog) Close() error {
+	if c.tickerCancel != nil {
+		c.tickerCancel()
+		<-c.tickerDone
+	}
+	return nil
 }
 
 // Lookup returns the catalog entry for (provider, model).  Both

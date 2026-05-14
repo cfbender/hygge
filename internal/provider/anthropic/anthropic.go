@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -201,6 +202,22 @@ func (a *adapter) buildRequestBody(req provider.Request, stream bool) ([]byte, e
 	// legacy shape is forwarded verbatim for back-compat.
 	switch {
 	case req.Reasoning.IsOn():
+		if !a.modelSupportsReasoning(req.ModelName) {
+			// The catalog says this model does not support reasoning.
+			// Drop the typed thinking block and log a warning so the
+			// caller knows the request was modified.  Fall through to
+			// the legacy Options path below — if the caller also set
+			// Options["thinking"] we still forward it verbatim
+			// (legacy opt-in), otherwise no thinking block is sent.
+			slog.Warn("anthropic: model does not support reasoning, dropping thinking block",
+				"model", req.ModelName)
+			if req.Options != nil {
+				if t, ok := req.Options["thinking"].(map[string]any); ok {
+					body.Thinking = t
+				}
+			}
+			break
+		}
 		budget := req.Reasoning.AnthropicBudget()
 		body.Thinking = map[string]any{
 			"type":          "enabled",
@@ -275,4 +292,24 @@ func classifyTransportError(err error) error {
 		return err
 	}
 	return fmt.Errorf("%w: %w", provider.ErrTransient, err)
+}
+
+// modelSupportsReasoning reports whether the catalog advertises reasoning
+// capability for the given model ID.
+//
+// Fail-open semantics: when no catalog is wired (or when the model is not
+// found in the catalog) the function returns true.  This preserves the
+// pre-catalog behaviour — every Anthropic model was assumed to support
+// thinking — so a stale or missing catalog never silently regresses
+// users who are actually using a reasoning-capable model.
+func (a *adapter) modelSupportsReasoning(modelID string) bool {
+	c := catalogHandle()
+	if c == nil {
+		return true
+	}
+	entry, ok := c.Lookup("anthropic", modelID)
+	if !ok {
+		return true
+	}
+	return entry.Capabilities.Reasoning
 }

@@ -2,6 +2,39 @@
 
 ## Shipped
 
+- **T3.3 + T3.6 — Periodic catalog auto-refresh + catalog-driven Anthropic reasoning detection.**
+
+  Two small v0.3 tail cleanups:
+
+  **T3.3 — Periodic catalog auto-refresh.** `catalog.LoadOptions` gains a
+  `RefreshInterval time.Duration` field.  When positive, `Load` starts a
+  background ticker goroutine that calls `Refresh` at that cadence.
+  `Catalog.Close()` (new method) cancels the ticker and waits for its
+  goroutine to exit — the CLI runtime defers it so no goroutine leaks on
+  shutdown.  Configured via `[catalog] refresh_interval = "24h"` in
+  `config.toml`; default empty (disabled) preserves existing behaviour.
+  `CatalogConfig.RefreshIntervalDuration()` parses the duration at call
+  time; invalid/negative values warn and return zero.
+
+  **T3.6 — Catalog-driven Anthropic reasoning detection.** The Anthropic
+  adapter's `buildRequestBody` now consults `Capabilities.Reasoning` in
+  the shared catalog before attaching the `thinking` block.  If the
+  catalog says a model does not support reasoning, the block is dropped
+  with a `slog.Warn` and the request proceeds without it.  Models not
+  found in the catalog fall through to the pre-catalog behaviour (attach
+  the block) so a stale or missing catalog never silently regresses users
+  on a reasoning-capable model.  The adapter uses the existing package-
+  level `catalogHandle()` / `SetCatalog` mechanism already wired by the
+  CLI bootstrap — no new plumbing required.
+
+  See `internal/catalog/catalog.go` (`LoadOptions.RefreshInterval`,
+  `Catalog.tickerLoop`, `Catalog.Close`),
+  `internal/config/config.go` (`CatalogConfig`, `RefreshIntervalDuration`),
+  `internal/provider/anthropic/anthropic.go` (`modelSupportsReasoning`),
+  and `cmd/hygge/cli/common.go` (`buildCatalog`, `Close`).
+
+  Remaining v0.3 item: **T3.4 (parallel tool execution)**.
+
 - **T2.5 — Lua plugin host with github/local sourcing.**
 
   Adds `internal/plugin`: a `Plugin` / `Host` / `Loader` abstraction with a
@@ -306,11 +339,6 @@
   hardcoded defaults for those endpoints.  A `[catalog.custom]`
   table in `config.toml` that injects extra entries would close
   the gap.
-- **Catalog: periodic auto-refresh.** Today the background refresh
-  fires on startup only.  A long-lived TUI session keeps the
-  in-memory snapshot for the lifetime of the process.  Adding a
-  periodic refresh (daily?) would surface upstream pricing changes
-  to a running session.
 - Bash `cwd` argument: the bash tool currently has no explicit
   working-directory argument, so `touchedPaths` returns nil for it.
   When bash grows a `cwd` field, wire it into `touchedPaths` so

@@ -78,6 +78,9 @@ type appRuntime struct {
 	// PluginPM is the package manager used by the plugins registry.
 	// Exposed for CLI commands that need to inspect cache directories.
 	PluginPM *plugin.PackageManager
+	// catalogSrc is the raw catalog.Catalog closed by Close to stop
+	// any periodic-refresh ticker goroutine.
+	catalogSrc *catalog.Catalog
 }
 
 // MCPServerStatus summarises the boot-time outcome of one MCP server
@@ -167,6 +170,12 @@ func (r *appRuntime) Close() error {
 	}
 	if r.Store != nil {
 		if err := r.Store.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	// Stop the catalog periodic-refresh ticker (no-op when interval was 0).
+	if r.catalogSrc != nil {
+		if err := r.catalogSrc.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -334,7 +343,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		return nil, fmt.Errorf("cli: build permission engine: %w", err)
 	}
 
-	catSrc := buildCatalog(xdgState, opts)
+	catSrc := buildCatalog(xdgState, opts, cfg)
 	// Wire the shared catalog into each provider package so their
 	// Models() lists come from the live snapshot rather than the
 	// hardcoded fallbacks.  Passing nil is fine (tests sometimes
@@ -569,6 +578,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Pwd:            opts.Pwd,
 		Plugins:        pluginReg,
 		PluginPM:       pluginPM,
+		catalogSrc:     catSrc,
 	}, nil
 }
 
@@ -1111,7 +1121,7 @@ func hasLowerPrefix(id, lower string) bool {
 // Returns nil only when [catalog.Load] catastrophically fails — which
 // in practice means the binary's embedded snapshot is malformed.  Each
 // provider shim already tolerates nil.
-func buildCatalog(xdgState string, opts bootstrapOptions) *catalog.Catalog {
+func buildCatalog(xdgState string, opts bootstrapOptions, cfg *config.Config) *catalog.Catalog {
 	stateDir := filepath.Join(xdgState, "hygge")
 	// Tests sometimes provide a Now func; honor it so disk-snapshot
 	// freshness checks are deterministic.
@@ -1123,11 +1133,18 @@ func buildCatalog(xdgState string, opts bootstrapOptions) *catalog.Catalog {
 	// disable the background refresh in that case so the test
 	// surface stays deterministic.
 	bg := opts.CatalogBaseURL == ""
+
+	var refreshInterval time.Duration
+	if cfg != nil {
+		refreshInterval = cfg.Catalog.RefreshIntervalDuration()
+	}
+
 	loadOpts := catalog.LoadOptions{
 		StateDir:          stateDir,
 		BaseURL:           opts.CatalogBaseURL,
 		Now:               now,
 		BackgroundRefresh: &bg,
+		RefreshInterval:   refreshInterval,
 	}
 	c, err := catalog.Load(loadOpts)
 	if err != nil {

@@ -939,3 +939,112 @@ resume_default = "CONTINUE"
 		t.Errorf("resume_default should be lower-cased, got %q", cfg.Session.ResumeDefault)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Catalog refresh_interval config tests (T3.3)
+// ---------------------------------------------------------------------------
+
+// TestLoad_CatalogRefreshInterval_Empty verifies that an absent
+// refresh_interval defaults to the empty string (disabled).
+func TestLoad_CatalogRefreshInterval_Empty(t *testing.T) {
+	tmp := t.TempDir()
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Catalog.RefreshInterval != "" {
+		t.Errorf("default catalog.refresh_interval: got %q, want \"\"", cfg.Catalog.RefreshInterval)
+	}
+	// Zero duration for empty string.
+	if d := cfg.Catalog.RefreshIntervalDuration(); d != 0 {
+		t.Errorf("RefreshIntervalDuration() for empty: got %v, want 0", d)
+	}
+}
+
+// TestLoad_CatalogRefreshInterval_Valid verifies that a valid duration
+// string is stored as-is.
+func TestLoad_CatalogRefreshInterval_Valid(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[catalog]
+refresh_interval = "24h"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Catalog.RefreshInterval != "24h" {
+		t.Errorf("catalog.refresh_interval: got %q, want \"24h\"", cfg.Catalog.RefreshInterval)
+	}
+	if d := cfg.Catalog.RefreshIntervalDuration(); d != 24*60*60*1e9 {
+		t.Errorf("RefreshIntervalDuration(): got %v, want 24h", d)
+	}
+}
+
+// TestLoad_CatalogRefreshInterval_Invalid verifies that an unparseable
+// refresh_interval is reset to "" rather than failing the load.
+func TestLoad_CatalogRefreshInterval_Invalid(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[catalog]
+refresh_interval = "not-a-duration"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load should not fail for invalid refresh_interval, got: %v", err)
+	}
+	if cfg.Catalog.RefreshInterval != "" {
+		t.Errorf("invalid refresh_interval should reset to \"\", got %q", cfg.Catalog.RefreshInterval)
+	}
+}
+
+// TestLoad_CatalogRefreshInterval_Negative verifies that a negative
+// duration string is reset to "" (disabled) with a warn.
+func TestLoad_CatalogRefreshInterval_Negative(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[catalog]
+refresh_interval = "-1h"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load should not fail for negative refresh_interval, got: %v", err)
+	}
+	if cfg.Catalog.RefreshInterval != "" {
+		t.Errorf("negative refresh_interval should reset to \"\", got %q", cfg.Catalog.RefreshInterval)
+	}
+}
+
+// TestCatalogConfig_RefreshIntervalDuration_DirectParsing tests the helper
+// directly (without going through config.Load) for all edge cases.
+func TestCatalogConfig_RefreshIntervalDuration_DirectParsing(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string // "disabled" or a valid duration string
+	}{
+		{"", "disabled"},
+		{"1h", "1h0m0s"},
+		{"30m", "30m0s"},
+		{"24h", "24h0m0s"},
+		{"bad", "disabled"},
+		{"-5m", "disabled"},
+	}
+	for _, c := range cases {
+		t.Run("input="+c.input, func(t *testing.T) {
+			cc := CatalogConfig{RefreshInterval: c.input}
+			d := cc.RefreshIntervalDuration()
+			if c.want == "disabled" {
+				if d != 0 {
+					t.Errorf("expected 0, got %v", d)
+				}
+			} else {
+				if d.String() != c.want {
+					t.Errorf("got %v, want %s", d, c.want)
+				}
+			}
+		})
+	}
+}
