@@ -100,20 +100,22 @@ func TestCoerceEnvValue(t *testing.T) {
 
 // TestBuildEnvMapFromKeys exercises the hermetic env-map builder.
 //
-// Important: env-var segments are split on "_" 1:1 by the spec.
-// HYGGE_MODEL_OPTIONS_THINKING_BUDGET → model.options.thinking.budget
-// (not model.options.thinking_budget — there's no way to encode underscores
-// in keys via env vars with the current scheme).
+// Env-var path segments are separated by "__" (double underscore).
+// Single underscores within a segment are preserved as part of the key name.
+//
+//	HYGGE_model__provider=openai         → model.provider = "openai"
+//	HYGGE_permission__file_write=allow   → permission.file_write = "allow"
+//	HYGGE_model__options__thinking_budget=8000 → model.options.thinking_budget = 8000
 func TestBuildEnvMapFromKeys(t *testing.T) {
 	lookup := makeEnvLookup(map[string]string{
-		"HYGGE_MODEL_PROVIDER":       "openai",
-		"HYGGE_PERMISSION_SHELL":     "deny",
-		"HYGGE_MODEL_OPTIONS_BUDGET": "8000",
+		"HYGGE_model__provider":        "openai",
+		"HYGGE_permission__shell":      "deny",
+		"HYGGE_model__options__budget": "8000",
 	})
 	keys := []string{
-		"HYGGE_MODEL_PROVIDER",
-		"HYGGE_PERMISSION_SHELL",
-		"HYGGE_MODEL_OPTIONS_BUDGET",
+		"HYGGE_model__provider",
+		"HYGGE_permission__shell",
+		"HYGGE_model__options__budget",
 	}
 
 	m := buildEnvMapFromKeys(keys, lookup)
@@ -141,6 +143,68 @@ func TestBuildEnvMapFromKeys(t *testing.T) {
 	if opts["budget"] != int64(8000) {
 		t.Errorf("model.options.budget: got %v (%T), want 8000 int64",
 			opts["budget"], opts["budget"])
+	}
+}
+
+// TestBuildEnvMapFromKeys_UnderscoreInSegment verifies that single underscores
+// within a segment are preserved as part of the config key name.
+//
+//	HYGGE_permission__file_write=allow → permission.file_write = "allow"
+func TestBuildEnvMapFromKeys_UnderscoreInSegment(t *testing.T) {
+	lookup := makeEnvLookup(map[string]string{
+		"HYGGE_permission__file_write": "allow",
+	})
+	m := buildEnvMapFromKeys([]string{"HYGGE_permission__file_write"}, lookup)
+
+	perm, ok := m["permission"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected permission map, got %T", m["permission"])
+	}
+	if perm["file_write"] != "allow" {
+		t.Errorf("permission.file_write: got %v, want allow", perm["file_write"])
+	}
+	// Confirm single-underscore split does NOT occur: "file" key must not exist.
+	if _, exists := perm["file"]; exists {
+		t.Error("permission.file should not exist — single underscore must not split segments")
+	}
+}
+
+// TestBuildEnvMapFromKeys_DeepUnderscoreKey verifies deeply nested keys with
+// underscores in the leaf segment name.
+//
+//	HYGGE_model__options__thinking_budget=8000 → model.options.thinking_budget = 8000
+func TestBuildEnvMapFromKeys_DeepUnderscoreKey(t *testing.T) {
+	lookup := makeEnvLookup(map[string]string{
+		"HYGGE_model__options__thinking_budget": "8000",
+	})
+	m := buildEnvMapFromKeys([]string{"HYGGE_model__options__thinking_budget"}, lookup)
+
+	model, ok := m["model"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected model map, got %T", m["model"])
+	}
+	opts, ok := model["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected model.options map, got %T", model["options"])
+	}
+	if opts["thinking_budget"] != int64(8000) {
+		t.Errorf("model.options.thinking_budget: got %v (%T), want 8000 int64",
+			opts["thinking_budget"], opts["thinking_budget"])
+	}
+}
+
+// TestBuildEnvMapFromKeys_MalformedEmptySegment verifies that env vars with
+// empty segments (produced by triple+ underscores after HYGGE_) are silently
+// skipped.  The resulting map must not contain any key from the bad var.
+func TestBuildEnvMapFromKeys_MalformedEmptySegment(t *testing.T) {
+	// HYGGE___foo has "HYGGE_" stripped → "_foo", split on "__" → ["", "foo"]
+	// The empty first segment must cause the var to be skipped.
+	lookup := makeEnvLookup(map[string]string{
+		"HYGGE___foo": "bad",
+	})
+	m := buildEnvMapFromKeys([]string{"HYGGE___foo"}, lookup)
+	if len(m) != 0 {
+		t.Errorf("expected empty map for malformed env var, got %v", m)
 	}
 }
 
