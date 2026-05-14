@@ -1,16 +1,17 @@
 # Hygge
 
-A fast, beautiful, plugin-extensible coding-agent TUI.
+A fast, beautiful, plugin-extensible TUI.
 
 ## Build
 
-Requires Go 1.24+ and [golangci-lint](https://golangci-lint.run/welcome/install/).
+Requires [mise](https://mise.jdx.dev) and [golangci-lint](https://golangci-lint.run/welcome/install/).
 
 ```sh
-make build        # compiles to ./bin/hygge
-make test         # runs tests with race detector
-make lint         # runs golangci-lint
-make run          # builds and runs
+mise install          # installs the Go toolchain pinned in .mise.toml
+mise run build        # compiles to ./bin/hygge
+mise run test         # runs tests with race detector
+mise run lint         # runs golangci-lint
+mise run run          # builds and runs
 ```
 
 ## License
