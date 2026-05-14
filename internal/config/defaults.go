@@ -27,6 +27,7 @@ func defaultConfig() map[string]any {
 			"file_write":            string(PermAsk),
 			"shell":                 string(PermAsk),
 			"network":               string(PermDeny),
+			"mcp":                   string(PermAsk),
 		},
 		"theme": map[string]any{
 			"name": "shell",

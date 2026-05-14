@@ -153,6 +153,28 @@ func TestMatcher_DefaultPolicy_Network(t *testing.T) {
 	}
 }
 
+func TestMatcher_DefaultPolicy_MCP(t *testing.T) {
+	rules, _ := buildRulesNoState(testConfig(config.PermAsk, config.PermAsk, config.PermAsk, config.PermDeny))
+	m, _ := NewMatcher(rules)
+
+	action, rule := m.Match(Request{Category: CategoryMCP, Target: "github_create_issue"})
+	if action != ActionAsk {
+		t.Errorf("mcp default: got %v, want ask", action)
+	}
+	if rule == nil || rule.Source != "default" {
+		t.Errorf("rule: got %+v, want default", rule)
+	}
+}
+
+func TestMatcher_NilConfigCoversMCP(t *testing.T) {
+	rules, _ := buildRulesNoState(nil)
+	m, _ := NewMatcher(rules)
+	action, _ := m.Match(Request{Category: CategoryMCP, Target: "any"})
+	if action != ActionAsk {
+		t.Errorf("nil-config MCP fallback: got %v, want ask", action)
+	}
+}
+
 func TestMatcher_InvalidPattern(t *testing.T) {
 	// doublestar rejects unclosed character classes.
 	_, err := NewMatcher([]Rule{
@@ -240,7 +262,8 @@ func TestModeToAction(t *testing.T) {
 
 // Helpers ---------------------------------------------------------------------
 
-// testConfig builds a config.Config with the four permission scalars set.
+// testConfig builds a config.Config with the four legacy permission
+// scalars set.  MCP defaults to "ask" (zero PermissionMode -> ActionAsk).
 func testConfig(readOutside, write, shell, network config.PermissionMode) *config.Config {
 	return &config.Config{
 		Permission: config.PermissionConfig{

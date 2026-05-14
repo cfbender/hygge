@@ -78,6 +78,9 @@ type PermissionConfig struct {
 	FileWrite          PermissionMode `mapstructure:"file_write"`
 	Shell              PermissionMode `mapstructure:"shell"`
 	Network            PermissionMode `mapstructure:"network"`
+	// MCP gates MCP tool invocations.  Defaults to "ask".  Servers
+	// may override per-server via mcp.toml's permission_category.
+	MCP PermissionMode `mapstructure:"mcp"`
 }
 
 // ThemeConfig holds display-theme selection.
@@ -296,6 +299,7 @@ func validateConfig(cfg *Config) error {
 		{"permission.file_write", cfg.Permission.FileWrite},
 		{"permission.shell", cfg.Permission.Shell},
 		{"permission.network", cfg.Permission.Network},
+		{"permission.mcp", cfg.Permission.MCP},
 	}
 	for _, p := range perms {
 		if !valid[p.val] {
