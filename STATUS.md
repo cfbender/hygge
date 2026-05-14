@@ -16,6 +16,21 @@
   See `internal/subagent/`, `internal/tool/task.go`, the
   `0002_subagent_kind` migration, and `hygge subagents list`.
 
+- **Sub-agents Stage B: per-type model override.** A sub-agent type
+  can now pin a specific provider+model via `model = "<provider>/<
+  model-id>"` in `subagents.toml`. The runtime resolves the override
+  through a `ProviderResolver` injected into `RunnerOptions`; the CLI
+  bootstrap wires a resolver that reuses the parent's provider when
+  the providerName matches and constructs new providers on demand
+  otherwise, caching one instance per provider name and sharing the
+  parent's credential precedence (`model.options.api_key` →
+  `$<PROVIDER>_API_KEY` → `auth.json`). Malformed model strings are
+  logged and dropped at load time; resolver errors at runtime surface
+  as task-tool `IsError` results. See
+  `internal/subagent/resolver.go`, `Runner.Run`, and
+  `cmd/hygge/cli/common.go`'s `buildProviderResolver` /
+  `buildProviderFor`.
+
 - **Lazy per-tool-call AGENTS.md / CLAUDE.md loader (v0.2).**
   Subdirectory context files are now discovered and injected on demand
   when the agent's tools touch a directory containing one. Blocks ride
@@ -27,20 +42,16 @@
 
 ## Follow-ups
 
-- **Sub-agents Stage B: per-type model override.** `Type.Model` is
-  parsed from `subagents.toml` and exposed via `hygge subagents show`,
-  but the runtime still inherits the parent's model.
-  `internal/subagent/runtime.go` already resolves model name through
-  `RunInput.ModelName`; Stage B replaces the parent's value with the
-  type's override when set, including a per-call provider lookup if
-  the override changes provider.
 - **Sub-agents Stage C: live nested transcript in the TUI.** Stage A
   already emits `bus.SubagentStarted` / `bus.SubagentCompleted` and
   the sub-agent's normal streaming events are tagged with the sub-
   session id (so the parent's TUI naturally filters them). Stage C
   subscribes to those events and renders an inline nested transcript
   while the sub-agent runs. Sub-session costs also need to roll up
-  into the parent's totals at that point.
+  into the parent's totals at that point. With Stage B landed,
+  override sub-agents now show `model_provider` / `model_name`
+  that differ from the parent's on their sub-session row — the TUI
+  should surface that in the nested transcript header.
 - Bash `cwd` argument: the bash tool currently has no explicit
   working-directory argument, so `touchedPaths` returns nil for it.
   When bash grows a `cwd` field, wire it into `touchedPaths` so

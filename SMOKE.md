@@ -98,6 +98,39 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       kind `subagent` (visible via `sqlite3 ~/.local/state/hygge/
       sessions.db 'select id, parent_id, kind from sessions'`).
 
+- [ ] **Sub-agent model override switches provider.**
+      Define a sub-agent type that pins a different provider than the
+      one in your active hygge config, then dispatch it.
+      ```
+      tmp=$(mktemp -d)
+      mkdir -p "$tmp/.agents"
+      cat > "$tmp/.agents/subagents.toml" <<'EOF'
+      [subagents.haiku]
+      description = "Cheap & quick recon."
+      prompt = "You are a recon sub-agent. Return one final message."
+      tools = ["read", "grep", "glob"]
+      model = "anthropic/claude-haiku-4-5"
+      EOF
+      (cd "$tmp" && ../bin/hygge subagents list)
+      ```
+      `subagents list` shows the new `haiku` type with a `MODEL`
+      column reading `anthropic/claude-haiku-4-5`, and `subagents
+      show haiku` echoes the same string on its `model:` line. With
+      both the parent provider's key AND `ANTHROPIC_API_KEY` set,
+      launch hygge in `$tmp` and ask: "use the task tool with
+      subagent_type=haiku, description 'sanity', prompt 'list files
+      under .'". After it returns:
+      ```
+      sqlite3 ~/.local/state/hygge/sessions.db \
+        'select id, parent_id, model_provider, model_name from sessions order by created_at desc limit 5'
+      ```
+      The newest sub-session row shows `model_provider = anthropic`
+      and `model_name = claude-haiku-4-5`, regardless of which
+      provider the parent session used. A type with a malformed
+      model (e.g. `model = "anthropic-claude"`) loads with a
+      warning in the logs and falls back to the parent's model
+      silently at run time.
+
 - [ ] **AGENTS.md is picked up.**
       ```
       tmp=$(mktemp -d)

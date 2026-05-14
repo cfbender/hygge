@@ -32,6 +32,7 @@ type Runner struct {
 	catalog       *cost.Catalog
 	registry      *Registry
 	parentTools   *tool.Registry
+	resolver      ProviderResolver
 	pwd           string
 	contextWindow int64
 	maxIter       int
@@ -70,6 +71,18 @@ type RunnerOptions struct {
 	// MaxIterations bounds the sub-agent loop.  Zero means
 	// defaultMaxIterations (25).
 	MaxIterations int
+
+	// ProviderResolver, when non-nil, is consulted whenever a
+	// [Type.Model] override is set on the requested type.  The
+	// resolver returns the provider to use and the bare model id to
+	// pass into the embedded agent loop.  When nil, or when the
+	// requested type has no Model override, the runner reuses
+	// Provider + RunInput.ModelName.
+	//
+	// Resolver errors are surfaced as [Runner.Run] errors so the
+	// task tool can render them as an IsError result for the parent
+	// model.
+	ProviderResolver ProviderResolver
 
 	// Now is an injectable clock for bus events and durations.
 	// Defaults to time.Now.
@@ -114,6 +127,7 @@ func NewRunner(opts RunnerOptions) (*Runner, error) {
 		catalog:       opts.Catalog,
 		registry:      opts.Registry,
 		parentTools:   opts.ParentTools,
+		resolver:      opts.ProviderResolver,
 		pwd:           opts.Pwd,
 		contextWindow: opts.ContextWindow,
 		maxIter:       opts.MaxIterations,
@@ -207,9 +221,11 @@ type RunInput struct {
 	// sub-agent.  Required.
 	Prompt string
 
-	// ModelName is the parent agent's current model name.  Stage A
-	// always reuses it.  Stage B will switch to per-type overrides
-	// resolved from [Type.Model].
+	// ModelName is the parent agent's current model name.  Used as
+	// the default when the requested type has no [Type.Model]
+	// override.  When the type pins an override, the resolver
+	// returns the model id and this field is ignored for the run
+	// (but still recorded on the input for traceability).
 	ModelName string
 }
 
@@ -256,13 +272,44 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		return Result{}, fmt.Errorf("subagent: Run: load parent session: %w", err)
 	}
 
+	// Determine the provider + model for this run.  When the type
+	// pins a [Type.Model], hand it to the resolver; the resolver
+	// returns the provider to use and the bare model id.  When the
+	// resolver is absent or the override is empty / malformed, fall
+	// back to the parent's provider + RunInput.ModelName.
+	//
+	// Malformed model strings should not actually reach us -- the
+	// registry strips them at load time -- but we treat the case as
+	// "fall back" rather than "fail" so a stale Type in memory
+	// never breaks an otherwise valid sub-agent run.
+	runProvider := r.provider
+	runModelName := in.ModelName
+	if t.Model != "" {
+		switch {
+		case r.resolver == nil:
+			slog.Warn("subagent: model override set but no ProviderResolver wired; using parent's provider",
+				"type", t.Name, "requested_model", t.Model)
+		case !IsValidModelRef(t.Model):
+			slog.Warn("subagent: stored model override is malformed; using parent's provider",
+				"type", t.Name, "requested_model", t.Model)
+		default:
+			p, m, err := r.resolver(ctx, t.Model)
+			if err != nil {
+				return Result{}, fmt.Errorf("subagent: Run: resolve %q for type %q: %w",
+					t.Model, t.Name, err)
+			}
+			runProvider = p
+			runModelName = m
+		}
+	}
+
 	subTools := r.buildToolRegistry(t)
 
 	// Create the sub-session up front so it's auditable even when the
 	// run fails partway through.  We do NOT carry a fork_message_id;
 	// sub-agents are not forks of the parent's history -- they branch
 	// from a tool_use into a fresh conversation.
-	subModel := session.ModelRef{Provider: parent.Model.Provider, Name: in.ModelName}
+	subModel := session.ModelRef{Provider: runProvider.Name(), Name: runModelName}
 	sub, err := r.store.CreateSession(ctx, session.NewSession{
 		ProjectDir: parent.ProjectDir,
 		Model:      subModel,
@@ -285,11 +332,12 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 
 	// Build an ephemeral Agent for this single run.  We intentionally
 	// do NOT share the parent's Agent: the sub-agent needs a different
-	// tool registry and (eventually, Stage B) a different model.
+	// tool registry and (when the type pins one) a different
+	// provider + model.
 	ag, err := agent.New(agent.Options{
 		Bus:           r.bus,
 		Store:         r.store,
-		Provider:      r.provider,
+		Provider:      runProvider,
 		Permission:    r.permission,
 		Tools:         subTools,
 		Catalog:       r.catalog,
@@ -299,7 +347,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		Now:           r.now,
 		ContextWindow: r.contextWindow,
 		// LazyContext is intentionally nil: sub-agents start with a
-		// clean slate.  Stage B may revisit if a sub-agent type
+		// clean slate.  Stage C may revisit if a sub-agent type
 		// wants its own subdir-context tracker.
 	})
 	if err != nil {

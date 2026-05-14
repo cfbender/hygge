@@ -47,15 +47,20 @@ func newSubagentsListCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "NAME\tSOURCE\tTOOLS\tDESCRIPTION")
+			writeln(tw, "NAME\tSOURCE\tMODEL\tTOOLS\tDESCRIPTION")
 			for _, t := range all {
 				tools := "(defaults)"
 				if len(t.Tools) > 0 {
 					tools = strings.Join(t.Tools, ",")
 				}
-				printf(tw, "%s\t%s\t%s\t%s\n",
+				model := "(parent)"
+				if t.Model != "" {
+					model = t.Model
+				}
+				printf(tw, "%s\t%s\t%s\t%s\t%s\n",
 					t.Name,
 					t.Source,
+					truncateInline(model, 32),
 					truncateInline(tools, 30),
 					truncateInline(t.Description, 60),
 				)
@@ -92,9 +97,9 @@ func newSubagentsShowCmd() *cobra.Command {
 			printf(out(cmd), "name:        %s\n", t.Name)
 			printf(out(cmd), "source:      %s\n", t.Source)
 			if t.Model != "" {
-				// Stage A parses but ignores; surface so the user knows
-				// the value reached the registry.
-				printf(out(cmd), "model:       %s (parsed but ignored in Stage A)\n", t.Model)
+				printf(out(cmd), "model:       %s\n", t.Model)
+			} else {
+				printf(out(cmd), "model:       (inherits parent's)\n")
 			}
 			printf(out(cmd), "description: %s\n", t.Description)
 			if len(t.Tools) == 0 {

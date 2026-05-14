@@ -163,11 +163,32 @@ tools = ["read", "grep", "glob", "bash"]
 description = "External documentation lookup."
 prompt = "..."
 tools = ["read", "bash"]
-# model = "anthropic/claude-haiku-4-5"   # reserved for a future release; ignored today
+model = "anthropic/claude-haiku-4-5"   # optional: pin this type to a specific provider+model
 ```
 
-Per-type model overrides are parsed but not yet honoured at runtime —
-sub-agents currently inherit the parent's provider and model.
+#### Per-type model overrides
+
+A sub-agent type may pin its own provider and model via the `model`
+field. The value must be of the form `<provider>/<model-id>`, e.g.
+`anthropic/claude-haiku-4-5`, `openai/gpt-4o-mini`, or
+`openrouter/anthropic/claude-haiku-4-5`. The provider name must match
+a registered provider (`anthropic`, `openai`, `openrouter`, ...); the
+model id is passed through unchanged.
+
+When the override targets the same provider as the parent's config,
+hygge reuses the parent's already-authenticated provider instance.
+When it targets a different provider, hygge constructs that provider
+on demand using the same credential precedence as the parent
+(`model.options.api_key` → `$<PROVIDER>_API_KEY` → `auth.json`), so
+make sure the relevant key is configured before launching a sub-agent
+that needs it.
+
+Malformed model strings (anything not matching
+`<provider>/<model-id>`) are logged with a warning at load time and
+the override is dropped — the type still loads and falls back to the
+parent's model. Providers that fail to construct (missing
+credentials, unknown name) surface as task-tool errors so the model
+sees a clear diagnostic.
 
 Sub-agents NEVER see the `task` tool, even when their TOML config
 asks for it: the recursion guard strips it from every sub-agent's

@@ -215,9 +215,12 @@ func normalizeEntry(name string, e tomlEntry, source string) (Type, error) {
 		}
 		tools = append(tools, t)
 	}
-	if e.Model != "" {
-		slog.Warn("subagent: per-type model override not yet implemented (Stage B); ignoring",
-			"type", name, "requested_model", e.Model)
+	model := strings.TrimSpace(e.Model)
+	if model != "" && !IsValidModelRef(model) {
+		slog.Warn("subagent: malformed model override; falling back to parent's model",
+			"type", name, "requested_model", model,
+			"want_shape", "<provider>/<model-id>")
+		model = ""
 	}
 	return Type{
 		Name:         name,
@@ -225,7 +228,7 @@ func normalizeEntry(name string, e tomlEntry, source string) (Type, error) {
 		SystemPrompt: prompt,
 		Tools:        tools,
 		Source:       source,
-		Model:        e.Model,
+		Model:        model,
 	}, nil
 }
 
