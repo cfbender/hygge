@@ -36,6 +36,8 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge provider auth [name]` / `list` / `remove` — manage per-machine API credentials.
 - `hygge config explain [key]` — print the effective config with provenance.
 - `hygge theme list` / `hygge theme show <name>` — inspect available themes.
+- `hygge skills list` / `show <name>` / `doctor` — inspect loaded skills.
+- `hygge context show` / `paths` — inspect the `AGENTS.md` files contributing to the system prompt.
 - `hygge version` — print version, Go version, OS/arch.
 
 ## Configuration
@@ -53,6 +55,74 @@ per-project model or permission overrides.
 
 `hygge config explain` shows the resolved config along with the source
 of every value: builtin default, user config, profile, or project file.
+
+### Conventions
+
+Hygge follows the vendor-neutral [`.agents`](https://agents.md) directory
+convention for shared agent assets (skills, prompts, and any future
+filesystem-discovered config) alongside its own `.hygge` directories.
+Every feature that loads config from disk consults the same four layers,
+in this order (lowest priority first; later layers override earlier ones
+with the same name):
+
+1. `~/.agents/<feature>/...` — vendor-neutral, per-user.
+2. `~/.config/hygge/<feature>/...` — hygge-native, per-user.
+3. `<project-root>/.agents/<feature>/...` — vendor-neutral, per-project (discovered by walking up from the current directory).
+4. `<project-root>/.hygge/<feature>/...` — hygge-native, per-project (same walk-up).
+
+Hygge-native paths override `.agents` paths so users can shadow a
+shared asset with a hygge-specific tweak. Project paths override user
+paths so per-repo conventions win.
+
+The walk-up for project layers stops at the first `.git` directory at
+or above the current level (the conventional "this is the project
+root" signal) and never climbs into `$HOME`.
+
+### Skills
+
+Skills are named markdown procedures the model can invoke at runtime.
+Drop a `.md` file with a small frontmatter block into any
+`skills/` directory under the four layers above; hygge picks it up
+automatically. Each skill carries `name`, `description`, and
+`when_to_use` keys plus a free-form markdown body:
+
+```markdown
+---
+name: refactor-handler
+description: Refactor an HTTP handler to extract its core logic
+when_to_use: When asked to split a long HTTP handler into testable pieces
+---
+# Procedure
+
+1. Identify the handler function …
+2. …
+```
+
+The system prompt advertises every loaded skill's `name`, `description`,
+and `when_to_use` to the model; the full body is fetched on demand via
+the built-in `skill` tool. Use `hygge skills list` to see what is
+loaded, `hygge skills show <name>` to inspect one, and
+`hygge skills doctor` to diagnose files that failed to parse.
+
+### AGENTS.md
+
+`AGENTS.md` is the conventional file for project-specific context the
+model should always have in mind (house rules, terminology, things to
+avoid). Unlike skills, its contents are appended to the system prompt
+unconditionally on every turn.
+
+Hygge looks for `AGENTS.md` in:
+
+1. `~/.agents/AGENTS.md`
+2. `~/.config/hygge/AGENTS.md`
+3. `<project-root>/.agents/AGENTS.md`
+4. `<project-root>/AGENTS.md`
+
+All discovered files are concatenated in that order. The project-root
+walk-up stops at the first directory containing `AGENTS.md`, `.git`,
+`.agents/`, or `.hygge/`. Use `hygge context show` to see exactly what
+hygge is appending and `hygge context paths` for a script-friendly
+list.
 
 ### Provider credentials
 
