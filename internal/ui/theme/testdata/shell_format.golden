@@ -1,0 +1,15 @@
+theme: shell
+  primary          = ansi:4
+  accent           = ansi:5
+  muted            = ansi:8
+  success          = ansi:2
+  warn             = ansi:3
+  error            = ansi:1
+  code.bg          = (default)
+  code.fg          = ansi:7
+  diff.add.bg      = ansi:22
+  diff.del.bg      = ansi:52
+  statusbar.bg     = ansi:8
+  statusbar.fg     = ansi:15
+  modal.bg         = (default)
+  modal.border     = ansi:8

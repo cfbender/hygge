@@ -1,0 +1,17 @@
+name = "midnight"
+
+[colors]
+primary        = "#7AA2F7"
+accent         = "5"
+muted          = "ansi:8"
+success        = "#9ECE6A"
+warn           = "#E0AF68"
+error          = "#F7768E"
+"code.fg"      = "inherit:primary"
+"code.bg"      = ""
+"diff.add.bg"  = "#2C3D34"
+"diff.del.bg"  = "#3D2C30"
+"statusbar.fg" = "#A9B1D6"
+"statusbar.bg" = "#16161E"
+"modal.bg"     = "#1A1B26"
+"modal.border" = "#414868"

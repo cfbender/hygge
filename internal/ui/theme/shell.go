@@ -1,0 +1,40 @@
+package theme
+
+// ShellTheme returns the builtin shell-palette theme.
+//
+// Every atom maps to a numbered slot in the terminal's ANSI palette.  No RGB
+// values are hard-coded; the actual hues depend on the user's terminal emulator
+// color scheme.  An empty raw string means "no override" — the terminal's
+// default background or foreground carries through.
+func ShellTheme() *Theme {
+	return &Theme{
+		Name: "shell",
+		Colors: map[Atom]Color{
+			// Semantic foreground tones — ANSI 16-color slots.
+			AtomPrimary: {kind: colorKindANSI, raw: "4"}, // blue
+			AtomAccent:  {kind: colorKindANSI, raw: "5"}, // magenta
+			AtomMuted:   {kind: colorKindANSI, raw: "8"}, // bright black / grey
+			AtomSuccess: {kind: colorKindANSI, raw: "2"}, // green
+			AtomWarn:    {kind: colorKindANSI, raw: "3"}, // yellow
+			AtomError:   {kind: colorKindANSI, raw: "1"}, // red
+
+			// Code block surfaces.
+			AtomCodeFg: {kind: colorKindANSI, raw: "7"}, // white / terminal foreground
+			AtomCodeBg: {kind: colorKindDefault},        // no override — terminal background
+
+			// Diff hunk backgrounds.
+			// 256-color dark green/red; lipgloss degrades gracefully on 16-color
+			// terminals by mapping 256-color indices to the nearest ANSI slot.
+			AtomDiffAddBg: {kind: colorKindANSI, raw: "22"}, // dark green
+			AtomDiffDelBg: {kind: colorKindANSI, raw: "52"}, // dark red
+
+			// Status bar.
+			AtomStatusBarFg: {kind: colorKindANSI, raw: "15"}, // bright white
+			AtomStatusBarBg: {kind: colorKindANSI, raw: "8"},  // bright black / dark grey
+
+			// Modal.
+			AtomModalBg:     {kind: colorKindDefault},        // no override
+			AtomModalBorder: {kind: colorKindANSI, raw: "8"}, // grey
+		},
+	}
+}

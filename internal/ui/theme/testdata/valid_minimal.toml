@@ -1,0 +1,17 @@
+name = "minimal"
+
+[colors]
+primary       = "4"
+accent        = "5"
+muted         = "8"
+success       = "2"
+warn          = "3"
+error         = "1"
+"code.fg"     = "7"
+"code.bg"     = ""
+"diff.add.bg" = "22"
+"diff.del.bg" = "52"
+"statusbar.fg" = "15"
+"statusbar.bg" = "8"
+"modal.bg"     = ""
+"modal.border" = "8"
