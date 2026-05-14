@@ -69,6 +69,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfbender/hygge/internal/agentsmd"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/permission"
@@ -123,6 +124,15 @@ type Options struct {
 	// CompactionMaxTokens caps the size of the generated summary in
 	// Compact.  Zero means 1024.
 	CompactionMaxTokens int
+	// LazyContext, when non-nil, enables the per-tool-call subdir
+	// AGENTS.md / CLAUDE.md loader (see agentsmd.LazyTracker).  Nil
+	// means the feature is off — the agent loop never injects subdir
+	// context.  Tracker state is per-Agent, but the agent maintains
+	// a per-session pending-block buffer so multiple sessions
+	// sharing one Agent do not bleed context into each other (only
+	// the seen-dir set is shared, which is the intended behaviour
+	// for one workspace).
+	LazyContext *agentsmd.LazyTracker
 }
 
 // Agent is the orchestrator.  Construct via [New]; the zero value is not
@@ -130,10 +140,14 @@ type Options struct {
 type Agent struct {
 	opts Options
 
-	// mu guards closed and locks.
+	// mu guards closed, locks, and pendingLazy.
 	mu     sync.Mutex
 	closed bool
 	locks  map[string]*sync.Mutex
+	// pendingLazy maps sessionID -> lazy context blocks queued for
+	// the next provider turn.  Drained before each buildRequest in
+	// runLoop.  Guarded by mu.
+	pendingLazy map[string][]agentsmd.Block
 }
 
 // New constructs an Agent.  Returns an error if any required option is nil.
@@ -166,8 +180,9 @@ func New(opts Options) (*Agent, error) {
 		opts.CompactionMaxTokens = 1024
 	}
 	return &Agent{
-		opts:  opts,
-		locks: make(map[string]*sync.Mutex),
+		opts:        opts,
+		locks:       make(map[string]*sync.Mutex),
+		pendingLazy: make(map[string][]agentsmd.Block),
 	}, nil
 }
 
@@ -263,4 +278,28 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 	}
 
 	return a.runLoop(ctx, sessionID, sess.Model.Name)
+}
+
+// appendPendingLazy queues blocks to be injected as a system-prompt
+// addition on the next provider turn for sessionID.  Guarded by a.mu.
+func (a *Agent) appendPendingLazy(sessionID string, blocks []agentsmd.Block) {
+	if len(blocks) == 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingLazy[sessionID] = append(a.pendingLazy[sessionID], blocks...)
+}
+
+// drainPendingLazy returns and clears the queued lazy blocks for
+// sessionID.  Returns nil when nothing is queued.  Guarded by a.mu.
+func (a *Agent) drainPendingLazy(sessionID string) []agentsmd.Block {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	blocks := a.pendingLazy[sessionID]
+	if len(blocks) == 0 {
+		return nil
+	}
+	delete(a.pendingLazy, sessionID)
+	return blocks
 }

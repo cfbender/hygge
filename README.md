@@ -160,12 +160,20 @@ The project-root walk-up stops at the first directory containing
 `AGENTS.md`, `CLAUDE.md`, `.git`, `.agents/`, or `.hygge/`, and never
 climbs into `$HOME`.
 
-**Coming next:** subdirectory `AGENTS.md` / `CLAUDE.md` files will be
-loaded automatically when the agent reads, writes, or runs commands
-in those directories — walked up from the touched path toward the
-project root and injected as transient system notes in the next
-provider turn. Until that lands, only the eight project-root layers
-above are surfaced at startup.
+**Subdirectory context (lazy):** subdirectory `AGENTS.md`, `CLAUDE.md`,
+and `CLAUDE.local.md` files are loaded automatically when the agent's
+tools (`read`, `write`, `edit`, `grep`, `glob`) touch a path inside that
+directory. The loader walks upward from each touched path toward the
+project root, picking up any context files in directories it has not
+already visited this session, and injects them into the system prompt
+of the NEXT provider turn only — they are never persisted into session
+history. Directories named `node_modules`, `vendor`, `.venv`,
+`__pycache__`, `dist`, `target`, `bin`, `build`, `.git`, `.agents`, and
+`.hygge` are walked through transparently but never contribute context.
+A session-wide cap (`MaxLazyContextFiles = 50`, `MaxLazyContextBytes =
+256 KiB`) bounds how much extra material can ride along; once a cap
+fires the loader disables itself for the rest of the session and logs
+a `slog.Warn`.
 
 Use:
 

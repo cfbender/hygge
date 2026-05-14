@@ -147,6 +147,75 @@ func (r *appRuntime) Close() error {
 	return firstErr
 }
 
+// buildLazyTracker constructs the per-tool-call subdir context
+// tracker the agent loop hands every touched path to.  Returns nil
+// (lazy loading disabled) when no project root could be discovered
+// from pwd, or when no markers exist at all.  Seeds the tracker's
+// seen-dir set with every directory whose context was already loaded
+// at bootstrap so those files are never re-injected.
+func buildLazyTracker(homeDir, pwd string, loaded []agentsmd.Block) *agentsmd.LazyTracker {
+	root := discoverProjectRoot(pwd, homeDir)
+	if root == "" {
+		slog.Warn("cli: lazy context disabled (no project root found)",
+			"pwd", pwd)
+		return nil
+	}
+	seenDirs := make([]string, 0, len(loaded))
+	for _, b := range loaded {
+		if b.Path == "" {
+			continue
+		}
+		seenDirs = append(seenDirs, filepath.Dir(b.Path))
+	}
+	return agentsmd.NewLazyTracker(homeDir, root, seenDirs)
+}
+
+// discoverProjectRoot walks parents of pwd looking for any of the
+// project-root markers Load uses (AGENTS.md, CLAUDE.md, .git, .agents,
+// .hygge).  Returns "" when no marker is found before $HOME or the
+// filesystem root.  Mirrors agentsmd.findProjectRoot deliberately — see
+// STATUS.md for why we don't share a helper yet.
+func discoverProjectRoot(pwd, homeStop string) string {
+	if pwd == "" {
+		return ""
+	}
+	dir := filepath.Clean(pwd)
+	homeStop = filepath.Clean(homeStop)
+	for {
+		if homeStop != "" && dir == homeStop {
+			return ""
+		}
+		if hasProjectMarker(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// hasProjectMarker reports whether dir contains any of the
+// project-root markers: AGENTS.md / CLAUDE.md, .git, .agents/, .hygge/.
+func hasProjectMarker(dir string) bool {
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return true
+	}
+	if info, err := os.Stat(filepath.Join(dir, ".agents")); err == nil && info.IsDir() {
+		return true
+	}
+	if info, err := os.Stat(filepath.Join(dir, ".hygge")); err == nil && info.IsDir() {
+		return true
+	}
+	return false
+}
+
 // bootstrap builds every component the CLI commands need from a single
 // options struct.  Returns a fully-wired runtime that callers Close.
 //
@@ -326,6 +395,12 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		agentsBlocks = nil
 	}
 
+	// Construct the lazy per-tool-call subdir context tracker.  The
+	// tracker is seeded with every directory we just loaded a block
+	// from so the same file is never re-injected.  Failures here
+	// only degrade lazy loading; the agent still runs without it.
+	lazyTracker := buildLazyTracker(opts.HomeDir, opts.Pwd, agentsBlocks)
+
 	// Build the tool registry now that the skill registry is in hand
 	// so the skill tool is registered when (and only when) skills are
 	// configured.
@@ -358,6 +433,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		ContextWindow: contextWindow,
 		SystemPrompt:  sysPrompt,
 		Now:           opts.Now,
+		LazyContext:   lazyTracker,
 	})
 	if err != nil {
 		permEngine.Close()
