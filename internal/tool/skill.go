@@ -28,6 +28,11 @@ func NewSkillTool(reg *skill.Registry) Tool {
 
 func (t *skillTool) Name() string { return "skill" }
 
+// Parallelizable returns true: the skill tool reads from an in-memory
+// registry with no mutation, making it safe to run concurrently with
+// other read-only tools.
+func (t *skillTool) Parallelizable() bool { return true }
+
 func (t *skillTool) Description() string {
 	return "Load the full body of a named skill. Use this when one of the listed available skills applies to the current task."
 }

@@ -2,6 +2,36 @@
 
 ## Shipped
 
+- **T3.4 — Parallel tool execution for parallelizable tools.**
+
+  The agent now runs independent tool calls concurrently within a turn.
+  Tools opt in via a new `Parallelizable() bool` method on the `tool.Tool`
+  interface:
+
+  - `read`, `grep`, `glob`, `skill`, `task` → opt in (read-only or isolated)
+  - `bash`, `write`, `edit` → stay sequential (state-mutating)
+  - MCP tools → sequential (unknown external side-effects)
+  - Plugin tools → default off; opt in via `parallelizable = true` in the Lua
+    registration table
+
+  `executeToolCalls` partitions calls into a parallel batch and a sequential
+  group, runs the parallel batch first via `sync.WaitGroup`, then runs the
+  sequential group serially.  Results are stitched back together in the
+  model's original call order before being returned to the provider.
+
+  A panic inside any parallel call is recovered; the slot receives an
+  `IsError` result and siblings complete normally.
+
+  The permission engine's session-scoped allow cache was already guarded by
+  `sync.RWMutex` — no changes needed for concurrent safety.
+
+  **v0.3 COMPLETE.**
+
+  See `internal/tool/tool.go` (`Parallelizable()` interface method),
+  `internal/agent/loop.go` (`executeToolCalls` parallel batch),
+  `internal/plugin/plugin.go` (`PluginTool.Parallelizable`),
+  `internal/plugin/lua.go` (Lua `parallelizable` key).
+
 - **T3.3 + T3.6 — Periodic catalog auto-refresh + catalog-driven Anthropic reasoning detection.**
 
   Two small v0.3 tail cleanups:
@@ -33,7 +63,7 @@
   `internal/provider/anthropic/anthropic.go` (`modelSupportsReasoning`),
   and `cmd/hygge/cli/common.go` (`buildCatalog`, `Close`).
 
-  Remaining v0.3 item: **T3.4 (parallel tool execution)**.
+  v0.3 is now complete.
 
 - **T2.5 — Lua plugin host with github/local sourcing.**
 

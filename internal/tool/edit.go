@@ -26,6 +26,10 @@ func newEditTool(r *readTracker) *editTool { return &editTool{reads: r} }
 
 func (t *editTool) Name() string { return "edit" }
 
+// Parallelizable returns false: edit mutates the filesystem and must not
+// run concurrently with other tools that may read or write the same file.
+func (t *editTool) Parallelizable() bool { return false }
+
 func (t *editTool) Description() string {
 	return "Perform an exact-string replacement in a file. oldString must match the file " +
 		"contents verbatim and be unique unless replaceAll is true. The file must have " +

@@ -53,6 +53,10 @@ func newGrepTool() *grepTool {
 
 func (t *grepTool) Name() string { return "grep" }
 
+// Parallelizable returns true: grep is a read-only filesystem scan
+// with no mutation, making it safe to run concurrently with sibling tools.
+func (t *grepTool) Parallelizable() bool { return true }
+
 func (t *grepTool) Description() string {
 	return "Search file contents with a regular expression. Uses ripgrep (rg) when " +
 		"available, otherwise walks the directory tree with Go's RE2 engine. Skips " +

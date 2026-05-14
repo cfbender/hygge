@@ -89,6 +89,16 @@ func NewTaskTool(runner SubagentRunner) *TaskTool {
 // Name implements [Tool].
 func (t *TaskTool) Name() string { return "task" }
 
+// Parallelizable implements [Tool].  Each sub-agent runs in an isolated
+// session with its own message history, so concurrent task calls are safe:
+// they do not share per-turn state within the parent session.
+//
+// Note: tools invoked INSIDE a sub-agent still go through their own
+// permission checks, and sub-agents share the parent's permission engine.
+// The engine's session cache is mutex-guarded, so concurrent sub-agent
+// dispatches are safe.
+func (t *TaskTool) Parallelizable() bool { return true }
+
 // Description implements [Tool].
 func (t *TaskTool) Description() string {
 	return "Dispatch a mission to a sub-agent that runs in isolation and returns a single " +

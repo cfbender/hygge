@@ -28,6 +28,10 @@ func newGlobTool() *globTool { return &globTool{} }
 
 func (t *globTool) Name() string { return "glob" }
 
+// Parallelizable returns true: glob is a read-only directory enumeration
+// with no mutation, making it safe to run concurrently with sibling tools.
+func (t *globTool) Parallelizable() bool { return true }
+
 func (t *globTool) Description() string {
 	return "Find files matching a doublestar glob (e.g. \"**/*.go\"). Results are sorted " +
 		"by modification time descending. Skips .git, node_modules, vendor, .venv, " +

@@ -197,6 +197,12 @@ func (p *luaPlugin) luaRegisterTool(L *lua.LState) int {
 		}
 	}
 
+	// parallelizable defaults to false; opt in explicitly.
+	parallelizable := false
+	if pval := tbl.RawGetString("parallelizable"); pval == lua.LTrue {
+		parallelizable = true
+	}
+
 	// Build a Go wrapper that calls the Lua function under the plugin mutex.
 	pluginName := p.name
 	pluginRef := p // captured for mutex access
@@ -251,10 +257,11 @@ func (p *luaPlugin) luaRegisterTool(L *lua.LState) int {
 	}
 
 	if err := p.host.RegisterTool(PluginTool{
-		Name:        name,
-		Description: desc,
-		InputSchema: inputSchema,
-		Execute:     executeFn,
+		Name:           name,
+		Description:    desc,
+		InputSchema:    inputSchema,
+		Parallelizable: parallelizable,
+		Execute:        executeFn,
 	}); err != nil {
 		L.RaiseError("hygge.register_tool: %s", err.Error())
 	}

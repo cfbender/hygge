@@ -271,8 +271,32 @@ func (pm *PackageManager) CacheDir(src Source) string {
 
 // --- git helpers ---
 
+// gitCommand returns an exec.Cmd configured so git never prompts interactively.
+// Missing or private repos surface as errors instead of blocking on a terminal
+// credential prompt, the macOS Git Credential Manager, or a user-configured
+// credential.helper (e.g. one that shells out to `gh`).
+func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	// Wipe any inherited credential.helper / core.askPass for this invocation.
+	// Without this, a user-configured helper (e.g. `manager`, `!gh auth git-credential`)
+	// can still pop a UI or stdin prompt even with GIT_TERMINAL_PROMPT=0.
+	full := append([]string{
+		"-c", "credential.helper=",
+		"-c", "core.askPass=",
+	}, args...)
+	cmd := exec.CommandContext(ctx, "git", full...) //nolint:gosec // args composed from validated source fields and managed cache paths
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0", // disable git's own username/password prompt
+		"GIT_ASKPASS=/bin/echo", // neutralise askpass: echo returns empty, git treats it as no creds
+		"SSH_ASKPASS=/bin/echo", // same for ssh askpass fallback
+		"GCM_INTERACTIVE=Never", // disable Git Credential Manager UI on macOS/Windows
+	)
+	// Detach stdin so even if some helper tries to read from us, it gets EOF.
+	cmd.Stdin = nil
+	return cmd
+}
+
 func (pm *PackageManager) gitClone(ctx context.Context, url, dir string) error {
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth=1", url, dir) //nolint:gosec // url is a github HTTPS URL from user config
+	cmd := gitCommand(ctx, "clone", "--depth=1", url, dir)
 	cmd.Stderr = nil
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -282,7 +306,7 @@ func (pm *PackageManager) gitClone(ctx context.Context, url, dir string) error {
 }
 
 func (pm *PackageManager) gitCheckout(ctx context.Context, dir, ref string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "checkout", ref) //nolint:gosec // ref is from user config
+	cmd := gitCommand(ctx, "-C", dir, "checkout", ref)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git checkout %q failed: %w\n%s", ref, err, string(out))
@@ -291,7 +315,7 @@ func (pm *PackageManager) gitCheckout(ctx context.Context, dir, ref string) erro
 }
 
 func (pm *PackageManager) gitPull(ctx context.Context, dir string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "pull", "--ff-only") //nolint:gosec // dir is managed cache dir
+	cmd := gitCommand(ctx, "-C", dir, "pull", "--ff-only")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git pull failed: %w\n%s", err, string(out))

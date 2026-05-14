@@ -43,6 +43,28 @@
 // produce incremental output (currently just "bash") publish
 // [bus.ToolCallProgress] events for each chunk and still return a complete
 // Result at the end.  See the bash tool's documentation for details.
+//
+// # Parallel execution
+//
+// Tools that return true from [Tool.Parallelizable] may be invoked
+// concurrently with other parallelizable tools within the same turn.
+// Tools that return false are always executed serially after the
+// parallel batch completes.
+//
+// The contract for Parallelizable: return true only when the tool's
+// effects are commutative with any sibling parallelizable tool that could
+// run in the same turn.  Read-only tools qualify; tools that mutate the
+// filesystem, run shell commands, or hold shared mutable state must
+// return false.
+//
+// Built-in mapping:
+//
+//   - read, grep, glob, skill, task → Parallelizable() == true
+//   - bash, write, edit             → Parallelizable() == false
+//
+// Plugin tools default to false; opt in via the Lua registration table:
+//
+//	hygge.register_tool { ..., parallelizable = true, ... }
 package tool
 
 import (
@@ -80,6 +102,25 @@ type Tool interface {
 	// Result as the zero value).  See the package doc for the
 	// IsError-vs-ToolError distinction.
 	Execute(ctx context.Context, args json.RawMessage, ec ExecContext) (Result, error)
+
+	// Parallelizable reports whether this tool is safe to invoke
+	// concurrently with other parallelizable tools in the same turn.
+	//
+	// Return true only when the tool's effects are commutative with any
+	// sibling parallelizable call in the same turn.  Read-only tools
+	// (read, grep, glob, skill, task) return true.  Tools that mutate
+	// the filesystem or run shell commands (bash, write, edit) return
+	// false.
+	//
+	// The agent loop runs all parallelizable calls in a single concurrent
+	// batch, then runs the sequential calls serially after the batch
+	// completes.  Bus events from siblings within the parallel batch
+	// arrive in undefined order; subscribers must not rely on
+	// intra-batch ordering.
+	//
+	// Plugin tools default to false; they opt in via the registration
+	// struct or the Lua `parallelizable = true` key.
+	Parallelizable() bool
 }
 
 // ExecContext is the per-call runtime context handed to a tool.

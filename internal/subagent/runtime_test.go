@@ -404,6 +404,7 @@ func (r *recordingTool) Description() string { return "stub" }
 func (r *recordingTool) InputSchema() map[string]any {
 	return map[string]any{"type": "object"}
 }
+func (r *recordingTool) Parallelizable() bool { return false }
 func (r *recordingTool) Execute(_ context.Context, _ json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
 	r.called.Store(true)
 	return tool.Result{Content: "should not have been called"}, nil

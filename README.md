@@ -996,6 +996,57 @@ hygge plugins update policy-guard                           # update one
 hygge plugins remove policy-guard                           # uninstall
 ```
 
+## Parallel tool execution
+
+Within a single turn, hygge can run multiple tool calls concurrently when the
+model issues several parallelizable calls at once (e.g. four `read` calls on
+different files, or `read + grep + glob`).
+
+### Which built-in tools opt in
+
+| Tool | Parallelizable | Reason |
+|------|:--------------:|--------|
+| `read` | ✓ | Pure filesystem read; no mutation |
+| `grep` | ✓ | Read-only scan |
+| `glob` | ✓ | Read-only enumeration |
+| `skill` | ✓ | In-memory registry lookup; no mutation |
+| `task` | ✓ | Each sub-agent runs in an isolated session |
+| `bash` | ✗ | Arbitrary shell side-effects |
+| `write` | ✗ | Filesystem mutation |
+| `edit` | ✗ | Filesystem mutation |
+
+### Execution policy
+
+1. All parallelizable calls in the turn form a **parallel batch** — every
+   goroutine is launched simultaneously, then `sync.WaitGroup.Wait()` drains
+   the batch.
+2. Non-parallelizable calls run **serially** after the batch completes, in
+   their original call order.
+3. Results are stitched back into the **model's original call order** before
+   being returned to the provider.
+4. A panic inside any parallel call is recovered; the slot receives an
+   `IsError` result and siblings continue to completion.
+
+### Plugin tools opt in
+
+Plugin tools default to `false` (serial) for safety.  Opt in from Lua:
+
+```lua
+hygge.register_tool {
+    name           = "search_repo",
+    description    = "Search the repo index",
+    parallelizable = true,   -- safe: read-only search
+    input_schema   = { ... },
+    execute = function(ctx, input)
+        -- ...
+    end,
+}
+```
+
+Note: even when `parallelizable = true`, the gopher-lua LState mutex
+serialises execution *within a single Lua plugin*.  Two different plugin
+tools from different plugins CAN run in parallel.
+
 ## Development
 
 ```sh
