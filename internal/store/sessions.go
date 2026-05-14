@@ -103,7 +103,8 @@ const sessionSelectColumns = `SELECT
 	model_provider, model_name,
 	total_input_tokens, total_output_tokens,
 	total_cache_read_tokens, total_cache_write_tokens, total_cost_usd,
-	created_at, updated_at, deleted_at, metadata, kind`
+	created_at, updated_at, deleted_at, metadata, kind,
+	COALESCE(first_message_preview, '') AS first_message_preview`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows so scanSession can
 // service single-row and multi-row reads.
@@ -113,15 +114,16 @@ type rowScanner interface {
 
 func scanSession(r rowScanner) (*session.Session, error) {
 	var (
-		s         session.Session
-		parentID  sql.NullString
-		forkMsg   sql.NullString
-		slug      sql.NullString
-		createdMs int64
-		updatedMs int64
-		deletedMs sql.NullInt64
-		metadata  string
-		kind      string
+		s               session.Session
+		parentID        sql.NullString
+		forkMsg         sql.NullString
+		slug            sql.NullString
+		createdMs       int64
+		updatedMs       int64
+		deletedMs       sql.NullInt64
+		metadata        string
+		kind            string
+		firstMsgPreview string
 	)
 	if err := r.Scan(
 		&s.ID, &parentID, &forkMsg, &slug, &s.ProjectDir,
@@ -129,6 +131,7 @@ func scanSession(r rowScanner) (*session.Session, error) {
 		&s.Totals.InputTokens, &s.Totals.OutputTokens,
 		&s.Totals.CacheReadTokens, &s.Totals.CacheWriteTokens, &s.Totals.CostUSD,
 		&createdMs, &updatedMs, &deletedMs, &metadata, &kind,
+		&firstMsgPreview,
 	); err != nil {
 		return nil, err
 	}
@@ -145,6 +148,7 @@ func scanSession(r rowScanner) (*session.Session, error) {
 	if s.Kind == "" {
 		s.Kind = session.KindPrimary
 	}
+	s.FirstMessagePreview = firstMsgPreview
 	return &s, nil
 }
 
@@ -165,6 +169,14 @@ func (s *Store) ListSessions(ctx context.Context, opts session.ListOpts) ([]*ses
 	}
 	if !opts.IncludeDeleted {
 		clauses = append(clauses, "deleted_at IS NULL")
+	}
+	if opts.Kind != "" {
+		clauses = append(clauses, "kind = ?")
+		args = append(args, string(opts.Kind))
+	}
+	if opts.ParentID != "" {
+		clauses = append(clauses, "parent_id = ?")
+		args = append(args, opts.ParentID)
 	}
 
 	query := sessionSelectColumns + " FROM sessions"
@@ -193,6 +205,14 @@ func (s *Store) ListSessions(ctx context.Context, opts session.ListOpts) ([]*ses
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: ListSessions iterate: %w", err)
 	}
+
+	// Apply the Query substring filter in Go after the SQL scan.
+	// This is applied against slug, project_dir, and first_message_preview.
+	// Case-insensitive; empty query passes all rows through.
+	if opts.Query != "" {
+		out = filterSessionsByQuery(out, opts.Query)
+	}
+
 	return out, nil
 }
 
@@ -299,4 +319,87 @@ func (s *Store) ForkSession(
 		ParentID:      fromSessionID,
 		ForkMessageID: fromMessageID,
 	})
+}
+
+// RenameSession sets a new slug on an existing session and bumps UpdatedAt.
+// An empty slug clears the slug (sets the column to NULL).  Returns
+// ErrNotFound when id is unknown.  A no-op when the new slug equals the
+// current slug (UpdatedAt is not bumped in that case).
+func (s *Store) RenameSession(ctx context.Context, id, slug string) error {
+	if id == "" {
+		return fmt.Errorf("store: RenameSession: id required")
+	}
+	// Read the current slug so we can skip the write on a no-op rename.
+	var curSlug sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		"SELECT slug FROM sessions WHERE id = ?", id,
+	).Scan(&curSlug)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("store: RenameSession %q: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("store: RenameSession lookup: %w", err)
+	}
+	// No-op: same slug (both empty, or both the same non-empty string).
+	current := nullStr(curSlug)
+	if current == slug {
+		return nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE sessions SET slug = ?, updated_at = ? WHERE id = ?",
+		nullableString(slug), time.Now().UnixMilli(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("store: RenameSession: %w", err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return fmt.Errorf("store: RenameSession %q: %w", id, ErrNotFound)
+	}
+	return nil
+}
+
+// filterSessionsByQuery applies a case-insensitive substring filter against
+// slug, project_dir, and first_message_preview.  Rows that match any field
+// are retained; all others are dropped.  An empty query passes all rows.
+func filterSessionsByQuery(sessions []*session.Session, query string) []*session.Session {
+	if query == "" {
+		return sessions
+	}
+	lower := strings.ToLower(query)
+	out := sessions[:0]
+	for _, s := range sessions {
+		if strings.Contains(strings.ToLower(s.Slug), lower) ||
+			strings.Contains(strings.ToLower(s.ProjectDir), lower) ||
+			strings.Contains(strings.ToLower(s.FirstMessagePreview), lower) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// latestUserMessageID returns the id of the most recent non-deleted user
+// message in sessionID, or ("", nil) when no user message exists.
+// Used by the fork-at-latest path.
+func (s *Store) latestUserMessageID(ctx context.Context, sessionID string) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM messages
+		 WHERE session_id = ? AND role = 'user' AND deleted_at IS NULL
+		 ORDER BY created_at DESC, id DESC LIMIT 1`,
+		sessionID,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: latestUserMessageID: %w", err)
+	}
+	return id, nil
+}
+
+// LatestUserMessageID returns the id of the most recent non-deleted user
+// message in sessionID, or ("", nil) when no user message exists.
+// Part of the extended store surface used by the session modal fork path.
+func (s *Store) LatestUserMessageID(ctx context.Context, sessionID string) (string, error) {
+	return s.latestUserMessageID(ctx, sessionID)
 }

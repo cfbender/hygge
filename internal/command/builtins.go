@@ -232,7 +232,6 @@ func (*sessionsCmd) Args() []ArgSpec     { return nil }
 func (*sessionsCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
 	return Outcome{
 		OpenModal: ModalSessions,
-		Notice:    "sessions picker not yet implemented (T1.2)",
 	}, nil
 }
 
@@ -247,18 +246,18 @@ func (*forkCmd) Args() []ArgSpec {
 	return []ArgSpec{{Name: "message_id", Description: "id of the message to fork at", Required: false}}
 }
 
-// TODO(T1.2): when session-management UI ships, surface a real fork
-// flow (pick a message, create the child session, switch the
-// foreground id).  For v0.3 we just hand the id off to the TUI as an
-// Update so the wiring is in place.
 func (*forkCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
 	id := strings.TrimSpace(input)
 	if id == "" {
-		return Outcome{Notice: "/fork: pass a message id (session management UI lands in T1.2)"}, nil
+		// No arg: fork at the foreground session's latest user message.
+		return Outcome{
+			Updates: map[string]string{UpdateForkAt: "latest"},
+			Notice:  "forking at latest message…",
+		}, nil
 	}
 	return Outcome{
 		Updates: map[string]string{UpdateForkAt: id},
-		Notice:  fmt.Sprintf("/fork: requested fork at %s (T1.2 will wire this up)", id),
+		Notice:  fmt.Sprintf("forking at message %s…", id),
 	}, nil
 }
 

@@ -160,9 +160,17 @@ type App struct {
 
 	// activeModal is the named modal currently open from a slash
 	// command Outcome (help / sessions).  Empty means none.
-	// v0.3 just records the request; rich modal rendering for help
-	// and sessions lands alongside T1.2 / T2.3.
 	activeModal string
+
+	// sessionsModal holds the live state of the sessions picker
+	// when activeModal == "sessions".
+	sessionsModal components.SessionsModal
+
+	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
+	// /fork outcome is received.  applyOutcome drains them after all
+	// Outcome fields have been processed and generates the fork tea.Cmd.
+	forkPendingID    string
+	forkPendingMsgID string
 
 	// subagents tracks every in-flight or completed sub-agent
 	// invocation whose root ancestor is opts.SessionID.  Keyed by
@@ -410,6 +418,14 @@ func (a *App) View() string {
 		return modal
 	}
 
+	// Sessions modal overlay.
+	if a.activeModal == "sessions" {
+		a.sessionsModal.Width = width
+		a.sessionsModal.Height = height
+		a.sessionsModal.Now = a.opts.Now()
+		return a.sessionsModal.View()
+	}
+
 	return main
 }
 
@@ -455,6 +471,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case sessionsLoadedMsg:
+		// Sessions loaded (or reloaded after rename/delete).
+		a.sessionsModal.Sessions = m.sessions
+		// Clamp cursor to avoid out-of-bounds after a delete.
+		filtered := a.sessionsModal.FilteredCount()
+		if a.sessionsModal.Cursor >= filtered && filtered > 0 {
+			a.sessionsModal.Cursor = filtered - 1
+		}
+		return a, nil
+
+	case switchSessionMsg:
+		return a, a.applySwitchSession(m.ID)
+
 	case sendStarted:
 		a.busy = true
 		return a, nil
@@ -494,6 +523,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(a.pendingPerms) > 0 {
 		return a.handleModalKey(k)
+	}
+
+	if a.activeModal == "sessions" {
+		return a.handleSessionsModalKey(k)
 	}
 
 	switch k.Type {
@@ -1236,4 +1269,197 @@ func extractTarget(args []byte) string {
 		}
 	}
 	return ""
+}
+
+// --- Sessions modal integration --------------------------------------------
+
+// openSessionsModal loads the current session list from the store and
+// transitions activeModal to "sessions".
+func (a *App) openSessionsModal() tea.Cmd {
+	if a.opts.Store == nil {
+		return a.setNotice("sessions: no store configured")
+	}
+	return func() tea.Msg {
+		sessions, err := a.opts.Store.ListSessions(a.ctx, session.ListOpts{
+			Limit:          200,
+			IncludeDeleted: true, // load all; modal filters client-side
+		})
+		if err != nil {
+			return clearNoticeMsg{notice: "sessions: " + err.Error()}
+		}
+		return sessionsLoadedMsg{sessions: sessions}
+	}
+}
+
+// sessionsLoadedMsg carries a freshly-loaded session list into the App.
+type sessionsLoadedMsg struct {
+	sessions []*session.Session
+}
+
+// handleSessionsModalKey routes a key press into the sessions modal.
+func (a *App) handleSessionsModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	sk := components.SessionsKey{
+		Name:  k.Type.String(),
+		Runes: k.Runes,
+	}
+	// Map bubbletea key type names to the strings our modal expects.
+	switch k.Type {
+	case tea.KeyUp:
+		sk.Name = "up"
+	case tea.KeyDown:
+		sk.Name = "down"
+	case tea.KeyEnter:
+		sk.Name = "enter"
+	case tea.KeyEsc:
+		sk.Name = "esc"
+	case tea.KeyTab:
+		sk.Name = "tab"
+	case tea.KeyBackspace, tea.KeyDelete:
+		sk.Name = "backspace"
+	case tea.KeyRunes:
+		if len(k.Runes) == 1 {
+			sk.Name = string(k.Runes)
+		}
+	}
+
+	updated, msg := a.sessionsModal.HandleKey(sk)
+	a.sessionsModal = updated
+
+	if msg == nil {
+		return a, nil
+	}
+
+	return a, a.applySessionsModalMsg(msg)
+}
+
+// applySessionsModalMsg applies a sessions-modal action message.
+func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
+	switch m := msg.(type) {
+	case components.CloseSessionsModal:
+		a.activeModal = ""
+		return nil
+
+	case components.SwitchSessionAction:
+		a.activeModal = ""
+		return a.applySwitchSession(m.ID)
+
+	case components.ForkSessionAction:
+		a.activeModal = ""
+		return a.applyForkSession(m.ID, m.MessageID)
+
+	case components.RenameSessionAction:
+		return a.applyRenameSession(m.ID, m.Slug)
+
+	case components.DeleteSessionAction:
+		return a.applyDeleteSession(m.ID)
+	}
+	return nil
+}
+
+// applySwitchSession changes the foreground session and resets the UI state.
+func (a *App) applySwitchSession(id string) tea.Cmd {
+	a.opts.SessionID = id
+	a.messages = nil
+	a.subagents = map[string]*components.SubagentState{}
+	a.renderer = nil
+	a.rendererW = 0
+	return a.setNotice(fmt.Sprintf("switched to session %s", id[:8]))
+}
+
+// applyForkSession forks a session.  If messageID is "", it resolves the
+// latest user message first.
+func (a *App) applyForkSession(fromID, messageID string) tea.Cmd {
+	if a.opts.Store == nil {
+		return a.setNotice("fork: no store configured")
+	}
+	return func() tea.Msg {
+		ctx := a.ctx
+		msgID := messageID
+		if msgID == "" || msgID == "latest" {
+			var err error
+			msgID, err = a.opts.Store.LatestUserMessageID(ctx, fromID)
+			if err != nil {
+				return sendCompleted{Err: fmt.Errorf("fork: lookup latest message: %w", err)}
+			}
+			if msgID == "" {
+				return clearNoticeMsg{notice: "fork: no user messages in session — nothing to fork at"}
+			}
+		}
+
+		// Validate that the message belongs to the source session.
+		msg, err := a.opts.Store.GetMessage(ctx, msgID)
+		if err != nil {
+			return clearNoticeMsg{notice: "fork: message not found: " + err.Error()}
+		}
+		if msg.SessionID != fromID {
+			return clearNoticeMsg{notice: "fork: message belongs to a different session"}
+		}
+
+		src, err := a.opts.Store.GetSession(ctx, fromID)
+		if err != nil {
+			return clearNoticeMsg{notice: "fork: source session not found: " + err.Error()}
+		}
+
+		forked, err := a.opts.Store.ForkSession(ctx, fromID, msgID, src.Model, "")
+		if err != nil {
+			return clearNoticeMsg{notice: "fork: " + err.Error()}
+		}
+		return switchSessionMsg{ID: forked.ID}
+	}
+}
+
+// applyRenameSession renames a session and refreshes the modal.
+func (a *App) applyRenameSession(id, slug string) tea.Cmd {
+	if a.opts.Store == nil {
+		return a.setNotice("rename: no store configured")
+	}
+	return func() tea.Msg {
+		if err := a.opts.Store.RenameSession(a.ctx, id, slug); err != nil {
+			return clearNoticeMsg{notice: "rename: " + err.Error()}
+		}
+		// Refresh the session list inside the modal.
+		sessions, err := a.opts.Store.ListSessions(a.ctx, session.ListOpts{
+			Limit: 200, IncludeDeleted: true,
+		})
+		if err != nil {
+			return clearNoticeMsg{notice: "rename ok but list reload failed: " + err.Error()}
+		}
+		return sessionsLoadedMsg{sessions: sessions}
+	}
+}
+
+// applyDeleteSession soft-deletes a session.  If it was the foreground,
+// the App switches to the most recent other primary session (creating a
+// fresh one if none exist).
+func (a *App) applyDeleteSession(id string) tea.Cmd {
+	if a.opts.Store == nil {
+		return a.setNotice("delete: no store configured")
+	}
+	wasForeground := id == a.opts.SessionID
+	return func() tea.Msg {
+		ctx := a.ctx
+		if err := a.opts.Store.SoftDeleteSession(ctx, id); err != nil {
+			return clearNoticeMsg{notice: "delete: " + err.Error()}
+		}
+		if wasForeground {
+			// Find another primary session to switch to.
+			others, err := a.opts.Store.ListSessions(ctx, session.ListOpts{
+				Kind: session.KindPrimary, Limit: 10,
+			})
+			if err == nil && len(others) > 0 {
+				return switchSessionMsg{ID: others[0].ID}
+			}
+			// No other sessions: clear the foreground so the next input
+			// creates a fresh one.
+			return switchSessionMsg{ID: ""}
+		}
+		// Refresh modal list.
+		sessions, err := a.opts.Store.ListSessions(ctx, session.ListOpts{
+			Limit: 200, IncludeDeleted: true,
+		})
+		if err != nil {
+			return clearNoticeMsg{notice: "delete ok but list reload failed: " + err.Error()}
+		}
+		return sessionsLoadedMsg{sessions: sessions}
+	}
 }

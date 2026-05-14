@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/cfbender/hygge/internal/session"
 )
 
 func TestSessionsListEmpty(t *testing.T) {
@@ -121,5 +124,131 @@ func TestSessionsDeleteWithoutForceErrors(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "refusing to delete") {
 		t.Errorf("expected refusal message, got:\n%s", out.String())
+	}
+}
+
+func TestSessionsRename(t *testing.T) {
+	home := hermeticHome(t)
+	id := seedSession(t, home)
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"sessions", "rename", id[:6], "my-new-slug"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	// Verify the slug was persisted via show.
+	root2 := NewRootCmd()
+	var showOut bytes.Buffer
+	root2.SetOut(&showOut)
+	root2.SetErr(&showOut)
+	root2.SetArgs([]string{"sessions", "show", id[:6]})
+	if err := root2.Execute(); err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if !strings.Contains(showOut.String(), "my-new-slug") {
+		t.Errorf("slug not visible in show output:\n%s", showOut.String())
+	}
+}
+
+func TestSessionsListIncludeSubagents(t *testing.T) {
+	home := hermeticHome(t)
+	parentID := seedSession(t, home)
+
+	// Seed a subagent session manually via the store.
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	subSess, err := rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+		ParentID:   parentID,
+		Kind:       session.KindSubagent,
+	})
+	if err != nil {
+		_ = rt.Close()
+		t.Fatalf("CreateSession subagent: %v", err)
+	}
+	_ = rt.Close()
+
+	subPrefix := subSess.ID[:10] // use longer prefix to avoid collision
+
+	// Default list: subagent should be hidden (only primary kind returned).
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"sessions", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Verify 'subagent' kind label is not in the default output.
+	// A subagent row would show "subagent" in the KIND column.
+	defaultRows := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for _, row := range defaultRows[1:] { // skip header
+		if strings.Contains(row, subPrefix[:8]) && strings.Contains(row, "subagent") {
+			t.Errorf("subagent row should be hidden by default:\n%s", out.String())
+		}
+	}
+
+	// With --include-subagents the subagent row (KIND=subagent) should appear.
+	root2 := NewRootCmd()
+	var out2 bytes.Buffer
+	root2.SetOut(&out2)
+	root2.SetErr(&out2)
+	root2.SetArgs([]string{"sessions", "list", "--include-subagents"})
+	if err := root2.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out2.String(), "subagent") {
+		t.Errorf("subagent kind missing from --include-subagents list:\n%s", out2.String())
+	}
+	if !strings.Contains(out2.String(), subPrefix[:8]) {
+		t.Errorf("subagent id missing from --include-subagents list:\n%s", out2.String())
+	}
+}
+
+func TestSessionsListQueryFilter(t *testing.T) {
+	home := hermeticHome(t)
+
+	// Create a session with a known slug.
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+	slugSess, err := rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+		Slug:       "special-task",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	_, _ = rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+		Slug:       "other-session",
+	})
+	_ = rt.Close()
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"sessions", "list", "--query", "special"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, shortID(slugSess.ID)) {
+		t.Errorf("query filter should show matching session:\n%s", got)
+	}
+	if strings.Contains(got, "other-session") {
+		t.Errorf("query filter should hide non-matching session:\n%s", got)
 	}
 }
