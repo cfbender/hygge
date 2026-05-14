@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cfbender/hygge/internal/agent"
+	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
@@ -215,8 +216,23 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	// Build the provider.  If a factory was injected use it directly;
-	// otherwise look up the registered factory by config name.
-	prv, err := buildProvider(opts.ProviderFactory, cfg)
+	// otherwise look up the registered factory by config name.  Before
+	// either path runs, we resolve credentials: precedence is
+	//
+	//   1. config-level model.options.api_key (explicit user override)
+	//   2. $<PROVIDER>_API_KEY environment variable (handled by the
+	//      adapter itself; we just step out of the way)
+	//   3. auth.json store entry (injected as opts["api_key"])
+	//
+	// The provider adapter's own resolveAPIKey chain is preserved
+	// unchanged; this code is purely about feeding it the right input.
+	modelOpts, err := resolveProviderOptions(cfg, stateOpts)
+	if err != nil {
+		_ = stOpen.Close()
+		b.Close()
+		return nil, err
+	}
+	prv, err := buildProvider(opts.ProviderFactory, cfg, modelOpts)
 	if err != nil {
 		_ = stOpen.Close()
 		b.Close()
@@ -297,10 +313,12 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 }
 
 // buildProvider returns the resolved Provider, preferring a caller-supplied
-// factory over the global provider registry.
-func buildProvider(factory func(opts map[string]any) (provider.Provider, error), cfg *config.Config) (provider.Provider, error) {
+// factory over the global provider registry.  modelOpts is the
+// caller-merged options map (config + injected credentials); the
+// adapter is opaque to its origin.
+func buildProvider(factory func(opts map[string]any) (provider.Provider, error), cfg *config.Config, modelOpts map[string]any) (provider.Provider, error) {
 	if factory != nil {
-		prv, err := factory(cfg.Model.Options)
+		prv, err := factory(modelOpts)
 		if err != nil {
 			return nil, fmt.Errorf("cli: build provider (injected): %w", err)
 		}
@@ -310,11 +328,136 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 	if err != nil {
 		return nil, fmt.Errorf("cli: lookup provider %q: %w", cfg.Model.Provider, err)
 	}
-	prv, err := f(cfg.Model.Options)
+	prv, err := f(modelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
 	}
 	return prv, nil
+}
+
+// resolveProviderOptions composes the options map passed to the
+// provider factory.  Order of precedence:
+//
+//  1. config model.options as-is (an explicit api_key wins).
+//  2. environment variable (deferred to the adapter — we leave
+//     opts["api_key"] absent so the adapter's own env fallback runs).
+//  3. credential store entry of type CredAPIKey (injected as
+//     opts["api_key"]).
+//
+// CredOAuth entries are skipped with a warning — the OAuth flow is
+// scaffolded but not yet wired end-to-end.
+func resolveProviderOptions(cfg *config.Config, stateOpts state.LoadOptions) (map[string]any, error) {
+	// Start with a shallow copy of cfg.Model.Options so we never
+	// mutate the loaded config struct.
+	merged := make(map[string]any, len(cfg.Model.Options)+1)
+	for k, v := range cfg.Model.Options {
+		merged[k] = v
+	}
+
+	// 1) Explicit config override wins.
+	if v, ok := merged["api_key"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			slog.Debug("cli: api key from config", "provider", cfg.Model.Provider, "key", maskKey(s))
+			return merged, nil
+		}
+	}
+
+	// 2) Environment variable: defer to the adapter.  If the canonical
+	//    env var is set we deliberately do not inject from the store,
+	//    so the env fallback chain in the adapter runs unchanged.
+	if envName := providerEnvVar(cfg.Model.Provider); envName != "" {
+		if v, ok := os.LookupEnv(envName); ok && v != "" {
+			slog.Debug("cli: api key from env", "provider", cfg.Model.Provider, "var", envName, "key", maskKey(v))
+			return merged, nil
+		}
+	}
+
+	// 3) Auth store.  Load failures here are fatal — a corrupt
+	//    auth.json should not be silently ignored.
+	authOpts := auth.LoadOptions{
+		HomeDir:      stateOpts.HomeDir,
+		XDGStateHome: stateOpts.XDGStateHome,
+	}
+	store, err := auth.Load(authOpts)
+	if err != nil {
+		return nil, fmt.Errorf("cli: load auth store: %w", err)
+	}
+	cred, ok := store.Get(cfg.Model.Provider)
+	if !ok {
+		return merged, nil
+	}
+	switch cred.Type {
+	case auth.CredAPIKey:
+		if cred.APIKey == "" {
+			slog.Warn("cli: auth store entry has empty api_key; skipping",
+				"provider", cfg.Model.Provider)
+			return merged, nil
+		}
+		merged["api_key"] = cred.APIKey
+		slog.Debug("cli: api key from auth store", "provider", cfg.Model.Provider, "key", maskKey(cred.APIKey))
+	case auth.CredOAuth:
+		slog.Warn("cli: auth store has OAuth credential but OAuth is not yet wired; falling back to adapter defaults",
+			"provider", cfg.Model.Provider)
+	default:
+		slog.Warn("cli: auth store entry has unknown credential type; skipping",
+			"provider", cfg.Model.Provider, "type", cred.Type)
+	}
+	return merged, nil
+}
+
+// providerEnvVar returns the canonical environment variable name a
+// provider's adapter reads its API key from, or "" if the provider is
+// unknown.  The list mirrors the providers we expect to support in
+// v0.1 / v0.2; new entries must be added here when a new adapter
+// lands.  Hard-coded so the CLI never reads from a surprising
+// variable.
+func providerEnvVar(name string) string {
+	switch name {
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
+	case "mistral":
+		return "MISTRAL_API_KEY"
+	case "groq":
+		return "GROQ_API_KEY"
+	case "deepseek":
+		return "DEEPSEEK_API_KEY"
+	case "google", "gemini":
+		return "GOOGLE_API_KEY"
+	case "xai":
+		return "XAI_API_KEY"
+	default:
+		return ""
+	}
+}
+
+// knownProviders returns the providers providerEnvVar recognises.
+// Used by the `hygge provider auth` picker to enumerate known names
+// without duplicating the list.
+func knownProviders() []string {
+	return []string{
+		"anthropic",
+		"openai",
+		"openrouter",
+		"mistral",
+		"groq",
+		"deepseek",
+		"google",
+		"xai",
+	}
+}
+
+// maskKey redacts an API key for logs and printf-style output.
+// Strings longer than 8 chars become "<first-3>***<last-4>"; shorter
+// strings collapse to "***".  Never returns the raw value.
+func maskKey(s string) string {
+	if len(s) <= 8 {
+		return "***"
+	}
+	return s[:3] + "***" + s[len(s)-4:]
 }
 
 // lookupContextWindow asks the provider for its model list and finds the
