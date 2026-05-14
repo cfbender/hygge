@@ -44,10 +44,11 @@ func (s Source) String() string {
 }
 
 // validTransports is the set of transport identifiers accepted in
-// mcp.toml.  Anything else is rejected at load time.  v0.2 ships
-// "stdio" only; "sse" and "streamable-http" land in v0.3.
+// mcp.toml.  Anything else is rejected at load time.  v0.3 adds "sse";
+// "streamable-http" is deferred to the next slice.
 var validTransports = map[string]bool{
 	"stdio": true,
+	"sse":   true,
 }
 
 // validPermissionCategories is the set of permission category names
@@ -69,6 +70,14 @@ type ServerConfig struct {
 	Args      []string
 	Env       map[string]string
 	Dir       string
+
+	// URL is the SSE endpoint URL.  Required when Transport is "sse".
+	URL string
+
+	// Headers are sent on every HTTP request for SSE transports.
+	// Values may reference $VAR / ${VAR} which are expanded at load
+	// time via os.LookupEnv.
+	Headers map[string]string
 
 	// Enabled defaults to true when unset.  Disabled servers are
 	// returned from LoadConfigs so `hygge mcp list` can show them,
@@ -114,6 +123,8 @@ type tomlServer struct {
 	Args               []string          `toml:"args"`
 	Env                map[string]string `toml:"env"`
 	Dir                string            `toml:"dir"`
+	URL                string            `toml:"url"`
+	Headers            map[string]string `toml:"headers"`
 	Enabled            *bool             `toml:"enabled"`
 	PermissionCategory string            `toml:"permission_category"`
 }
@@ -246,11 +257,34 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 		transport = "stdio"
 	}
 	if !validTransports[transport] {
-		return ServerConfig{}, fmt.Errorf("unknown transport %q (v0.2 supports: stdio)", transport)
+		return ServerConfig{}, fmt.Errorf("unknown transport %q (supported: stdio, sse)", transport)
 	}
+
+	// Transport-specific validation.
 	command := interpolate(s.Command, envLookup)
-	if strings.TrimSpace(command) == "" {
-		return ServerConfig{}, fmt.Errorf("command is required for transport %q", transport)
+	sseURL := interpolate(s.URL, envLookup)
+
+	switch transport {
+	case "stdio":
+		if strings.TrimSpace(command) == "" {
+			return ServerConfig{}, fmt.Errorf("command is required for transport %q", transport)
+		}
+		if sseURL != "" {
+			slog.Warn("mcp: url field is ignored for stdio transport",
+				"path", path, "server", name)
+		}
+		if len(s.Headers) > 0 {
+			slog.Warn("mcp: headers field is ignored for stdio transport",
+				"path", path, "server", name)
+		}
+	case "sse":
+		if strings.TrimSpace(sseURL) == "" {
+			return ServerConfig{}, fmt.Errorf("url is required for transport %q", transport)
+		}
+		if command != "" {
+			slog.Warn("mcp: command field is ignored for sse transport",
+				"path", path, "server", name)
+		}
 	}
 
 	args := make([]string, len(s.Args))
@@ -260,6 +294,24 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 	env := make(map[string]string, len(s.Env))
 	for k, v := range s.Env {
 		env[k] = interpolate(v, envLookup)
+	}
+
+	// Expand header values using the provided envLookup.  For SSE
+	// headers this is the primary mechanism for injecting tokens such
+	// as Bearer tokens from the environment.
+	headers := make(map[string]string, len(s.Headers))
+	for k, v := range s.Headers {
+		expanded := os.Expand(v, func(key string) string {
+			val := envLookup(key)
+			if val == "" {
+				if _, ok := os.LookupEnv(key); !ok {
+					slog.Warn("mcp: header references unset env var",
+						"path", path, "server", name, "header", k, "var", key)
+				}
+			}
+			return val
+		})
+		headers[k] = expanded
 	}
 
 	enabled := true
@@ -284,6 +336,8 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 		Args:               args,
 		Env:                env,
 		Dir:                interpolate(s.Dir, envLookup),
+		URL:                sseURL,
+		Headers:            headers,
 		Enabled:            enabled,
 		PermissionCategory: permCat,
 		Source:             src,

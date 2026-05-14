@@ -545,13 +545,25 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 			statuses = append(statuses, status)
 			continue
 		}
-		transport := mcp.NewStdio(mcp.StdioOptions{
-			Command: cfg.Command,
-			Args:    cfg.Args,
-			Env:     cfg.Env,
-			Dir:     cfg.Dir,
-		})
-		status.CommandLabel = transport.ServerLabel()
+
+		var transport mcp.Transport
+		switch cfg.Transport {
+		case "sse":
+			transport = mcp.NewSSE(mcp.SSEOptions{
+				ServerURL:  cfg.URL,
+				Headers:    cfg.Headers,
+				ServerName: cfg.Name,
+			})
+			status.CommandLabel = transport.ServerLabel()
+		default: // "stdio"
+			transport = mcp.NewStdio(mcp.StdioOptions{
+				Command: cfg.Command,
+				Args:    cfg.Args,
+				Env:     cfg.Env,
+				Dir:     cfg.Dir,
+			})
+			status.CommandLabel = transport.ServerLabel()
+		}
 		client := mcp.New(mcp.ClientOptions{
 			Transport:     transport,
 			Name:          cfg.Name,

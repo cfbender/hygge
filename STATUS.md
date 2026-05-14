@@ -185,3 +185,21 @@
 - Walk-up logic exists in three places now (`agentsmd.findProjectRoot`,
   `cli.discoverProjectRoot`, `agentsmd.LazyTracker.walkUp`). When a
   fourth use case appears, consolidate into a shared helper.
+
+- **MCP: SSE transport (T1.3a) — shipped.** Hygge can now connect to
+  hosted MCP servers (Linear, GitHub, Notion, etc.) over HTTP in
+  addition to local stdio subprocesses.  Configured via
+  `transport = "sse"` and `url = "..."` in `mcp.toml`; headers
+  (bearer tokens, etc.) go in `[servers.<name>.headers]` with
+  `$VAR` expansion.  The transport implements the MCP SSE
+  handshake, correlates POST responses with JSON-RPC ids via the
+  existing Client dispatcher, handles server-initiated
+  notifications on the GET stream, and reconnects with exponential
+  backoff (capped at 5 attempts by default) on transient drops.
+  See `internal/mcp/sse.go` and `cmd/hygge/cli/common.go`.
+
+- **MCP: Streamable HTTP (T1.3b) — next slice.** The 2026
+  Streamable HTTP transport spec is intentionally out of scope
+  here.  When it lands it will follow the same `Transport`
+  interface, extend `validTransports` with `"streamable-http"`,
+  and reuse the SSE scanner for the response body.

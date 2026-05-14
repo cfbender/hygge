@@ -1,14 +1,16 @@
 // Package mcp implements an MCP (Model Context Protocol) client.
 //
-// Hygge speaks MCP version 2024-11-05 over stdio.  Each configured MCP
-// server runs as a subprocess; the Client owns the JSON-RPC dispatch
-// loop and surfaces every advertised tool as a hygge tool.Tool.
+// Hygge speaks MCP version 2024-11-05 over stdio and SSE.  Each
+// configured MCP server runs as a subprocess (stdio) or connects over
+// HTTP (SSE); the Client owns the JSON-RPC dispatch loop and surfaces
+// every advertised tool as a hygge tool.Tool.
 //
 // See the package-level files for the breakdown:
 //
 //   - protocol.go — JSON-RPC 2.0 types + MCP request/response shapes.
 //   - framing.go  — Content-Length-framed message reader / writer.
 //   - stdio.go    — subprocess Transport implementation.
+//   - sse.go      — SSE (Server-Sent Events) Transport implementation.
 //   - client.go   — Client lifecycle + RPC dispatch.
 //   - tool.go     — MCPTool: wrap one MCP tool def as a tool.Tool.
 //   - config.go   — mcp.toml loader (the .agents convention).
