@@ -59,6 +59,12 @@ type AppOptions struct {
 	ModelName     string
 	ProfileName   string
 	Now           func() time.Time
+
+	// OnSessionCreated, if non-nil, is invoked after the App lazily
+	// creates a new session on first Send.  The CLI uses this to record
+	// the new id in state (RecentSessions).  Best-effort; errors are
+	// swallowed internally.
+	OnSessionCreated func(id string)
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -456,7 +462,7 @@ func (a *App) handleModalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // startSend launches a goroutine that calls Agent.Send and returns the
 // resulting tea.Cmds (sendStarted now, sendCompleted later).
 func (a *App) startSend(text string) tea.Cmd {
-	if a.opts.Agent == nil || a.opts.SessionID == "" {
+	if a.opts.Agent == nil {
 		// No agent wired up — useful for tests that just want to verify
 		// input handling.  Just emit sendStarted then sendCompleted so the
 		// busy state cycles for the test.
@@ -474,12 +480,55 @@ func (a *App) startSend(text string) tea.Cmd {
 	return tea.Batch(
 		func() tea.Msg { return sendStarted{UserInput: text, StartedAt: a.opts.Now()} },
 		func() tea.Msg {
-			msg, err := a.opts.Agent.Send(ctx, a.opts.SessionID, []session.Part{
+			sid, err := a.ensureSession(ctx)
+			if err != nil {
+				return sendCompleted{Err: err}
+			}
+			msg, err := a.opts.Agent.Send(ctx, sid, []session.Part{
 				{Kind: session.PartText, Text: text},
 			})
 			return sendCompleted{Result: msg, Err: err}
 		},
 	)
+}
+
+// ensureSession returns a usable session id.  If opts.SessionID is empty,
+// a fresh session is created via opts.Store, the id is stored back into
+// opts.SessionID, bus.SessionStart is published, and any
+// OnSessionCreated callback is invoked.  Subsequent calls return the
+// stored id without touching the store.
+//
+// Concurrency: callers are the per-Send goroutine launched from startSend.
+// At most one Send is in flight per App (the inflight cancel field
+// enforces single-shot behaviour at the input layer), so we do not lock
+// here.
+func (a *App) ensureSession(ctx context.Context) (string, error) {
+	if a.opts.SessionID != "" {
+		return a.opts.SessionID, nil
+	}
+	if a.opts.Store == nil {
+		return "", errors.New("ui: ensureSession: Store is required to lazily create sessions")
+	}
+	sess, err := a.opts.Store.CreateSession(ctx, session.NewSession{
+		ProjectDir: a.opts.ProjectDir,
+		Model: session.ModelRef{
+			Provider: a.opts.ModelProvider,
+			Name:     a.opts.ModelName,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("ui: ensureSession: create: %w", err)
+	}
+	a.opts.SessionID = sess.ID
+	bus.Publish(a.opts.Bus, bus.SessionStart{
+		SessionID: sess.ID,
+		Resumed:   false,
+		At:        a.opts.Now(),
+	})
+	if a.opts.OnSessionCreated != nil {
+		a.opts.OnSessionCreated(sess.ID)
+	}
+	return sess.ID, nil
 }
 
 // handleBusEvent applies one event to the App state.
