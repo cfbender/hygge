@@ -25,3 +25,7 @@ run = "rm -rf ./bin ./coverage.out"
 [tasks.run]
 description = "Build and run the hygge binary (pass args after --)"
 run = ["mise run build", "./bin/hygge $@"]
+
+[tasks.precommit]
+description = "All final checks before committing code"
+run = ["mise run lint", "mise run test", "mise run build"]
