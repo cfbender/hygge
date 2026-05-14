@@ -13,10 +13,6 @@ import (
 //
 // Registries are safe for concurrent use; Register may be called from any
 // goroutine and Get/All/AsProviderTools never block writers.
-//
-// The built-in tools that ship with v0.1 are added to a registry via
-// Default in a separate file; the framework defined here knows nothing
-// about specific tools.
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
@@ -97,6 +93,28 @@ func (r *Registry) AsProviderTools() []provider.Tool {
 // same tracker as the built-ins.
 func (r *Registry) ReadTracker() *readTracker { //nolint:revive // exported intentionally; type is package-internal by design
 	return r.reads
+}
+
+// Default returns a Registry preloaded with the six v0.1 built-in tools:
+// read, write, edit, bash, grep, glob.  The returned registry owns its
+// own read-tracker; the built-ins are wired to use it.
+func Default() *Registry {
+	r := NewRegistry()
+	mustRegister(r, newReadTool(r.reads))
+	mustRegister(r, newWriteTool(r.reads))
+	mustRegister(r, newEditTool(r.reads))
+	mustRegister(r, newBashTool())
+	mustRegister(r, newGrepTool())
+	mustRegister(r, newGlobTool())
+	return r
+}
+
+// mustRegister panics if Register fails; only used for the built-ins
+// where a duplicate name would be a programmer error.
+func mustRegister(r *Registry, t Tool) {
+	if err := r.Register(t); err != nil {
+		panic(fmt.Sprintf("tool: Default: %v", err))
+	}
 }
 
 // readTracker is the per-session set of "this file was read this session"
