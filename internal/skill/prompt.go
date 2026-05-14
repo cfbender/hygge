@@ -14,10 +14,12 @@ import "strings"
 //	skill by name via the `skill` tool when the task matches its description.
 //
 //	- <name>: <description>
-//	  <when_to_use>
+//	  <when_to_use>            (only when when_to_use is non-empty)
 //	- ...
 //
-// The skills are listed sorted by name for determinism.
+// The skills are listed sorted by name for determinism.  The
+// when_to_use line is omitted for skills that fold that guidance into
+// the description (the `.agents`-standard layout).
 func BuildSystemPromptAdditions(r *Registry) string {
 	if r == nil || r.Len() == 0 {
 		return ""
@@ -32,9 +34,11 @@ func BuildSystemPromptAdditions(r *Registry) string {
 		b.WriteString(": ")
 		b.WriteString(sk.Description)
 		b.WriteByte('\n')
-		b.WriteString("  ")
-		b.WriteString(sk.WhenToUse)
-		b.WriteByte('\n')
+		if strings.TrimSpace(sk.WhenToUse) != "" {
+			b.WriteString("  ")
+			b.WriteString(sk.WhenToUse)
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
