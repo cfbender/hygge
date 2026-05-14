@@ -44,6 +44,7 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge commands list` / `hygge commands show <name>` — inspect slash commands available in the TUI.
 - `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
 - `hygge catalog list [<provider>]` / `show <provider>/<model>` / `refresh` — inspect and refresh the models.dev-backed model catalog.
+- `hygge hooks list [--event <event>]` / `hygge hooks show <name>` — inspect configured hooks.
 - `hygge version` — print version, Go version, OS/arch.
 
 ## Configuration
@@ -609,6 +610,128 @@ adapter switches to the `max_completion_tokens` / `reasoning_effort`
 request shape automatically.  A hardcoded name-prefix matcher (o1-*,
 o3-*, o4-*, reasoning-*) remains as a fallback for brand-new ids the
 local catalog hasn't been refreshed for.
+
+## Hooks
+
+Hooks are external programs that gate or observe agent events.  They are
+configured via `hooks.toml` at the standard four discovery layers (same
+walk-up as skills and subagents).
+
+### Events
+
+| Event | When | Can deny? | Can modify? |
+|---|---|---|---|
+| `pre_tool` | After the permission gate, before tool execution | yes | tool input |
+| `post_tool` | After tool returns, before result is sent to model | no | tool result |
+| `pre_message` | Before the user message is persisted | yes | message text |
+| `post_message` | After the assistant message is committed | no | — (always async) |
+
+### TOML schema
+
+```toml
+[hooks.policy-guard]
+description = "Block dangerous bash commands"
+events      = ["pre_tool"]
+command     = "/usr/local/bin/hygge-policy-check"
+args        = ["--strict"]
+timeout     = "5s"    # default; applies per invocation
+mode        = "sync"  # default; async only valid for post_* events
+
+[hooks.policy-guard.env]
+POLICY_ENV = "strict"
+
+[hooks.telemetry]
+description = "Ship tool-call results to observability"
+events      = ["post_tool", "post_message"]
+command     = "/usr/local/bin/hygge-telemetry"
+mode        = "async"   # fire-and-forget
+
+[hooks.redact]
+description = "Mask credentials in tool output"
+events      = ["post_tool"]
+command     = "/usr/local/bin/hygge-redact"
+timeout     = "2s"
+```
+
+### Protocol
+
+The hook receives a JSON object on **stdin**:
+
+```json
+{
+  "event":      "pre_tool",
+  "session_id": "...",
+  "hook_name":  "policy-guard",
+  "pwd":        "/Users/alice/repo",
+  "tool_name":  "bash",
+  "tool_input": {"command": "rm -rf /tmp/old"}
+}
+```
+
+The hook writes a JSON **Action** to stdout (empty stdout = allow):
+
+```json
+{ "decision": "deny", "reason": "rm -rf is not allowed" }
+```
+
+Supported decisions:
+
+- `allow` (default / empty stdout) — proceed unchanged.
+- `deny` — block the event.  `reason` is surfaced as an error result.
+- `modify` — replace part of the payload before continuing.
+  - `modified_tool_input` for `pre_tool`.
+  - `modified_message` for `pre_message`.
+  - `modified_tool_result` (object with `is_error` + `content`) for `post_tool`.
+
+**Exit semantics**: a non-zero exit is treated as `deny`; stderr is the
+reason (capped to 1 KiB).  A hook that times out is treated as `deny`
+with reason "hook X timed out after Ys".  Malformed stdout JSON
+fails-open (allow + `slog.Warn`).
+
+### Sync vs async
+
+- `sync` (default) — the agent waits for Run to return before
+  continuing.  5 s default timeout; configurable per hook.
+- `async` — dispatched in a goroutine after the turn completes.
+  Only valid for `post_*` events.  `post_message` is always async.
+
+Async hooks use `context.Background` (they outlive the triggering
+request).  Up to 32 async hooks can be in-flight simultaneously; beyond
+that limit new dispatches are dropped with a `slog.Warn`.  On agent
+`Close()`, up to 2 s are spent waiting for in-flight async hooks.
+
+### CLI
+
+```sh
+hygge hooks list                  # name | source | events | mode | timeout
+hygge hooks list --event pre_tool # filter by event
+hygge hooks show <name>           # full detail
+```
+
+### Policy-guard example
+
+```sh
+cat > /usr/local/bin/hygge-policy-check <<'EOF'
+#!/bin/sh
+input=$(cat -)
+cmd=$(echo "$input" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))")
+case "$cmd" in
+  *"rm -rf"*)
+    echo '{"decision":"deny","reason":"rm -rf patterns are blocked by policy"}'
+    ;;
+esac
+EOF
+chmod +x /usr/local/bin/hygge-policy-check
+```
+
+Then in `.agents/hooks.toml`:
+
+```toml
+[hooks.policy]
+description = "Block rm -rf"
+events      = ["pre_tool"]
+command     = "/usr/local/bin/hygge-policy-check"
+```
 
 ## Development
 

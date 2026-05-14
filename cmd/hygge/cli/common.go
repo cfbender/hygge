@@ -29,6 +29,7 @@ import (
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/mcp"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
@@ -64,6 +65,7 @@ type appRuntime struct {
 	Subagents      *subagent.Registry
 	SubagentRunner *subagent.Runner
 	Commands       *command.Registry
+	Hooks          *hook.Registry
 	AgentsBlocks   []agentsmd.Block
 	MCPClients     []*mcp.Client
 	MCPConfigs     []mcp.ServerConfig
@@ -463,6 +465,18 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		sysPrompt += "\n\n" + extras
 	}
 
+	// Hooks: load from the standard four-layer paths.  Failures here
+	// are non-fatal — no hooks is a valid (and safe) configuration.
+	hookReg, err := hook.Load(hook.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load hooks.toml; hooks disabled for this run", "err", err)
+		hookReg = hook.New()
+	}
+
 	ag, err := agent.New(agent.Options{
 		Bus:           b,
 		Store:         stOpen,
@@ -476,6 +490,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Now:           opts.Now,
 		LazyContext:   lazyTracker,
 		Reasoning:     resolveReasoning(cfg, opts.ReasoningOverride),
+		Hooks:         hookReg,
 	})
 	if err != nil {
 		permEngine.Close()
@@ -501,6 +516,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Subagents:      subagentReg,
 		SubagentRunner: subRunner,
 		Commands:       cmdReg,
+		Hooks:          hookReg,
 		AgentsBlocks:   agentsBlocks,
 		MCPClients:     mcpClients,
 		MCPConfigs:     mcpConfigs,

@@ -66,12 +66,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/cfbender/hygge/internal/agentsmd"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -139,6 +142,11 @@ type Options struct {
 	// not enable it.  CLI / config plumb a [provider.Reasoning]
 	// into this field at bootstrap.
 	Reasoning provider.Reasoning
+	// Hooks, when non-nil, gates each turn through the hook
+	// framework (pre_message, pre_tool, post_tool, post_message).
+	// A nil Hooks means "no hooks" — the agent loop treats it as a
+	// no-op without any nil-deref risk.
+	Hooks *hook.Registry
 }
 
 // Agent is the orchestrator.  Construct via [New]; the zero value is not
@@ -198,6 +206,9 @@ func (a *Agent) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.closed = true
+	if a.opts.Hooks != nil {
+		a.opts.Hooks.Close()
+	}
 	return nil
 }
 
@@ -263,6 +274,44 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 		return nil, ErrClosed
 	}
 
+	// Resolve a working directory for hook input.
+	pwd := a.opts.Pwd
+	if pwd == "" {
+		if wd, err := os.Getwd(); err == nil {
+			pwd = wd
+		}
+	}
+
+	// Extract text from the user parts for the pre_message hook.
+	var userText string
+	for _, p := range userParts {
+		if p.Kind == session.PartText {
+			userText += p.Text
+		}
+	}
+
+	// Run pre_message hook BEFORE persisting the user message.  On Deny,
+	// return immediately without appending anything.  On Modify, replace
+	// the text in the user parts.
+	if a.opts.Hooks != nil {
+		hookIn := hook.Input{
+			Event:     hook.EventPreMessage,
+			SessionID: sessionID,
+			HookName:  "pre_message",
+			Pwd:       pwd,
+			Message:   userText,
+		}
+		out, dec, denier, reason, warns := a.opts.Hooks.RunPre(ctx, hook.EventPreMessage, hookIn)
+		logHookWarns(warns)
+		if dec == hook.DecisionDeny {
+			return nil, fmt.Errorf("agent: pre_message hook %q denied: %s", denier, reason)
+		}
+		// Use the (possibly modified) message from the hook output.
+		if out.Message != "" && out.Message != userText {
+			userParts = replaceTextParts(userParts, out.Message)
+		}
+	}
+
 	// Persist the user message before any provider work.
 	userMsg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
 		Role:  session.RoleUser,
@@ -308,4 +357,37 @@ func (a *Agent) drainPendingLazy(sessionID string) []agentsmd.Block {
 	}
 	delete(a.pendingLazy, sessionID)
 	return blocks
+}
+
+// replaceTextParts returns a copy of parts where every PartText entry
+// is replaced with a single PartText carrying newText.  Non-text parts
+// are preserved in order.  If no text parts exist, a new text part is
+// prepended.
+func replaceTextParts(parts []session.Part, newText string) []session.Part {
+	out := make([]session.Part, 0, len(parts))
+	inserted := false
+	for _, p := range parts {
+		if p.Kind == session.PartText {
+			if !inserted {
+				out = append(out, session.Part{Kind: session.PartText, Text: newText})
+				inserted = true
+			}
+			// Additional text parts are dropped (merged into the single
+			// replacement).
+		} else {
+			out = append(out, p)
+		}
+	}
+	if !inserted {
+		out = append([]session.Part{{Kind: session.PartText, Text: newText}}, out...)
+	}
+	return out
+}
+
+// logHookWarns emits slog.Warn for each non-fatal hook execution error.
+func logHookWarns(warns []hook.Warning) {
+	for _, w := range warns {
+		slog.Warn("agent: hook execution warning (fail-open)",
+			"hook", w.HookName, "err", w.Err)
+	}
 }

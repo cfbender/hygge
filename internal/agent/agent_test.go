@@ -18,6 +18,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -937,4 +938,245 @@ func TestSend_ReasoningOptionPropagates(t *testing.T) {
 			t.Errorf("call %d Reasoning=%+v, want %+v", i, r, wantReasoning)
 		}
 	}
+}
+
+// ---------- Hook integration tests ------------------------------------------
+
+// hookReg builds a *hook.Registry from a single fake hook.
+func singleHookReg(h hook.Hook) *hook.Registry {
+	reg := hook.New()
+	_ = reg.Register(h)
+	return reg
+}
+
+// staticHook is a simple Hook implementation for tests.
+type staticHook struct {
+	name   string
+	events []hook.Event
+	mode   hook.Mode
+	action hook.Action
+	err    error
+	called *atomic.Int32
+}
+
+func (h *staticHook) Name() string           { return h.name }
+func (h *staticHook) Description() string    { return "test" }
+func (h *staticHook) Source() string         { return "test" }
+func (h *staticHook) Events() []hook.Event   { return h.events }
+func (h *staticHook) Mode() hook.Mode        { return h.mode }
+func (h *staticHook) Timeout() time.Duration { return 5 * time.Second }
+func (h *staticHook) Run(_ context.Context, _ hook.Input) (hook.Action, error) {
+	if h.called != nil {
+		h.called.Add(1)
+	}
+	return h.action, h.err
+}
+
+// TestHook_PreToolDeny verifies that a pre_tool deny surfaces as an IsError
+// tool result and the underlying tool is never executed.
+func TestHook_PreToolDeny(t *testing.T) {
+	env := newTestEnv(t)
+	target := filepath.Join(env.pwd, "x.txt")
+	if err := os.WriteFile(target, []byte("data"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var toolExecuted atomic.Int32
+	// Override the read tool with one that increments toolExecuted.
+	tools := tool.NewRegistry()
+	_ = tools.Register(&countingTool{name: "read", counter: &toolExecuted})
+
+	denyHookImpl := &staticHook{
+		name:   "deny-all",
+		events: []hook.Event{hook.EventPreTool},
+		mode:   hook.ModeSync,
+		action: hook.Action{Decision: hook.DecisionDeny, Reason: "blocked by policy"},
+	}
+
+	prov := newFakeProvider("fake",
+		scriptToolUse("", toolUseEvent(t, "tu1", "read", map[string]any{"path": target})),
+		scriptText("done", provider.Usage{}),
+	)
+	a, err := New(Options{
+		Bus:        env.Bus,
+		Store:      env.Store,
+		Provider:   prov,
+		Permission: env.Perm,
+		Tools:      tools,
+		Catalog:    env.Catalog,
+		Pwd:        env.pwd,
+		Now:        env.Now,
+		Hooks:      singleHookReg(denyHookImpl),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("read it")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if toolExecuted.Load() != 0 {
+		t.Fatal("tool must NOT execute when pre_tool hook denies")
+	}
+
+	// The tool result message should have IsError=true.
+	msgs := readMessages(t, env.Store, env.sessionID)
+	var toolMsg *session.Message
+	for _, m := range msgs {
+		if m.Role == session.RoleTool {
+			toolMsg = m
+			break
+		}
+	}
+	if toolMsg == nil {
+		t.Fatal("want a tool result message")
+	}
+	if !toolMsg.Parts[0].IsError {
+		t.Fatalf("want IsError=true, got false; content=%q", toolMsg.Parts[0].Content)
+	}
+	if !strings.Contains(toolMsg.Parts[0].Content, "blocked by policy") {
+		t.Fatalf("want deny reason in content, got %q", toolMsg.Parts[0].Content)
+	}
+}
+
+// TestHook_PreToolModify verifies that a pre_tool modify hook changes
+// the args that reach the tool.
+func TestHook_PreToolModify(t *testing.T) {
+	env := newTestEnv(t)
+
+	var receivedInput []byte
+	tools := tool.NewRegistry()
+	_ = tools.Register(&capturingTool{name: "read", received: &receivedInput})
+
+	newArgs := json.RawMessage(`{"path":"/modified/path"}`)
+	modifyHookImpl := &staticHook{
+		name:   "modify-input",
+		events: []hook.Event{hook.EventPreTool},
+		mode:   hook.ModeSync,
+		action: hook.Action{Decision: hook.DecisionModify, ModifiedToolInput: newArgs},
+	}
+
+	prov := newFakeProvider("fake",
+		scriptToolUse("", toolUseEvent(t, "tu1", "read", map[string]any{"path": "/original"})),
+		scriptText("done", provider.Usage{}),
+	)
+	a, err := New(Options{
+		Bus:        env.Bus,
+		Store:      env.Store,
+		Provider:   prov,
+		Permission: env.Perm,
+		Tools:      tools,
+		Catalog:    env.Catalog,
+		Pwd:        env.pwd,
+		Now:        env.Now,
+		Hooks:      singleHookReg(modifyHookImpl),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	// Auto-allow permission for the modified path too.
+	if _, err := a.Send(context.Background(), env.sessionID, userText("read")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if string(receivedInput) != string(newArgs) {
+		t.Fatalf("want modified args %s, got %s", newArgs, receivedInput)
+	}
+}
+
+// TestHook_PreMessageDeny verifies that a pre_message deny aborts the
+// turn without persisting any messages.
+func TestHook_PreMessageDeny(t *testing.T) {
+	env := newTestEnv(t)
+
+	denyHookImpl := &staticHook{
+		name:   "msg-deny",
+		events: []hook.Event{hook.EventPreMessage},
+		mode:   hook.ModeSync,
+		action: hook.Action{Decision: hook.DecisionDeny, Reason: "message blocked"},
+	}
+
+	prov := newFakeProvider("fake",
+		scriptText("should not run", provider.Usage{}),
+	)
+	a, err := New(Options{
+		Bus:        env.Bus,
+		Store:      env.Store,
+		Provider:   prov,
+		Permission: env.Perm,
+		Tools:      env.Tools,
+		Catalog:    env.Catalog,
+		Pwd:        env.pwd,
+		Now:        env.Now,
+		Hooks:      singleHookReg(denyHookImpl),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	_, err = a.Send(context.Background(), env.sessionID, userText("hello"))
+	if err == nil {
+		t.Fatal("want error when pre_message hook denies")
+	}
+	if !strings.Contains(err.Error(), "message blocked") {
+		t.Fatalf("want deny reason in error, got %v", err)
+	}
+
+	// No messages should have been persisted.
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if len(msgs) != 0 {
+		t.Fatalf("want 0 messages after pre_message deny, got %d", len(msgs))
+	}
+}
+
+// TestHook_NilRegistrySafe verifies that opts.Hooks=nil is handled
+// without any nil-deref or panic.
+func TestHook_NilRegistrySafe(t *testing.T) {
+	env := newTestEnv(t)
+	prov := newFakeProvider("fake", scriptText("hello", provider.Usage{}))
+	a := env.newAgent(prov) // no Hooks option → nil
+
+	_, err := a.Send(context.Background(), env.sessionID, userText("hi"))
+	if err != nil {
+		t.Fatalf("Send with nil Hooks: %v", err)
+	}
+}
+
+// ---------- tool stubs for hook tests ---------------------------------------
+
+// countingTool counts how many times Execute is called.
+type countingTool struct {
+	name    string
+	counter *atomic.Int32
+}
+
+func (c *countingTool) Name() string        { return c.name }
+func (c *countingTool) Description() string { return "counting" }
+func (c *countingTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (c *countingTool) Execute(_ context.Context, _ json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
+	c.counter.Add(1)
+	return tool.Result{Content: "ok"}, nil
+}
+
+// capturingTool stores the raw input bytes of its last Execute call.
+type capturingTool struct {
+	name     string
+	received *[]byte
+}
+
+func (c *capturingTool) Name() string        { return c.name }
+func (c *capturingTool) Description() string { return "capturing" }
+func (c *capturingTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (c *capturingTool) Execute(_ context.Context, input json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
+	*c.received = append([]byte(nil), input...)
+	return tool.Result{Content: "ok"}, nil
 }

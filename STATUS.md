@@ -2,6 +2,29 @@
 
 ## Shipped
 
+- **Hooks framework (v0.3 T1.4) — Tier-1 complete.**
+  A four-event hooks framework (`pre_tool`, `post_tool`, `pre_message`,
+  `post_message`) backed by subprocess hooks invoked via JSON-over-stdio.
+  Hooks can allow, deny, or modify the event payload; sync (default)
+  runs blocking with a per-hook timeout (5 s default), async fires
+  fire-and-forget for post-* events only.  Configured via `hooks.toml`
+  at the standard four discovery layers (`~/.agents`, `~/.config/hygge`,
+  `<project>/.agents`, `<project>/.hygge`).  Built-in hooks: none — the
+  framework is the contract.
+
+  Integrates into the agent loop: `pre_message` before each turn,
+  `pre_tool` before tool execution (after permission gate), `post_tool`
+  after, `post_message` after assistant commits.  Hook denials surface
+  as deterministic `IsError`-shaped results so the model can react.
+
+  Adds `hygge hooks list [--event <event>]` and `hygge hooks show <name>`
+  for inspecting the registry at runtime.
+
+  Tier-1 (v0.3) is now complete.  v0.3 enters Tier-2: cost roll-up,
+  foreground switch, compaction UX, and the WASM plugin host (T2.5) which
+  shares conceptual surface with this hooks framework.  See "Follow-ups"
+  below for the hand-off notes to the plugin host.
+
 - **Slash-commands framework (v0.3 T1.1).** Input that begins with `/`
   is routed through `internal/command`'s `Registry` instead of the
   send path. Built-in commands ship for `/help`, `/clear`,
@@ -213,3 +236,28 @@
   HTTP DELETE on `Close()`.  The SSE parser from `sse.go` is reused.
   MCP transport surface is now complete for v0.3.
   See `internal/mcp/streamable.go` and `cmd/hygge/cli/common.go`.
+
+## Hook → WASM plugin host hand-off notes (T2.5)
+
+The v0.3 hooks framework uses subprocess + JSON-over-stdio as its only
+implementation.  The T2.5 WASM plugin host will add a second
+implementation of the same `hook.Hook` interface; the registry and
+agent-loop integration points are already generic.  Key design
+observations for T2.5:
+
+- `hook.Hook` is a pure Go interface with no subprocess coupling.  A
+  WASM host just needs to provide another struct that implements `Run`.
+- `hook.Registry` is unaware of the transport; it only calls `Run`.
+  In-process Go hooks land the same way.
+- `hook.Input` and `hook.Action` are the protocol types.  WASM hooks
+  that want JSON exchange can reuse them; in-process hooks call them
+  directly.
+- `fail_closed` is already a parsed TOML field (defaulting false) but
+  not yet enforced — the registry always fails open on hook errors.
+  T2.5 can flip the default for security-critical WASM policies.
+- The async cap (32 in-flight) and Close timeout (2 s) are constants in
+  `registry.go`; expose them as `LoadOptions` fields when T2.5 needs
+  tuning.
+- `internal/hook` has no UI surface beyond `slog.Warn`.  If T2.5 wants
+  hook-denial events on the bus, add a new bus event type there rather
+  than in the hook package (keeping hook free of bus imports).

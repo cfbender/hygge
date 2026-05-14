@@ -132,6 +132,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newContextCmd(),
 		newMCPCmd(),
 		newCatalogCmd(),
+		newHooksCmd(),
 	)
 
 	return root
