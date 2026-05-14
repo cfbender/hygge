@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/command"
@@ -45,14 +45,10 @@ func newSlashApp(t *testing.T) (*App, *bus.Bus, *command.Registry) {
 	return app, b, reg
 }
 
-// typeInto sends each rune in s through Update as a Runes key.
+// typeInto sends each rune in s through Update as a KeyPressMsg.
 func typeInto(app *App, s string) {
 	for _, r := range s {
-		if r == '/' {
-			app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-			continue
-		}
-		app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 }
 
@@ -60,7 +56,7 @@ func TestSlashCommandPaletteShowsForSlashBuffer(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/co")
-	view := app.View()
+	view := app.View().Content
 	if !strings.Contains(view, "/compact") {
 		t.Errorf("palette should show /compact for /co buffer:\n%s", view)
 	}
@@ -73,7 +69,7 @@ func TestSlashCommandPaletteHiddenForNonSlash(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "hello")
-	view := app.View()
+	view := app.View().Content
 	if strings.Contains(view, "▶") {
 		t.Errorf("palette should not render outside slash mode:\n%s", view)
 	}
@@ -83,7 +79,7 @@ func TestSlashCommandEnterRunsHelp(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/help")
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected cmd from Enter on /help")
 	}
@@ -106,7 +102,7 @@ func TestSlashCommandUnknownShowsHint(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/nope")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(app.notice, "unknown command") {
 		t.Errorf("notice should say unknown: %q", app.notice)
 	}
@@ -116,7 +112,7 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/model openrouter/gpt-5")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if app.opts.ModelProvider != "openrouter" {
 		t.Errorf("ModelProvider = %q, want openrouter", app.opts.ModelProvider)
 	}
@@ -129,7 +125,7 @@ func TestSlashCommandReasonUpdatesOpts(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/reason high")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if app.opts.Reasoning.Effort != "high" {
 		t.Errorf("Reasoning.Effort = %q, want high", app.opts.Reasoning.Effort)
 	}
@@ -144,7 +140,7 @@ func TestSlashCommandClearWipesMessages(t *testing.T) {
 		t.Fatal("setup: expected a message before /clear")
 	}
 	typeInto(app, "/clear")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(app.messages) != 0 {
 		t.Errorf("expected /clear to wipe messages, got %d", len(app.messages))
 	}
@@ -154,7 +150,7 @@ func TestSlashCommandSessionsOpensModal(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/sessions")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if app.activeModal != command.ModalSessions {
 		t.Errorf("activeModal = %q, want %q", app.activeModal, command.ModalSessions)
 	}
@@ -165,7 +161,7 @@ func TestSlashCommandPaletteTabCompletes(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/co")
 	// Tab completes the highlighted (first) match → /compact.
-	app.Update(tea.KeyMsg{Type: tea.KeyTab})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := app.input.Value(); !strings.HasPrefix(got, "/compact") {
 		t.Errorf("expected Tab to complete to /compact, got %q", got)
 	}
@@ -175,7 +171,7 @@ func TestSlashCommandPaletteEscDismisses(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/co")
-	app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if app.input.Value() != "" {
 		t.Errorf("Esc should clear the slash buffer, got %q", app.input.Value())
 	}
@@ -190,12 +186,12 @@ func TestSlashCommandPaletteArrowsNavigate(t *testing.T) {
 		t.Fatalf("setup: want >=2 matches for /co, got %d", len(matches))
 	}
 	// Highlight starts at 0 (clamped); Down should move to 1.
-	app.Update(tea.KeyMsg{Type: tea.KeyDown})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if app.paletteHighlight != 1 {
 		t.Errorf("after Down, highlight = %d, want 1", app.paletteHighlight)
 	}
 	// Up should move back to 0.
-	app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if app.paletteHighlight != 0 {
 		t.Errorf("after Up, highlight = %d, want 0", app.paletteHighlight)
 	}
@@ -205,7 +201,7 @@ func TestNonSlashInputStillRoutesToSend(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "hello")
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected cmd from Enter on plain input")
 	}
@@ -270,12 +266,12 @@ func TestCompact_OpensModal(t *testing.T) {
 
 	// Type /compact and press Enter.
 	typeInto(app, "/compact")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if app.activeModal != command.ModalCompactConfirm {
 		t.Errorf("activeModal = %q, want %q", app.activeModal, command.ModalCompactConfirm)
 	}
-	view := app.View()
+	view := app.View().Content
 	if !strings.Contains(view, "Compact session?") {
 		t.Errorf("modal should show 'Compact session?', got:\n%s", view)
 	}
@@ -288,7 +284,7 @@ func TestCompact_ModalCancel_Esc(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 
 	typeInto(app, "/compact")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// Modal should be open.
 	if app.activeModal != command.ModalCompactConfirm {
@@ -296,7 +292,7 @@ func TestCompact_ModalCancel_Esc(t *testing.T) {
 	}
 
 	// Press Esc → modal closes.
-	app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if app.activeModal != "" {
 		t.Errorf("modal still open after Esc: %q", app.activeModal)
 	}
@@ -308,9 +304,9 @@ func TestCompact_ModalCancel_N(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 
 	typeInto(app, "/compact")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if app.activeModal != "" {
 		t.Errorf("modal still open after 'n': %q", app.activeModal)
 	}
@@ -324,7 +320,7 @@ func TestCompact_ForceFlag_SkipsModal(t *testing.T) {
 
 	// /compact --force should apply Outcome.Compact=true and not open modal.
 	typeInto(app, "/compact --force")
-	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if app.activeModal == command.ModalCompactConfirm {
 		t.Errorf("--force should bypass the confirmation modal")
@@ -371,12 +367,12 @@ func TestCompactionBanner_DismissedByCtrlX(t *testing.T) {
 	app.bannerVisible = true
 	app.bannerPct = 84
 
-	app.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	app.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if !app.bannerDismissed {
 		t.Error("banner should be dismissed after Ctrl+X")
 	}
 
-	view := app.View()
+	view := app.View().Content
 	if strings.Contains(view, "Context usage at") {
 		t.Error("dismissed banner should not appear in view")
 	}
@@ -390,7 +386,7 @@ func TestCompactionInFlight_ShowsNotice(t *testing.T) {
 	app.compactionInFlight = true
 	app.compactionInFlightCount = 42
 
-	view := app.View()
+	view := app.View().Content
 	if !strings.Contains(view, "Compacting 42 messages") {
 		t.Errorf("in-flight notice missing from view:\n%s", view)
 	}
@@ -411,7 +407,7 @@ func TestCompactionToast_ShowsOnComplete(t *testing.T) {
 	if app.compactionToast == "" {
 		t.Fatal("compactionToast should be set after compactionCompleteMsg")
 	}
-	view := app.View()
+	view := app.View().Content
 	if !strings.Contains(view, "Compacted 12 messages") {
 		t.Errorf("toast missing compacted count:\n%s", view)
 	}
@@ -430,7 +426,7 @@ func TestCompactionToast_FailureShown(t *testing.T) {
 		Err: errForTest("provider exploded"),
 	})
 
-	view := app.View()
+	view := app.View().Content
 	if !strings.Contains(view, "Compaction failed") {
 		t.Errorf("failure toast not shown:\n%s", view)
 	}

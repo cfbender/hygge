@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/theme"

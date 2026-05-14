@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/ui/components"
@@ -72,7 +72,7 @@ func TestSubagentStarted_AddsCollapsedBlockUnderTaskMessage(t *testing.T) {
 		t.Errorf("expected task message to be stamped with SubagentID=sub-1, got %q", taskMsg.SubagentID)
 	}
 
-	out := app.View()
+	out := app.View().Content
 	for _, want := range []string{"▸", "task[general]", "anthropic/claude-haiku-4-5", "running"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q in:\n%s", want, out)
@@ -99,17 +99,17 @@ func TestSubagentToggleExpandsLatest(t *testing.T) {
 	}
 
 	// Press Ctrl+T -> Expanded becomes true.
-	app.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if !app.subagents["sub-1"].Expanded {
 		t.Errorf("expected Expanded=true after Ctrl+T")
 	}
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "▾") {
 		t.Errorf("expected expanded chevron in view, got:\n%s", out)
 	}
 
 	// Toggle back.
-	app.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if app.subagents["sub-1"].Expanded {
 		t.Errorf("expected Expanded=false after second Ctrl+T")
 	}
@@ -119,7 +119,7 @@ func TestSubagentToggleNoOpWhenNoBlocks(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 	// No panic / no state change.
-	app.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if len(app.subagents) != 0 {
 		t.Errorf("expected no subagents tracked")
 	}
@@ -225,7 +225,7 @@ func TestSubagentIterationLimitMarksFailed(t *testing.T) {
 	if !st.HitIterLimit {
 		t.Fatal("expected HitIterLimit=true")
 	}
-	out := app.View()
+	out := app.View().Content
 	if !strings.Contains(out, "failed (iteration limit)") {
 		t.Errorf("expected failed-banner in view, got:\n%s", out)
 	}
@@ -271,7 +271,7 @@ func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	}
 
 	// Toggle expands the LATEST (sub-b).
-	app.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if !app.subagents["sub-b"].Expanded {
 		t.Errorf("expected latest (sub-b) to expand on Ctrl+T")
 	}
@@ -297,7 +297,7 @@ func TestSubagentNotDescendedFromForegroundIsIgnored(t *testing.T) {
 	}
 	// Its events should also be dropped.
 	app.Handle(bus.AssistantTextDelta{SessionID: "alien-1", Text: "should not appear"})
-	out := app.View()
+	out := app.View().Content
 	if strings.Contains(out, "should not appear") {
 		t.Errorf("expected no leak from non-descendant sub-agent, got:\n%s", out)
 	}
@@ -544,7 +544,7 @@ func TestCtrlGNoSubagents_Notice(t *testing.T) {
 	app, _ := makeForegroundApp(t)
 
 	// No subagents tracked — Ctrl+G should produce a notice but not crash.
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected a notice cmd from Ctrl+G with no subagents")
 	}
@@ -574,7 +574,7 @@ func TestCtrlGFollowsIntoSubagent(t *testing.T) {
 	app.Handle(bus.AssistantTextDelta{SessionID: "sub-1", Text: "sub-agent reply"})
 
 	// Press Ctrl+G — should push sub-1 onto the foreground stack.
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 
 	// Stack should be ["fg-session", "sub-1"] (depth 2).
 	if len(app.foregroundStack) != 2 {
@@ -596,7 +596,7 @@ func TestEscAtDepth1_DoesNotPopStack(t *testing.T) {
 	app, _ := makeForegroundApp(t)
 
 	// At root depth (no stack), Esc falls through to existing behaviour.
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	// No stack change.
 	if len(app.foregroundStack) != 0 {
 		t.Errorf("Esc at depth 1 should not modify stack, got %v", app.foregroundStack)
@@ -619,7 +619,7 @@ func TestEscAtDepth2_PopsStack(t *testing.T) {
 	})
 
 	// Follow into sub-1.
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 
 	// Stack is ["fg-session", "sub-1"] — depth 2.
 	if len(app.foregroundStack) != 2 {
@@ -627,7 +627,7 @@ func TestEscAtDepth2_PopsStack(t *testing.T) {
 	}
 
 	// Esc should pop back to root.
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	if len(app.foregroundStack) != 1 {
 		t.Errorf("expected stack depth 1 after Esc pop, got %d: %v", len(app.foregroundStack), app.foregroundStack)
@@ -660,7 +660,7 @@ func TestBreadcrumbVisibleAtDepth2(t *testing.T) {
 		Model:           "x/y",
 		At:              time.Now(),
 	})
-	_, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 
 	segs := app.breadcrumbSegments()
 	if len(segs) < 2 {
