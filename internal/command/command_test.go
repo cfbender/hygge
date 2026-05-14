@@ -237,8 +237,18 @@ func TestBuiltinOutcomes(t *testing.T) {
 			name:    "compact",
 			cmdName: "compact",
 			check: func(t *testing.T, o Outcome) {
+				if o.OpenModal != ModalCompactConfirm {
+					t.Errorf("OpenModal=%q, want %q", o.OpenModal, ModalCompactConfirm)
+				}
+			},
+		},
+		{
+			name:    "compact-force",
+			cmdName: "compact",
+			input:   "--force",
+			check: func(t *testing.T, o Outcome) {
 				if !o.Compact {
-					t.Error("expected Compact=true")
+					t.Error("expected Compact=true for --force")
 				}
 			},
 		},

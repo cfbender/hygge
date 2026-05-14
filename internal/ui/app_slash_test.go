@@ -257,3 +257,191 @@ func TestSplitSlash(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T2.3 Compaction UI tests
+// ---------------------------------------------------------------------------
+
+// TestCompact_OpensModal verifies that /compact opens the confirmation modal
+// instead of immediately running compaction.
+func TestCompact_OpensModal(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	// Type /compact and press Enter.
+	typeInto(app, "/compact")
+	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if app.activeModal != command.ModalCompactConfirm {
+		t.Errorf("activeModal = %q, want %q", app.activeModal, command.ModalCompactConfirm)
+	}
+	view := app.View()
+	if !strings.Contains(view, "Compact session?") {
+		t.Errorf("modal should show 'Compact session?', got:\n%s", view)
+	}
+}
+
+// TestCompact_ModalCancel_Esc verifies that Esc closes the modal without
+// triggering compaction.
+func TestCompact_ModalCancel_Esc(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	typeInto(app, "/compact")
+	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Modal should be open.
+	if app.activeModal != command.ModalCompactConfirm {
+		t.Fatalf("modal not open after /compact")
+	}
+
+	// Press Esc → modal closes.
+	app.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if app.activeModal != "" {
+		t.Errorf("modal still open after Esc: %q", app.activeModal)
+	}
+}
+
+// TestCompact_ModalCancel_N verifies that pressing 'n' closes the modal.
+func TestCompact_ModalCancel_N(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	typeInto(app, "/compact")
+	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if app.activeModal != "" {
+		t.Errorf("modal still open after 'n': %q", app.activeModal)
+	}
+}
+
+// TestCompact_ForceFlag_SkipsModal verifies that /compact --force bypasses
+// the modal (the legacy path for power users).
+func TestCompact_ForceFlag_SkipsModal(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	// /compact --force should apply Outcome.Compact=true and not open modal.
+	typeInto(app, "/compact --force")
+	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if app.activeModal == command.ModalCompactConfirm {
+		t.Errorf("--force should bypass the confirmation modal")
+	}
+}
+
+// TestCompactionBanner_ShowsWhenThresholdEventFires verifies that a
+// CompactionRequested{Source:"threshold"} bus event makes the banner visible.
+func TestCompactionBanner_ShowsWhenThresholdEventFires(t *testing.T) {
+	t.Parallel()
+	app, b, _ := newSlashApp(t)
+	app.opts.SessionID = "sess-1"
+	app.foregroundStack = []string{"sess-1"}
+
+	bus.Publish(b, bus.CompactionRequested{
+		SessionID: "sess-1",
+		Source:    "threshold",
+		UsagePct:  84,
+		At:        time.Now(),
+	})
+
+	// Let the bridge goroutine deliver the event.
+	time.Sleep(50 * time.Millisecond)
+
+	// Drain the busCh via Handle.
+	select {
+	case ev := <-app.busCh:
+		app.Handle(ev)
+	default:
+	}
+
+	if !app.bannerVisible {
+		t.Error("banner should be visible after threshold event")
+	}
+	if app.bannerPct != 84 {
+		t.Errorf("bannerPct = %v, want 84", app.bannerPct)
+	}
+}
+
+// TestCompactionBanner_DismissedByCtrlX verifies that Ctrl+X hides the banner.
+func TestCompactionBanner_DismissedByCtrlX(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.bannerVisible = true
+	app.bannerPct = 84
+
+	app.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if !app.bannerDismissed {
+		t.Error("banner should be dismissed after Ctrl+X")
+	}
+
+	view := app.View()
+	if strings.Contains(view, "Context usage at") {
+		t.Error("dismissed banner should not appear in view")
+	}
+}
+
+// TestCompactionInFlight_ShowsNotice verifies that setting compactionInFlight
+// causes the "Compacting N messages…" notice to render.
+func TestCompactionInFlight_ShowsNotice(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.compactionInFlight = true
+	app.compactionInFlightCount = 42
+
+	view := app.View()
+	if !strings.Contains(view, "Compacting 42 messages") {
+		t.Errorf("in-flight notice missing from view:\n%s", view)
+	}
+}
+
+// TestCompactionToast_ShowsOnComplete verifies that compactionCompleteMsg
+// populates the toast line.
+func TestCompactionToast_ShowsOnComplete(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	app.Update(compactionCompleteMsg{
+		MarkerID:          "mkr_01ABCDEFGHIJK",
+		MessagesCompacted: 12,
+		SummaryTokens:     512,
+	})
+
+	if app.compactionToast == "" {
+		t.Fatal("compactionToast should be set after compactionCompleteMsg")
+	}
+	view := app.View()
+	if !strings.Contains(view, "Compacted 12 messages") {
+		t.Errorf("toast missing compacted count:\n%s", view)
+	}
+	if !strings.Contains(view, "512 tokens") {
+		t.Errorf("toast missing token count:\n%s", view)
+	}
+}
+
+// TestCompactionToast_FailureShown verifies that a failed compaction surfaces
+// the error in the toast.
+func TestCompactionToast_FailureShown(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	app.Update(compactionCompleteMsg{
+		Err: errForTest("provider exploded"),
+	})
+
+	view := app.View()
+	if !strings.Contains(view, "Compaction failed") {
+		t.Errorf("failure toast not shown:\n%s", view)
+	}
+	if !strings.Contains(view, "provider exploded") {
+		t.Errorf("failure reason not in toast:\n%s", view)
+	}
+}
+
+// errForTest is a convenience error for test fixtures.
+type testErr struct{ msg string }
+
+func (e testErr) Error() string { return e.msg }
+
+func errForTest(msg string) error { return testErr{msg: msg} }

@@ -317,11 +317,40 @@ These are deliberately deferred. Do not block v0.1 on them.
 - OpenAI / OpenRouter / additional providers.
 - Plugins (WASM or subprocess).
 - Live theme reload and additional builtin themes.
-- Compaction UI.
 - Per-message expand for tool results.
 - AssistantThinkingDelta rendering.
 - History cycling on Up arrow.
 - Windows shell support in the `bash` tool.
+
+## T2.3 Compaction UX smoke
+
+- [ ] **Threshold banner appears.** Send enough messages to push context usage
+      above 80% (or lower `[compaction] threshold_pct` in `.hygge/config.toml`
+      for a quick test). The banner `⚠  Context usage at X%. /compact to summarise...`
+      should appear above the input.
+
+- [ ] **Ctrl+X dismisses the banner.** Press Ctrl+X. Banner disappears.
+
+- [ ] **`/compact` opens the modal.** Type `/compact` and press Enter.
+      The confirmation modal appears, showing message count, context usage %,
+      and the destructive-action warning.
+
+- [ ] **`n` / Esc cancels.** Press `n` or Esc. Modal closes. No compaction runs.
+
+- [ ] **`y` triggers compaction.** Type `/compact`, Enter, then `y`. The
+      "⌛ Compacting N messages…" notice appears above the input.
+
+- [ ] **Toast shows on completion.** After compaction finishes, the
+      "✓ Compacted N messages → M tokens summary. Marker mkr_..." toast
+      appears for ~5 seconds then disappears.
+
+- [ ] **`/compact --force` skips modal.** Type `/compact --force`, Enter.
+      No modal appears — compaction runs directly and the in-flight notice
+      and completion toast follow.
+
+- [ ] **Banner reappears after compaction if still over threshold.**
+      After the toast clears, if context usage is still above threshold, the
+      banner should reappear on the next assistant turn.
 
 ## v0.2 progress
 
