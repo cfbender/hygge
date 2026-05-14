@@ -50,6 +50,30 @@ type ToolCallRequested struct {
 	At time.Time
 }
 
+// ToolCallProgress fires for each chunk of streaming output produced by a
+// tool that supports incremental progress (e.g. bash stdout/stderr lines).
+// Subscribers (e.g. the UI) render these in real time so the user does not
+// have to wait for a long-running tool to finish before seeing output.
+type ToolCallProgress struct {
+	// SessionID is the session in which the tool is running.
+	SessionID string
+	// MessageID is the message that contains the tool-call request.
+	MessageID string
+	// ToolUseID is the provider-assigned identifier for this tool call.
+	// Lets a subscriber correlate multiple progress events to one call.
+	ToolUseID string
+	// ToolName is the name of the tool producing output.
+	ToolName string
+	// Stream is "stdout" or "stderr"; tools that produce other channels
+	// should pick a label and document it.
+	Stream string
+	// Line is a single line of output, without a trailing newline.
+	Line string
+	// At is the wall-clock time the line was emitted.
+	// Populated by the caller; the bus does not set this field.
+	At time.Time
+}
+
 // ToolCallCompleted fires after a tool finishes (success or error).
 type ToolCallCompleted struct {
 	// SessionID is the session in which the tool ran.
