@@ -73,6 +73,13 @@ type AppOptions struct {
 	// the new id in state (RecentSessions).  Best-effort; errors are
 	// swallowed internally.
 	OnSessionCreated func(id string)
+
+	// OpenSessionsModalOnStart, when true, causes the sessions picker to
+	// open immediately after the first render.  Used by `hygge resume`
+	// (multiple sessions in cwd) and resume_default="ask".  When the
+	// picker is opened this way and the user presses Esc without selecting
+	// a session — and no foreground session is bound — the App exits.
+	OpenSessionsModalOnStart bool
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -106,7 +113,14 @@ func New(opts AppOptions) (*App, error) {
 		subagents: make(map[string]*components.SubagentState),
 	}
 	a.spinner.Spinner = spinner.Dot
-	a.bridge()
+	// Only subscribe to bus events when there's a concrete foreground
+	// session.  When OpenSessionsModalOnStart is true and no SessionID is
+	// set, we skip the bridge so no goroutines block on a non-existent
+	// session.  The bridge is started (or re-started) inside
+	// applySwitchSession once the user picks a session.
+	if opts.SessionID != "" || !opts.OpenSessionsModalOnStart {
+		a.bridge()
+	}
 	return a, nil
 }
 
@@ -240,11 +254,27 @@ type App struct {
 // Init is the bubbletea Model entry point.  Starts the input focus, the
 // spinner tick, and the bus listener.
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		a.input.Textarea.Focus(),
 		a.spinner.Tick,
-		a.listenBus(),
-	)
+	}
+	// Only start the bus listener when the bridge is running (i.e. a
+	// foreground session is already bound or OpenSessionsModalOnStart
+	// is false).
+	if a.opts.SessionID != "" || !a.opts.OpenSessionsModalOnStart {
+		cmds = append(cmds, a.listenBus())
+	}
+	if a.opts.OpenSessionsModalOnStart {
+		// Initialise the modal and schedule a load.
+		a.activeModal = "sessions"
+		a.sessionsModal = components.SessionsModal{
+			Theme:        a.opts.Theme,
+			ForegroundID: a.opts.SessionID,
+			AllowNew:     true,
+		}
+		cmds = append(cmds, a.openSessionsModal())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Close releases the bridge goroutine and any in-flight Send.  Idempotent.
@@ -1773,7 +1803,24 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 	switch m := msg.(type) {
 	case components.CloseSessionsModal:
 		a.activeModal = ""
+		// When the picker was opened on start (OpenSessionsModalOnStart) and
+		// there is no foreground session bound, the user chose to cancel
+		// without picking — exit the App.
+		if a.opts.OpenSessionsModalOnStart && a.opts.SessionID == "" {
+			return tea.Quit
+		}
 		return nil
+
+	case components.NewSessionAction:
+		// User pressed 'n' in the picker with no sessions.  Close the picker
+		// and start fresh (no session id → lazy create on first input).
+		a.activeModal = ""
+		// Start the bus bridge now that we have a concrete "start fresh" intent.
+		if a.opts.SessionID == "" && a.opts.OpenSessionsModalOnStart {
+			a.bridge()
+			return tea.Batch(a.listenBus(), a.setNotice("starting a new session"))
+		}
+		return a.setNotice("starting a new session")
 
 	case components.SwitchSessionAction:
 		a.activeModal = ""
@@ -1797,6 +1844,10 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 // stack to [id] via resetForeground so the breadcrumb is cleared.  Use
 // Ctrl+G to follow into a sub-session without losing the current root.
 func (a *App) applySwitchSession(id string) tea.Cmd {
+	// When the picker was opened on start before any session was bound,
+	// start the bus bridge now that we have a concrete session to track.
+	bridgeNeeded := a.opts.SessionID == "" && a.opts.OpenSessionsModalOnStart && id != ""
+
 	a.opts.SessionID = id
 	a.messages = nil
 	a.subagents = map[string]*components.SubagentState{}
@@ -1807,14 +1858,23 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 	} else {
 		a.foregroundStack = nil
 	}
+
+	var cmds []tea.Cmd
+	if bridgeNeeded {
+		a.bridge()
+		cmds = append(cmds, a.listenBus())
+	}
+
 	noticeID := id
 	if len(id) > 8 {
 		noticeID = id[:8]
 	}
 	if id == "" {
-		return a.setNotice("foreground cleared; next input creates a new session")
+		cmds = append(cmds, a.setNotice("foreground cleared; next input creates a new session"))
+	} else {
+		cmds = append(cmds, a.setNotice(fmt.Sprintf("switched to session %s", noticeID)))
 	}
-	return a.setNotice(fmt.Sprintf("switched to session %s", noticeID))
+	return tea.Batch(cmds...)
 }
 
 // applyForkSession forks a session.  If messageID is "", it resolves the

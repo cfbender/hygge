@@ -71,6 +71,11 @@ type SessionsModal struct {
 
 	// Now is the wall-clock used for "N ago" labels.
 	Now time.Time
+
+	// AllowNew, when true, shows a "No sessions yet. [n] new session [esc] cancel"
+	// affordance when the filtered list is empty.  Used when the picker is
+	// opened on start (resume_default="ask", or `hygge resume` in an empty project).
+	AllowNew bool
 }
 
 // --- Emitted message types --------------------------------------------------
@@ -112,6 +117,12 @@ func (DeleteSessionAction) sessionsModalMsg() {}
 type CloseSessionsModal struct{}
 
 func (CloseSessionsModal) sessionsModalMsg() {}
+
+// NewSessionAction asks the App to start a fresh session.  Emitted when
+// the user presses 'n' in the empty-list picker.
+type NewSessionAction struct{}
+
+func (NewSessionAction) sessionsModalMsg() {}
 
 // --- Update -----------------------------------------------------------------
 
@@ -200,6 +211,12 @@ func (m SessionsModal) handleListKey(k SessionsKey) (SessionsModal, SessionsModa
 	case "d":
 		m.ShowDeleted = !m.ShowDeleted
 		m.Cursor = 0
+	case "n":
+		// 'n' starts a fresh session when AllowNew is set and the filtered
+		// list is empty (the typical picker-on-start with no sessions case).
+		if m.AllowNew && n == 0 {
+			return m, NewSessionAction{}
+		}
 	case "enter":
 		if n == 0 {
 			return m, nil
@@ -388,7 +405,15 @@ func (m SessionsModal) renderBox(termWidth int) string {
 	// Rows.
 	if len(filtered) == 0 {
 		b.WriteString("\n  ")
-		b.WriteString(m.style(theme.AtomMuted).Italic(true).Render("no sessions match"))
+		if m.AllowNew {
+			b.WriteString(m.style(theme.AtomMuted).Italic(true).Render("No sessions yet."))
+			b.WriteString("  ")
+			b.WriteString(m.style(theme.AtomAccent).Render("[n] new session"))
+			b.WriteString("   ")
+			b.WriteString(m.style(theme.AtomMuted).Render("[esc] cancel"))
+		} else {
+			b.WriteString(m.style(theme.AtomMuted).Italic(true).Render("no sessions match"))
+		}
 		b.WriteString("\n")
 	} else {
 		for i, s := range filtered {

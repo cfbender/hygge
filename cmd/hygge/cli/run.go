@@ -27,17 +27,32 @@ var resumeFlag string
 // bootstrap; invalid values warn and are reset to "" (no reasoning).
 var reasoningFlag string
 
-// init binds --resume and --reasoning.  Called from NewRootCmd via
-// wireRunFlags below.
+// continueFlag is set by --continue / -c on bare `hygge`.  When true,
+// hygge attempts to resume the most recent session for the current cwd
+// instead of starting a fresh one.
+var continueFlag bool
+
+// newFlag is set by --new on bare `hygge`.  When true, hygge always
+// starts a fresh session even when resume_default = "continue".
+var newFlag bool
+
+// init binds --resume, --reasoning, --continue, and --new.
+// Called from NewRootCmd via wireRunFlags below.
 func wireRunFlags(root *cobra.Command) {
 	root.Flags().StringVar(&resumeFlag, "resume", "", "resume the most recent session whose id starts with this prefix")
 	root.Flags().StringVar(&reasoningFlag, "reasoning", "", "reasoning depth for the run: off | low | medium | high (overrides [model] reasoning)")
+	root.Flags().BoolVarP(&continueFlag, "continue", "c", false, "resume the most recent session for the current directory")
+	root.Flags().BoolVar(&newFlag, "new", false, "start a fresh session (overrides resume_default = continue)")
 }
 
 // runRun is the body of `hygge` (no subcommand).  Bootstraps the
 // runtime and launches the TUI.
 func runRun(cmd *cobra.Command, _ []string) error {
 	ctx := context.Background()
+
+	if continueFlag && newFlag {
+		return die(cmd, "conflicting flags: --continue and --new")
+	}
 
 	rt, err := bootstrap(ctx, bootstrapOptions{
 		ConfigFile:        rootFlags.ConfigFile,
@@ -50,15 +65,47 @@ func runRun(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = rt.Close() }()
 
-	var sid string
+	// Legacy --resume flag (prefix-match).
 	if resumeFlag != "" {
-		sid, err = findSessionByPrefix(ctx, rt, resumeFlag, false)
+		sid, err := findSessionByPrefix(ctx, rt, resumeFlag, false)
 		if err != nil {
 			return die(cmd, "%s", err)
 		}
+		return runTUI(ctx, cmd, rt, sid, false)
 	}
 
-	return runTUI(ctx, cmd, rt, sid)
+	var sid string
+	openPicker := false
+
+	switch {
+	case continueFlag:
+		// --continue: resume the cwd's most recent session or start fresh.
+		sid, err = findResumableSession(ctx, rt, rt.Pwd, false)
+		if err != nil {
+			return fmt.Errorf("cli: find resumable session: %w", err)
+		}
+		if sid == "" {
+			slog.Info("hygge: no session to continue; starting fresh", "pwd", rt.Pwd)
+		}
+
+	case newFlag:
+		// --new: explicit fresh session; sid stays "".
+
+	case rt.Config.Session.ResumeDefault == "continue":
+		sid, err = findResumableSession(ctx, rt, rt.Pwd, false)
+		if err != nil {
+			return fmt.Errorf("cli: find resumable session: %w", err)
+		}
+		// Falls through to fresh start if sid == "".
+
+	case rt.Config.Session.ResumeDefault == "ask":
+		openPicker = true
+
+	default:
+		// "new" (the built-in default) — start fresh; sid stays "".
+	}
+
+	return runTUI(ctx, cmd, rt, sid, openPicker)
 }
 
 // runTUI builds the App and runs it inside a tea.Program.  Shared
@@ -66,7 +113,11 @@ func runRun(cmd *cobra.Command, _ []string) error {
 // (i.e. testOverrides.SkipTea is true) this returns immediately after
 // constructing the App so the bootstrap path is exercised without
 // touching a TTY.
-func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string) error {
+//
+// openSessionsModalOnStart, when true, opens the sessions picker
+// immediately after the first render (used by resume_default="ask" and
+// `hygge resume` with multiple cwd sessions).
+func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
 	app, err := ui.New(ui.AppOptions{
 		Bus:           rt.Bus,
 		Agent:         rt.Agent,
@@ -87,6 +138,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 				printf(stderr, "hygge: warning: could not record recent session: %v\n", err)
 			}
 		},
+		OpenSessionsModalOnStart: openSessionsModalOnStart,
 	})
 	if err != nil {
 		return fmt.Errorf("cli: build ui app: %w", err)

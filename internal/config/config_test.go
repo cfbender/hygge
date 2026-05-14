@@ -853,3 +853,89 @@ threshold_pct = 110
 		t.Errorf("out-of-range threshold_pct should reset to 80, got %v", cfg.Compaction.ThresholdPct)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Session resume_default config tests (T2.4)
+// ---------------------------------------------------------------------------
+
+// TestLoad_Session_Default verifies that resume_default defaults to "new".
+func TestLoad_Session_Default(t *testing.T) {
+	tmp := t.TempDir()
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.ResumeDefault != "new" {
+		t.Errorf("session.resume_default default: got %q, want \"new\"", cfg.Session.ResumeDefault)
+	}
+}
+
+// TestLoad_Session_Continue verifies resume_default = "continue" parses correctly.
+func TestLoad_Session_Continue(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[session]
+resume_default = "continue"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.ResumeDefault != "continue" {
+		t.Errorf("session.resume_default: got %q, want \"continue\"", cfg.Session.ResumeDefault)
+	}
+}
+
+// TestLoad_Session_Ask verifies resume_default = "ask" parses correctly.
+func TestLoad_Session_Ask(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[session]
+resume_default = "ask"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.ResumeDefault != "ask" {
+		t.Errorf("session.resume_default: got %q, want \"ask\"", cfg.Session.ResumeDefault)
+	}
+}
+
+// TestLoad_Session_InvalidValueWarnsAndResets confirms an invalid
+// resume_default does NOT fail the load — it warns and resets to "new".
+func TestLoad_Session_InvalidValueWarnsAndResets(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[session]
+resume_default = "always"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load should not fail for invalid resume_default, got: %v", err)
+	}
+	if cfg.Session.ResumeDefault != "new" {
+		t.Errorf("invalid resume_default should reset to \"new\", got %q", cfg.Session.ResumeDefault)
+	}
+}
+
+// TestLoad_Session_CaseInsensitive verifies upper-case TOML values are
+// normalised to lower-case.
+func TestLoad_Session_CaseInsensitive(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[session]
+resume_default = "CONTINUE"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.ResumeDefault != "continue" {
+		t.Errorf("resume_default should be lower-cased, got %q", cfg.Session.ResumeDefault)
+	}
+}

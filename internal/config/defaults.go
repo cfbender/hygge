@@ -35,5 +35,8 @@ func defaultConfig() map[string]any {
 		"compaction": map[string]any{
 			"threshold_pct": float64(80),
 		},
+		"session": map[string]any{
+			"resume_default": "new",
+		},
 	}
 }

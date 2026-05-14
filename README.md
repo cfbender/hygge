@@ -31,8 +31,10 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 
 ## Commands
 
-- `hygge` — launch the TUI for a new session in the current directory.
-- `hygge resume [id-prefix]` — re-open the most recent matching session.
+- `hygge` — launch the TUI; default behaviour determined by `[session] resume_default` (see "Resume behaviour" below).
+- `hygge --continue` / `-c` — resume the most recent session for the current directory; falls back to a fresh session if none exist.
+- `hygge --new` — force a fresh session even when `resume_default = "continue"`.
+- `hygge resume [id-prefix]` — re-open a session (see "Resume behaviour" for picker logic).
 - `hygge sessions list` — list recent sessions; `--include-deleted` to show soft-deleted rows.
 - `hygge sessions delete <id-prefix>` — soft-delete a session.
 - `hygge profile list` / `hygge profile use <name>` — manage config profiles.
@@ -46,6 +48,44 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge catalog list [<provider>]` / `show <provider>/<model>` / `refresh` — inspect and refresh the models.dev-backed model catalog.
 - `hygge hooks list [--event <event>]` / `hygge hooks show <name>` — inspect configured hooks.
 - `hygge version` — print version, Go version, OS/arch.
+
+### Resume behaviour
+
+| Invocation | Behaviour |
+|---|---|
+| `hygge` | Honour `[session] resume_default`. Default: `"new"`. |
+| `hygge --continue` / `-c` | Resume most recent session for cwd. If none, start fresh with a log notice. |
+| `hygge --new` | Start fresh, override `resume_default`. |
+| `hygge resume` | Picker if cwd has > 1 session; auto-pick if exactly 1; error if 0. |
+| `hygge resume <prefix>` | Prefix-match, cwd-scoped by default. |
+| `hygge resume --any` | Global scope (all projects). Combine with `<prefix>` or alone. |
+
+When both `--continue` and `--new` are set, hygge errors: "conflicting flags".
+
+#### `[session] resume_default`
+
+Configure the bare `hygge` default in `config.toml`:
+
+```toml
+[session]
+resume_default = "continue"   # "new" | "continue" | "ask"
+```
+
+| Value | Behaviour |
+|---|---|
+| `"new"` (default) | Always start a fresh session. |
+| `"continue"` | Resume the cwd's most recent session; fall back to fresh if none. |
+| `"ask"` | Open the sessions picker on launch. When the project has no sessions, the picker shows a "No sessions yet. [n] new session [esc] cancel" affordance. |
+
+#### Interactive picker
+
+When the picker opens (via `hygge resume` with multiple sessions or `resume_default = "ask"`):
+
+- Navigate with `↑/k` and `↓/j`, press `Enter` to select.
+- Press `/` to filter by name, project, or first message.
+- Press `Esc` with no selection — if hygge was launched with no foreground session (e.g. bare `hygge` with `resume_default = "ask"`) — exits hygge.
+- In a project with no sessions yet, press `n` to start a fresh session or `Esc` to cancel.
+- `--any` on `hygge resume` is the only path to cross-project resume; document clearly when sharing instructions.
 
 ## Configuration
 
