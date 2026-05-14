@@ -162,7 +162,7 @@ type Options struct {
 type Agent struct {
 	opts Options
 
-	// mu guards closed, locks, pendingLazy, and thresholdFired.
+	// mu guards closed, locks, pendingLazy, thresholdFired, and pluginInjects.
 	mu     sync.Mutex
 	closed bool
 	locks  map[string]*sync.Mutex
@@ -178,6 +178,10 @@ type Agent struct {
 	//   - Agent.Compact completes successfully for that session.
 	// Guarded by mu.
 	thresholdFired map[string]bool
+	// pluginInjects counts per-plugin per-session message injections for
+	// the current turn.  Reset by ResetPluginInjectCounters at turn start.
+	// Guarded by mu.
+	pluginInjects map[pluginInjectKey]int
 }
 
 // New constructs an Agent.  Returns an error if any required option is nil.
@@ -408,3 +412,87 @@ func logHookWarns(warns []hook.Warning) {
 			"hook", w.HookName, "err", w.Err)
 	}
 }
+
+// maxPluginInjectsPerTurn is the per-plugin per-turn cap for InjectMessage.
+// Plugins that inject more than this many messages in a single turn are
+// silently rate-limited to prevent runaway feedback loops.
+const maxPluginInjectsPerTurn = 10
+
+// InjectMessage appends a message to sessionID on behalf of a plugin.
+//
+// role must be "user" or "assistant".  Only "user" messages trigger a new
+// agent turn; "assistant" messages are persisted but the loop is not re-
+// entered (they serve as synthetic context injections).
+//
+// Each plugin is tracked by pluginName.  At most maxPluginInjectsPerTurn
+// calls per pluginName per active turn are processed; additional calls
+// return ErrInjectCap without appending anything.
+func (a *Agent) InjectMessage(ctx context.Context, pluginName, sessionID, role, content string) error {
+	if a.isClosed() {
+		return ErrClosed
+	}
+	if sessionID == "" {
+		return fmt.Errorf("agent: InjectMessage: sessionID required")
+	}
+	if role != "user" && role != "assistant" {
+		return fmt.Errorf("agent: InjectMessage: role must be 'user' or 'assistant', got %q", role)
+	}
+	if content == "" {
+		return fmt.Errorf("agent: InjectMessage: content must not be empty")
+	}
+
+	// Check and increment the per-turn injection counter.
+	a.mu.Lock()
+	key := pluginInjectKey{plugin: pluginName, session: sessionID}
+	if a.pluginInjects == nil {
+		a.pluginInjects = make(map[pluginInjectKey]int)
+	}
+	n := a.pluginInjects[key]
+	if n >= maxPluginInjectsPerTurn {
+		a.mu.Unlock()
+		slog.Warn("agent: plugin inject cap reached; dropping message",
+			"plugin", pluginName, "session", sessionID, "cap", maxPluginInjectsPerTurn)
+		return ErrInjectCap
+	}
+	a.pluginInjects[key] = n + 1
+	a.mu.Unlock()
+
+	r := session.Role(role)
+	_, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
+		Role: r,
+		Parts: []session.Part{
+			{Kind: session.PartText, Text: content},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("agent: InjectMessage: append: %w", err)
+	}
+	return nil
+}
+
+// ResetPluginInjectCounters resets the per-turn injection counters for
+// sessionID.  Called by the agent loop at the start of each turn so the
+// cap applies per-turn, not per-session.
+func (a *Agent) ResetPluginInjectCounters(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pluginInjects == nil {
+		return
+	}
+	// Remove all entries for this session.
+	for k := range a.pluginInjects {
+		if k.session == sessionID {
+			delete(a.pluginInjects, k)
+		}
+	}
+}
+
+// pluginInjectKey keys the per-turn injection counter.
+type pluginInjectKey struct {
+	plugin  string
+	session string
+}
+
+// ErrInjectCap is returned by InjectMessage when a plugin has injected the
+// maximum number of messages for the current turn.
+var ErrInjectCap = errors.New("agent: plugin inject cap reached")

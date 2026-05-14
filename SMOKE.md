@@ -678,3 +678,44 @@ These are deliberately deferred. Do not block v0.1 on them.
       by policy". A subsequent benign bash call (e.g. `ls /tmp`) works
       without interference. Confirm via `hygge hooks list` that the
       `policy` hook appears with source `project`.
+
+## Plugin host (T2.5)
+
+- [ ] **`hygge plugins list` shows empty state.**
+      `./bin/hygge plugins list` prints "(no plugins installed)" without error.
+
+- [ ] **Install a local fixture plugin.**
+      ```sh
+      tmp=$(mktemp -d)
+      cat > "$tmp/plugin.lua" <<'EOF'
+      hygge.register_hook("pre_tool", function(event)
+          if event.tool_name == "bash" then
+              local input = event.tool_input or {}
+              local cmd = input.command or ""
+              if cmd:find("rm %-rf", 1, false) then
+                  return { decision = "deny", reason = "rm -rf blocked by plugin" }
+              end
+          end
+          return { decision = "allow" }
+      end)
+      hygge.notify("policy plugin loaded", "info")
+      EOF
+      # Add source to config.toml:
+      mkdir -p ~/.config/hygge
+      echo '[plugins]' >> ~/.config/hygge/config.toml
+      echo "sources = [\"local:$tmp\"]" >> ~/.config/hygge/config.toml
+      ```
+      Launch `./bin/hygge plugins list` — the plugin should appear with `loaded` status.
+
+- [ ] **Plugin hook denies a tool call.**
+      With `ANTHROPIC_API_KEY` set and the fixture plugin configured, launch hygge and ask:
+      "run bash with command 'rm -rf /tmp/test'". The hook fires and the model receives
+      a deny result. A benign bash call (`ls /tmp`) proceeds normally.
+
+- [ ] **Plugin `show` command.**
+      `./bin/hygge plugins show <name>` prints name, source, version, entrypoint,
+      synthesised=true (for the single-file fixture).
+
+- [ ] **Invalid source URI rejected.**
+      `./bin/hygge plugins install npm:some-package` exits non-zero with a clear
+      error message about npm not being supported in v0.3.

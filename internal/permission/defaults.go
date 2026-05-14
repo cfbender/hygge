@@ -108,5 +108,15 @@ func defaultRules(cfg *config.Config) []Rule {
 			Action:   ActionAsk,
 			Source:   "default",
 		},
+		// Plugin tools default to "ask" so the user knows a plugin
+		// tool is running.  CategoryPlugin is not yet surfaced in
+		// config.PermissionConfig; when it is, wire it here similarly
+		// to CategoryMCP.
+		{
+			Category: CategoryPlugin,
+			Pattern:  "**",
+			Action:   ActionAsk,
+			Source:   "default",
+		},
 	}
 }

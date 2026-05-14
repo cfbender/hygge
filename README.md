@@ -47,6 +47,7 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
 - `hygge catalog list [<provider>]` / `show <provider>/<model>` / `refresh` — inspect and refresh the models.dev-backed model catalog.
 - `hygge hooks list [--event <event>]` / `hygge hooks show <name>` — inspect configured hooks.
+- `hygge plugins list` / `show <name>` / `install <source>` / `remove <name>` / `update [<name>]` — manage Lua plugins.
 - `hygge version` — print version, Go version, OS/arch.
 
 ### Resume behaviour
@@ -856,6 +857,119 @@ Then in `.agents/hooks.toml`:
 description = "Block rm -rf"
 events      = ["pre_tool"]
 command     = "/usr/local/bin/hygge-policy-check"
+```
+
+## Plugins
+
+Plugins extend hygge with custom tools, hooks, slash commands, and sub-agent types. They are portable Lua scripts that register into hygge's existing registries through a neovim-style `hygge.*` global module.
+
+### Declaring plugins in `config.toml`
+
+```toml
+[plugins]
+sources = [
+  "github:cfbender/hygge-policy-guard@v1.2.3",  # GitHub repo, pinned tag
+  "github:cfbender/hygge-policy-guard",           # default branch
+  "github:cfbender/hygge-policy-guard#main",      # explicit branch
+  "local:/Users/cfb/code/my-plugin",              # local dir (dev workflow)
+]
+
+# Per-plugin config: accessible inside the plugin via hygge.config
+[plugins.policy-guard]
+strict = true
+blocked_patterns = ["rm -rf", "sudo"]
+```
+
+### Lua API reference
+
+| Function | Description |
+|---|---|
+| `hygge.register_tool { name, description, input_schema, execute }` | Register a tool the model can invoke |
+| `hygge.register_hook(event, [opts], handler)` | Register a hook for `pre_tool`, `post_tool`, `pre_message`, `post_message` |
+| `hygge.register_command { name, description, args, execute }` | Register a `/name` slash command |
+| `hygge.register_subagent { name, description, system_prompt, tools, model }` | Register a sub-agent type |
+| `hygge.send_message(session_id, role, content)` | Inject a message (rate-limited: 10/turn/plugin) |
+| `hygge.notify(message, level)` | User-visible notification (`"info"` / `"warn"` / `"error"`) |
+| `hygge.log(level, message, fields)` | Structured log to slog with plugin name |
+| `hygge.exec(cmd, args, opts)` | Run a subprocess; returns `{ stdout, stderr, code }` |
+| `hygge.config` | Read-only table with `[plugins.<name>]` config |
+
+`exec` calls go through the permission engine under `CategoryShell`. Plugin tools default to a new `CategoryPlugin` permission category (ask-once-per-session).
+
+### Plugin layout
+
+**Single-file plugin** (simplest):
+
+```
+my-plugin/
+  plugin.lua     ← entry point; no manifest needed
+```
+
+**Directory plugin** with `plugin.toml`:
+
+```
+my-plugin/
+  plugin.toml    ← manifest
+  init.lua       ← entrypoint (matches `entrypoint` in plugin.toml)
+  lib/
+    helpers.lua
+```
+
+```toml
+# plugin.toml
+name        = "my-plugin"
+version     = "1.0.0"
+description = "Does something useful"
+entrypoint  = "init.lua"
+```
+
+### Example: policy-guard hook
+
+```lua
+-- ~/.config/hygge/plugins-dev/policy.lua
+hygge.register_hook("pre_tool", function(event)
+    if event.tool_name == "bash" then
+        local input = event.tool_input or {}
+        local cmd = input.command or ""
+        for _, pat in ipairs(hygge.config.blocked_patterns or {}) do
+            if cmd:find(pat, 1, true) then
+                return {
+                    decision = "deny",
+                    reason   = "blocked pattern: " .. pat,
+                }
+            end
+        end
+    end
+    return { decision = "allow" }
+end)
+```
+
+```toml
+# config.toml
+[plugins]
+sources = ["local:~/.config/hygge/plugins-dev"]
+
+[plugins.policy]
+blocked_patterns = ["rm -rf", "sudo"]
+```
+
+### Distribution model
+
+Plugins are Lua scripts hosted in any git repository (GitHub, self-hosted, local path). Install via `hygge plugins install <source>`. Plugins are trusted on install — no per-use permission prompt.
+
+### Forward compatibility
+
+The `Loader` interface reserves room for a future **subprocess JSON-RPC** runtime (for plugins in any language that communicate via stdin/stdout JSON-RPC). This is architecturally planned for v0.4+ but not implemented in v0.3. `npm:` sources are similarly deferred.
+
+### Managing plugins
+
+```sh
+hygge plugins install github:cfbender/hygge-policy-guard  # install
+hygge plugins list                                          # list installed
+hygge plugins show policy-guard                             # show details
+hygge plugins update                                        # update all
+hygge plugins update policy-guard                           # update one
+hygge plugins remove policy-guard                           # uninstall
 ```
 
 ## Development

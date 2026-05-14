@@ -65,6 +65,62 @@ type Config struct {
 	Theme      ThemeConfig      `mapstructure:"theme"`
 	Compaction CompactionConfig `mapstructure:"compaction"`
 	Session    SessionConfig    `mapstructure:"session"`
+	// Plugins holds plugin source and per-plugin configuration.
+	// Sources is the list of plugin source URIs declared in [plugins].sources.
+	// PluginSettings maps plugin names to their [plugins.<name>] config tables.
+	Plugins PluginsConfig `mapstructure:"plugins"`
+
+	// raw is the full merged config map, preserved so PluginSettings can
+	// extract dynamic [plugins.<name>] tables that mapstructure cannot
+	// decode because the keys are not known at compile time.
+	raw map[string]any
+}
+
+// RawPluginSettings returns the per-plugin config tables from the raw merged
+// config.  Each key is a plugin name (from [plugins.<name>] in config.toml).
+// Returns nil when no plugin-specific tables are set.
+//
+// Example TOML:
+//
+//	[plugins.policy-guard]
+//	strict = true
+//	blocked_patterns = ["rm -rf", "sudo"]
+func (c *Config) RawPluginSettings() map[string]map[string]any {
+	return PluginSettings(c.raw)
+}
+
+// PluginsConfig is the [plugins] section of config.toml.
+type PluginsConfig struct {
+	// Sources is the list of plugin source URIs.
+	// Each entry must be a valid source URI (github: or local:).
+	Sources []string `mapstructure:"sources"`
+}
+
+// PluginSettings returns the per-plugin config tables from the raw merged
+// config map.  Each key is a plugin name (from [plugins.<name>] in
+// config.toml) and the value is the free-form table content.
+//
+// The raw map is needed here because mapstructure cannot decode dynamic map
+// keys; we extract them from the merged map directly.
+func PluginSettings(raw map[string]any) map[string]map[string]any {
+	out := make(map[string]map[string]any)
+	pluginsRaw, ok := raw["plugins"]
+	if !ok {
+		return out
+	}
+	pluginsMap, ok := pluginsRaw.(map[string]any)
+	if !ok {
+		return out
+	}
+	for k, v := range pluginsMap {
+		if k == "sources" {
+			continue // not a plugin config table
+		}
+		if tbl, ok := v.(map[string]any); ok {
+			out[k] = tbl
+		}
+	}
+	return out
 }
 
 // SessionConfig controls session-lifecycle behaviour.
@@ -248,6 +304,7 @@ func Load(ctx context.Context, opts LoadOptions) (*Config, Provenance, error) {
 		return nil, nil, err
 	}
 	cfg.Profile = profileName
+	cfg.raw = merged
 
 	// Validate known fields.
 	if err := validateConfig(cfg); err != nil {

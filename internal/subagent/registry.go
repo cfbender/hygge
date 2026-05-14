@@ -246,6 +246,33 @@ func (r *Registry) Get(name string) (*Type, bool) {
 	return &cp, true
 }
 
+// Register adds a Type to the registry at runtime.  This is the plugin
+// integration point: plugins call this (via the Host interface) to
+// register dynamically-declared sub-agent types.  Returns an error when
+// the name is invalid or already taken.
+//
+// The zero-value of Registry is not usable; callers must use [Load] or
+// construct via the Load path before calling Register.
+func (r *Registry) Register(t Type) error {
+	if r == nil {
+		return fmt.Errorf("subagent: Register on nil Registry")
+	}
+	name := strings.TrimSpace(t.Name)
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("subagent: Register: invalid name %q (must match [a-z][a-z0-9_]*)", name)
+	}
+	if t.Description == "" {
+		return fmt.Errorf("subagent: Register: description is required for %q", name)
+	}
+	if _, exists := r.byName[name]; exists {
+		return fmt.Errorf("subagent: Register: duplicate name %q", name)
+	}
+	t.Name = name
+	r.byName[name] = t
+	r.types = append(r.types, t)
+	return nil
+}
+
 // List returns every registered type, sorted by Name.  The returned
 // slice is a fresh copy; mutating it does not affect the registry.
 func (r *Registry) List() []Type {
