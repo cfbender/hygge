@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cfbender/hygge/internal/state"
 )
 
 // --- helpers -----------------------------------------------------------------
@@ -663,13 +665,10 @@ api_key = "${BRACE_VAR}"
 func TestLoad_StateFileProfile(t *testing.T) {
 	tmp := t.TempDir()
 
-	stateDir := filepath.Join(tmp, ".local", "state", "hygge")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatalf("mkdir state: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(stateDir, "state.json"),
-		[]byte(`{"profile":"work"}`), 0o644); err != nil {
-		t.Fatalf("write state: %v", err)
+	// Write state using the state package so the field name and format are correct.
+	if err := state.Save(&state.State{ActiveProfile: "work"},
+		state.LoadOptions{HomeDir: tmp}); err != nil {
+		t.Fatalf("state.Save: %v", err)
 	}
 
 	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
