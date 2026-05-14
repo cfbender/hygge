@@ -13,7 +13,7 @@ import (
 // recordUsage applies token usage to the session's running totals and
 // publishes the cost-/context-related bus events.  Pricing failures are
 // absorbed here and never propagate as agent errors — see the package doc.
-func (a *Agent) recordUsage(ctx context.Context, sessionID string, u provider.Usage) {
+func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u provider.Usage) {
 	if u.InputTokens == 0 && u.OutputTokens == 0 &&
 		u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
 		// No usage reported (provider may emit empty Usage on some
@@ -21,7 +21,7 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID string, u provider.Us
 		return
 	}
 
-	money := a.computeCost(ctx, u)
+	money := a.computeCost(ctx, modelName, u)
 
 	delta := session.Totals{
 		InputTokens:      u.InputTokens,
@@ -107,7 +107,12 @@ func (a *Agent) Compact(ctx context.Context, sessionID string) (*session.Marker,
 		return nil, ErrNothingToCompact
 	}
 
-	summary, usage, err := a.generateCompactionSummary(ctx, msgs)
+	sess, err := a.opts.Store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("agent: Compact: load session: %w", err)
+	}
+
+	summary, usage, err := a.generateCompactionSummary(ctx, sess.Model.Name, msgs)
 	if err != nil {
 		return nil, fmt.Errorf("agent: Compact: generate summary: %w", err)
 	}
@@ -131,7 +136,7 @@ const compactionSystemPrompt = "Summarize the following conversation in 2-3 para
 // prompt over msgs, drains the stream collecting text deltas, and returns
 // the resulting summary together with the final Usage.
 func (a *Agent) generateCompactionSummary(
-	ctx context.Context, msgs []*session.Message,
+	ctx context.Context, modelName string, msgs []*session.Message,
 ) (string, provider.Usage, error) {
 	values := make([]session.Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -142,7 +147,7 @@ func (a *Agent) generateCompactionSummary(
 	}
 
 	req := provider.Request{
-		ModelName: a.providerModelName(),
+		ModelName: modelName,
 		Messages:  values,
 		System:    compactionSystemPrompt,
 		MaxTokens: a.opts.CompactionMaxTokens,

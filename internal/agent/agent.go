@@ -257,5 +257,10 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 		At:        a.opts.Now(),
 	})
 
-	return a.runLoop(ctx, sessionID)
+	sess, err := a.opts.Store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("agent: Send: load session: %w", err)
+	}
+
+	return a.runLoop(ctx, sessionID, sess.Model.Name)
 }
