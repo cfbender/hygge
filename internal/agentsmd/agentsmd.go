@@ -10,27 +10,29 @@
 // are auto-appended to the system prompt unconditionally so the model
 // always has the project's house rules in context.
 //
-// # Discovery
+// # Discovery (v0.2 surface)
 //
-// User layers (loaded if present):
+// Load() returns AT MOST the following blocks, in precedence order
+// (lowest first; all that exist are concatenated, none overrides any
+// other):
 //
-//  1. ~/.agents/AGENTS.md                 (user-level, vendor-neutral)
-//  2. ~/.config/hygge/AGENTS.md           (user-level, hygge-native)
-//  3. ~/.claude/CLAUDE.md                 (user-level, claude-compat)
+//	User layers:
+//	  1. ~/.agents/AGENTS.md                  (SourceUserAgents)
+//	  2. ~/.config/hygge/AGENTS.md            (SourceUserHygge)
+//	  3. ~/.claude/CLAUDE.md                  (SourceUserClaude)
 //
-// Project layers, gated on a project root found via walk-up from Pwd:
+//	Project layers, gated on a project root found via walk-up from Pwd:
+//	  4. <project-root>/.agents/AGENTS.md     (SourceProjectAgents)
+//	  5. <project-root>/AGENTS.md             (SourceProjectRoot)
+//	  6. <project-root>/AGENTS.local.md       (SourceProjectRoot)
+//	  7. <project-root>/CLAUDE.md             (SourceProjectRoot)
+//	  8. <project-root>/CLAUDE.local.md       (SourceProjectRoot)
 //
-//  4. <project-root>/.agents/AGENTS.md    (project, vendor-neutral)
-//  5. <project-root>/AGENTS.md            (project, conventional)
-//  6. <project-root>/CLAUDE.md            (project, claude-compat)
-//  7. <project-root>/CLAUDE.local.md      (project, claude-compat local override)
-//  8. <project-root>/**/{AGENTS.md,CLAUDE.md}  (recursive descent)
-//
-// The recursive descent (layer 8) excludes common dependency / build
-// directories (.git, node_modules, vendor, .venv, __pycache__, dist,
-// target, bin, build) and is bounded by MaxRecursiveFiles and
-// MaxRecursiveBytes so a misconfigured workspace cannot blow up the
-// system prompt.  Files duplicating layer-5/6/7 paths are skipped.
+// Subdirectory AGENTS.md / CLAUDE.md files are NOT loaded at startup.
+// They are loaded lazily, on-demand, by the per-tool-call loader
+// described in STATUS.md (walks up from each tool-touched path to the
+// project root, injecting any newly-seen context block as a transient
+// system note in the next provider turn).
 //
 // The project-root walk stops at the first directory containing
 // AGENTS.md, CLAUDE.md, .git, .agents/, or .hygge/.  The walk also
@@ -39,32 +41,36 @@
 package agentsmd
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
-// MaxRecursiveFiles bounds how many project-subdirectory context files
-// the recursive descent will load.  Beyond this cap the loader logs a
-// slog.Warn and stops descending.
-const MaxRecursiveFiles = 50
+// MaxLazyContextFiles bounds how many subdirectory context files the
+// future lazy per-tool-call loader (see STATUS.md) may inject across a
+// single session.  Beyond this cap the loader is expected to log a
+// slog.Warn and stop loading new files.
+//
+// Reserved for the lazy loader; not consulted by Load() in v0.2.
+const MaxLazyContextFiles = 50
 
-// MaxRecursiveBytes bounds the total byte size of recursive-descent
-// blocks.  Files that would push the running total over this cap are
-// skipped with a slog.Warn.  The cap does not apply to the dedicated
-// layers (1-7) — those are user-explicit choices.
-const MaxRecursiveBytes = 256 * 1024
+// MaxLazyContextBytes bounds the total byte size of lazy-loaded
+// subdirectory context blocks.  Files that would push the running
+// total over this cap are expected to be skipped with a slog.Warn.
+//
+// Reserved for the lazy loader; not consulted by Load() in v0.2.
+const MaxLazyContextBytes = 256 * 1024
 
-// excludeDirs is the set of directory names skipped during recursive
-// descent.  Matches the convention used by the grep/glob builtins,
-// plus .agents and .hygge whose top-level files are already handled
-// by dedicated layers (preventing double-loading).
-var excludeDirs = map[string]struct{}{
+// LazyExcludeDirs is the set of directory names the future lazy loader
+// should skip when walking up from a tool-touched path looking for
+// AGENTS.md / CLAUDE.md.  Their top-level files are already handled by
+// dedicated layers, and dependency / build directories should never
+// contribute project context.
+//
+// Reserved for the lazy loader; not consulted by Load() in v0.2.
+var LazyExcludeDirs = map[string]struct{}{
 	".git":         {},
 	".agents":      {},
 	".hygge":       {},
@@ -93,10 +99,16 @@ const (
 	// SourceProjectAgents is <project-root>/.agents/AGENTS.md.
 	SourceProjectAgents
 	// SourceProjectRoot is the conventional file (AGENTS.md /
-	// CLAUDE.md / CLAUDE.local.md) at the project root itself.
+	// AGENTS.local.md / CLAUDE.md / CLAUDE.local.md) at the project
+	// root itself.
 	SourceProjectRoot
-	// SourceProjectSubdir is an AGENTS.md or CLAUDE.md found by
-	// recursive descent from the project root.
+	// SourceProjectSubdir is an AGENTS.md or CLAUDE.md found in a
+	// subdirectory of the project root.
+	//
+	// Not produced by Load() in v0.2; reserved for the lazy
+	// per-tool-call loader described in STATUS.md, which surfaces
+	// subdir context only when the agent actually touches the
+	// directory via a tool call.
 	SourceProjectSubdir
 )
 
@@ -150,6 +162,10 @@ type LoadOptions struct {
 // Load returns every project-context file found, in precedence order
 // (lowest first).  Missing files are silently skipped; an empty slice
 // is returned when nothing exists anywhere.
+//
+// Load only considers the project-root files and the user layers — it
+// does NOT walk subdirectories.  Subdirectory context is loaded
+// lazily by the per-tool-call loader described in STATUS.md.
 func Load(opts LoadOptions) ([]Block, error) {
 	homeDir := opts.HomeDir
 	if homeDir == "" {
@@ -190,18 +206,22 @@ func Load(opts LoadOptions) ([]Block, error) {
 				SourceProjectAgents); ok {
 				blocks = append(blocks, b)
 			}
-			// Layers 5-7: project-root files.  Skipped at the
-			// recursive layer below so we don't double-count.
-			rootFiles := []string{"AGENTS.md", "CLAUDE.md", "CLAUDE.local.md"}
+			// Layers 5-8: project-root files.  All share
+			// SourceProjectRoot; AGENTS.local.md and CLAUDE.local.md
+			// are the per-machine override conventions for AGENTS.md
+			// and CLAUDE.md respectively.
+			rootFiles := []string{
+				"AGENTS.md",
+				"AGENTS.local.md",
+				"CLAUDE.md",
+				"CLAUDE.local.md",
+			}
 			for _, name := range rootFiles {
 				p := filepath.Join(root, name)
 				if b, ok := readBlock(p, relTo(root, p), SourceProjectRoot); ok {
 					blocks = append(blocks, b)
 				}
 			}
-			// Layer 8: recursive descent.
-			recursive := loadRecursive(root)
-			blocks = append(blocks, recursive...)
 		}
 	}
 
@@ -234,86 +254,6 @@ func relTo(root, path string) string {
 		return ""
 	}
 	return rel
-}
-
-// loadRecursive walks the project tree under root looking for
-// AGENTS.md / CLAUDE.md / CLAUDE.local.md files in subdirectories.
-// Root-level files are skipped (those are loaded as SourceProjectRoot
-// separately).  excludeDirs are pruned wholesale.
-//
-// Capped by MaxRecursiveFiles and MaxRecursiveBytes; over-cap files
-// are reported via slog.Warn and dropped.
-func loadRecursive(root string) []Block {
-	var blocks []Block
-	var totalBytes int
-	stopped := false
-
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// Permission-denied or similar — log and skip the
-			// offending entry, but continue the walk.
-			if !errors.Is(err, fs.ErrNotExist) {
-				slog.Warn("agentsmd: walk error", "path", path, "err", err)
-			}
-			return nil
-		}
-		if stopped {
-			return filepath.SkipAll
-		}
-		if d.IsDir() {
-			if path == root {
-				return nil
-			}
-			if _, skip := excludeDirs[d.Name()]; skip {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// File.  Skip anything that isn't one of our context names.
-		name := d.Name()
-		if name != "AGENTS.md" && name != "CLAUDE.md" && name != "CLAUDE.local.md" {
-			return nil
-		}
-		// Skip root-level files — already loaded as SourceProjectRoot.
-		if filepath.Dir(path) == root {
-			return nil
-		}
-
-		if len(blocks) >= MaxRecursiveFiles {
-			slog.Warn("agentsmd: recursive file cap hit; remaining files skipped",
-				"cap", MaxRecursiveFiles, "first_skipped", path)
-			stopped = true
-			return filepath.SkipAll
-		}
-
-		info, statErr := d.Info()
-		if statErr == nil && info.Size() > 0 {
-			if totalBytes+int(info.Size()) > MaxRecursiveBytes {
-				slog.Warn("agentsmd: recursive byte cap hit; file skipped",
-					"cap", MaxRecursiveBytes, "path", path, "size", info.Size())
-				return nil
-			}
-		}
-
-		b, ok := readBlock(path, relTo(root, path), SourceProjectSubdir)
-		if !ok {
-			return nil
-		}
-		blocks = append(blocks, b)
-		if info != nil {
-			totalBytes += int(info.Size())
-		}
-		return nil
-	})
-	if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
-		slog.Warn("agentsmd: recursive walk failed", "root", root, "err", walkErr)
-	}
-
-	// Deterministic order: by relative path (depth-ish then lex).
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].RelPath < blocks[j].RelPath
-	})
-	return blocks
 }
 
 // findProjectRoot walks parents of start looking for the first
@@ -377,9 +317,9 @@ func hasMarker(dir string) bool {
 //	<!-- source: <source-token>: <path-or-relpath> -->
 //	<content>
 //
-// For project-subdir blocks the comment uses the relative path
-// (e.g. `project/subdir: internal/skill/AGENTS.md`) so the model can
-// locate the file inside the working tree.
+// For project-layer blocks the comment uses the relative path (e.g.
+// `project/root: CLAUDE.local.md`) so the model can locate the file
+// inside the working tree.
 func BuildSystemPromptAdditions(blocks []Block) string {
 	if len(blocks) == 0 {
 		return ""

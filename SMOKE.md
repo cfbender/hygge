@@ -90,24 +90,13 @@ Set `ANTHROPIC_API_KEY` in your environment for the items that need it.
       Output shows `## Project context` and includes the
       `<!-- source: project/root: CLAUDE.md -->` comment marker.
 
-- [ ] **Subdirectory AGENTS.md auto-loaded.**
-      ```
-      tmp=$(mktemp -d)
-      mkdir -p "$tmp/.git" "$tmp/internal"
-      cat > "$tmp/internal/AGENTS.md" <<'EOF'
-      Internal package rule.
-      EOF
-      (cd "$tmp" && ../bin/hygge context list)
-      ```
-      Output table includes a row with SOURCE `project/subdir` and
-      PATH `internal/AGENTS.md` (relative, not absolute).
-
 - [ ] **`hygge context list` summarises every source.**
       With a mix of `~/.agents/AGENTS.md`, `<root>/AGENTS.md`, and
-      `<root>/internal/AGENTS.md` planted, run `./bin/hygge context list`
+      `<root>/CLAUDE.md` planted, run `./bin/hygge context list`
       and confirm the table contains one row per file with SOURCE
-      columns drawn from `user/.agents`, `project/root`, and
-      `project/subdir` respectively.
+      columns drawn from `user/.agents` and `project/root`. The
+      `project/root` rows use project-relative PATH values
+      (`AGENTS.md`, `CLAUDE.md`), not absolute paths.
 
 ## TUI session
 
