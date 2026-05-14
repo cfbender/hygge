@@ -249,10 +249,19 @@ func (c *Catalog) lookupInSnapshot(provider, model string, requireFresh bool) (P
 		p.Provider = provider
 		return p, true, fresh
 	}
-	// Try a relaxed match: models.dev uses dash-separated version
-	// numbers ("claude-sonnet-4-5") while hygge uses dot-separated
-	// ("claude-sonnet-4.5").  Try replacing dots with dashes once.
-	if alt := strings.ReplaceAll(model, ".", "-"); alt != model {
+	// Try a relaxed match: catalog keys may differ from caller
+	// spelling on dot-vs-dash separators (e.g. live JSON uses
+	// "claude-sonnet-4.5" while hygge asks for "claude-sonnet-4-5").
+	// Try both directions once.
+	for _, alt := range []string{
+		strings.ReplaceAll(model, ".", "-"),
+		// Replace dashes following digits with dots:
+		// "claude-sonnet-4-5" → "claude-sonnet-4.5"
+		dashVersionToDot(model),
+	} {
+		if alt == model {
+			continue
+		}
 		if p, ok := mods[alt]; ok {
 			p.Model = model
 			p.Provider = provider
@@ -260,6 +269,29 @@ func (c *Catalog) lookupInSnapshot(provider, model string, requireFresh bool) (P
 		}
 	}
 	return Pricing{}, false, fresh
+}
+
+// dashVersionToDot replaces a trailing "-N-M" sequence with "-N.M" so that
+// hygge's dash-only model IDs (claude-sonnet-4-5) can fall back to dot-style
+// catalog keys (claude-sonnet-4.5).  Only the last digit-pair is rewritten.
+func dashVersionToDot(s string) string {
+	// Walk backwards looking for the pattern "-D" where D is a digit.
+	// If found, replace the dash before D with a dot.
+	for i := len(s) - 1; i > 0; i-- {
+		if s[i] < '0' || s[i] > '9' {
+			continue
+		}
+		// found a trailing digit; look back through any digits to find the dash
+		j := i - 1
+		for j > 0 && s[j] >= '0' && s[j] <= '9' {
+			j--
+		}
+		if s[j] != '-' {
+			return s
+		}
+		return s[:j] + "." + s[j+1:]
+	}
+	return s
 }
 
 // ensureFresh kicks off a fetch if the in-memory snapshot is missing or

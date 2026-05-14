@@ -59,7 +59,7 @@ type Provider interface {
 // Request is the provider-agnostic completion request.  The same struct flows
 // through every Provider; adapters translate it to their wire format.
 type Request struct {
-	// ModelName is the upstream model identifier (e.g. "claude-sonnet-4.5").
+	// ModelName is the upstream model identifier (e.g. "claude-sonnet-4-5").
 	ModelName string
 
 	// Messages is the ordered conversation history.  Compaction summaries,

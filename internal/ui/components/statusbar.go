@@ -33,7 +33,7 @@ type StatusBar struct {
 // View renders the status bar.  Layout (left-aligned identity, right-aligned
 // spinner):
 //
-//	[profile:work]  anthropic/claude-sonnet-4.5  ~/proj                ●
+//	[profile:work]  anthropic/claude-sonnet-4-5  ~/proj                ●
 func (s StatusBar) View() string {
 	width := s.Width
 	if width <= 0 {

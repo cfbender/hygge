@@ -27,7 +27,7 @@ func newTestApp(t *testing.T) (*App, *bus.Bus) {
 		Theme:         theme.ShellTheme(),
 		ProjectDir:    "~/proj",
 		ModelProvider: "anthropic",
-		ModelName:     "claude-sonnet-4.5",
+		ModelName:     "claude-sonnet-4-5",
 		ProfileName:   "work",
 		Now:           now,
 	})
@@ -54,7 +54,7 @@ func TestColdStartEmptyState(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	out := app.View()
-	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4.5", "Type a message", "$0.0000", "no messages"} {
+	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4-5", "Type a message", "$0.0000", "no messages"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
@@ -477,7 +477,7 @@ func TestEnsureSessionLazilyCreates(t *testing.T) {
 		Theme:         theme.ShellTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
-		ModelName:     "claude-sonnet-4.5",
+		ModelName:     "claude-sonnet-4-5",
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		OnSessionCreated: func(id string) {
 			observed = id

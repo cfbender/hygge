@@ -68,7 +68,7 @@ func TestStream_BasicText(t *testing.T) {
 	p := newAdapter(t, srv.URL, nil)
 
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -113,7 +113,7 @@ func TestStream_WithToolUse(t *testing.T) {
 	p := newAdapter(t, srv.URL, nil)
 
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "read a.go"}}}},
 	})
 	if err != nil {
@@ -147,7 +147,7 @@ func TestStream_WithThinking(t *testing.T) {
 	p := newAdapter(t, srv.URL, nil)
 
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestStream_MidStreamError(t *testing.T) {
 	p := newAdapter(t, srv.URL, nil)
 
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -205,7 +205,7 @@ func TestStream_PartialThenDone(t *testing.T) {
 	p := newAdapter(t, srv.URL, nil)
 
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -246,7 +246,7 @@ func TestStream_NetworkFailureMidStream(t *testing.T) {
 
 	p := newAdapter(t, srv.URL, nil)
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -274,7 +274,7 @@ func TestStream_HTTP401(t *testing.T) {
 	defer srv.Close()
 	p := newAdapter(t, srv.URL, nil)
 	_, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if !errors.Is(err, provider.ErrAuth) {
@@ -290,7 +290,7 @@ func TestStream_HTTP429(t *testing.T) {
 	defer srv.Close()
 	p := newAdapter(t, srv.URL, nil)
 	_, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if !errors.Is(err, provider.ErrRateLimited) {
@@ -306,7 +306,7 @@ func TestStream_HTTP500(t *testing.T) {
 	defer srv.Close()
 	p := newAdapter(t, srv.URL, nil)
 	_, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if !errors.Is(err, provider.ErrTransient) {
@@ -322,7 +322,7 @@ func TestStream_HTTP400(t *testing.T) {
 	defer srv.Close()
 	p := newAdapter(t, srv.URL, nil)
 	_, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if !errors.Is(err, provider.ErrInvalidRequest) {
@@ -347,7 +347,7 @@ func TestStream_RequestShape(t *testing.T) {
 	}
 
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		System:    "Be concise.",
 		Messages:  msgs,
 		Tools: []provider.Tool{{
@@ -368,7 +368,7 @@ func TestStream_RequestShape(t *testing.T) {
 		t.Fatalf("unmarshal captured: %v: %s", err, string(*captured))
 	}
 
-	if got["model"] != "claude-sonnet-4.5" {
+	if got["model"] != "claude-sonnet-4-5" {
 		t.Errorf("model: %v", got["model"])
 	}
 	if got["stream"] != true {
@@ -442,7 +442,7 @@ func TestStream_HeadersPresent(t *testing.T) {
 
 	p := newAdapter(t, srv.URL, nil)
 	ch, err := p.Stream(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -473,7 +473,7 @@ func TestCountTokens(t *testing.T) {
 
 	p := newAdapter(t, srv.URL, nil)
 	n, err := p.CountTokens(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -491,7 +491,7 @@ func TestCountTokens_HTTPError(t *testing.T) {
 	defer srv.Close()
 	p := newAdapter(t, srv.URL, nil)
 	_, err := p.CountTokens(t.Context(), provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if !errors.Is(err, provider.ErrAuth) {
@@ -518,7 +518,7 @@ func TestListModels(t *testing.T) {
 			t.Errorf("%s capability flags: %+v", m.Name, m)
 		}
 	}
-	for _, want := range []string{"claude-sonnet-4.5", "claude-opus-4.7", "claude-haiku-3.5"} {
+	for _, want := range []string{"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"} {
 		if !names[want] {
 			t.Errorf("missing model %s", want)
 		}
@@ -616,7 +616,7 @@ func TestStream_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	p := newAdapter(t, srv.URL, nil)
 	ch, err := p.Stream(ctx, provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 	})
 	if err != nil {
@@ -669,7 +669,7 @@ func TestBuildRequestBody_CacheControlMarkers(t *testing.T) {
 	}
 	a := p.(*adapter)
 	body, err := a.buildRequestBody(provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		System:    "sys",
 		Messages: []session.Message{
 			{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}},
@@ -690,7 +690,7 @@ func TestBuildRequestBody_NoCacheWhenOff(t *testing.T) {
 	}
 	a := p.(*adapter)
 	body, err := a.buildRequestBody(provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		System:    "sys",
 		Messages: []session.Message{
 			{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}},
@@ -711,7 +711,7 @@ func TestBuildRequestBody_ThinkingOption(t *testing.T) {
 	}
 	a := p.(*adapter)
 	body, err := a.buildRequestBody(provider.Request{
-		ModelName: "claude-sonnet-4.5",
+		ModelName: "claude-sonnet-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}}},
 		Options:   map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 8000}},
 	}, true)
@@ -738,7 +738,7 @@ func TestLive_AnthropicSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	ch, err := p.Stream(ctx, provider.Request{
-		ModelName: "claude-haiku-3.5",
+		ModelName: "claude-haiku-4-5",
 		Messages:  []session.Message{{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "Reply with the single word: hi"}}}},
 		MaxTokens: 16,
 	})

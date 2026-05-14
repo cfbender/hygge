@@ -155,21 +155,21 @@ func (a *adapter) CountTokens(ctx context.Context, req provider.Request) (int64,
 func (a *adapter) ListModels(_ context.Context) ([]provider.Model, error) {
 	return []provider.Model{
 		{
-			Name:           "claude-sonnet-4.5",
+			Name:           "claude-sonnet-4-5",
 			ContextWindow:  200_000,
 			MaxOutput:      8192,
 			SupportsTools:  true,
 			SupportsImages: true,
 		},
 		{
-			Name:           "claude-opus-4.7",
+			Name:           "claude-opus-4-5",
 			ContextWindow:  200_000,
 			MaxOutput:      8192,
 			SupportsTools:  true,
 			SupportsImages: true,
 		},
 		{
-			Name:           "claude-haiku-3.5",
+			Name:           "claude-haiku-4-5",
 			ContextWindow:  200_000,
 			MaxOutput:      8192,
 			SupportsTools:  true,

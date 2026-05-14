@@ -43,14 +43,14 @@ func TestFetchAndParse_SampleFixture(t *testing.T) {
 		t.Errorf("FetchedAt = %v, want %v", snap.FetchedAt, now)
 	}
 
-	got, ok := snap.Providers["anthropic"]["claude-sonnet-4.5"]
+	got, ok := snap.Providers["anthropic"]["claude-sonnet-4-5"]
 	if !ok {
-		t.Fatalf("anthropic/claude-sonnet-4.5 not in snapshot; providers=%v", keys(snap.Providers))
+		t.Fatalf("anthropic/claude-sonnet-4-5 not in snapshot; providers=%v", keys(snap.Providers))
 	}
 	if got.InputPerMTok != 3 || got.OutputPerMTok != 15 || got.CacheReadPerMTok != 0.3 || got.CacheWritePerMTok != 3.75 {
 		t.Errorf("sonnet pricing mismatch: %+v", got)
 	}
-	if got.Provider != "anthropic" || got.Model != "claude-sonnet-4.5" {
+	if got.Provider != "anthropic" || got.Model != "claude-sonnet-4-5" {
 		t.Errorf("provider/model mismatch: %+v", got)
 	}
 }

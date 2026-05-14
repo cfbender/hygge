@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -88,6 +90,14 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		return nil
 	}
 
+	// Redirect slog to a log file so warnings/errors emitted from the
+	// agent loop, provider, tools, etc. are diagnosable even though the
+	// TUI owns stderr in alt-screen mode.  Best-effort: a failure to open
+	// the file is not fatal — we just keep the default handler.
+	if logCloser := setupTUILog(rt); logCloser != nil {
+		defer logCloser()
+	}
+
 	prog := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 
 	// Translate SIGINT/SIGTERM into a clean Quit so deferred Close runs.
@@ -110,4 +120,39 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		return fmt.Errorf("cli: tea run: %w", err)
 	}
 	return nil
+}
+
+// setupTUILog redirects slog output to $XDG_STATE_HOME/hygge/hygge.log so
+// that warnings emitted under bubbletea's alt-screen are recoverable.
+// Returns a close function (or nil if redirection failed) that restores
+// the previous slog default handler and closes the file.
+func setupTUILog(rt *appRuntime) func() {
+	dir := rt.StateOpts.XDGStateHome
+	if dir == "" {
+		// state.LoadOptions falls back to XDG_STATE_HOME or ~/.local/state
+		// at load time; if we don't have it here, just skip — the user
+		// can still see fatal errors when the program returns.
+		return nil
+	}
+	logDir := filepath.Join(dir, "hygge")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return nil
+	}
+	logPath := filepath.Join(logDir, "hygge.log")
+	f, err := os.OpenFile(logPath, //nolint:gosec // logPath is a derived path under our state dir
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	slog.Info("hygge: tui session started",
+		"pwd", rt.Pwd,
+		"provider", rt.Config.Model.Provider,
+		"model", rt.Config.Model.Name,
+		"profile", rt.Config.Profile)
+	return func() {
+		slog.SetDefault(prev)
+		_ = f.Close()
+	}
 }

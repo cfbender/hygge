@@ -29,7 +29,7 @@ func (fakeProvider) CountTokens(_ context.Context, _ provider.Request) (int64, e
 }
 func (fakeProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 	return []provider.Model{{
-		Name:           "claude-sonnet-4.5",
+		Name:           "claude-sonnet-4-5",
 		ContextWindow:  200_000,
 		MaxOutput:      8192,
 		SupportsTools:  true,
@@ -80,7 +80,7 @@ func seedSession(t *testing.T, projectDir string) string {
 		ProjectDir: projectDir,
 		Model: session.ModelRef{
 			Provider: "anthropic",
-			Name:     "claude-sonnet-4.5",
+			Name:     "claude-sonnet-4-5",
 		},
 	})
 	if err != nil {

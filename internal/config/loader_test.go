@@ -215,7 +215,7 @@ func TestResolveValue(t *testing.T) {
 	cfg := &Config{
 		Model: ModelConfig{
 			Provider: "anthropic",
-			Name:     "claude-sonnet-4.5",
+			Name:     "claude-sonnet-4-5",
 			Options:  optMap,
 		},
 		Permission: PermissionConfig{
@@ -233,7 +233,7 @@ func TestResolveValue(t *testing.T) {
 		want any
 	}{
 		{"model.provider", "anthropic"},
-		{"model.name", "claude-sonnet-4.5"},
+		{"model.name", "claude-sonnet-4-5"},
 		{"model.options.thinking_budget", int64(8000)},
 		{"permission.file_read_outside_pwd", PermAsk},
 		{"permission.file_write", PermAllow},
