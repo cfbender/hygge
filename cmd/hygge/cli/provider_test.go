@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cfbender/hygge/internal/auth"
+	"github.com/cfbender/hygge/internal/provider"
 )
 
 // authOptsFor returns LoadOptions for the hermetic home dir.
@@ -323,5 +324,21 @@ func TestKnownProviders(t *testing.T) {
 	}
 	if !providerKnownContains("anthropic") {
 		t.Error("anthropic missing from knownProviders")
+	}
+}
+
+// TestOpenAIRegistered confirms the openai shim is wired into the CLI via
+// the blank import in common.go.  Without this guard, removing the import
+// would silently break `hygge config set model.provider = openai`.
+func TestOpenAIRegistered(t *testing.T) {
+	f, err := provider.Get("openai")
+	if err != nil {
+		t.Fatalf("provider.Get(openai): %v", err)
+	}
+	if f == nil {
+		t.Fatal("factory is nil")
+	}
+	if providerEnvVar("openai") != "OPENAI_API_KEY" {
+		t.Errorf("openai env var mapping missing")
 	}
 }
