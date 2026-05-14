@@ -81,16 +81,41 @@ root" signal) and never climbs into `$HOME`.
 ### Skills
 
 Skills are named markdown procedures the model can invoke at runtime.
-Drop a `.md` file with a small frontmatter block into any
-`skills/` directory under the four layers above; hygge picks it up
-automatically. Each skill carries `name`, `description`, and
-`when_to_use` keys plus a free-form markdown body:
+Hygge supports two file layouts in any `skills/` directory under the
+four layers above:
+
+**Directory-style** (the `.agents` standard — recommended):
+
+```
+skills/
+  refactor-handler/
+    SKILL.md           # frontmatter + body
+    scripts/           # optional auxiliary files
+    reference/
+```
+
+**Flat-style** (simpler — one file per skill):
+
+```
+skills/
+  refactor-handler.md
+```
+
+Either way the file carries a `name` and `description` in frontmatter
+plus a free-form markdown body. `when_to_use` is optional — fold that
+guidance into the description if you prefer the `.agents` convention.
+Any additional keys (`version`, `allowed-tools`, etc.) are preserved in
+`extras` and shown by `hygge skills show`. Multi-line values are
+supported via YAML block scalars (`>` folded, `|` literal) and implicit
+indented blocks.
 
 ```markdown
 ---
 name: refactor-handler
-description: Refactor an HTTP handler to extract its core logic
-when_to_use: When asked to split a long HTTP handler into testable pieces
+description: >
+  Refactor an HTTP handler to extract its core logic. Use when asked
+  to split a long handler into testable pieces.
+version: 1.0.0
 ---
 # Procedure
 
@@ -98,11 +123,16 @@ when_to_use: When asked to split a long HTTP handler into testable pieces
 2. …
 ```
 
-The system prompt advertises every loaded skill's `name`, `description`,
-and `when_to_use` to the model; the full body is fetched on demand via
-the built-in `skill` tool. Use `hygge skills list` to see what is
-loaded, `hygge skills show <name>` to inspect one, and
-`hygge skills doctor` to diagnose files that failed to parse.
+For directory-style skills, `Skill directory: <absolute path>` is
+prepended to the body when the model loads it via the `skill` tool, so
+the model can resolve relative paths to auxiliary scripts or
+references.
+
+The system prompt advertises every loaded skill's `name` and
+`description` (and `when_to_use` when present); the full body is
+fetched on demand via the built-in `skill` tool. Use `hygge skills
+list` to see what is loaded, `hygge skills show <name>` to inspect one,
+and `hygge skills doctor` to diagnose files that failed to parse.
 
 ### AGENTS.md
 

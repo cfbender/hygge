@@ -52,16 +52,18 @@ import (
 
 // Skill is a single named procedure the agent can invoke.
 type Skill struct {
-	// Name is the unique identifier.  Must match the filename stem and
-	// the regular expression ^[a-z][a-z0-9-]{0,63}$.
+	// Name is the unique identifier.  Must match the filename stem (or
+	// the directory name for directory-style skills) and the regular
+	// expression ^[a-z][a-z0-9-]{0,63}$.
 	Name string
 
 	// Description is the one-line summary shown in the system prompt.
 	Description string
 
 	// WhenToUse describes the situations in which the model should
-	// invoke this skill.  Shown in the system prompt under the
-	// description.
+	// invoke this skill.  Optional — `.agents`-standard skills fold
+	// this guidance into Description.  Shown in the system prompt
+	// under the description when non-empty.
 	WhenToUse string
 
 	// Body is the markdown body of the skill, with leading and
@@ -73,8 +75,18 @@ type Skill struct {
 	// extra keys were present.
 	Extras map[string]string
 
-	// Path is the absolute path the skill was loaded from.
+	// Path is the absolute path the skill file was loaded from.  For
+	// directory-style skills this points at the SKILL.md inside the
+	// skill's directory.
 	Path string
+
+	// Dir is the absolute path to the skill's directory.  For flat
+	// `<name>.md` skills this is the parent directory.  For
+	// directory-style `<name>/SKILL.md` skills this is the skill's
+	// own directory and is where auxiliary scripts / reference files
+	// live.  The `skill` tool exposes this so the model can resolve
+	// relative paths inside the skill body.
+	Dir string
 
 	// Source identifies which of the four layers this skill came from.
 	Source Source
@@ -183,9 +195,16 @@ func Load(opts LoadOptions) (*Registry, error) {
 	return reg, nil
 }
 
-// loadFromDir reads every *.md file in dir, parses each, and inserts
-// the resulting Skill into reg.  Files that fail to parse are logged
-// and skipped.  A missing dir is silently ignored.
+// loadFromDir scans dir for skills.  Two layouts are supported and may
+// coexist in the same directory:
+//
+//  1. Flat:       <dir>/<name>.md           (hygge-native, simple)
+//  2. Directory:  <dir>/<name>/SKILL.md     (.agents standard; allows
+//     auxiliary scripts and
+//     reference files alongside)
+//
+// Files / directories that fail to parse are logged and skipped.  A
+// missing dir is silently ignored.
 func loadFromDir(reg *Registry, dir string, source Source) {
 	if dir == "" {
 		return
@@ -198,19 +217,34 @@ func loadFromDir(reg *Registry, dir string, source Source) {
 		slog.Warn("skill: read dir failed", "dir", dir, "err", err)
 		return
 	}
-	var names []string
+
+	// Collect flat and dir candidates separately so we can iterate
+	// each in a stable order.
+	var flatFiles, dirNames []string
 	for _, e := range entries {
+		name := e.Name()
 		if e.IsDir() {
+			dirNames = append(dirNames, name)
 			continue
 		}
-		name := e.Name()
 		if !strings.HasSuffix(name, ".md") {
 			continue
 		}
-		names = append(names, name)
+		// Skip a top-level SKILL.md sitting in the skills root —
+		// the directory-style layout always nests it under
+		// <name>/SKILL.md and a stray one at the top would have no
+		// associated skill name.
+		if name == "SKILL.md" {
+			slog.Warn("skill: ignoring SKILL.md at skills-root (expected <name>/SKILL.md)",
+				"path", filepath.Join(dir, name))
+			continue
+		}
+		flatFiles = append(flatFiles, name)
 	}
-	sort.Strings(names)
-	for _, name := range names {
+	sort.Strings(flatFiles)
+	sort.Strings(dirNames)
+
+	for _, name := range flatFiles {
 		full := filepath.Join(dir, name)
 		sk, err := ParseFile(full)
 		if err != nil {
@@ -219,6 +253,28 @@ func loadFromDir(reg *Registry, dir string, source Source) {
 				continue
 			}
 			slog.Warn("skill: skipped (parse error)", "path", full, "err", err)
+			continue
+		}
+		sk.Source = source
+		sk.Dir = filepath.Dir(sk.Path)
+		reg.byName[sk.Name] = sk
+	}
+
+	for _, name := range dirNames {
+		skillDir := filepath.Join(dir, name)
+		skillPath := filepath.Join(skillDir, "SKILL.md")
+		if _, err := os.Stat(skillPath); err != nil {
+			// No SKILL.md — this is a non-skill directory (could be
+			// a hidden VCS dir, a backup dir, whatever).  Silent skip.
+			continue
+		}
+		sk, err := ParseSkillDir(skillDir)
+		if err != nil {
+			if errorIsNoFrontmatter(err) {
+				slog.Warn("skill: skipped (no frontmatter)", "path", skillPath)
+				continue
+			}
+			slog.Warn("skill: skipped (parse error)", "path", skillPath, "err", err)
 			continue
 		}
 		sk.Source = source

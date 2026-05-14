@@ -24,16 +24,21 @@ var reservedKeys = map[string]struct{}{
 	"when_to_use": {},
 }
 
-// ParseFile reads path and parses it as a skill.  Returns a fully-
-// populated Skill (Source is left zero — the loader fills it in) or an
-// error.  ErrNoFrontmatter is returned when the file does not begin
-// with the `---\n` delimiter; the loader treats that as a non-skill
-// file and skips it.  Any other parse failure returns a *ParseError.
+// ParseFile reads path and parses it as a flat-layout skill.  The
+// filename stem must equal the frontmatter `name`.  For directory-
+// style skills (`<name>/SKILL.md`) use ParseSkillDir instead.
+//
+// Returns a fully-populated Skill (Source and Dir are left zero — the
+// loader fills them in) or an error.  ErrNoFrontmatter is returned
+// when the file does not begin with the `---\n` delimiter; the loader
+// treats that as a non-skill file and skips it.  Any other parse
+// failure returns a *ParseError.
 //
 // Validation enforced here:
 //   - The frontmatter must close with a `---` line.
-//   - `name`, `description`, and `when_to_use` must all be present and
-//     non-empty.
+//   - `name` and `description` must be present and non-empty.
+//   - `when_to_use` is optional (`.agents`-standard skills fold this
+//     into the description).
 //   - `name` must match nameRegex.
 //   - The filename stem must equal the frontmatter `name`.
 func ParseFile(path string) (Skill, error) {
@@ -41,7 +46,7 @@ func ParseFile(path string) (Skill, error) {
 	if err != nil {
 		return Skill{}, &ParseError{Path: path, Reason: fmt.Sprintf("read: %v", err)}
 	}
-	sk, err := parse(data, path)
+	sk, err := parse(data, path, parseModeFile)
 	if err != nil {
 		return Skill{}, err
 	}
@@ -50,10 +55,45 @@ func ParseFile(path string) (Skill, error) {
 	return sk, nil
 }
 
-// parse is the in-memory parser used by ParseFile and the tests.  It
-// does not touch the filesystem aside from deriving the stem from path
-// for the filename / frontmatter-name consistency check.
-func parse(data []byte, path string) (Skill, error) {
+// ParseSkillDir reads `<dir>/SKILL.md` and parses it as a directory-
+// style skill.  The directory's base name must equal the frontmatter
+// `name`.  Returns a fully-populated Skill with Path set to the
+// SKILL.md location and Dir set to the directory itself.  Source is
+// left zero — the loader fills it in.
+//
+// Validation is the same as ParseFile except the filename-stem check
+// is replaced with a directory-name check.
+func ParseSkillDir(dir string) (Skill, error) {
+	skillPath := filepath.Join(dir, "SKILL.md")
+	data, err := os.ReadFile(skillPath) //nolint:gosec // path comes from a controlled walk over a known directory
+	if err != nil {
+		return Skill{}, &ParseError{Path: skillPath, Reason: fmt.Sprintf("read: %v", err)}
+	}
+	sk, err := parse(data, skillPath, parseModeSkillDir)
+	if err != nil {
+		return Skill{}, err
+	}
+	sk.Path = skillPath
+	sk.Dir = dir
+	sk.LoadedAt = time.Now()
+	return sk, nil
+}
+
+// parseMode selects which filename ↔ name consistency check parse
+// applies.  parseModeNone disables the check (used by some unit tests
+// that exercise parse directly with an empty path).
+type parseMode int
+
+const (
+	parseModeNone     parseMode = iota // no path-based name check
+	parseModeFile                      // stem(path) must equal name
+	parseModeSkillDir                  // base(dir(path)) must equal name
+)
+
+// parse is the in-memory parser used by ParseFile, ParseSkillDir, and
+// the tests.  It does not touch the filesystem aside from deriving the
+// stem or directory name from path for the name-consistency check.
+func parse(data []byte, path string, mode parseMode) (Skill, error) {
 	// Detect frontmatter: the file must begin with `---` followed by a
 	// newline.  We tolerate a leading BOM but nothing else.
 	body := data
@@ -105,19 +145,29 @@ func parse(data []byte, path string) (Skill, error) {
 	if description == "" {
 		return Skill{}, &ParseError{Path: path, Reason: "frontmatter is missing required `description`"}
 	}
-	if whenToUse == "" {
-		return Skill{}, &ParseError{Path: path, Reason: "frontmatter is missing required `when_to_use`"}
-	}
 
-	// Filename stem must equal name.  Empty path skips the check (used
-	// by some tests that exercise parse directly).
+	// Name-consistency check is mode-dependent.  Empty path always
+	// skips the check (used by parse-directly unit tests).
 	if path != "" {
-		stem := filenameStem(path)
-		if stem != name {
-			return Skill{}, &ParseError{
-				Path:   path,
-				Reason: fmt.Sprintf("filename stem %q does not match frontmatter name %q", stem, name),
+		switch mode {
+		case parseModeFile:
+			stem := filenameStem(path)
+			if stem != name {
+				return Skill{}, &ParseError{
+					Path:   path,
+					Reason: fmt.Sprintf("filename stem %q does not match frontmatter name %q", stem, name),
+				}
 			}
+		case parseModeSkillDir:
+			dirName := filepath.Base(filepath.Dir(path))
+			if dirName != name {
+				return Skill{}, &ParseError{
+					Path:   path,
+					Reason: fmt.Sprintf("directory name %q does not match frontmatter name %q", dirName, name),
+				}
+			}
+		case parseModeNone:
+			// no-op
 		}
 	}
 
@@ -186,47 +236,175 @@ func findClosingFence(body []byte) int {
 }
 
 // parseHeader walks the frontmatter body line by line and returns a
-// map of key → value.  Lines that don't look like `key: value` are
-// reported as ParseError.  Blank lines are tolerated.
+// map of key → value.  Supports two value shapes:
+//
+//   - inline:  `key: value` (single line; quotes stripped)
+//   - block:   `key: >` or `key: |` on one line, followed by
+//     indented continuation lines.  `>` folds newlines to
+//     spaces; `|` preserves newlines literally.  Both strip
+//     trailing whitespace.  Continuation ends at the first
+//     line that is not indented (>=1 space) and not blank.
+//
+// Lines that don't look like `key: value` or aren't part of a block
+// scalar are reported as ParseError.  Blank lines outside block
+// scalars are tolerated.  `# comment` lines are ignored.
 func parseHeader(header []byte, path string) (map[string]string, error) {
 	out := make(map[string]string)
+
+	// Buffer all lines first so we can implement block-scalar
+	// lookahead without re-scanning.
 	scanner := bufio.NewScanner(bytes.NewReader(header))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lineNum := 0
+	var lines []string
 	for scanner.Scan() {
-		lineNum++
-		raw := scanner.Text()
-		line := strings.TrimRight(raw, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		// `# comment` lines are ignored — convenience for humans.
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
-			continue
-		}
-		colon := strings.IndexByte(line, ':')
-		if colon < 1 {
-			return nil, &ParseError{
-				Path:   path,
-				Reason: fmt.Sprintf("line %d: expected `key: value`, got %q", lineNum, line),
-			}
-		}
-		key := strings.TrimSpace(line[:colon])
-		value := strings.TrimSpace(line[colon+1:])
-		// Strip matching surrounding quotes on the value if present.
-		value = stripQuotes(value)
-		if key == "" {
-			return nil, &ParseError{
-				Path:   path,
-				Reason: fmt.Sprintf("line %d: empty key", lineNum),
-			}
-		}
-		out[key] = value
+		lines = append(lines, strings.TrimRight(scanner.Text(), "\r"))
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, &ParseError{Path: path, Reason: fmt.Sprintf("scan header: %v", err)}
 	}
+
+	for i := 0; i < len(lines); i++ {
+		raw := lines[i]
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		// `# comment` lines are ignored.
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		colon := strings.IndexByte(raw, ':')
+		if colon < 1 {
+			return nil, &ParseError{
+				Path:   path,
+				Reason: fmt.Sprintf("line %d: expected `key: value`, got %q", i+1, raw),
+			}
+		}
+		key := strings.TrimSpace(raw[:colon])
+		valuePart := strings.TrimSpace(raw[colon+1:])
+		if key == "" {
+			return nil, &ParseError{
+				Path:   path,
+				Reason: fmt.Sprintf("line %d: empty key", i+1),
+			}
+		}
+
+		// Block scalar markers: `>` (folded) or `|` (literal),
+		// optionally followed by a chomp indicator (`-` strip, `+`
+		// keep — both treated as strip-trailing here).
+		if valuePart == ">" || valuePart == "|" ||
+			valuePart == ">-" || valuePart == "|-" ||
+			valuePart == ">+" || valuePart == "|+" {
+			marker := valuePart[0]
+			value, consumed := readBlockScalar(lines[i+1:], marker)
+			out[key] = value
+			i += consumed
+			continue
+		}
+
+		// Implicit block: `key:` with empty value, followed by an
+		// indented continuation.  Treated as a literal block so
+		// list-style continuations (`  - item`) and free-form
+		// continuations both round-trip cleanly into Extras.  This
+		// matches what `.agents` skills do for fields like
+		// `allowed-tools` and avoids erroring out on perfectly
+		// valid YAML that just happens to use implicit block style.
+		if valuePart == "" && i+1 < len(lines) {
+			next := lines[i+1]
+			if next != "" && (next[0] == ' ' || next[0] == '\t') {
+				value, consumed := readBlockScalar(lines[i+1:], '|')
+				out[key] = value
+				i += consumed
+				continue
+			}
+		}
+
+		out[key] = stripQuotes(valuePart)
+	}
 	return out, nil
+}
+
+// readBlockScalar reads continuation lines for a YAML-style block
+// scalar.  Continuation lines are any non-blank lines that start with
+// whitespace; the leading indent (smallest non-zero) is stripped from
+// each so the value is dedented.  Blank lines inside a block scalar
+// are preserved (rendered as newlines for `|`, swallowed for `>`).
+//
+// marker is the introducing character: `>` for folded (newlines →
+// spaces) or `|` for literal (newlines preserved).
+//
+// Returns the assembled value and the number of input lines consumed.
+func readBlockScalar(rest []string, marker byte) (string, int) {
+	var contLines []string
+	consumed := 0
+	for _, line := range rest {
+		if line == "" {
+			// Blank line.  We don't know yet whether it's
+			// internal to the block or terminating; include it
+			// provisionally and trim trailing blanks at the end.
+			contLines = append(contLines, "")
+			consumed++
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			// First non-indented, non-blank line ends the block.
+			break
+		}
+		contLines = append(contLines, line)
+		consumed++
+	}
+	// Strip trailing blank lines.
+	for len(contLines) > 0 && strings.TrimSpace(contLines[len(contLines)-1]) == "" {
+		contLines = contLines[:len(contLines)-1]
+	}
+	if len(contLines) == 0 {
+		return "", consumed
+	}
+	// Find the smallest leading indent across non-blank lines.
+	minIndent := -1
+	for _, l := range contLines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		n := 0
+		for n < len(l) && (l[n] == ' ' || l[n] == '\t') {
+			n++
+		}
+		if minIndent == -1 || n < minIndent {
+			minIndent = n
+		}
+	}
+	if minIndent < 0 {
+		minIndent = 0
+	}
+	for i, l := range contLines {
+		if len(l) >= minIndent {
+			contLines[i] = l[minIndent:]
+		}
+	}
+	if marker == '>' {
+		// Folded: join non-blank runs with single spaces; blank
+		// lines remain as paragraph breaks (single newline).
+		var b strings.Builder
+		prevBlank := false
+		for i, l := range contLines {
+			if strings.TrimSpace(l) == "" {
+				if !prevBlank {
+					b.WriteByte('\n')
+				}
+				prevBlank = true
+				continue
+			}
+			if i > 0 && !prevBlank {
+				b.WriteByte(' ')
+			}
+			b.WriteString(l)
+			prevBlank = false
+		}
+		return strings.TrimSpace(b.String()), consumed
+	}
+	// Literal: preserve newlines verbatim.
+	return strings.TrimRight(strings.Join(contLines, "\n"), "\n"), consumed
 }
 
 // stripQuotes removes a single matching pair of surrounding single or

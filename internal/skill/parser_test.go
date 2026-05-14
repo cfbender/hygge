@@ -115,7 +115,6 @@ func TestParseFile_InvalidName(t *testing.T) {
 func TestParseFile_MissingRequiredKeys(t *testing.T) {
 	cases := map[string]string{
 		"missing description": "---\nname: ok\nwhen_to_use: y\n---\nbody\n",
-		"missing when_to_use": "---\nname: ok\ndescription: x\n---\nbody\n",
 		"missing name":        "---\ndescription: x\nwhen_to_use: y\n---\nbody\n",
 	}
 	for label, body := range cases {
@@ -129,6 +128,135 @@ func TestParseFile_MissingRequiredKeys(t *testing.T) {
 				t.Fatalf("expected error for %s", label)
 			}
 		})
+	}
+}
+
+// TestParseFile_WhenToUseOptional verifies that skill files following
+// the `.agents` convention (description-only, no when_to_use) parse
+// successfully.
+func TestParseFile_WhenToUseOptional(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ok.md")
+	body := "---\nname: ok\ndescription: x only\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("expected description-only frontmatter to parse, got %v", err)
+	}
+	if sk.WhenToUse != "" {
+		t.Errorf("WhenToUse = %q, want empty", sk.WhenToUse)
+	}
+	if sk.Description != "x only" {
+		t.Errorf("Description = %q", sk.Description)
+	}
+}
+
+// TestParseSkillDir_HappyPath verifies the directory-style layout used
+// by the `.agents` standard parses correctly.
+func TestParseSkillDir_HappyPath(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "adapt")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	body := "---\nname: adapt\ndescription: Adapt designs across contexts. Use when responsive design is mentioned.\nversion: 1.0.0\n---\n# Adapt\n\nbody text.\n"
+	if err := os.WriteFile(skillFile, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := ParseSkillDir(skillDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sk.Name != "adapt" {
+		t.Errorf("Name = %q", sk.Name)
+	}
+	if sk.Path != skillFile {
+		t.Errorf("Path = %q, want %q", sk.Path, skillFile)
+	}
+	if sk.Dir != skillDir {
+		t.Errorf("Dir = %q, want %q", sk.Dir, skillDir)
+	}
+	if got := sk.Extras["version"]; got != "1.0.0" {
+		t.Errorf("Extras[version] = %q", got)
+	}
+}
+
+// TestParseSkillDir_NameMismatch verifies that the directory name must
+// equal the frontmatter `name`.
+func TestParseSkillDir_NameMismatch(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "wrong-dir")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	body := "---\nname: original\ndescription: x\n---\nbody\n"
+	if err := os.WriteFile(skillFile, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseSkillDir(skillDir); err == nil {
+		t.Fatal("expected error: directory name mismatch")
+	}
+}
+
+// TestParseFile_FoldedBlockScalar verifies that YAML folded-block
+// values (`description: >` followed by indented continuation) parse
+// with newlines collapsed to spaces.
+func TestParseFile_FoldedBlockScalar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ok.md")
+	body := "---\nname: ok\ndescription: >\n  Line one of the description.\n  Line two continuing the same paragraph.\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Line one of the description. Line two continuing the same paragraph."
+	if sk.Description != want {
+		t.Errorf("Description = %q, want %q", sk.Description, want)
+	}
+}
+
+// TestParseFile_LiteralBlockScalar verifies that `|` preserves
+// newlines.
+func TestParseFile_LiteralBlockScalar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ok.md")
+	body := "---\nname: ok\ndescription: x\nnotes: |\n  line one\n  line two\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sk.Extras["notes"]; got != "line one\nline two" {
+		t.Errorf("Extras[notes] = %q", got)
+	}
+}
+
+// TestParseFile_ImplicitBlockList verifies that the YAML "key:\n  -
+// item" shape used by `allowed-tools` in some `.agents` skills is
+// accepted (and stored verbatim into Extras).
+func TestParseFile_ImplicitBlockList(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ok.md")
+	body := "---\nname: ok\ndescription: x\nallowed-tools:\n  - Bash(*)\n  - Read(*)\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := sk.Extras["allowed-tools"]
+	if got != "- Bash(*)\n- Read(*)" {
+		t.Errorf("Extras[allowed-tools] = %q", got)
 	}
 }
 

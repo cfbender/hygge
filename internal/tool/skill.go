@@ -87,11 +87,21 @@ func (t *skillTool) Execute(_ context.Context, raw json.RawMessage, _ ExecContex
 		}, nil
 	}
 
+	// Prepend a one-line header pointing at the skill's directory so
+	// the model can resolve relative paths inside the body (script
+	// blocks, references, etc.).  The header is plain text so it does
+	// not interfere with markdown rendering.
+	content := sk.Body
+	if sk.Dir != "" {
+		content = fmt.Sprintf("Skill directory: %s\n\n%s", sk.Dir, sk.Body)
+	}
+
 	return Result{
-		Content: sk.Body,
+		Content: content,
 		Metadata: map[string]any{
 			"name":   sk.Name,
 			"path":   sk.Path,
+			"dir":    sk.Dir,
 			"source": sk.Source.String(),
 		},
 	}, nil
