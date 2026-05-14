@@ -150,32 +150,13 @@ func (a *adapter) CountTokens(ctx context.Context, req provider.Request) (int64,
 
 // ListModels implements provider.Provider.
 //
-// Anthropic does not expose a public models list endpoint.  The static slice
-// returned here is replaced by the models.dev catalog integration in Task 10.
+// Anthropic does not expose a public models list endpoint.  Model
+// metadata is sourced from the shared [*catalog.Catalog] wired by the
+// CLI bootstrap; when no catalog is wired (or it has no Anthropic
+// entries) a small hardcoded fallback list is returned so the TUI
+// keeps working fully offline.  See [Models].
 func (a *adapter) ListModels(_ context.Context) ([]provider.Model, error) {
-	return []provider.Model{
-		{
-			Name:           "claude-sonnet-4-5",
-			ContextWindow:  200_000,
-			MaxOutput:      8192,
-			SupportsTools:  true,
-			SupportsImages: true,
-		},
-		{
-			Name:           "claude-opus-4-5",
-			ContextWindow:  200_000,
-			MaxOutput:      8192,
-			SupportsTools:  true,
-			SupportsImages: true,
-		},
-		{
-			Name:           "claude-haiku-4-5",
-			ContextWindow:  200_000,
-			MaxOutput:      8192,
-			SupportsTools:  true,
-			SupportsImages: true,
-		},
-	}, nil
+	return Models(), nil
 }
 
 // buildRequestBody serialises a provider.Request into the Messages API JSON

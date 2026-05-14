@@ -97,11 +97,13 @@ func New(opts map[string]any) (provider.Provider, error) {
 	}
 
 	return openaicompat.New(openaicompat.Config{
-		Name:         "openrouter",
-		BaseURL:      baseURL,
-		APIKey:       key,
-		ExtraHeaders: extra,
-		Models:       Models(),
+		Name:            "openrouter",
+		BaseURL:         baseURL,
+		APIKey:          key,
+		ExtraHeaders:    extra,
+		Models:          Models(),
+		Catalog:         catalogHandle(),
+		CatalogProvider: "openrouter",
 	})
 }
 

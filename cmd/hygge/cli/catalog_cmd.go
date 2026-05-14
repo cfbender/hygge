@@ -1,0 +1,329 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/cfbender/hygge/internal/catalog"
+)
+
+// newCatalogCmd builds the `hygge catalog` subcommand group.
+func newCatalogCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "catalog",
+		Short: "Inspect and refresh the models.dev-backed catalog",
+		Long: `Inspect and refresh hygge's model catalog.
+
+The catalog is hygge's central source of truth for model metadata:
+pricing, capabilities, and context-window limits.  It is sourced from
+models.dev, persisted at $XDG_STATE_HOME/hygge/catalog.json, and
+shipped with an embedded snapshot so hygge works fully offline.
+
+Subcommands:
+  list                     Summary by provider, with model counts.
+  list <provider>          Table of every model the catalog knows for
+                           that provider id (id, context, capabilities,
+                           pricing).
+  show <provider>/<model>  All metadata for a single model.
+  refresh                  Pull a fresh snapshot from models.dev and
+                           write it to the state directory.`,
+	}
+	root.AddCommand(newCatalogListCmd(), newCatalogShowCmd(), newCatalogRefreshCmd())
+	return root
+}
+
+// newCatalogListCmd builds `hygge catalog list [<provider>]`.
+func newCatalogListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list [<provider>]",
+		Short: "List providers with model counts, or models for a single provider",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rt, err := bootstrap(context.Background(), bootstrapOptions{
+				ConfigFile:      rootFlags.ConfigFile,
+				ProfileName:     rootFlags.Profile,
+				Pwd:             rootFlags.Pwd,
+				ProviderFactory: stubProviderFactory,
+			})
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rt.Close() }()
+
+			cat := rt.Catalog.Source()
+			if cat == nil {
+				return die(cmd, "no catalog available")
+			}
+
+			if len(args) == 0 {
+				return printCatalogProviders(cmd, cat)
+			}
+			return printCatalogProvider(cmd, cat, args[0])
+		},
+	}
+}
+
+// printCatalogProviders writes the "by provider" summary table.
+func printCatalogProviders(cmd *cobra.Command, cat *catalog.Catalog) error {
+	loaded := cat.Loaded()
+	printf(out(cmd), "source: %s   fetched: %s   age: %s\n",
+		loaded.Source, formatLoadedTime(loaded.FetchedAt), formatAge(loaded.Age))
+	printf(out(cmd), "models: %d across %d providers\n\n", loaded.Models, loaded.Providers)
+
+	tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
+	writeln(tw, "PROVIDER\tMODELS\tREASONING")
+	for _, p := range cat.Providers() {
+		entries := cat.Models(p)
+		reason := 0
+		for _, e := range entries {
+			if e.Capabilities.Reasoning {
+				reason++
+			}
+		}
+		printf(tw, "%s\t%d\t%d\n", p, len(entries), reason)
+	}
+	return tw.Flush()
+}
+
+// printCatalogProvider writes the per-provider model table.
+func printCatalogProvider(cmd *cobra.Command, cat *catalog.Catalog, providerID string) error {
+	entries := cat.Models(providerID)
+	if len(entries) == 0 {
+		return die(cmd, "no models for provider %q", providerID)
+	}
+	tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
+	writeln(tw, "MODEL\tCONTEXT\tCAPABILITIES\tINPUT$/MTok\tOUTPUT$/MTok")
+	for _, e := range entries {
+		printf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			e.ID,
+			formatContext(e.Limit.ContextWindow),
+			formatCapabilities(e.Capabilities),
+			formatMoney(e.Cost.Input),
+			formatMoney(e.Cost.Output),
+		)
+	}
+	return tw.Flush()
+}
+
+// newCatalogShowCmd builds `hygge catalog show <provider>/<model>`.
+func newCatalogShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <provider>/<model>",
+		Short: "Print all metadata for a single catalog entry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rt, err := bootstrap(context.Background(), bootstrapOptions{
+				ConfigFile:      rootFlags.ConfigFile,
+				ProfileName:     rootFlags.Profile,
+				Pwd:             rootFlags.Pwd,
+				ProviderFactory: stubProviderFactory,
+			})
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rt.Close() }()
+
+			ref := args[0]
+			providerID, modelID, ok := splitProviderModel(ref)
+			if !ok {
+				return die(cmd, "expected <provider>/<model>, got %q", ref)
+			}
+			cat := rt.Catalog.Source()
+			if cat == nil {
+				return die(cmd, "no catalog available")
+			}
+			e, ok := cat.Lookup(providerID, modelID)
+			if !ok {
+				return die(cmd, "no entry for %s/%s (try `hygge catalog list %s` to see what's available)",
+					providerID, modelID, providerID)
+			}
+			printCatalogEntry(cmd, e)
+			return nil
+		},
+	}
+}
+
+// printCatalogEntry writes the full per-entry detail block.
+func printCatalogEntry(cmd *cobra.Command, e catalog.Entry) {
+	tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
+	printf(tw, "provider:\t%s\n", e.Provider)
+	printf(tw, "id:\t%s\n", e.ID)
+	if e.Name != "" {
+		printf(tw, "name:\t%s\n", e.Name)
+	}
+	if e.ReleaseDate != "" {
+		printf(tw, "release_date:\t%s\n", e.ReleaseDate)
+	}
+	printf(tw, "source:\t%s\n", e.Source)
+	printf(tw, "\n")
+	printf(tw, "context_window:\t%s\n", formatContext(e.Limit.ContextWindow))
+	printf(tw, "max_output:\t%s\n", formatContext(e.Limit.MaxOutput))
+	printf(tw, "\n")
+	printf(tw, "capabilities:\n")
+	printf(tw, "  reasoning:\t%v\n", e.Capabilities.Reasoning)
+	printf(tw, "  tool_calling:\t%v\n", e.Capabilities.ToolCalling)
+	printf(tw, "  attachment:\t%v\n", e.Capabilities.Attachment)
+	printf(tw, "  input_text:\t%v\n", e.Capabilities.InputText)
+	printf(tw, "  input_images:\t%v\n", e.Capabilities.InputImages)
+	printf(tw, "  output_text:\t%v\n", e.Capabilities.OutputText)
+	printf(tw, "  output_images:\t%v\n", e.Capabilities.OutputImages)
+	printf(tw, "\n")
+	printf(tw, "cost (USD per 1M tokens):\n")
+	printf(tw, "  input:\t%s\n", formatMoney(e.Cost.Input))
+	printf(tw, "  output:\t%s\n", formatMoney(e.Cost.Output))
+	printf(tw, "  cache_read:\t%s\n", formatMoney(e.Cost.CacheRead))
+	printf(tw, "  cache_write:\t%s\n", formatMoney(e.Cost.CacheWrite))
+	_ = tw.Flush()
+}
+
+// newCatalogRefreshCmd builds `hygge catalog refresh [--quiet]`.
+func newCatalogRefreshCmd() *cobra.Command {
+	var quiet bool
+	c := &cobra.Command{
+		Use:   "refresh",
+		Short: "Pull a fresh snapshot from models.dev and persist it",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			rt, err := bootstrap(context.Background(), bootstrapOptions{
+				ConfigFile:      rootFlags.ConfigFile,
+				ProfileName:     rootFlags.Profile,
+				Pwd:             rootFlags.Pwd,
+				ProviderFactory: stubProviderFactory,
+			})
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rt.Close() }()
+
+			cat := rt.Catalog.Source()
+			if cat == nil {
+				return die(cmd, "no catalog available")
+			}
+			prev := cat.Loaded()
+			res, err := cat.Refresh(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("catalog refresh: %w", err)
+			}
+			if quiet {
+				return nil
+			}
+			path := cat.StatePath()
+			printf(out(cmd), "refreshed: %d providers / %d models", res.Providers, res.Models)
+			if path != "" {
+				printf(out(cmd), " (%s)", path)
+			}
+			printf(out(cmd), "\n")
+			if !prev.FetchedAt.IsZero() {
+				printf(out(cmd), "previous snapshot age: %s\n", formatAge(prev.Age))
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&quiet, "quiet", false, "suppress success output (exit code still reflects failure)")
+	return c
+}
+
+// formatCapabilities collapses the Capabilities struct into a
+// short, comma-separated list of advertised features.  Used by the
+// per-provider table.
+func formatCapabilities(c catalog.Capabilities) string {
+	flags := []string{}
+	if c.Reasoning {
+		flags = append(flags, "reasoning")
+	}
+	if c.ToolCalling {
+		flags = append(flags, "tools")
+	}
+	if c.InputImages {
+		flags = append(flags, "vision")
+	}
+	if c.Attachment {
+		flags = append(flags, "attachments")
+	}
+	if c.OutputImages {
+		flags = append(flags, "image-out")
+	}
+	sort.Strings(flags)
+	if len(flags) == 0 {
+		return "-"
+	}
+	return strings.Join(flags, ",")
+}
+
+// formatContext renders an integer context window as a human-friendly
+// string ("200K", "1M") with a fallback to the raw number when the
+// magnitude doesn't match a clean prefix.
+func formatContext(n int64) string {
+	if n <= 0 {
+		return "-"
+	}
+	switch {
+	case n >= 1_000_000 && n%1_000_000 == 0:
+		return fmt.Sprintf("%dM", n/1_000_000)
+	case n >= 1_000 && n%1_000 == 0:
+		return fmt.Sprintf("%dK", n/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// formatMoney renders a USD-per-1M-tokens rate.  Returns "-" for zero
+// (meaning "model doesn't charge for that token class").
+func formatMoney(v float64) string {
+	if v <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("$%g", v)
+}
+
+// formatAge renders a duration in a way that's readable for the user
+// (e.g. "5h", "3d", "two-weeks").  Falls back to the duration's
+// default String() for small values.
+func formatAge(d time.Duration) string {
+	if d <= 0 {
+		return "0"
+	}
+	day := 24 * time.Hour
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < day:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		days := int(d / day)
+		return fmt.Sprintf("%dd", days)
+	}
+}
+
+// formatLoadedTime renders the snapshot timestamp.  Falls back to
+// "embedded (no timestamp)" for zero times — that's the marker the
+// loader leaves on the embedded snapshot.
+func formatLoadedTime(t time.Time) string {
+	if t.IsZero() {
+		return "embedded"
+	}
+	return t.Format(time.RFC3339)
+}
+
+// splitProviderModel splits "<provider>/<model>" into its two parts.
+// Returns ok=false when the input has no slash.
+//
+// The model id may itself contain slashes (e.g. openrouter ids are
+// "openrouter/openai/o3-mini" if a user enters them with the
+// "openrouter/" prefix); we split on the FIRST slash so the remainder
+// keeps its namespaced form.
+func splitProviderModel(ref string) (provider, model string, ok bool) {
+	i := strings.Index(ref, "/")
+	if i <= 0 || i == len(ref)-1 {
+		return "", "", false
+	}
+	return ref[:i], ref[i+1:], true
+}

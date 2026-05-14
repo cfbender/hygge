@@ -200,6 +200,13 @@ type Model struct {
 	// SupportsImages indicates whether the model accepts inline image
 	// parts in user messages.
 	SupportsImages bool
+
+	// SupportsReasoning indicates whether the model produces an
+	// explicit thinking / reasoning trace.  Sourced from
+	// internal/catalog's capability metadata; zero (default) when
+	// the catalog has no entry, in which case adapters that care
+	// (openaicompat) fall back to name-prefix heuristics.
+	SupportsReasoning bool
 }
 
 // Usage is the cumulative token accounting reported by the provider on the

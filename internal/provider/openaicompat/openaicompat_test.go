@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 )
@@ -769,7 +770,7 @@ func equalTypes(a, b []provider.EventType) bool {
 
 // --- Reasoning-model detection --------------------------------------------
 
-func TestIsReasoningModel(t *testing.T) {
+func TestMatchesReasoningPrefix(t *testing.T) {
 	cases := []struct {
 		id   string
 		want bool
@@ -796,8 +797,8 @@ func TestIsReasoningModel(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.id, func(t *testing.T) {
-			if got := isReasoningModel(c.id); got != c.want {
-				t.Errorf("isReasoningModel(%q)=%v, want %v", c.id, got, c.want)
+			if got := matchesReasoningPrefix(c.id); got != c.want {
+				t.Errorf("matchesReasoningPrefix(%q)=%v, want %v", c.id, got, c.want)
 			}
 		})
 	}
@@ -1007,4 +1008,102 @@ func TestReasoningDelta_HelperHandlesBothSpellings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Catalog-driven reasoning detection -----------------------------------
+
+func TestAdapter_IsReasoningModel_CatalogHit(t *testing.T) {
+	t.Parallel()
+	// Build a catalog that says model "future-reason-1" is a
+	// reasoning model and "future-plain-1" is not.  Confirm both
+	// answers come from the catalog rather than the prefix matcher.
+	cat := buildFixtureCatalog(t, `{
+      "openai": {
+        "models": {
+          "future-reason-1": {"id": "future-reason-1", "reasoning": true},
+          "future-plain-1":  {"id": "future-plain-1"}
+        }
+      }
+    }`)
+
+	p := newCompat(t, Config{
+		Name:    "openai",
+		BaseURL: "http://unused",
+		APIKey:  "x",
+		Models:  []provider.Model{},
+		Catalog: cat,
+	})
+	a := p.(*adapter)
+	if !a.isReasoningModel("future-reason-1") {
+		t.Errorf("catalog-driven detection missed reasoning model")
+	}
+	if a.isReasoningModel("future-plain-1") {
+		t.Errorf("catalog-driven detection wrongly flagged plain model")
+	}
+}
+
+func TestAdapter_IsReasoningModel_CatalogMissFallsBackToPrefix(t *testing.T) {
+	t.Parallel()
+	// Empty catalog: no entries match.  The legacy prefix matcher
+	// must still answer correctly for o-series ids.
+	cat := buildFixtureCatalog(t, `{"openai": {"models": {}}}`)
+	p := newCompat(t, Config{
+		Name:    "openai",
+		BaseURL: "http://unused",
+		APIKey:  "x",
+		Models:  []provider.Model{},
+		Catalog: cat,
+	})
+	a := p.(*adapter)
+	if !a.isReasoningModel("o3-mini") {
+		t.Errorf("prefix fallback missed o3-mini")
+	}
+	if a.isReasoningModel("gpt-4o") {
+		t.Errorf("prefix fallback wrongly flagged gpt-4o")
+	}
+}
+
+func TestAdapter_IsReasoningModel_NoCatalog_PrefixMatcher(t *testing.T) {
+	t.Parallel()
+	// No catalog wired at all (the historical default).  Prefix
+	// matcher is the only source.
+	p := newCompat(t, Config{
+		Name:    "openai",
+		BaseURL: "http://unused",
+		APIKey:  "x",
+		Models:  []provider.Model{},
+	})
+	a := p.(*adapter)
+	if !a.isReasoningModel("o4-mini") {
+		t.Errorf("expected o4-mini to be reasoning")
+	}
+	if a.isReasoningModel("future-unknown-model") {
+		t.Errorf("unknown model should not be reasoning")
+	}
+}
+
+// buildFixtureCatalog spins up an httptest server that serves body, then
+// constructs a *catalog.Catalog refreshed against it.  Returned catalog
+// has the BackgroundRefresh disabled and is fully populated by the time
+// this helper returns.
+func buildFixtureCatalog(t *testing.T, body string) *catalog.Catalog {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	bg := false
+	cat, err := catalog.Load(catalog.LoadOptions{
+		StateDir:          t.TempDir(),
+		HTTPClient:        srv.Client(),
+		BaseURL:           srv.URL,
+		BackgroundRefresh: &bg,
+	})
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+	if _, err := cat.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	return cat
 }

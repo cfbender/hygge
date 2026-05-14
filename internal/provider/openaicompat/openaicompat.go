@@ -52,6 +52,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
 )
 
@@ -110,6 +111,22 @@ type Config struct {
 	// DefaultMaxTokens is the value sent when provider.Request.MaxTokens
 	// is zero.  Zero here means "omit max_tokens" — let the server pick.
 	DefaultMaxTokens int
+
+	// Catalog, when non-nil, is consulted by reasoning-model detection
+	// before falling back to the legacy name-prefix heuristic.  The
+	// catalog is the authoritative source for capability metadata
+	// (sourced from models.dev); the prefix matcher is the fallback
+	// for models the catalog hasn't been refreshed for.
+	//
+	// CatalogProvider is the provider id used for catalog Lookups.
+	// When empty, [Config.Name] is used.  This matters for adapters
+	// that ride on top of compat (e.g. openrouter) where the
+	// adapter's Name and the catalog's provider id differ from the
+	// upstream vendor that owns the reasoning capability — see
+	// canonicaliseModelID below for the namespaced-id stripping
+	// applied before catalog lookup.
+	Catalog         *catalog.Catalog
+	CatalogProvider string
 
 	// Now is an injectable clock for tests and diagnostics.  Defaults to
 	// time.Now.
@@ -225,7 +242,7 @@ func (a *adapter) buildRequestBody(req provider.Request) ([]byte, error) {
 		body.ToolChoice = "auto"
 	}
 
-	reasoning := isReasoningModel(req.ModelName)
+	reasoning := a.isReasoningModel(req.ModelName)
 
 	// Reasoning-class OpenAI models reject `temperature` and
 	// `max_tokens` outright.  Route them through the
@@ -272,10 +289,66 @@ func (a *adapter) buildRequestBody(req provider.Request) ([]byte, error) {
 // reasoning-class OpenAI model that requires the reasoning request
 // shape (max_completion_tokens, no temperature, reasoning_effort).
 //
-// Detection is by name prefix because hygge's catalog doesn't yet
-// carry capability metadata.  This will move to a catalog lookup when
-// "Models-catalog-driven model lists" lands (see STATUS.md).  Matches,
-// case-insensitive on the prefix:
+// Two-tier detection:
+//
+//  1. When a [*catalog.Catalog] is wired into Config.Catalog, look up
+//     the model in the catalog and use its [Capabilities.Reasoning]
+//     flag.  This is the authoritative source — when models.dev
+//     advertises reasoning, hygge believes it.
+//  2. Otherwise (or when the catalog has no entry for the model), fall
+//     back to the hardcoded name-prefix matcher.  This keeps detection
+//     working for brand-new ids the catalog hasn't been refreshed for.
+//
+// Provider-prefixed forms ("openai/o3-mini", "openrouter/openai/o3")
+// are handled by stripping any leading "<vendor>/" segments before
+// the lookup or prefix check.
+func (a *adapter) isReasoningModel(modelID string) bool {
+	if modelID == "" {
+		return false
+	}
+	// Catalog tier.  We try the configured CatalogProvider first;
+	// when that misses we also try "openai" because openrouter-style
+	// ids ("openai/o3-mini") carry their upstream vendor in the id
+	// itself.  See canonicaliseModelID for the stripping rules.
+	if a.cfg.Catalog != nil {
+		bare := canonicaliseModelID(modelID)
+		providerID := a.cfg.CatalogProvider
+		if providerID == "" {
+			providerID = a.cfg.Name
+		}
+		if providerID != "" {
+			if e, ok := a.cfg.Catalog.Lookup(providerID, bare); ok {
+				return e.Capabilities.Reasoning
+			}
+		}
+		// Second chance: try "openai" directly.  Most reasoning
+		// models are OpenAI's, and ids like "openai/o3-mini" should
+		// resolve cleanly when the catalog has them under that
+		// provider regardless of which adapter is asking.
+		if providerID != "openai" {
+			if e, ok := a.cfg.Catalog.Lookup("openai", bare); ok {
+				return e.Capabilities.Reasoning
+			}
+		}
+	}
+	return matchesReasoningPrefix(modelID)
+}
+
+// canonicaliseModelID strips any leading "<vendor>/" segments and
+// lowercases the result.  Used to translate ids like
+// "openrouter/openai/o3-mini" into "o3-mini" before a catalog lookup
+// or prefix check.
+func canonicaliseModelID(modelID string) string {
+	id := strings.ToLower(modelID)
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		id = id[i+1:]
+	}
+	return id
+}
+
+// matchesReasoningPrefix is the legacy heuristic kept as a fallback
+// when the catalog has no entry for a model.  Matches, case-insensitive
+// on the prefix:
 //
 //   - o1, o1-* (e.g. o1-mini)
 //   - o3, o3-* (e.g. o3-mini)
@@ -284,21 +357,12 @@ func (a *adapter) buildRequestBody(req provider.Request) ([]byte, error) {
 //     gateway models)
 //
 // Provider-prefixed forms ("openai/o3-mini", "openrouter/openai/o3")
-// also match by stripping any leading "<vendor>/" segments before
-// the prefix check.
-//
-// TODO(catalog): replace with a capability lookup once the catalog
-// carries reasoning support flags per-model.
-func isReasoningModel(modelID string) bool {
+// are handled via canonicaliseModelID upstream.
+func matchesReasoningPrefix(modelID string) bool {
 	if modelID == "" {
 		return false
 	}
-	id := strings.ToLower(modelID)
-	// Strip any vendor-prefix segments ("openai/o3-mini" -> "o3-mini",
-	// "openrouter/openai/o3" -> "o3").
-	if i := strings.LastIndex(id, "/"); i >= 0 {
-		id = id[i+1:]
-	}
+	id := canonicaliseModelID(modelID)
 	switch {
 	case id == "o1", strings.HasPrefix(id, "o1-"):
 		return true

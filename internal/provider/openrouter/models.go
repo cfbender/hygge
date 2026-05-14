@@ -1,28 +1,74 @@
 package openrouter
 
-import "github.com/cfbender/hygge/internal/provider"
+import (
+	"sync"
 
-// Models returns the static catalog of OpenRouter models this shim
-// advertises.
+	"github.com/cfbender/hygge/internal/catalog"
+	"github.com/cfbender/hygge/internal/provider"
+)
+
+// catalogMu guards access to packageCatalog so SetCatalog from the CLI
+// bootstrap is safe to race against ongoing Models calls.
+var (
+	catalogMu      sync.RWMutex
+	packageCatalog *catalog.Catalog
+)
+
+// SetCatalog wires a shared [*catalog.Catalog] into this provider
+// package.  Called once by cmd/hygge/cli/common.go during bootstrap.
+// Passing nil disables catalog-driven model lists (useful for tests
+// that want the hardcoded defaults).
+func SetCatalog(c *catalog.Catalog) {
+	catalogMu.Lock()
+	defer catalogMu.Unlock()
+	packageCatalog = c
+}
+
+// catalogHandle returns the package-level catalog under a read lock.
+func catalogHandle() *catalog.Catalog {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	return packageCatalog
+}
+
+// Models returns the model catalog this shim advertises.
 //
-// Static catalog is a curated subset of OpenRouter's full model list.
-// Users can pass any other model name via `[model] name = ...` in config
-// — OpenRouter resolves arbitrary "<vendor>/<model>" strings server-side
-// against its live catalog.  This list exists to give the user
-// discoverable defaults spanning the major upstream vendors; it is not
-// an exhaustive enumeration.
+// When a [*catalog.Catalog] is wired via [SetCatalog], the list is
+// derived from the catalog's "openrouter" entries.  When no catalog
+// is wired (or it has no OpenRouter entries), a small hardcoded
+// curated subset is returned so the TUI keeps working offline.
 //
-// Capability flags (SupportsTools / SupportsImages) are conservative
-// best-effort values for v0.2: true for the flagship Anthropic, OpenAI
-// and Google entries; mixed for the open-weight and DeepSeek models.
-// The authoritative source for pricing and capability flags is the
-// models.dev catalog integration scheduled for the v0.2 polish pass —
-// these numbers are placeholders that catalog will override.
-//
-// Adding entries: pick well-known "<vendor>/<model>" IDs only, no
-// invented version numbers.  Anything experimental belongs in user
-// override (`hygge config set model.name ...`) rather than this list.
+// Users can pass any other model name via `[model] name = ...` in
+// config — OpenRouter resolves arbitrary "<vendor>/<model>" strings
+// server-side against its live catalog.  The hardcoded list exists
+// only to give discoverable defaults spanning the major upstream
+// vendors; it is not an exhaustive enumeration.
 func Models() []provider.Model {
+	c := catalogHandle()
+	if c == nil {
+		return defaultModels()
+	}
+	entries := c.Models("openrouter")
+	if len(entries) == 0 {
+		return defaultModels()
+	}
+	out := make([]provider.Model, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, provider.Model{
+			Name:              e.ID,
+			ContextWindow:     e.Limit.ContextWindow,
+			MaxOutput:         e.Limit.MaxOutput,
+			SupportsTools:     e.Capabilities.ToolCalling,
+			SupportsImages:    e.Capabilities.InputImages,
+			SupportsReasoning: e.Capabilities.Reasoning,
+		})
+	}
+	return out
+}
+
+// defaultModels is the hardcoded fallback returned when no catalog is
+// wired.  Mirrors the v0.1 hardcoded list verbatim.
+func defaultModels() []provider.Model {
 	return []provider.Model{
 		{
 			Name:           "anthropic/claude-sonnet-4-5",
