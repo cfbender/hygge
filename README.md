@@ -4,7 +4,7 @@ A fast, beautiful, plugin-extensible TUI.
 
 ## Build
 
-Requires [mise](https://mise.jdx.dev) and [golangci-lint](https://golangci-lint.run/welcome/install/).
+Requires [mise](https://mise.jdx.dev)
 
 ```sh
 mise install          # installs the Go toolchain pinned in .mise.toml
