@@ -40,7 +40,8 @@ export ANTHROPIC_API_KEY=...    # required to talk to the model
 - `hygge config explain [key]` — print the effective config with provenance.
 - `hygge theme list` / `hygge theme show <name>` — inspect available themes.
 - `hygge skills list` / `show <name>` / `doctor` — inspect loaded skills.
-- `hygge subagents list` / `show <name>` — inspect registered sub-agent types invokable by the `task` tool.
+- `hygge subagents list` / `hygge subagents show <name>` — inspect registered sub-agent types invokable by the `task` tool.
+- `hygge commands list` / `hygge commands show <name>` — inspect slash commands available in the TUI.
 - `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
 - `hygge catalog list [<provider>]` / `show <provider>/<model>` / `refresh` — inspect and refresh the models.dev-backed model catalog.
 - `hygge version` — print version, Go version, OS/arch.
@@ -404,6 +405,84 @@ Permission gating: MCP tool calls go through the new `mcp` category
 
 Only the `stdio` transport is supported in v0.2. SSE and Streamable
 HTTP transports are deferred to v0.3.
+
+## Slash commands
+
+Anything typed into the TUI input that starts with `/` is interpreted
+as a slash command instead of a chat message. An inline palette
+opens above the input, filtered live by what you've typed; use
+Up/Down to highlight, Tab to complete, Enter to run, Esc to
+dismiss.
+
+The built-in command set:
+
+| Command     | Effect                                           |
+|-------------|--------------------------------------------------|
+| `/help`     | List every registered command (built-in + user). `/help <name>` shows full detail. |
+| `/clear`    | Clear the rendered session history.              |
+| `/compact`  | Trigger a session compaction now.                |
+| `/cost`     | Show running session cost.                       |
+| `/sessions` | Open the sessions picker (rich UI lands in T1.2). |
+| `/fork`     | Fork the session at a message id (T1.2 will wire). |
+| `/model`    | No-arg: show current model. With `<provider>/<id>`: switch. |
+| `/reason`   | No-arg: show current reasoning depth. With `off|low|medium|high`: switch. |
+| `/version`  | Show the hygge version.                          |
+
+`/q` and `/quit` are intentionally NOT claimed — the existing
+keybinds (Ctrl+C) handle exit.
+
+### Defining your own commands
+
+Drop a `commands.toml` at one of the standard four discovery layers
+(`~/.agents`, `~/.config/hygge`, `<project>/.agents`,
+`<project>/.hygge`). Later layers override earlier same-named
+entries; user TOML can even override the built-ins if you want a
+custom `/compact` prompt.
+
+```toml
+[commands.review]
+description = "Review code for issues"
+prompt = """
+Review the following code for bugs, security issues, and
+improvements:
+
+{{code}}
+"""
+args = [
+  { name = "code", description = "code to review", required = true },
+]
+
+[commands.explain]
+description = "Explain a concept"
+prompt = "Explain {{topic}} in plain language."
+args = [
+  { name = "topic", description = "what to explain", required = true },
+]
+
+[commands.brief]
+description = "Quick TLDR of a file"
+prompt = "Summarise this file in 3 bullet points: {{tail}}"
+```
+
+Template rules:
+
+- `{{name}}` substitutes the matching arg by name.
+- `{{tail}}` is reserved and captures every remaining word after the
+  last named arg. With no `args` declared, `{{tail}}` receives the
+  entire input.
+- Whitespace splits arguments; wrap a value in double quotes to
+  include spaces (`/review "with spaces" rest`). Backslash escapes
+  the next character inside quotes.
+- A missing required arg produces a friendly notice and does not
+  send the message.
+- Unknown `{{names}}` are left literal at runtime (a load-time
+  warning surfaces in `~/.local/state/hygge/hygge.log`).
+
+Command names must match `[a-z][a-z0-9_-]*` and are case-sensitive.
+
+Inspect what's loaded with `hygge commands list` (`--source builtin`
+/ `user` / `project` to filter) and `hygge commands show <name>` for
+the full detail.
 
 ## Model catalog
 

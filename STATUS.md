@@ -2,6 +2,27 @@
 
 ## Shipped
 
+- **Slash-commands framework (v0.3 T1.1).** Input that begins with `/`
+  is routed through `internal/command`'s `Registry` instead of the
+  send path. Built-in commands ship for `/help`, `/clear`,
+  `/compact`, `/cost`, `/sessions`, `/fork`, `/model`, `/reason`,
+  `/version`. Users extend the set with a `commands.toml` at the
+  standard four discovery layers
+  (`~/.agents`, `~/.config/hygge`, `<project>/.agents`,
+  `<project>/.hygge`); each entry declares a `description`, a
+  `prompt` template with `{{name}}` placeholders, and an optional
+  `args` list. Commands return a closed-set `Outcome` (Message,
+  Notice, ClearHistory, Compact, OpenModal, Updates) which the TUI
+  dispatches — commands never mutate state directly. An inline
+  command palette renders above the input on slash buffers with
+  prefix-filtered matches, Up/Down navigation, Tab completion, Esc
+  dismissal, and an overflow indicator past 8 rows. Also adds
+  `hygge commands list [--source ...]` / `hygge commands show
+  <name>` for inspection. T1.2 (session-management UI) and T2.3
+  (compaction UX) are now unblocked. See `internal/command/`,
+  `internal/ui/app_slash.go`, `internal/ui/components/command_palette.go`,
+  and `cmd/hygge/cli/commands_cmd.go`.
+
 - **Sub-agents Stage A: `task` tool + runtime + TOML registry.**
   The `task` tool dispatches isolated missions to a sub-agent that runs
   to completion and returns a single summary message. A built-in

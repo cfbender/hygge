@@ -362,3 +362,41 @@ These are deliberately deferred. Do not block v0.1 on them.
       `temperature` and `max_tokens`.  If no key is available, this
       step is verified by the unit tests in
       `internal/provider/openaicompat` instead.
+
+## v0.3 progress
+
+### Slash commands smoke
+
+- [ ] **Built-in palette filters and completes.**
+      Launch `./bin/hygge`, type `/he` in the input. The palette
+      shows `/help` highlighted. Press `Tab` — the input fills with
+      `/help `. Press `Enter`; the help listing appears as an
+      ephemeral notice under the input and lists every built-in.
+
+- [ ] **`/model` reflects and switches.**
+      In a running TUI: type `/model` and press Enter. A notice
+      reads `current model: <provider>/<model-id>`. Then type
+      `/model openrouter/google-gemini-2-5-pro` and press Enter; the
+      status bar updates to show the new model name.
+
+- [ ] **`/cost` matches the footer.**
+      Run a turn, then `/cost`. The notice shows the same dollar
+      figure the footer renders.
+
+- [ ] **Unknown command surfaces a hint.**
+      `/foo` followed by Enter produces a notice reading
+      `unknown command /foo — try /help`. The TUI does not crash;
+      the input is cleared and continues to accept new text.
+
+- [ ] **TOML prompt template loads and runs.**
+      Drop a `commands.toml` at `~/.agents/commands.toml`:
+      ```toml
+      [commands.review]
+      description = "Review code"
+      prompt = "Review:\n\n{{code}}"
+      args = [{ name = "code", required = true }]
+      ```
+      Launch `./bin/hygge`. Type `/review def foo(): pass` and
+      press Enter. The agent receives the rendered template as a
+      user message and produces a normal response. `hygge commands
+      list` shows `/review` with source `user`.

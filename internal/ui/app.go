@@ -40,7 +40,9 @@ import (
 
 	"github.com/cfbender/hygge/internal/agent"
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
@@ -58,6 +60,8 @@ type AppOptions struct {
 	ModelProvider string // "anthropic" etc, for status bar display
 	ModelName     string
 	ProfileName   string
+	Reasoning     provider.Reasoning
+	Commands      *command.Registry // slash-command registry; nil disables slash routing
 	Now           func() time.Time
 
 	// OnSessionCreated, if non-nil, is invoked after the App lazily
@@ -142,6 +146,22 @@ type App struct {
 	input *components.Input
 	// inflightCancel cancels the current Send.
 	inflightCancel context.CancelFunc
+
+	// notice is the ephemeral status line raised by slash commands
+	// and surfaced briefly under the input.  Cleared on a timer or
+	// the next slash invocation.
+	notice string
+
+	// paletteHighlight is the current row index into the active
+	// command palette matches.  -1 means "no row highlighted".
+	// Reset on every buffer change.
+	paletteHighlight int
+
+	// activeModal is the named modal currently open from a slash
+	// command Outcome (help / sessions).  Empty means none.
+	// v0.3 just records the request; rich modal rendering for help
+	// and sessions lands alongside T1.2 / T2.3.
+	activeModal string
 
 	// subagents tracks every in-flight or completed sub-agent
 	// invocation whose root ancestor is opts.SessionID.  Keyed by
@@ -311,6 +331,33 @@ func (a *App) View() string {
 
 	in := a.input.View()
 
+	// Inline command palette: shown immediately above the input when
+	// the buffer starts with "/" and a registry is configured.
+	palette := ""
+	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+		matches := a.paletteMatches()
+		head, _ := splitSlash(a.input.Value())
+		p := components.CommandPalette{
+			Width:           width - 2,
+			Theme:           a.opts.Theme,
+			Matches:         matches,
+			Highlight:       a.clampedPaletteHighlight(matches),
+			QueryAfterSlash: head,
+		}
+		palette = p.View()
+	}
+
+	// Notice line: one row immediately under the input, dimmed.
+	// Rendered only when set so the layout stays compact otherwise.
+	notice := ""
+	if a.notice != "" {
+		style := lipgloss.NewStyle()
+		if a.opts.Theme != nil {
+			style = a.opts.Theme.Style(theme.AtomMuted)
+		}
+		notice = style.Render(a.notice)
+	}
+
 	fr := components.Footer{
 		Width:   width,
 		Theme:   a.opts.Theme,
@@ -325,14 +372,30 @@ func (a *App) View() string {
 	// the remainder.  No hard scrolling in v0.1 — the message list just
 	// renders the full buffer and the bottom of the terminal shows whatever
 	// fits.  Task 13's CLI will wrap us in `tea.WithAltScreen` if desired.
-	bodyHeight := height - lipgloss.Height(sb) - lipgloss.Height(in) - lipgloss.Height(fr)
+	chrome := lipgloss.Height(sb) + lipgloss.Height(in) + lipgloss.Height(fr)
+	if palette != "" {
+		chrome += lipgloss.Height(palette)
+	}
+	if notice != "" {
+		chrome += lipgloss.Height(notice)
+	}
+	bodyHeight := height - chrome
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
 	bodyStyle := lipgloss.NewStyle().Height(bodyHeight)
 	body := bodyStyle.Render(ml)
 
-	main := strings.Join([]string{sb, body, in, fr}, "\n")
+	sections := []string{sb, body}
+	if palette != "" {
+		sections = append(sections, palette)
+	}
+	sections = append(sections, in)
+	if notice != "" {
+		sections = append(sections, notice)
+	}
+	sections = append(sections, fr)
+	main := strings.Join(sections, "\n")
 
 	// Modal overlays the entire screen when there's a pending permission.
 	if len(a.pendingPerms) > 0 {
@@ -380,6 +443,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearToastMsg:
 		a.modalToast = ""
+		return a, nil
+
+	case clearNoticeMsg:
+		// Only clear when we are still showing the same notice the
+		// timer was scheduled for — otherwise a fresher notice that
+		// landed in the meantime would be wiped.
+		if a.notice == m.notice {
+			a.notice = ""
+		}
 		return a, nil
 
 	case sendStarted:
@@ -452,8 +524,44 @@ func (a *App) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return a, nil
 		}
+		if strings.HasPrefix(text, "/") {
+			a.input.Reset()
+			return a, a.runSlashCommand(text)
+		}
 		a.input.Reset()
 		return a, a.startSend(text)
+	case tea.KeyTab:
+		// Tab completes the currently-highlighted command palette
+		// entry when the input is in slash mode.  Outside slash
+		// mode it falls through to the textarea (default insert).
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+			matches := a.paletteMatches()
+			hi := a.clampedPaletteHighlight(matches)
+			if hi >= 0 {
+				a.input.Textarea.SetValue("/" + matches[hi].Name() + " ")
+				// Move cursor to end so further typing extends args.
+				a.input.Textarea.CursorEnd()
+			}
+			return a, nil
+		}
+	case tea.KeyEsc:
+		// Esc dismisses the command palette without changing input.
+		// Outside slash mode it falls through (the textarea has no
+		// Esc binding by default, so this is a no-op there).
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+			a.input.Reset()
+			return a, nil
+		}
+	case tea.KeyUp:
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+			a.movePaletteHighlight(-1)
+			return a, nil
+		}
+	case tea.KeyDown:
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+			a.movePaletteHighlight(+1)
+			return a, nil
+		}
 	}
 
 	var cmd tea.Cmd
