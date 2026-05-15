@@ -118,7 +118,17 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		thinkingBuf     strings.Builder
 		streamToolCalls []toolCallEvent
 		pendingUsage    provider.Usage
+		activeToolCalls = map[string]toolCallEvent{}
 	)
+	upsertToolCall := func(tc toolCallEvent) {
+		for i := range streamToolCalls {
+			if streamToolCalls[i].ID == tc.ID {
+				streamToolCalls[i] = tc
+				return
+			}
+		}
+		streamToolCalls = append(streamToolCalls, tc)
+	}
 	appendAssistant := func(u provider.Usage) error {
 		mu.Lock()
 		if currentID != "" {
@@ -157,9 +167,34 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			bus.Publish(a.opts.Bus, bus.AssistantThinkingDelta{SessionID: sessionID, Text: delta, At: a.opts.Now()})
 			return nil
 		},
+		OnToolInputStart: func(id string, toolName string) error {
+			mu.Lock()
+			activeToolCalls[id] = toolCallEvent{ID: id, Name: toolName}
+			mu.Unlock()
+			return nil
+		},
+		OnToolInputDelta: func(id string, delta string) error {
+			mu.Lock()
+			tc := activeToolCalls[id]
+			tc.ID = id
+			tc.Input = append(tc.Input, []byte(delta)...)
+			activeToolCalls[id] = tc
+			mu.Unlock()
+			return nil
+		},
+		OnToolInputEnd: func(id string) error {
+			mu.Lock()
+			if tc, ok := activeToolCalls[id]; ok && tc.Name != "" {
+				upsertToolCall(tc)
+			}
+			mu.Unlock()
+			return nil
+		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			mu.Lock()
-			streamToolCalls = append(streamToolCalls, toolCallEvent{ID: tc.ToolCallID, Name: tc.ToolName, Input: []byte(tc.Input)})
+			event := toolCallEvent{ID: tc.ToolCallID, Name: tc.ToolName, Input: []byte(tc.Input)}
+			activeToolCalls[tc.ToolCallID] = event
+			upsertToolCall(event)
 			mu.Unlock()
 			return nil
 		},
@@ -180,6 +215,7 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			textBuf.Reset()
 			thinkingBuf.Reset()
 			streamToolCalls = nil
+			activeToolCalls = map[string]toolCallEvent{}
 			mu.Unlock()
 			a.recordUsage(ctx, sessionID, modelName, u)
 			return nil
@@ -199,6 +235,15 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 	}
 	result, err := ag.Stream(ctx, call)
 	if err != nil {
+		mu.Lock()
+		u := pendingUsage
+		hasPartial := len(buildAssistantParts(textBuf.String(), thinkingBuf.String(), streamToolCalls)) > 0
+		mu.Unlock()
+		if hasPartial {
+			if appendErr := appendAssistant(u); appendErr != nil {
+				return final, appendErr
+			}
+		}
 		return final, fmt.Errorf("agent: fantasy stream: %w", err)
 	}
 	if result != nil && len(result.Steps) >= a.opts.MaxIterations {
