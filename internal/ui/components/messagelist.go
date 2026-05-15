@@ -184,18 +184,17 @@ func relativeTimestamp(t, now time.Time) string {
 
 	if tY == nY && tM == nM && tD == nD {
 		// Same day.
-		if t.Hour() == now.Hour() {
-			// Same hour — show relative.
-			mins := int(now.Sub(t).Minutes())
-			if mins < 1 {
-				return "just now"
-			}
-			if mins == 1 {
-				return "1 minute ago"
-			}
+		mins := int(now.Sub(t).Minutes())
+		if mins < 1 {
+			return "just now"
+		}
+		if mins == 1 {
+			return "1 minute ago"
+		}
+		if mins < 60 {
 			return fmt.Sprintf("%d minutes ago", mins)
 		}
-		// Different hour — show time only.
+		// Over an hour ago — show time only.
 		return t.Format("3:04 PM")
 	}
 	// Different day — full timestamp.
