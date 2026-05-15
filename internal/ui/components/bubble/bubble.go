@@ -110,6 +110,10 @@ type Bubble struct {
 
 	// BackgroundColor fills the bubble content block behind text and padding.
 	BackgroundColor color.Color
+
+	// HeaderLeftColor overrides the foreground color of the header-left text.
+	// When nil, the theme atom or accent color is used.
+	HeaderLeftColor color.Color
 }
 
 // View renders the bubble and returns the composed string.
@@ -385,6 +389,10 @@ func (b Bubble) renderHeader(innerW int, accentColor color.Color) string {
 		rightStyle = b.Theme.Style(theme.AtomBubbleHeaderMuted)
 	} else if accentColor != nil {
 		leftStyle = lipgloss.NewStyle().Foreground(accentColor)
+	}
+	// Per-bubble header-left color override (mode color, subagent color, etc.)
+	if b.HeaderLeftColor != nil {
+		leftStyle = leftStyle.Foreground(b.HeaderLeftColor)
 	}
 
 	left := leftStyle.Render(b.HeaderLeft)

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"image/color"
 
 	tea "charm.land/bubbletea/v2"
@@ -118,11 +117,13 @@ func (a *App) formatModeIndicator() string {
 	var parts []string
 	for i, mode := range a.opts.Modes {
 		if i == a.modeIndex {
-			if s != nil {
-				parts = append(parts, s.Header.Accent.Render(mode.Name))
-			} else {
-				parts = append(parts, fmt.Sprintf("[%s]", mode.Name))
+			style := lipgloss.NewStyle().Bold(true)
+			if mode.Color != "" {
+				style = style.Foreground(lipgloss.Color(mode.Color))
+			} else if s != nil {
+				style = s.Header.Accent
 			}
+			parts = append(parts, style.Render(mode.Name))
 		} else {
 			if s != nil {
 				parts = append(parts, s.Header.Muted.Render(mode.Name))

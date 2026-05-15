@@ -113,7 +113,11 @@ func (a *App) generateLayout(w, h int) uiLayout {
 }
 
 // editorHeight returns the current editor height in rows.
+// Returns 0 when viewing a subagent (input is hidden).
 func (a *App) editorHeight() int {
+	if a.viewingSubagent() {
+		return 0
+	}
 	h := a.input.Textarea.Height()
 	if a.styles != nil {
 		h += 2 // border top + bottom

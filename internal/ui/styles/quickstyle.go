@@ -55,6 +55,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.BubbleBg = o.bgLessVisible
 	s.SidebarBg = o.bgLessVisible
 	s.InputBg = o.bgBase
+	s.UserAccent = o.accent
 
 	// Working indicator gradient.
 	s.WorkingGradFromColor = o.primary
