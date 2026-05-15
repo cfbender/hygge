@@ -399,6 +399,11 @@ type App struct {
 	// Updated on bus.QueueChanged.
 	queuedPrompts []string
 
+	// todoIncomplete/todoInProgress summarize the foreground session's agent
+	// todo list. Updated on bus.TodoChanged.
+	todoIncomplete int
+	todoInProgress int
+
 	// activeTurns is the number of agent turns currently executing for the
 	// foreground session.  Incremented on bus.TurnStarted; decremented on
 	// bus.TurnCompleted.  The UI flips busy=false only when activeTurns
@@ -520,6 +525,7 @@ func (a *App) bridge() {
 	subCmpDone := bus.Subscribe[bus.CompactionCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subCmpFail := bus.Subscribe[bus.CompactionFailed](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subQueueChanged := bus.Subscribe[bus.QueueChanged](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
+	subTodoChanged := bus.Subscribe[bus.TodoChanged](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subTurnStarted := bus.Subscribe[bus.TurnStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subTurnDone := bus.Subscribe[bus.TurnCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 
@@ -546,6 +552,7 @@ func (a *App) bridge() {
 	go forward(subCmpDone.C(), a.busCh, stop, subCmpDone.Unsubscribe)
 	go forward(subCmpFail.C(), a.busCh, stop, subCmpFail.Unsubscribe)
 	go forward(subQueueChanged.C(), a.busCh, stop, subQueueChanged.Unsubscribe)
+	go forward(subTodoChanged.C(), a.busCh, stop, subTodoChanged.Unsubscribe)
 	go forward(subTurnStarted.C(), a.busCh, stop, subTurnStarted.Unsubscribe)
 	go forward(subTurnDone.C(), a.busCh, stop, subTurnDone.Unsubscribe)
 }
@@ -659,6 +666,8 @@ func (a *App) View() tea.View {
 		Theme:         a.opts.Theme,
 		QueueCount:    a.queueCount,
 		QueuedPrompts: a.queuedPrompts,
+		TodoCount:     a.todoIncomplete,
+		TodoRunning:   a.busy && a.todoInProgress > 0,
 	}.View()
 
 	// Inline command palette: shown immediately above the input when
@@ -1641,6 +1650,14 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			}
 			a.input.SetBusy(true, suffix)
 		}
+
+	case bus.TodoChanged:
+		rootID := a.rootSessionID()
+		if rootID != "" && e.SessionID != rootID {
+			return nil
+		}
+		a.todoIncomplete = e.Incomplete
+		a.todoInProgress = e.InProgress
 
 	case bus.TurnStarted:
 		// Gate on foreground session.  Increment the in-flight turn counter

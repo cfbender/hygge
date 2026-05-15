@@ -123,10 +123,10 @@ func newExecContext(b *bus.Bus, e *permission.Engine, pwd string) ExecContext {
 
 // --- Default() registry tests -----------------------------------------------
 
-func TestDefault_RegistersAllSixTools(t *testing.T) {
+func TestDefault_RegistersBuiltInTools(t *testing.T) {
 	r := Default()
-	want := []string{"bash", "edit", "glob", "grep", "read", "write"}
-	got := make([]string, 0, 6)
+	want := []string{"bash", "edit", "glob", "grep", "read", "todo", "write"}
+	got := make([]string, 0, len(want))
 	for _, t := range r.All() {
 		got = append(got, t.Name())
 	}
@@ -138,8 +138,8 @@ func TestDefault_RegistersAllSixTools(t *testing.T) {
 func TestDefault_AsProviderToolsSorted(t *testing.T) {
 	r := Default()
 	pts := r.AsProviderTools()
-	if len(pts) != 6 {
-		t.Fatalf("AsProviderTools: got %d entries, want 6", len(pts))
+	if len(pts) != 7 {
+		t.Fatalf("AsProviderTools: got %d entries, want 7", len(pts))
 	}
 	names := make([]string, len(pts))
 	for i, p := range pts {

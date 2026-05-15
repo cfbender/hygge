@@ -26,7 +26,6 @@ func (p StatusPills) View() string {
 	if p.QueueCount > 0 {
 		pills = append(pills, p.pill(fmt.Sprintf("%d queued", p.QueueCount), theme.AtomAccent))
 	}
-	// TODO(phase-6): wire TodoCount/TodoRunning when first-class todo state lands.
 	if p.TodoCount > 0 {
 		label := fmt.Sprintf("%d todo", p.TodoCount)
 		if p.TodoCount != 1 {

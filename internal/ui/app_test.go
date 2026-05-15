@@ -1225,6 +1225,17 @@ func TestQueueChanged_ClearQueue(t *testing.T) {
 	}
 }
 
+func TestTodoChanged_UpdatesStatusPillState(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.TurnStarted{SessionID: ""})
+	app.Handle(bus.TodoChanged{SessionID: "", Incomplete: 2, InProgress: 1})
+	if app.todoIncomplete != 2 || app.todoInProgress != 1 {
+		t.Fatalf("todo state = incomplete %d, in_progress %d; want 2, 1", app.todoIncomplete, app.todoInProgress)
+	}
+}
+
 // TestEscWhileQueued_CallsClearQueue verifies that pressing Esc while busy
 // with items in the queue calls Agent.ClearQueue and does NOT cancel the
 // active run.

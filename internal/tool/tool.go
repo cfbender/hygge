@@ -1,5 +1,5 @@
-// Package tool defines the tool execution framework for Hygge and the six
-// built-in tools shipped in v0.1 (read, write, edit, bash, grep, glob).
+// Package tool defines the tool execution framework for Hygge and its
+// built-in tools.
 //
 // # IsError vs ToolError — the most important distinction
 //
@@ -60,7 +60,7 @@
 // Built-in mapping:
 //
 //   - read, grep, glob, skill, task → Parallelizable() == true
-//   - bash, write, edit             → Parallelizable() == false
+//   - bash, write, edit, todo       → Parallelizable() == false
 //
 // Plugin tools default to false; opt in via the Lua registration table:
 //
