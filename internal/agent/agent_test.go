@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/hook"
@@ -26,6 +28,33 @@ import (
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/tool"
 )
+
+func TestRuntimeBuildsFantasyToolsFromRegistry(t *testing.T) {
+	reg := tool.NewRegistry()
+	if err := reg.Register(&countingTool{name: "fake_plugin", counter: &atomic.Int32{}}); err != nil {
+		t.Fatalf("register fake plugin-like tool: %v", err)
+	}
+	rt := NewRuntime(RuntimeOptions{Tools: reg, MaxIterations: 3})
+	ftools := rt.buildFantasyTools(fantasyToolOptions{})
+	if len(ftools) != 1 {
+		t.Fatalf("fantasy tools len = %d, want 1", len(ftools))
+	}
+	info := ftools[0].Info()
+	if info.Name != "fake_plugin" {
+		t.Fatalf("fantasy tool name = %q, want fake_plugin", info.Name)
+	}
+	if info.Parameters == nil {
+		t.Fatalf("fantasy tool parameters nil")
+	}
+}
+
+func TestSessionAgentSelectsLegacyLoopWithoutFantasyModel(t *testing.T) {
+	var model fantasy.LanguageModel
+	rt := NewRuntime(RuntimeOptions{Model: model, Tools: tool.NewRegistry(), MaxIterations: 1})
+	if rt.hasFantasyModel() {
+		t.Fatalf("runtime reported fantasy model with nil model")
+	}
+}
 
 // ---------- test harness ----------------------------------------------------
 

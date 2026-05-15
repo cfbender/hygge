@@ -20,13 +20,17 @@ import (
 )
 
 type fantasyTool struct {
-	t            tool.Tool
-	a            *Agent
+	t    tool.Tool
+	opts fantasyToolOptions
+	prov fantasy.ProviderOptions
+}
+
+type fantasyToolOptions struct {
+	agent        *Agent
 	sessionID    string
 	messageIDPtr *string
 	modelName    string
 	pwd          string
-	opts         fantasy.ProviderOptions
 	beforeRun    func() error
 }
 
@@ -34,30 +38,31 @@ func (f *fantasyTool) Info() fantasy.ToolInfo {
 	return fantasy.ToolInfo{Name: f.t.Name(), Description: f.t.Description(), Parameters: f.t.InputSchema(), Parallel: f.t.Parallelizable()}
 }
 
-func (f *fantasyTool) ProviderOptions() fantasy.ProviderOptions        { return f.opts }
-func (f *fantasyTool) SetProviderOptions(opts fantasy.ProviderOptions) { f.opts = opts }
+func (f *fantasyTool) ProviderOptions() fantasy.ProviderOptions        { return f.prov }
+func (f *fantasyTool) SetProviderOptions(opts fantasy.ProviderOptions) { f.prov = opts }
 
 func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	if f.beforeRun != nil {
-		if err := f.beforeRun(); err != nil {
+	if f.opts.beforeRun != nil {
+		if err := f.opts.beforeRun(); err != nil {
 			return fantasy.ToolResponse{}, err
 		}
 	}
 	msgID := ""
-	if f.messageIDPtr != nil {
-		msgID = *f.messageIDPtr
+	if f.opts.messageIDPtr != nil {
+		msgID = *f.opts.messageIDPtr
 	}
 	args := json.RawMessage(call.Input)
-	bus.Publish(f.a.opts.Bus, bus.ToolCallRequested{SessionID: f.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Args: append([]byte(nil), args...), At: f.a.opts.Now()})
+	a := f.opts.agent
+	bus.Publish(a.opts.Bus, bus.ToolCallRequested{SessionID: f.opts.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Args: append([]byte(nil), args...), At: a.opts.Now()})
 
 	toolInput := args
-	if f.a.opts.Hooks != nil {
-		hookIn := hook.Input{Event: hook.EventPreTool, SessionID: f.sessionID, HookName: "pre_tool", Pwd: f.pwd, ToolName: call.Name, ToolInput: toolInput}
-		out, dec, denier, reason, warns := f.a.opts.Hooks.RunPre(ctx, hook.EventPreTool, hookIn)
+	if a.opts.Hooks != nil {
+		hookIn := hook.Input{Event: hook.EventPreTool, SessionID: f.opts.sessionID, HookName: "pre_tool", Pwd: f.opts.pwd, ToolName: call.Name, ToolInput: toolInput}
+		out, dec, denier, reason, warns := a.opts.Hooks.RunPre(ctx, hook.EventPreTool, hookIn)
 		logHookWarns(warns)
 		if dec == hook.DecisionDeny {
 			content := fmt.Sprintf("hook %q denied tool call: %s", denier, reason)
-			bus.Publish(f.a.opts.Bus, bus.ToolCallCompleted{SessionID: f.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Err: content, At: f.a.opts.Now()})
+			bus.Publish(a.opts.Bus, bus.ToolCallCompleted{SessionID: f.opts.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Err: content, At: a.opts.Now()})
 			return fantasy.NewTextErrorResponse(content), nil
 		}
 		if len(out.ToolInput) > 0 {
@@ -66,13 +71,13 @@ func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.T
 	}
 
 	started := time.Now()
-	res, err := f.t.Execute(ctx, toolInput, tool.ExecContext{SessionID: f.sessionID, Pwd: f.a.opts.Pwd, Bus: f.a.opts.Bus, Permission: f.a.opts.Permission, ToolUseID: call.ID, MessageID: msgID, ModelName: f.modelName, Now: f.a.opts.Now})
+	res, err := f.t.Execute(ctx, toolInput, tool.ExecContext{SessionID: f.opts.sessionID, Pwd: a.opts.Pwd, Bus: a.opts.Bus, Permission: a.opts.Permission, ToolUseID: call.ID, MessageID: msgID, ModelName: f.opts.modelName, Now: a.opts.Now})
 	if err != nil {
 		res = tool.Result{IsError: true, Content: err.Error()}
 	}
-	if f.a.opts.Hooks != nil {
-		hookIn := hook.Input{Event: hook.EventPostTool, SessionID: f.sessionID, HookName: "post_tool", Pwd: f.pwd, ToolName: call.Name, ToolInput: toolInput, ToolResult: &hook.ToolResult{IsError: res.IsError, Content: res.Content}}
-		out, warns := f.a.opts.Hooks.RunPost(ctx, hook.EventPostTool, hookIn)
+	if a.opts.Hooks != nil {
+		hookIn := hook.Input{Event: hook.EventPostTool, SessionID: f.opts.sessionID, HookName: "post_tool", Pwd: f.opts.pwd, ToolName: call.Name, ToolInput: toolInput, ToolResult: &hook.ToolResult{IsError: res.IsError, Content: res.Content}}
+		out, warns := a.opts.Hooks.RunPost(ctx, hook.EventPostTool, hookIn)
 		logHookWarns(warns)
 		if out.ToolResult != nil {
 			res.IsError = out.ToolResult.IsError
@@ -83,7 +88,7 @@ func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.T
 	if res.IsError {
 		errString = res.Content
 	}
-	bus.Publish(f.a.opts.Bus, bus.ToolCallCompleted{SessionID: f.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Err: errString, DurationMs: time.Since(started).Milliseconds(), At: f.a.opts.Now()})
+	bus.Publish(a.opts.Bus, bus.ToolCallCompleted{SessionID: f.opts.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Err: errString, DurationMs: time.Since(started).Milliseconds(), At: a.opts.Now()})
 	if res.IsError {
 		return fantasy.NewTextErrorResponse(res.Content), nil
 	}
@@ -105,7 +110,6 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 	}
 
 	var currentID string
-	ftools := make([]fantasy.AgentTool, 0, len(a.opts.Tools.All()))
 	var (
 		mu              sync.Mutex
 		final           *session.Message
@@ -136,10 +140,8 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		a.recordUsage(ctx, sessionID, modelName, u)
 		return nil
 	}
-	for _, t := range a.opts.Tools.All() {
-		ftools = append(ftools, &fantasyTool{t: t, a: a, sessionID: sessionID, messageIDPtr: &currentID, modelName: modelName, pwd: pwd, beforeRun: func() error { mu.Lock(); u := pendingUsage; mu.Unlock(); return appendAssistant(u) }})
-	}
-	ag := fantasy.NewAgent(a.opts.FantasyModel, fantasy.WithTools(ftools...), fantasy.WithStopConditions(fantasy.StepCountIs(a.opts.MaxIterations)))
+	ftools := a.runtime.buildFantasyTools(fantasyToolOptions{agent: a, sessionID: sessionID, messageIDPtr: &currentID, modelName: modelName, pwd: pwd, beforeRun: func() error { mu.Lock(); u := pendingUsage; mu.Unlock(); return appendAssistant(u) }})
+	ag := a.runtime.newFantasyAgent(ftools)
 	call := fantasy.AgentStreamCall{Messages: fmsgs,
 		OnTextDelta: func(_ string, delta string) error {
 			mu.Lock()

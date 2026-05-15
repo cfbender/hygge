@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/agent"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
@@ -33,6 +35,7 @@ type Runner struct {
 	registry      *Registry
 	parentTools   *tool.Registry
 	resolver      ProviderResolver
+	fantasyModel  FantasyModelResolver
 	pwd           string
 	contextWindow int64
 	maxIter       int
@@ -84,6 +87,12 @@ type RunnerOptions struct {
 	// model.
 	ProviderResolver ProviderResolver
 
+	// FantasyModelResolver returns the Fantasy language model for the resolved
+	// provider/model pair.  When nil, sub-agents use the legacy provider stream;
+	// production bootstrap wires this so parent and sub-agent turns share the
+	// same model/tool runtime path.
+	FantasyModelResolver FantasyModelResolver
+
 	// Now is an injectable clock for bus events and durations.
 	// Defaults to time.Now.
 	Now func() time.Time
@@ -128,6 +137,7 @@ func NewRunner(opts RunnerOptions) (*Runner, error) {
 		registry:      opts.Registry,
 		parentTools:   opts.ParentTools,
 		resolver:      opts.ProviderResolver,
+		fantasyModel:  opts.FantasyModelResolver,
 		pwd:           opts.Pwd,
 		contextWindow: opts.ContextWindow,
 		maxIter:       opts.MaxIterations,
@@ -284,6 +294,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 	// never breaks an otherwise valid sub-agent run.
 	runProvider := r.provider
 	runModelName := in.ModelName
+	runFantasyModel := fantasy.LanguageModel(nil)
 	if t.Model != "" {
 		switch {
 		case r.resolver == nil:
@@ -301,6 +312,13 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 			runProvider = p
 			runModelName = m
 		}
+	}
+	if r.fantasyModel != nil {
+		lm, err := r.fantasyModel(ctx, runProvider.Name(), runModelName)
+		if err != nil {
+			return Result{}, fmt.Errorf("subagent: Run: resolve fantasy model %q/%q: %w", runProvider.Name(), runModelName, err)
+		}
+		runFantasyModel = lm
 	}
 
 	subTools := r.buildToolRegistry(t)
@@ -355,6 +373,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		Bus:           r.bus,
 		Store:         r.store,
 		Provider:      runProvider,
+		FantasyModel:  runFantasyModel,
 		Permission:    r.permission,
 		Tools:         subTools,
 		Catalog:       r.catalog,

@@ -166,7 +166,9 @@ type Options struct {
 // Agent is the orchestrator.  Construct via [New]; the zero value is not
 // usable.
 type Agent struct {
-	opts Options
+	opts    Options
+	runtime *Runtime
+	session *SessionAgent
 
 	// mu guards closed, ctx, cancel, locks, pendingLazy, thresholdFired,
 	// pluginInjects, activeRuns, and queues.
@@ -237,7 +239,7 @@ func New(opts Options) (*Agent, error) {
 		opts.CompactionMaxTokens = 1024
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Agent{
+	a := &Agent{
 		opts:           opts,
 		ctx:            ctx,
 		cancel:         cancel,
@@ -246,7 +248,14 @@ func New(opts Options) (*Agent, error) {
 		thresholdFired: make(map[string]bool),
 		activeRuns:     make(map[string]struct{}),
 		queues:         make(map[string][]QueuedSend),
-	}, nil
+	}
+	a.runtime = NewRuntime(RuntimeOptions{
+		Model:         opts.FantasyModel,
+		Tools:         opts.Tools,
+		MaxIterations: opts.MaxIterations,
+	})
+	a.session = NewSessionAgent(a, a.runtime)
+	return a, nil
 }
 
 // Close releases the agent.  After Close, Send and Compact return
