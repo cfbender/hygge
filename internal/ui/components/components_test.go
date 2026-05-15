@@ -838,3 +838,122 @@ func TestSidebarModifiedFiles_StubReplaced(t *testing.T) {
 		t.Errorf("sidebar should not show em-dash stub when files are present; got:\n%s", out)
 	}
 }
+
+// ── Tool-group inline status rendering ───────────────────────────────────────
+
+// TestToolGroup_RendersAwaitingPermissionText verifies that a tool row with
+// Status==ToolStatusAwaitingPermission renders "Requesting permission…" inline.
+func TestToolGroup_RendersAwaitingPermissionText(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "write",
+				Target:   "/etc/hosts",
+				Status:   ToolStatusAwaitingPermission,
+			},
+		},
+	}
+	out := stripANSI(ml.View())
+	if !strings.Contains(out, "Requesting permission") {
+		t.Errorf("expected 'Requesting permission…' in tool row; got:\n%s", out)
+	}
+}
+
+// TestToolGroup_RendersWaitingForResponseText verifies that a tool row with
+// Status==ToolStatusRunning renders "Waiting for tool response…" inline.
+func TestToolGroup_RendersWaitingForResponseText(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "bash",
+				Target:   "go test ./...",
+				Status:   ToolStatusRunning,
+			},
+		},
+	}
+	out := stripANSI(ml.View())
+	if !strings.Contains(out, "Waiting for tool response") {
+		t.Errorf("expected 'Waiting for tool response…' in tool row; got:\n%s", out)
+	}
+}
+
+// TestToolGroup_NoStatusTextWhenCompleted verifies that completed tool rows
+// render without any status text.
+func TestToolGroup_NoStatusTextWhenCompleted(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "read",
+				Target:   "/tmp/file.txt",
+				Status:   ToolStatusCompleted,
+			},
+		},
+	}
+	out := stripANSI(ml.View())
+	for _, unwanted := range []string{"Requesting permission", "Waiting for tool response", "cancelled", "error"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("completed tool row must not contain %q; got:\n%s", unwanted, out)
+		}
+	}
+	// Tool name and target must still appear.
+	if !strings.Contains(out, "read") {
+		t.Errorf("completed tool row must still show tool name; got:\n%s", out)
+	}
+}
+
+// TestToolGroup_ErrorText verifies that a tool row with Status==ToolStatusError
+// renders "error" inline.
+func TestToolGroup_ErrorText(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "edit",
+				Target:   "foo.go",
+				Status:   ToolStatusError,
+				IsError:  true,
+			},
+		},
+	}
+	out := stripANSI(ml.View())
+	if !strings.Contains(out, "error") {
+		t.Errorf("error tool row must contain 'error'; got:\n%s", out)
+	}
+}
+
+// TestToolGroup_CancelledText verifies that a tool row with
+// Status==ToolStatusCancelled renders "cancelled" inline.
+func TestToolGroup_CancelledText(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "bash",
+				Target:   "rm -rf /",
+				Status:   ToolStatusCancelled,
+			},
+		},
+	}
+	out := stripANSI(ml.View())
+	if !strings.Contains(out, "cancelled") {
+		t.Errorf("cancelled tool row must contain 'cancelled'; got:\n%s", out)
+	}
+}

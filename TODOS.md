@@ -105,6 +105,7 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - ✅ **OSC response filter** — `dropOSCResponses` filter via `tea.WithFilter` drops leaked terminal color-query responses before they reach the textarea. (`cmd/hygge/cli/osc_filter.go`)
 - ✅ **Decouple `startSend`** — `Agent.Send` now runs in a goroutine; `sendCompleted` arrives via `program.Send` (`tea.go:1183`). UI event loop is responsive during agent turns.
 - ✅ **Boot progress bar + working placeholder + env/ctx options** — `supportsProgressBar()` emits OSC 9;4;3 around bootstrap; `Input.SetBusy` rotates placeholder on send; `tea.WithEnvironment` added to `NewProgram` call.
+- ✅ **Inline tool-row status text** — `ToolStatus` enum on `UIMessage`; `handleBusEvent` transitions `Pending → AwaitingPermission → Running → Completed/Error/Cancelled` via `ToolCallRequested`, `PermissionAsked`, `PermissionReplied`, and `ToolCallCompleted`. `renderToolGroup` renders "Requesting permission…" / "Waiting for tool response…" / "error" / "cancelled" inline. Hydrated rows stamped Completed/Error/Unknown. Subagent (`task`) rows unaffected. No new bus events.
 ---
 
-_Last updated after the boot progress bar + working placeholder slice._
+_Last updated after the inline tool-row status slice._

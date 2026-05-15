@@ -19,6 +19,34 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
+// ToolStatus is the execution lifecycle state of a single tool call.
+// Only meaningful on UIMessage entries where Role == RoleTool.
+type ToolStatus int
+
+const (
+	// ToolStatusUnknown is the zero value; no status text is rendered.
+	// Used for hydrated orphan tool-use entries (tool_use with no matching
+	// result — interrupted run). Should not occur in well-formed sessions.
+	ToolStatusUnknown ToolStatus = iota
+	// ToolStatusPending means the agent requested the tool call; no permission
+	// decision has been asked yet. Rarely visible — transitions quickly.
+	ToolStatusPending
+	// ToolStatusAwaitingPermission means the permission engine published a
+	// PermissionAsked event; the user has not yet responded. The modal is
+	// visible; the inline row shows "Requesting permission…".
+	ToolStatusAwaitingPermission
+	// ToolStatusRunning means permission was granted (or not required); the tool
+	// is executing. The inline row shows "Waiting for tool response…".
+	ToolStatusRunning
+	// ToolStatusCompleted means the tool finished without error. No status text.
+	ToolStatusCompleted
+	// ToolStatusError means the tool finished with an error. Inline row shows "error".
+	ToolStatusError
+	// ToolStatusCancelled means permission was denied or the user cancelled.
+	// Inline row shows "cancelled".
+	ToolStatusCancelled
+)
+
 // MessageRole is the participant role for a rendered message.
 type MessageRole string
 
@@ -49,6 +77,9 @@ type UIMessage struct {
 	FinalMarkdown string // cached glamour output once streaming completes
 	IsStreaming   bool
 	IsError       bool // tool result error flag
+	// Status is the execution lifecycle state for RoleTool messages.
+	// Set by handleBusEvent transitions; hydrated from persisted state.
+	Status ToolStatus
 	// SubagentID is the SubSessionID of a sub-agent dispatched by this
 	// message.  When non-empty and the matching SubagentState is in
 	// MessageList.Subagents, the view renders a nested block under this
@@ -510,10 +541,36 @@ func formatTokensSaved(n int64) string {
 	}
 }
 
+// toolStatusText returns the inline status label for a tool row, or "" when
+// no text should be shown (Pending, Completed, Unknown).
+func toolStatusText(s ToolStatus, t *theme.Theme) string {
+	var muted, errStyle lipgloss.Style
+	if t != nil {
+		muted = t.Style(theme.AtomBubbleBodyMuted).Faint(true).Italic(true)
+		errStyle = t.Style(theme.AtomError).Faint(true)
+	} else {
+		muted = lipgloss.NewStyle().Faint(true).Italic(true)
+		errStyle = lipgloss.NewStyle().Faint(true)
+	}
+	switch s {
+	case ToolStatusAwaitingPermission:
+		return muted.Render("Requesting permission…")
+	case ToolStatusRunning:
+		return muted.Render("Waiting for tool response…")
+	case ToolStatusError:
+		return errStyle.Render("error")
+	case ToolStatusCancelled:
+		return muted.Render("cancelled")
+	default:
+		// Pending, Completed, Unknown — no status text.
+		return ""
+	}
+}
+
 // renderToolGroup renders a group of consecutive non-task tool calls as a
 // single distinct bordered bubble.  Each tool call occupies one body row:
 //
-//	· {ToolName} {Target}   [— error]
+//	· {ToolName} {Target}   [status text]
 func (m MessageList) renderToolGroup(items []UIMessage) string {
 	if len(items) == 0 {
 		return ""
@@ -538,10 +595,6 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		nameStyle = m.Theme.Style(theme.AtomPrimary)
 	}
 	targetStyle := m.muted()
-	errStyle := lipgloss.NewStyle()
-	if m.Theme != nil {
-		errStyle = m.Theme.Style(theme.AtomError)
-	}
 
 	var rows []string
 	for _, msg := range items {
@@ -551,28 +604,42 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		// Plain visible width of "· {name} " prefix (without ANSI).
 		prefixVisW := 2 + len(msg.ToolName) + 1 // "· " + name + " "
 
+		// Compute the inline status suffix.  For errored tools that also have
+		// a ToolStatus set, prefer the ToolStatus rendering; fall back to the
+		// legacy IsError flag when Status is zero/unknown (e.g. hydrated rows
+		// that predate the status field).
+		statusTxt := toolStatusText(msg.Status, m.Theme)
+		if statusTxt == "" && msg.IsError {
+			// Legacy path: no Status but IsError is set.
+			if m.Theme != nil {
+				statusTxt = m.Theme.Style(theme.AtomError).Faint(true).Render("error")
+			} else {
+				statusTxt = lipgloss.NewStyle().Faint(true).Render("error")
+			}
+		}
+
 		var row string
 		if msg.Target != "" {
-			// Truncate target to fit inside innerW: leave room for prefix + error suffix.
-			errSuffix := ""
-			if msg.IsError {
-				errSuffix = " — error"
+			// Truncate target to fit inside innerW: leave room for prefix + status suffix.
+			statusLen := lipgloss.Width(statusTxt)
+			sepLen := 0
+			if statusLen > 0 {
+				sepLen = 1 // one space separator
 			}
-			// Available characters for the target string (rune count).
-			avail := innerW - prefixVisW - len(errSuffix)
+			avail := innerW - prefixVisW - statusLen - sepLen
 			if avail < 1 {
 				avail = 1
 			}
 			target := truncateTarget(msg.Target, avail)
 			tgt := targetStyle.Render(target)
 			row = dot + " " + name + " " + tgt
-			if msg.IsError {
-				row += errStyle.Render(errSuffix)
+			if statusTxt != "" {
+				row += " " + statusTxt
 			}
 		} else {
 			row = dot + " " + name
-			if msg.IsError {
-				row += errStyle.Render(" — error")
+			if statusTxt != "" {
+				row += " " + statusTxt
 			}
 		}
 		rows = append(rows, row)

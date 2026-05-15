@@ -459,6 +459,7 @@ func (a *App) bridge() {
 	subCost := bus.Subscribe[bus.CostUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 64})
 	subCtx := bus.Subscribe[bus.ContextUsageUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 64})
 	subPerm := bus.Subscribe[bus.PermissionAsked](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
+	subPermReplied := bus.Subscribe[bus.PermissionReplied](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subIter := bus.Subscribe[bus.IterationLimitReached](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subSubStart := bus.Subscribe[bus.SubagentStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subSubDone := bus.Subscribe[bus.SubagentCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
@@ -481,6 +482,7 @@ func (a *App) bridge() {
 	go forward(subCost.C(), a.busCh, stop, subCost.Unsubscribe)
 	go forward(subCtx.C(), a.busCh, stop, subCtx.Unsubscribe)
 	go forward(subPerm.C(), a.busCh, stop, subPerm.Unsubscribe)
+	go forward(subPermReplied.C(), a.busCh, stop, subPermReplied.Unsubscribe)
 	go forward(subIter.C(), a.busCh, stop, subIter.Unsubscribe)
 	go forward(subSubStart.C(), a.busCh, stop, subSubStart.Unsubscribe)
 	go forward(subSubDone.C(), a.busCh, stop, subSubDone.Unsubscribe)
@@ -1327,6 +1329,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Target:      target,
 			Raw:         "(running…)",
 			IsStreaming: true,
+			Status:      components.ToolStatusPending,
 		})
 
 	case bus.ToolCallCompleted:
@@ -1378,6 +1381,27 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Target:    e.Target,
 		})
 		a.updateInputFocus()
+		// Stamp the matching tool row as awaiting permission.  We correlate
+		// by ToolName (most recent streaming row with that name) because
+		// PermissionAsked does not carry a ToolUseID.
+		a.setToolStatus(e.ToolName, components.ToolStatusAwaitingPermission)
+
+	case bus.PermissionReplied:
+		// Transition the awaiting-permission tool row based on the decision.
+		// We find the most-recently-created row that is in AwaitingPermission
+		// state — one reply resolves one request, so processing in FIFO order
+		// is correct for the common single-permission case.
+		if e.Decision == "allow" {
+			a.setToolStatusByCurrentStatus(
+				components.ToolStatusAwaitingPermission,
+				components.ToolStatusRunning,
+			)
+		} else {
+			a.setToolStatusByCurrentStatus(
+				components.ToolStatusAwaitingPermission,
+				components.ToolStatusCancelled,
+			)
+		}
 
 	case bus.IterationLimitReached:
 		// Route iter-limit notices to a sub-agent when the session
@@ -2148,22 +2172,55 @@ func (a *App) updateLastTool(e bus.ToolCallCompleted) {
 		if e.Err != "" {
 			msg.IsError = true
 			msg.Raw = e.Err
+			msg.Status = components.ToolStatusError
 		} else {
+			msg.Status = components.ToolStatusCompleted
 			msg.Raw = string(e.Result)
 		}
 		return
 	}
 	// No matching streaming tool entry — synthesise one.
 	out := string(e.Result)
+	status := components.ToolStatusCompleted
 	if e.Err != "" {
 		out = e.Err
+		status = components.ToolStatusError
 	}
 	a.messages = append(a.messages, uiMessage{
 		Role:     components.RoleTool,
 		ToolName: e.ToolName,
 		Raw:      out,
 		IsError:  e.Err != "",
+		Status:   status,
 	})
+}
+
+// setToolStatus finds the most recent streaming RoleTool message with the
+// given toolName and sets its Status field.  Used by the PermissionAsked
+// handler to mark the row as awaiting permission.  No-op when no match
+// is found (the tool row may not have arrived on the bus yet — rare race).
+func (a *App) setToolStatus(toolName string, status components.ToolStatus) {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		msg := &a.messages[i]
+		if msg.Role == components.RoleTool && msg.IsStreaming && msg.ToolName == toolName {
+			msg.Status = status
+			return
+		}
+	}
+}
+
+// setToolStatusByCurrentStatus finds the most recent RoleTool message whose
+// Status equals fromStatus and transitions it to toStatus.  Used by the
+// PermissionReplied handler to move the first awaiting-permission row to
+// Running or Cancelled.  No-op when no match is found.
+func (a *App) setToolStatusByCurrentStatus(fromStatus, toStatus components.ToolStatus) {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		msg := &a.messages[i]
+		if msg.Role == components.RoleTool && msg.Status == fromStatus {
+			msg.Status = toStatus
+			return
+		}
+	}
 }
 
 // ensureRenderer constructs (or returns the cached) glamour renderer for the
@@ -2950,6 +3007,18 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 					raw = res.Content
 					isError = res.IsError
 				}
+				// Hydrated tool entries with a result are always completed or errored.
+				// Entries without a matching result are orphaned (tool_use with no
+				// tool_result — interrupted run); use ToolStatusUnknown so no status
+				// text is rendered.  Well-formed sessions should not produce orphans.
+				hydratedStatus := components.ToolStatusUnknown
+				if _, hasResult := toolResults[p.ToolID]; hasResult {
+					if isError {
+						hydratedStatus = components.ToolStatusError
+					} else {
+						hydratedStatus = components.ToolStatusCompleted
+					}
+				}
 				toolEntries = append(toolEntries, uiMessage{
 					Role:      components.RoleTool,
 					ToolName:  p.ToolName,
@@ -2957,6 +3026,7 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 					Target:    target,
 					Raw:       raw,
 					IsError:   isError,
+					Status:    hydratedStatus,
 				})
 			}
 		}
@@ -3024,6 +3094,11 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 				raw = res.Content
 				isError = res.IsError
 			}
+			// Legacy combined-row: always completed or errored (no in-flight state).
+			legacyStatus := components.ToolStatusCompleted
+			if isError {
+				legacyStatus = components.ToolStatusError
+			}
 			entries = append(entries, uiMessage{
 				Role:      components.RoleTool,
 				ToolName:  p.ToolName,
@@ -3031,6 +3106,7 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 				Target:    target,
 				Raw:       raw,
 				IsError:   isError,
+				Status:    legacyStatus,
 			})
 		}
 		return entries
