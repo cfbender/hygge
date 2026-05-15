@@ -38,6 +38,7 @@ func builtinCommands() []Command {
 		&sessionsCmd{},
 		&forkCmd{},
 		&modelCmd{},
+		&themeCmd{},
 		&apiKeyCmd{},
 		&reasonCmd{},
 		&versionCmd{},
@@ -334,6 +335,24 @@ func (*modelCmd) Execute(_ context.Context, _ App, input string) (Outcome, error
 		Updates: map[string]string{UpdateModel: ref},
 		Notice:  fmt.Sprintf("switching model to %s", ref),
 	}, nil
+}
+
+// --- /theme ---------------------------------------------------------------
+
+type themeCmd struct{}
+
+func (*themeCmd) Name() string        { return "theme" }
+func (*themeCmd) Description() string { return "Show or switch the active theme" }
+func (*themeCmd) Source() string      { return "builtin" }
+func (*themeCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "name", Description: "theme name", Required: false}}
+}
+func (*themeCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	name := strings.TrimSpace(input)
+	if name == "" {
+		return Outcome{OpenModal: ModalTheme}, nil
+	}
+	return Outcome{Updates: map[string]string{UpdateTheme: name}, Notice: fmt.Sprintf("switching theme to %s", name)}, nil
 }
 
 // --- /apikey --------------------------------------------------------------

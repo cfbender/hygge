@@ -29,6 +29,9 @@ package theme
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -117,6 +120,40 @@ var allAtoms = []Atom{
 	AtomSidebarValue,
 	AtomSidebarAccent,
 	AtomSidebarMuted,
+}
+
+// KnownNames returns builtin and user theme names available to Load.
+func KnownNames(opts LoadOptions) []string {
+	names := map[string]bool{"shell": true}
+	configHome := opts.ConfigHome
+	if configHome == "" {
+		home := opts.HomeDir
+		if home == "" {
+			if h, err := os.UserHomeDir(); err == nil {
+				home = h
+			}
+		}
+		if home != "" {
+			configHome = filepath.Join(home, ".config")
+		}
+	}
+	if configHome != "" {
+		entries, err := os.ReadDir(filepath.Join(configHome, "hygge", "themes"))
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || filepath.Ext(entry.Name()) != ".toml" {
+					continue
+				}
+				names[strings.TrimSuffix(entry.Name(), ".toml")] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // AllAtoms returns the locked list of v0.1 style atoms in stable order.

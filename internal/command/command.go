@@ -77,6 +77,9 @@ const (
 	// UpdateAttachments asks the TUI to mutate pending prompt attachments.
 	// Currently recognised value: "clear".
 	UpdateAttachments = "attachments"
+
+	// UpdateTheme asks the TUI to load and persist a theme by name.
+	UpdateTheme = "theme"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].
@@ -88,6 +91,7 @@ const (
 	ModalCompactConfirm = "compact-confirm"
 	ModalModel          = "model"
 	ModalAPIKey         = "apikey"
+	ModalTheme          = "theme"
 )
 
 // App is the read-only handle commands use to inspect live TUI state.

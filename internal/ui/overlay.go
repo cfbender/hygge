@@ -10,6 +10,7 @@ const (
 	overlayCompactConfirm overlayKind = command.ModalCompactConfirm
 	overlayModel          overlayKind = command.ModalModel
 	overlayAPIKey         overlayKind = command.ModalAPIKey
+	overlayTheme          overlayKind = command.ModalTheme
 	overlayPermission     overlayKind = "permission"
 )
 

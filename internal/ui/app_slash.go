@@ -121,6 +121,10 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			a.apiKeyModal = components.APIKeyModal{Theme: a.opts.Theme, Provider: apiKeyProvider, HasExisting: providerHasAPIKey(a.opts.Config, apiKeyProvider, a.opts.ModelProvider)}
 			a.openOverlay(overlayAPIKey)
 			a.updateInputFocus()
+		case command.ModalTheme:
+			a.themeModal = components.ThemeModal{Theme: a.opts.Theme, Current: currentThemeName(a.opts.Theme), Themes: a.themeNames()}
+			a.openOverlay(overlayTheme)
+			a.updateInputFocus()
 		default:
 			slogWarnUnknownModal(out.OpenModal)
 		}
@@ -177,6 +181,11 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 	case command.UpdateModel:
 		if provName, modelName, ok := splitModelRef(value); ok {
 			return a.switchModelCmd(provName, modelName)
+		}
+	case command.UpdateTheme:
+		name := strings.TrimSpace(value)
+		if name != "" {
+			return a.switchThemeCmd(name)
 		}
 	case command.UpdateReasoning:
 		switch value {

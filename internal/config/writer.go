@@ -23,6 +23,10 @@ type WriteModelOptions struct {
 // provider credentials. It shares the model writer's target-resolution inputs.
 type WriteProviderAPIKeyOptions = WriteModelOptions
 
+// WriteThemeSelectionOptions controls the narrow config writer used by runtime
+// theme selection. It shares the model writer's target-resolution inputs.
+type WriteThemeSelectionOptions = WriteModelOptions
+
 // WriteModelSelection persists provider/name to one deterministic writable
 // file. Target policy: if the winning model provenance already comes from a
 // real config file, update that file; otherwise create/update the user config
@@ -113,6 +117,43 @@ func WriteProviderAPIKey(opts WriteProviderAPIKeyOptions, providerName, apiKey s
 	return target, nil
 }
 
+// WriteThemeSelection persists theme.name while preserving unrelated config
+// fields. Target policy mirrors the model writer: update the winning real
+// theme provenance when known, otherwise write the user config.
+func WriteThemeSelection(opts WriteThemeSelectionOptions, themeName string) (string, error) {
+	if strings.TrimSpace(themeName) == "" {
+		return "", fmt.Errorf("config: theme name is required")
+	}
+	target := themeWriteTarget(opts)
+	m := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
+		parsed, err := parseTOMLBytes(data)
+		if err != nil {
+			return target, &ParseError{File: target, Err: err}
+		}
+		m = parsed
+	} else if !os.IsNotExist(err) {
+		return target, fmt.Errorf("config: read theme target: %w", err)
+	}
+	theme, ok := m["theme"].(map[string]any)
+	if !ok {
+		theme = map[string]any{}
+		m["theme"] = theme
+	}
+	theme["name"] = strings.TrimSpace(themeName)
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return target, fmt.Errorf("config: encode theme target: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return target, fmt.Errorf("config: create config dir: %w", err)
+	}
+	if err := os.WriteFile(target, buf.Bytes(), 0o600); err != nil {
+		return target, fmt.Errorf("config: write theme target: %w", err)
+	}
+	return target, nil
+}
+
 func providerAPIKeyWriteTarget(opts WriteProviderAPIKeyOptions) string {
 	for _, key := range []string{"model.options.api_key", "model.provider"} {
 		if path := lastRealSource(opts.Provenance[key]); path != "" {
@@ -127,6 +168,13 @@ func modelWriteTarget(opts WriteModelOptions) string {
 		if path := lastRealSource(opts.Provenance[key]); path != "" {
 			return path
 		}
+	}
+	return filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+}
+
+func themeWriteTarget(opts WriteThemeSelectionOptions) string {
+	if path := lastRealSource(opts.Provenance["theme.name"]); path != "" {
+		return path
 	}
 	return filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
 }
