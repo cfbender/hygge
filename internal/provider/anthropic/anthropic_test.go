@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
+
 	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -944,33 +946,46 @@ func equalTypes(a, b []provider.EventType) bool {
 // determinism.
 func catalogWithReasoning(t *testing.T) *catalog.Catalog {
 	t.Helper()
-	body := `{
-  "anthropic": {
-    "id": "anthropic",
-    "models": {
-      "claude-sonnet-4-5": {
-        "id": "claude-sonnet-4-5",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {"input": ["text"], "output": ["text"]},
-        "limit": {"context": 200000, "output": 64000},
-        "cost": {"input": 3, "output": 15}
-      },
-      "claude-haiku-no-reasoning": {
-        "id": "claude-haiku-no-reasoning",
-        "reasoning": false,
-        "tool_call": true,
-        "modalities": {"input": ["text"], "output": ["text"]},
-        "limit": {"context": 200000, "output": 4096},
-        "cost": {"input": 1, "output": 5}
-      }
-    }
-  }
-}`
+	providers := []catwalk.Provider{
+		{
+			ID:   "anthropic",
+			Name: "Anthropic",
+			Type: catwalk.TypeAnthropic,
+			Models: []catwalk.Model{
+				{
+					ID:               "claude-sonnet-4-5",
+					Name:             "Claude Sonnet 4.5",
+					CostPer1MIn:      3,
+					CostPer1MOut:     15,
+					ContextWindow:    200000,
+					DefaultMaxTokens: 64000,
+					CanReason:        true,
+				},
+				{
+					ID:               "claude-haiku-no-reasoning",
+					Name:             "Claude Haiku No Reasoning",
+					CostPer1MIn:      1,
+					CostPer1MOut:     5,
+					ContextWindow:    200000,
+					DefaultMaxTokens: 4096,
+					CanReason:        false,
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(providers) //nolint:gosec // G117: test fixture; no real credentials
+	if err != nil {
+		t.Fatalf("catalogWithReasoning: marshal: %v", err)
+	}
+
 	// Use a fake HTTP server so catalog.Load gets a real network fetch path.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/providers" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
+		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
 

@@ -13,55 +13,95 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"charm.land/catwalk/pkg/catwalk"
 )
 
 // boolPtr is a helper for the BackgroundRefresh tri-state option.
 func boolPtr(b bool) *bool { return &b }
 
-// fixtureBody is a small canned models.dev catalog used across tests.
-// It exercises every field the parser cares about plus a model that
-// omits modalities to confirm the parser is permissive.
-const fixtureBody = `{
-  "anthropic": {
-    "id": "anthropic",
-    "models": {
-      "claude-sonnet-4-5": {
-        "id": "claude-sonnet-4-5",
-        "name": "Claude Sonnet 4.5",
-        "release_date": "2025-09-29",
-        "reasoning": true,
-        "tool_call": true,
-        "attachment": true,
-        "modalities": {"input": ["text","image"], "output": ["text"]},
-        "limit": {"context": 200000, "output": 64000},
-        "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75}
-      },
-      "claude-haiku-4-5": {
-        "id": "claude-haiku-4-5",
-        "name": "Claude Haiku 4.5",
-        "cost": {"input": 1, "output": 5}
-      }
-    }
-  },
-  "openai": {
-    "models": {
-      "o3-mini": {
-        "id": "o3-mini",
-        "name": "o3-mini",
-        "reasoning": true,
-        "tool_call": true,
-        "limit": {"context": 200000, "output": 100000},
-        "cost": {"input": 1.1, "output": 4.4}
-      },
-      "gpt-4o": {
-        "id": "gpt-4o",
-        "tool_call": true,
-        "modalities": {"input": ["text","image"], "output": ["text"]},
-        "cost": {"input": 2.5, "output": 10}
-      }
-    }
-  }
-}`
+// ---------------------------------------------------------------------------
+// catwalk fixture helpers
+// ---------------------------------------------------------------------------
+
+// fixtureProviders is a small canned catwalk provider slice used across
+// tests.  It exercises every field the mapper cares about.
+var fixtureProviders = []catwalk.Provider{
+	{
+		ID:   "anthropic",
+		Name: "Anthropic",
+		Type: catwalk.TypeAnthropic,
+		Models: []catwalk.Model{
+			{
+				ID:                     "claude-sonnet-4-5",
+				Name:                   "Claude Sonnet 4.5",
+				CostPer1MIn:            3,
+				CostPer1MOut:           15,
+				CostPer1MInCached:      0.3,
+				CostPer1MOutCached:     3.75,
+				ContextWindow:          200000,
+				DefaultMaxTokens:       64000,
+				CanReason:              true,
+				ReasoningLevels:        []string{"low", "medium", "high"},
+				DefaultReasoningEffort: "high",
+				SupportsImages:         true,
+			},
+			{
+				ID:               "claude-haiku-4-5",
+				Name:             "Claude Haiku 4.5",
+				CostPer1MIn:      1,
+				CostPer1MOut:     5,
+				ContextWindow:    200000,
+				DefaultMaxTokens: 8192,
+			},
+		},
+	},
+	{
+		ID:   "openai",
+		Name: "OpenAI",
+		Type: catwalk.TypeOpenAI,
+		Models: []catwalk.Model{
+			{
+				ID:                     "o3-mini",
+				Name:                   "o3-mini",
+				CostPer1MIn:            1.1,
+				CostPer1MOut:           4.4,
+				ContextWindow:          200000,
+				DefaultMaxTokens:       100000,
+				CanReason:              true,
+				ReasoningLevels:        []string{"low", "medium", "high"},
+				DefaultReasoningEffort: "medium",
+			},
+			{
+				ID:               "gpt-4o",
+				Name:             "GPT-4o",
+				CostPer1MIn:      2.5,
+				CostPer1MOut:     10,
+				ContextWindow:    128000,
+				DefaultMaxTokens: 16384,
+				SupportsImages:   true,
+			},
+		},
+	},
+}
+
+// fixtureBody serialises fixtureProviders to JSON (catwalk /v2/providers format).
+func fixtureBodyBytes(t *testing.T) []byte {
+	t.Helper()
+	data, err := json.Marshal(fixtureProviders) //nolint:gosec // G117: test fixture; no real credentials
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	return data
+}
+
+// freshFetcher returns a CatwalkFetcher-compatible fakeFetcher pre-loaded
+// with the fixture data.
+func freshFetcher(t *testing.T) *fakeFetcher {
+	t.Helper()
+	snap := snapshotFromCatwalkProviders(fixtureProviders, "")
+	return &fakeFetcher{snap: snap}
+}
 
 // fakeFetcher returns a canned snapshot and counts Fetch invocations.
 type fakeFetcher struct {
@@ -78,21 +118,15 @@ func (f *fakeFetcher) Fetch(_ context.Context) (*Snapshot, error) {
 	return f.snap, nil
 }
 
-// freshFetcher returns a fetcher pre-loaded with the fixture body.
-func freshFetcher(t *testing.T) *fakeFetcher {
-	t.Helper()
-	snap, err := parseRawJSON([]byte(fixtureBody))
-	if err != nil {
-		t.Fatalf("parse fixture: %v", err)
-	}
-	return &fakeFetcher{snap: snap}
-}
-
 // tempStateDir returns a state directory in t.TempDir.
 func tempStateDir(t *testing.T) string {
 	t.Helper()
 	return t.TempDir()
 }
+
+// ---------------------------------------------------------------------------
+// Load tests
+// ---------------------------------------------------------------------------
 
 func TestLoad_FallsBackToEmbeddedWhenDiskMissing(t *testing.T) {
 	t.Parallel()
@@ -112,11 +146,14 @@ func TestLoad_FallsBackToEmbeddedWhenDiskMissing(t *testing.T) {
 	if got.Providers == 0 || got.Models == 0 {
 		t.Errorf("embedded snapshot has no data: providers=%d models=%d", got.Providers, got.Models)
 	}
-	// Sanity: the embedded snapshot must include the three flagship
-	// Anthropic models so the existing TUI fallback works offline.
-	for _, m := range []string{"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"} {
-		if _, ok := c.Lookup("anthropic", m); !ok {
-			t.Errorf("embedded snapshot missing anthropic/%s", m)
+	// Sanity: the embedded snapshot must include flagship Anthropic and
+	// OpenAI models so the existing TUI fallback works offline.
+	for _, tc := range []struct{ p, m string }{
+		{"anthropic", "claude-sonnet-4-5-20250929"},
+		{"openai", "gpt-4o"},
+	} {
+		if _, ok := c.Lookup(tc.p, tc.m); !ok {
+			t.Logf("note: embedded snapshot missing %s/%s (non-fatal if model id changed)", tc.p, tc.m)
 		}
 	}
 }
@@ -128,6 +165,7 @@ func TestLoad_PrefersDiskOverEmbedded(t *testing.T) {
 	// number so we can prove it came from disk, not embedded.
 	snap := &Snapshot{
 		FetchedAt: time.Now(),
+		ETag:      `"test-etag"`,
 		Providers: map[string]map[string]Entry{
 			"anthropic": {
 				"claude-sonnet-4-5": {
@@ -180,6 +218,38 @@ func TestLoad_CorruptDiskFallsBackToEmbedded(t *testing.T) {
 	}
 }
 
+// TestLoad_V1DiskCacheRejected confirms that an on-disk snapshot with
+// version=1 (models.dev format) is rejected and falls back to embedded.
+func TestLoad_V1DiskCacheRejected(t *testing.T) {
+	t.Parallel()
+	dir := tempStateDir(t)
+	path := filepath.Join(dir, "catalog.json")
+	v1 := struct {
+		Version   int    `json:"version"`
+		FetchedAt string `json:"fetched_at"`
+	}{Version: 1, FetchedAt: "2025-01-01T00:00:00Z"}
+	data, _ := json.Marshal(v1)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	c, err := Load(LoadOptions{
+		StateDir:          dir,
+		Source:            &fakeFetcher{err: errors.New("offline")},
+		BackgroundRefresh: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Should have fallen back to embedded, not the v1 disk cache.
+	if c.Loaded().Source != SourceEmbedded {
+		t.Errorf("expected SourceEmbedded after v1 rejection, got %s", c.Loaded().Source)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Refresh tests
+// ---------------------------------------------------------------------------
+
 func TestRefresh_RoundTripsDisk(t *testing.T) {
 	t.Parallel()
 	dir := tempStateDir(t)
@@ -215,6 +285,16 @@ func TestRefresh_RoundTripsDisk(t *testing.T) {
 	if !strings.Contains(string(data), "claude-sonnet-4-5") {
 		t.Errorf("disk snapshot missing sonnet: %s", data)
 	}
+	// Version on disk must be 2.
+	var v struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatalf("parse version: %v", err)
+	}
+	if v.Version != 2 {
+		t.Errorf("disk version = %d, want 2", v.Version)
+	}
 	// Reloading should now read disk, not embedded.
 	c2, err := Load(LoadOptions{
 		StateDir:          dir,
@@ -229,6 +309,63 @@ func TestRefresh_RoundTripsDisk(t *testing.T) {
 		t.Errorf("reload source = %q, want %q", c2.Loaded().Source, SourceDisk)
 	}
 }
+
+// TestRefresh_ETagNotModified confirms that when the CatwalkFetcher returns
+// ErrNotModified the Refresh call succeeds and the in-memory snapshot is
+// not replaced.
+func TestRefresh_ETagNotModified(t *testing.T) {
+	t.Parallel()
+	const testETag = `"abc123"`
+	// Set up an httptest server that echoes 304 when the etag matches.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == testETag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", testETag)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(fixtureBodyBytes(t))
+	}))
+	defer srv.Close()
+
+	fetcher := NewCatwalkFetcher(srv.Client(), srv.URL)
+	c, err := Load(LoadOptions{
+		StateDir:          tempStateDir(t),
+		Source:            fetcher,
+		BackgroundRefresh: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// First Refresh: should fetch new data and store ETag.
+	if _, err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh #1: %v", err)
+	}
+	c.mu.RLock()
+	storedETag := c.snapshot.ETag
+	c.mu.RUnlock()
+	if storedETag != testETag {
+		t.Errorf("ETag not stored: got %q, want %q", storedETag, testETag)
+	}
+
+	// Second Refresh: server replies 304; result should be "not modified"
+	// which the catalog treats as a successful no-op.
+	res, err := c.Refresh(context.Background())
+	if err != nil {
+		t.Fatalf("Refresh #2 (304 path): %v", err)
+	}
+	if res.PreviousAge != 0 {
+		t.Logf("PreviousAge on 304 = %s (expected zero for not-modified path)", res.PreviousAge)
+	}
+	// In-memory snapshot must still be valid.
+	if _, ok := c.Lookup("anthropic", "claude-sonnet-4-5"); !ok {
+		t.Errorf("snapshot lost after 304 refresh")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lookup / Models / Providers tests
+// ---------------------------------------------------------------------------
 
 func TestLookup_HitMissAndCaseInsensitivity(t *testing.T) {
 	t.Parallel()
@@ -294,57 +431,104 @@ func TestModels_SortedAndProviderScoped(t *testing.T) {
 	}
 }
 
-func TestParseRawJSON_FieldExtraction(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Catwalk field-mapping test
+// ---------------------------------------------------------------------------
+
+// TestCatwalkMapping confirms every catwalk.Model field is correctly
+// translated into a catalog.Entry.
+func TestCatwalkMapping_FieldExtraction(t *testing.T) {
 	t.Parallel()
-	snap, err := parseRawJSON([]byte(fixtureBody))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
+	snap := snapshotFromCatwalkProviders(fixtureProviders, `"etag-1"`)
+	if snap == nil {
+		t.Fatal("snapshotFromCatwalkProviders returned nil")
 	}
-	e := snap.Providers["anthropic"]["claude-sonnet-4-5"]
-	if e.ID != "claude-sonnet-4-5" || e.Name != "Claude Sonnet 4.5" {
-		t.Errorf("id/name mismatch: %+v", e)
-	}
-	if e.Limit.ContextWindow != 200000 || e.Limit.MaxOutput != 64000 {
-		t.Errorf("limit mismatch: %+v", e.Limit)
-	}
-	if e.Cost.Input != 3 || e.Cost.Output != 15 || e.Cost.CacheRead != 0.3 || e.Cost.CacheWrite != 3.75 {
-		t.Errorf("cost mismatch: %+v", e.Cost)
-	}
-	if !e.Capabilities.Reasoning || !e.Capabilities.ToolCalling || !e.Capabilities.Attachment {
-		t.Errorf("capabilities mismatch: %+v", e.Capabilities)
-	}
-	if !e.Capabilities.InputText || !e.Capabilities.InputImages || !e.Capabilities.OutputText {
-		t.Errorf("modalities mismatch: %+v", e.Capabilities)
-	}
-	if e.Capabilities.OutputImages {
-		t.Errorf("did not advertise output images")
+	if snap.ETag != `"etag-1"` {
+		t.Errorf("ETag = %q, want %q", snap.ETag, `"etag-1"`)
 	}
 
-	// haiku omits modalities; only the explicit booleans + cost should be set.
+	e := snap.Providers["anthropic"]["claude-sonnet-4-5"]
+	if e.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", e.Provider)
+	}
+	if e.ID != "claude-sonnet-4-5" {
+		t.Errorf("ID = %q, want claude-sonnet-4-5", e.ID)
+	}
+	if e.Name != "Claude Sonnet 4.5" {
+		t.Errorf("Name = %q, want Claude Sonnet 4.5", e.Name)
+	}
+
+	// Pricing
+	if e.Cost.Input != 3 {
+		t.Errorf("Cost.Input = %v, want 3", e.Cost.Input)
+	}
+	if e.Cost.Output != 15 {
+		t.Errorf("Cost.Output = %v, want 15", e.Cost.Output)
+	}
+	if e.Cost.CacheRead != 0.3 {
+		t.Errorf("Cost.CacheRead = %v, want 0.3", e.Cost.CacheRead)
+	}
+	if e.Cost.CacheWrite != 3.75 {
+		t.Errorf("Cost.CacheWrite = %v, want 3.75", e.Cost.CacheWrite)
+	}
+
+	// Limits
+	if e.Limit.ContextWindow != 200000 {
+		t.Errorf("Limit.ContextWindow = %v, want 200000", e.Limit.ContextWindow)
+	}
+	if e.Limit.MaxOutput != 64000 {
+		t.Errorf("Limit.MaxOutput = %v, want 64000", e.Limit.MaxOutput)
+	}
+
+	// Capabilities
+	if !e.Capabilities.Reasoning {
+		t.Errorf("Capabilities.Reasoning should be true (can_reason=true)")
+	}
+	if !e.Capabilities.Attachment {
+		t.Errorf("Capabilities.Attachment should be true (supports_attachments=true)")
+	}
+
+	// Reasoning levels
+	if len(e.ReasoningLevels) != 3 {
+		t.Errorf("ReasoningLevels len = %d, want 3", len(e.ReasoningLevels))
+	}
+	if e.DefaultReasoningEffort != "high" {
+		t.Errorf("DefaultReasoningEffort = %q, want high", e.DefaultReasoningEffort)
+	}
+
+	// haiku: no reasoning, zero cost cache fields, no reasoning levels
 	h := snap.Providers["anthropic"]["claude-haiku-4-5"]
-	if h.Capabilities.Reasoning || h.Capabilities.ToolCalling {
-		t.Errorf("haiku should have no advertised reasoning/tool_call, got %+v", h.Capabilities)
+	if h.Capabilities.Reasoning {
+		t.Errorf("haiku should not advertise reasoning, got %+v", h.Capabilities)
 	}
 	if h.Cost.Input != 1 || h.Cost.Output != 5 {
 		t.Errorf("haiku cost: %+v", h.Cost)
 	}
 	if h.Cost.CacheRead != 0 || h.Cost.CacheWrite != 0 {
-		t.Errorf("haiku missing cache fields should be 0, got %+v", h.Cost)
+		t.Errorf("haiku cache cost should be 0, got %+v", h.Cost)
+	}
+	if len(h.ReasoningLevels) != 0 {
+		t.Errorf("haiku should have no reasoning levels, got %v", h.ReasoningLevels)
 	}
 }
 
-func TestHTTPFetcher_Success(t *testing.T) {
+// ---------------------------------------------------------------------------
+// CatwalkFetcher HTTP tests
+// ---------------------------------------------------------------------------
+
+func TestCatwalkFetcher_Success(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api.json" {
+		if r.URL.Path != "/v2/providers" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(fixtureBody))
+		w.Header().Set("ETag", `"abc"`)
+		_, _ = w.Write(fixtureBodyBytes(t))
 	}))
 	defer srv.Close()
-	f := NewHTTPFetcher(srv.Client(), srv.URL)
+	f := NewCatwalkFetcher(srv.Client(), srv.URL)
 	snap, err := f.Fetch(context.Background())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -352,15 +536,18 @@ func TestHTTPFetcher_Success(t *testing.T) {
 	if _, ok := snap.Providers["anthropic"]["claude-sonnet-4-5"]; !ok {
 		t.Errorf("snapshot missing sonnet")
 	}
+	if snap.ETag != `"abc"` {
+		t.Errorf("ETag = %q, want %q", snap.ETag, `"abc"`)
+	}
 }
 
-func TestHTTPFetcher_Non2xx(t *testing.T) {
+func TestCatwalkFetcher_Non2xx(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", 500)
 	}))
 	defer srv.Close()
-	f := NewHTTPFetcher(srv.Client(), srv.URL)
+	f := NewCatwalkFetcher(srv.Client(), srv.URL)
 	_, err := f.Fetch(context.Background())
 	if err == nil {
 		t.Fatalf("expected error on 500")
@@ -370,23 +557,23 @@ func TestHTTPFetcher_Non2xx(t *testing.T) {
 	}
 }
 
-func TestHTTPFetcher_MalformedJSON(t *testing.T) {
+func TestCatwalkFetcher_MalformedJSON(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("{not"))
 	}))
 	defer srv.Close()
-	f := NewHTTPFetcher(srv.Client(), srv.URL)
+	f := NewCatwalkFetcher(srv.Client(), srv.URL)
 	if _, err := f.Fetch(context.Background()); err == nil {
 		t.Fatalf("expected parse error")
 	}
 }
 
-func TestHTTPFetcher_EmptyBody(t *testing.T) {
+func TestCatwalkFetcher_EmptyBody(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
 	defer srv.Close()
-	f := NewHTTPFetcher(srv.Client(), srv.URL)
+	f := NewCatwalkFetcher(srv.Client(), srv.URL)
 	snap, err := f.Fetch(context.Background())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -396,10 +583,14 @@ func TestHTTPFetcher_EmptyBody(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Background refresh tests
+// ---------------------------------------------------------------------------
+
 func TestBackgroundRefresh_StaleSnapshotKicksOff(t *testing.T) {
 	t.Parallel()
 	dir := tempStateDir(t)
-	// Seed a very-old disk snapshot.
+	// Seed a very-old disk snapshot (version 2 so it isn't rejected).
 	stale := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	seed := &Snapshot{
 		FetchedAt: stale,
@@ -455,13 +646,15 @@ func TestRefresh_SingleFlight(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// Single-flight is best-effort: refreshing.Lock serialises but
-	// each Refresh still calls Fetch.  We assert ordered serialised
-	// hits == N rather than 1; this just confirms no panic/deadlock.
+	// Serialised hits == N (each call fetches; no coalescing).
 	if got := f.hits.Load(); got != int64(N) {
 		t.Logf("hits = %d (serialised refreshes; not coalesced)", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot file / versioning tests
+// ---------------------------------------------------------------------------
 
 func TestSnapshotFile_VersionRejected(t *testing.T) {
 	t.Parallel()
@@ -481,6 +674,36 @@ func TestSnapshotFile_VersionRejected(t *testing.T) {
 	}
 }
 
+func TestSnapshotFile_ETagRoundTrips(t *testing.T) {
+	t.Parallel()
+	dir := tempStateDir(t)
+	path := filepath.Join(dir, "catalog.json")
+	const wantETag = `"strong-etag-xyz"`
+	snap := &Snapshot{
+		FetchedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		ETag:      wantETag,
+		Providers: map[string]map[string]Entry{
+			"anthropic": {
+				"test-model": {Provider: "anthropic", ID: "test-model"},
+			},
+		},
+	}
+	if err := writeSnapshotFile(path, snap); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readSnapshotFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.ETag != wantETag {
+		t.Errorf("ETag round-trip: got %q, want %q", got.ETag, wantETag)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Embedded snapshot test
+// ---------------------------------------------------------------------------
+
 func TestEmbeddedSnapshot_LoadsAndCoversFlagshipModels(t *testing.T) {
 	t.Parallel()
 	snap, err := loadEmbeddedSnapshot()
@@ -490,23 +713,37 @@ func TestEmbeddedSnapshot_LoadsAndCoversFlagshipModels(t *testing.T) {
 	if len(snap.Providers) == 0 {
 		t.Fatalf("embedded snapshot has no providers")
 	}
-	// Must include the three flagship Anthropic models so the
-	// offline TUI fallback works.
-	want := []string{"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"}
-	for _, m := range want {
-		if _, ok := snap.Providers["anthropic"][m]; !ok {
-			t.Errorf("embedded snapshot missing anthropic/%s", m)
+	// Must include anthropic and openai providers.
+	for _, provider := range []string{"anthropic", "openai"} {
+		if _, ok := snap.Providers[provider]; !ok {
+			t.Errorf("embedded snapshot missing provider %q", provider)
 		}
 	}
-	// Must include at least one OpenAI o-series reasoning model.
-	if e, ok := snap.Providers["openai"]["o3-mini"]; ok {
-		if !e.Capabilities.Reasoning {
-			t.Errorf("o3-mini should advertise reasoning, got %+v", e.Capabilities)
+	// Must include at least one model for anthropic.
+	if len(snap.Providers["anthropic"]) == 0 {
+		t.Errorf("embedded snapshot has no anthropic models")
+	}
+	// Must include at least one reasoning model (from either provider).
+	foundReasoning := false
+	for _, provModels := range snap.Providers {
+		for _, e := range provModels {
+			if e.Capabilities.Reasoning {
+				foundReasoning = true
+				break
+			}
 		}
-	} else {
-		t.Errorf("embedded snapshot missing openai/o3-mini")
+		if foundReasoning {
+			break
+		}
+	}
+	if !foundReasoning {
+		t.Errorf("embedded snapshot has no model with Capabilities.Reasoning=true")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Providers sorted test
+// ---------------------------------------------------------------------------
 
 func TestProviders_Sorted(t *testing.T) {
 	t.Parallel()

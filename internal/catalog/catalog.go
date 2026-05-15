@@ -3,14 +3,16 @@
 //
 // # Sources
 //
-// Data is sourced from models.dev with three layers of fallback:
+// Data is sourced from the catwalk catalog service with three layers of
+// fallback:
 //
 //  1. A disk-cached snapshot at $XDG_STATE_HOME/hygge/catalog.json,
 //     refreshed on demand via [Catalog.Refresh] (which is wired to the
 //     `hygge catalog refresh` CLI command).
-//  2. An embedded snapshot.json compiled into the binary.  This is the
-//     bedrock fallback: hygge always has at least this catalog available
-//     even when offline and no disk cache exists.
+//  2. An embedded snapshot derived from the catwalk module's built-in
+//     provider configs.  This is the bedrock fallback: hygge always has
+//     at least this catalog available even when offline and no disk
+//     cache exists.
 //  3. An optional background refresh kicked off at [Load] time when the
 //     disk cache is missing or older than [LoadOptions.MaxStaleness].
 //     The refresh runs in a goroutine and NEVER blocks startup.
@@ -21,30 +23,35 @@
 //
 // # Schema
 //
-// Parsed against the live models.dev /api.json schema as of 2026-05.  The
-// fields we depend on are:
+// Parsed from the catwalk /v2/providers JSON array.  The fields hygge
+// depends on per model are:
 //
 //	{
-//	  "<provider>": {
-//	    "models": {
-//	      "<model-id>": {
-//	        "id":            string,
-//	        "name":          string,
-//	        "release_date":  string,
-//	        "limit":         { "context": int, "output": int },
-//	        "modalities":    { "input": [string...], "output": [string...] },
-//	        "tool_call":     bool,
-//	        "reasoning":     bool,
-//	        "attachment":    bool,
-//	        "cost":          { "input": float, "output": float,
-//	                          "cache_read": float, "cache_write": float }
-//	      }
-//	    }
-//	  }
+//	  "id":                       string,
+//	  "name":                     string,
+//	  "cost_per_1m_in":           float,
+//	  "cost_per_1m_out":          float,
+//	  "cost_per_1m_in_cached":    float,
+//	  "cost_per_1m_out_cached":   float,
+//	  "context_window":           int,
+//	  "default_max_tokens":       int,
+//	  "can_reason":               bool,
+//	  "reasoning_levels":         []string,
+//	  "default_reasoning_effort": string,
+//	  "supports_attachments":     bool
 //	}
 //
-// Unknown top-level providers and unknown fields inside model entries are
-// preserved as best-effort metadata or dropped silently — never an error.
+// Unknown fields inside model entries are silently ignored.
+//
+// # ETag caching
+//
+// The [CatwalkFetcher] uses HTTP ETag conditional requests.  The ETag
+// received from the server is stored in the on-disk snapshot so that
+// subsequent calls can send If-None-Match, saving bandwidth when the
+// catalog has not changed (server replies 304).  An old-format v1 disk
+// snapshot (from the prior models.dev integration) is detected by its
+// version number and silently discarded so the catwalk snapshot is
+// fetched fresh.
 //
 // # Concurrency
 //
@@ -57,11 +64,11 @@
 //
 // # Boundaries
 //
-// This package depends only on the standard library.  It must not import
-// internal/agent, internal/store, internal/provider, or internal/cost.
-// Both internal/cost and internal/provider/* consume a [*Catalog] handed
-// to them by the cmd/hygge/cli bootstrap; this package never reaches
-// up.
+// This package depends on charm.land/catwalk and the standard library.
+// It must not import internal/agent, internal/store, internal/provider,
+// or internal/cost.  Both internal/cost and internal/provider/* consume
+// a [*Catalog] handed to them by the cmd/hygge/cli bootstrap; this
+// package never reaches up.
 package catalog
 
 import (
@@ -78,9 +85,9 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is the canonical models.dev catalog host.  The full URL
-// fetched is BaseURL + "/api.json".
-const DefaultBaseURL = "https://models.dev"
+// DefaultBaseURL is the canonical catwalk catalog host.  The full URL
+// fetched is BaseURL + "/v2/providers".
+const DefaultBaseURL = "https://api.catwalk.sh"
 
 // DefaultMaxStaleness is the freshness window used when [LoadOptions]
 // does not set one explicitly.  After this much time has passed since the
@@ -96,8 +103,8 @@ const DefaultHTTPTimeout = 15 * time.Second
 type Source string
 
 const (
-	// SourceEmbedded means the snapshot came from the bundled
-	// snapshot.json embedded into the binary at build time.
+	// SourceEmbedded means the snapshot came from the catwalk module's
+	// built-in provider configs, loaded at startup.
 	SourceEmbedded Source = "embedded"
 	// SourceDisk means the snapshot was read from the on-disk cache
 	// at $XDG_STATE_HOME/hygge/catalog.json.
@@ -110,7 +117,7 @@ const (
 // Entry is one model in the catalog: a flat denormalised view across the
 // provider, id, capability flags, limits, and pricing.
 type Entry struct {
-	// Provider is the canonical models.dev provider id, e.g. "anthropic"
+	// Provider is the canonical catwalk provider id, e.g. "anthropic"
 	// or "openai".  Lowercase, no spaces.
 	Provider string
 
@@ -120,8 +127,8 @@ type Entry struct {
 	// as the catalog publishes it.
 	ID string
 
-	// Name is the human-readable display name from models.dev, e.g.
-	// "Claude Sonnet 4.5 (latest)".  May be empty when the upstream
+	// Name is the human-readable display name from the catalog, e.g.
+	// "Claude Sonnet 4.5".  May be empty when the upstream
 	// catalog omits it.
 	Name string
 
@@ -136,9 +143,18 @@ type Entry struct {
 	// model does not charge for that token class" (e.g. no caching).
 	Cost Cost
 
-	// ReleaseDate is a free-form date string from upstream
-	// ("2025-09-29", "Q3 2025", etc.).  May be empty.
+	// ReleaseDate is a free-form date string ("2025-09-29", etc.).
+	// May be empty.  Populated only by the legacy models.dev path.
 	ReleaseDate string
+
+	// ReasoningLevels is the set of reasoning effort levels the model
+	// supports, e.g. ["low", "medium", "high"].  Empty when the model
+	// does not advertise explicit levels.
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
+
+	// DefaultReasoningEffort is the effort level the provider recommends
+	// when the caller does not specify one, e.g. "high".  May be empty.
+	DefaultReasoningEffort string `json:"default_reasoning_effort,omitempty"`
 
 	// Source identifies which layer produced this entry.  Set when the
 	// Catalog hands an Entry to a caller; not persisted in JSON.
@@ -203,14 +219,14 @@ type LoadOptions struct {
 	StateDir string
 
 	// Source is an injectable fetcher for tests.  Nil uses the real
-	// models.dev fetcher.
+	// catwalk fetcher.
 	Source Fetcher
 
 	// HTTPClient is used for live fetches when Source is nil.  Nil
 	// defaults to an [http.Client] with [DefaultHTTPTimeout].
 	HTTPClient *http.Client
 
-	// BaseURL overrides the models.dev host when Source is nil.
+	// BaseURL overrides the catwalk host when Source is nil.
 	// Empty falls back to [DefaultBaseURL].  Tests point this at an
 	// httptest server.
 	BaseURL string
@@ -325,7 +341,7 @@ func Load(opts LoadOptions) (*Catalog, error) {
 	}
 	src := opts.Source
 	if src == nil {
-		src = NewHTTPFetcher(opts.HTTPClient, baseURL)
+		src = NewCatwalkFetcher(opts.HTTPClient, baseURL)
 	}
 
 	stateDir := opts.StateDir
@@ -543,14 +559,52 @@ func (c *Catalog) Providers() []string {
 // disk.  Blocking.  Single-flight: concurrent Refresh calls collapse to
 // one underlying fetch.
 //
-// On success the in-memory snapshot is replaced and the disk cache is
-// rewritten atomically.  On failure the previous snapshot is preserved
-// and the error is returned.
+// When the source is a [CatwalkFetcher] the current snapshot's ETag is
+// forwarded as If-None-Match.  If the server replies 304 Not Modified,
+// Refresh returns successfully with the existing snapshot counts and a
+// zero PreviousAge — the in-memory and on-disk state are unchanged.
+//
+// On success (new data) the in-memory snapshot is replaced and the
+// disk cache is rewritten atomically.  On failure the previous snapshot
+// is preserved and the error is returned.
 func (c *Catalog) Refresh(ctx context.Context) (RefreshResult, error) {
 	c.refreshing.Lock()
 	defer c.refreshing.Unlock()
 
-	snap, err := c.source.Fetch(ctx)
+	// When the fetcher supports ETag-gated requests, pass the etag
+	// from the current in-memory snapshot to save bandwidth.
+	var snap *Snapshot
+	var err error
+	if cf, ok := c.source.(*CatwalkFetcher); ok {
+		c.mu.RLock()
+		etag := ""
+		if c.snapshot != nil {
+			etag = c.snapshot.ETag
+		}
+		c.mu.RUnlock()
+		snap, err = cf.FetchWithETag(ctx, etag)
+		if errors.Is(err, ErrNotModified) {
+			// Server confirmed nothing changed; return current counts.
+			c.mu.RLock()
+			cur := c.snapshot
+			c.mu.RUnlock()
+			if cur == nil {
+				return RefreshResult{}, nil
+			}
+			providers := len(cur.Providers)
+			models := 0
+			for _, m := range cur.Providers {
+				models += len(m)
+			}
+			return RefreshResult{
+				Providers: providers,
+				Models:    models,
+				FetchedAt: cur.FetchedAt,
+			}, nil
+		}
+	} else {
+		snap, err = c.source.Fetch(ctx)
+	}
 	if err != nil {
 		return RefreshResult{}, fmt.Errorf("catalog: refresh: %w", err)
 	}
