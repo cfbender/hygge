@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -183,6 +184,20 @@ func (a *App) applyUpdate(key, value string) {
 		// We signal via the forkPending flag which applyOutcome checks.
 		a.forkPendingID = fromID
 		a.forkPendingMsgID = value
+	case command.UpdateAttachFile:
+		att, err := loadPromptAttachment(value)
+		if err != nil {
+			a.notice = "attach: " + err.Error()
+			break
+		}
+		a.pendingAttachments = append(a.pendingAttachments, att)
+		a.notice = fmt.Sprintf("attached %s (%s)", att.Name, formatBytes(att.Size))
+	case command.UpdateAttachments:
+		if value == "clear" {
+			n := len(a.pendingAttachments)
+			a.pendingAttachments = nil
+			a.notice = fmt.Sprintf("cleared %d attachment(s)", n)
+		}
 	default:
 		slogWarnUnknownUpdate(key, value)
 	}

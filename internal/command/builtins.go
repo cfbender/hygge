@@ -33,6 +33,8 @@ func builtinCommands() []Command {
 		&clearCmd{},
 		&compactCmd{},
 		&costCmd{},
+		&attachCmd{},
+		&attachmentsCmd{},
 		&sessionsCmd{},
 		&forkCmd{},
 		&modelCmd{},
@@ -176,6 +178,42 @@ func formatCommandHelp(c Command) string {
 		fmt.Fprintf(&b, "  example: /%s\n", c.Name())
 	}
 	return b.String()
+}
+
+// --- /attach ---------------------------------------------------------------
+
+type attachCmd struct{}
+
+func (*attachCmd) Name() string        { return "attach" }
+func (*attachCmd) Description() string { return "Attach a local file to the next prompt" }
+func (*attachCmd) Source() string      { return "builtin" }
+func (*attachCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "path", Description: "local file path to attach", Required: true}}
+}
+func (*attachCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	path := strings.TrimSpace(input)
+	if path == "" {
+		return Outcome{Notice: "usage: /attach <path>"}, nil
+	}
+	return Outcome{Updates: map[string]string{UpdateAttachFile: path}}, nil
+}
+
+// --- /attachments ---------------------------------------------------------
+
+type attachmentsCmd struct{}
+
+func (*attachmentsCmd) Name() string        { return "attachments" }
+func (*attachmentsCmd) Description() string { return "Manage pending prompt attachments" }
+func (*attachmentsCmd) Source() string      { return "builtin" }
+func (*attachmentsCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "action", Description: "clear removes all pending attachments", Required: true}}
+}
+func (*attachmentsCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	action := strings.TrimSpace(input)
+	if action != "clear" {
+		return Outcome{Notice: "usage: /attachments clear"}, nil
+	}
+	return Outcome{Updates: map[string]string{UpdateAttachments: "clear"}}, nil
 }
 
 // --- /clear ---------------------------------------------------------------

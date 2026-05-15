@@ -251,6 +251,10 @@ type App struct {
 	// the next slash invocation.
 	notice string
 
+	// pendingAttachments are one-shot local files included with the next user
+	// message. They clear after Agent.Send accepts the turn/enqueue.
+	pendingAttachments []promptAttachment
+
 	// paletteHighlight is the current row index into the active
 	// command palette matches.  -1 means "no row highlighted".
 	// Reset on every buffer change.
@@ -669,6 +673,7 @@ func (a *App) View() tea.View {
 		TodoCount:     a.todoIncomplete,
 		TodoRunning:   a.busy && a.todoInProgress > 0,
 	}.View()
+	attachmentChips := a.renderAttachmentChips(leftW)
 
 	// Inline command palette: shown immediately above the input when
 	// the buffer starts with "/" and a registry is configured.
@@ -740,6 +745,9 @@ func (a *App) View() tea.View {
 	if statusPills != "" {
 		chrome += lipgloss.Height(statusPills)
 	}
+	if attachmentChips != "" {
+		chrome += lipgloss.Height(attachmentChips)
+	}
 	if breadcrumb != "" {
 		chrome += lipgloss.Height(breadcrumb)
 	}
@@ -787,6 +795,9 @@ func (a *App) View() tea.View {
 		sections = append(sections, palette)
 	}
 	sections = append(sections, in)
+	if attachmentChips != "" {
+		sections = append(sections, attachmentChips)
+	}
 	if statusPills != "" {
 		sections = append(sections, statusPills)
 	}
@@ -1298,6 +1309,8 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // In tests that do not wire a *tea.Program, sendOutOfBand is a no-op; tests
 // drive sendCompleted manually via app.Update(sendCompleted{...}).
 func (a *App) startSend(text string) tea.Cmd {
+	attachments := append([]promptAttachment(nil), a.pendingAttachments...)
+	a.pendingAttachments = nil
 	if a.opts.Agent == nil && a.testAgentSendFn == nil {
 		// No agent wired up — useful for tests that just want to verify
 		// input handling.  Just emit sendStarted so the busy state flips.
@@ -1336,15 +1349,34 @@ func (a *App) startSend(text string) tea.Cmd {
 			a.sendOutOfBand(sendCompleted{Err: err})
 			return
 		}
-		msg, err := sendFn(ctx, sid, []session.Part{
-			{Kind: session.PartText, Text: text},
-		})
+		msg, err := sendFn(ctx, sid, attachmentParts(text, attachments))
 		a.sendOutOfBand(sendCompleted{Result: msg, Err: err})
 	}()
 
 	return func() tea.Msg {
 		return sendStarted{UserInput: text, StartedAt: startedAt}
 	}
+}
+
+func (a *App) renderAttachmentChips(width int) string {
+	if len(a.pendingAttachments) == 0 {
+		return ""
+	}
+	style := lipgloss.NewStyle().Padding(0, 1)
+	if a.opts.Theme != nil {
+		style = a.opts.Theme.Style(theme.AtomMuted).Padding(0, 1)
+	}
+	chips := make([]string, 0, len(a.pendingAttachments)+1)
+	for _, att := range a.pendingAttachments {
+		label := fmt.Sprintf("📎 %s %s", att.Name, formatBytes(att.Size))
+		chips = append(chips, style.Render(label))
+	}
+	chips = append(chips, style.Render("/attachments clear to remove"))
+	out := lipgloss.JoinHorizontal(lipgloss.Left, chips...)
+	if width > 0 && lipgloss.Width(out) > width {
+		return lipgloss.NewStyle().MaxWidth(width).Render(out)
+	}
+	return out
 }
 
 // ensureSession returns a usable session id.  If opts.SessionID is empty,
