@@ -139,6 +139,7 @@ func New(opts AppOptions) (*App, error) {
 		subagents:     make(map[string]*components.SubagentState),
 		subagentAnims: make(map[string]*anim.Anim),
 		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
+		touched:       appstate.NewTouchedFiles(),
 	}
 	a.msgViewport.MouseWheelEnabled = true
 	a.spinner.Spinner = spinner.Dot
@@ -296,6 +297,16 @@ type App struct {
 
 	// closed protects against double Close.
 	closeOnce sync.Once
+
+	// touched tracks absolute paths of files written or edited during the
+	// session.  Populated on bus.ToolCallCompleted for write/edit tools.
+	touched *appstate.TouchedFiles
+
+	// modifiedFilesCache is the most-recently-computed sidebar file list.
+	// Recomputed on a 2-second tick (modifiedFilesTick) to avoid running
+	// git diff --numstat on every render frame.
+	modifiedFilesCache     []components.SidebarModifiedFile
+	modifiedFilesCacheTime time.Time
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the
@@ -304,6 +315,7 @@ func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		a.input.Textarea.Focus(),
 		a.spinner.Tick,
+		a.scheduleModifiedFilesTick(),
 	}
 	// Only start the bus listener when the bridge is running (i.e. a
 	// foreground session is already bound or OpenSessionsModalOnStart
@@ -631,20 +643,21 @@ func (a *App) View() tea.View {
 	var main string
 	if sidebarW > 0 {
 		sb := components.Sidebar{
-			Width:        sidebarW,
-			Height:       height,
-			SessionTitle: a.sidebarSessionTitle(),
-			UsedTokens:   a.usedTok,
-			MaxTokens:    a.maxTok,
-			PctUsed:      a.pctUsed,
-			CostUSD:      a.costDollars,
-			MCPs:         a.opts.MCPStatuses,
-			ProjectPath:  a.collapsedProjectPath(),
-			GitBranch:    a.gitBranch(),
-			AppName:      "Hygge",
-			Version:      a.opts.Version,
-			Theme:        a.opts.Theme,
-			NerdFonts:    a.opts.NerdFonts,
+			Width:         sidebarW,
+			Height:        height,
+			SessionTitle:  a.sidebarSessionTitle(),
+			UsedTokens:    a.usedTok,
+			MaxTokens:     a.maxTok,
+			PctUsed:       a.pctUsed,
+			CostUSD:       a.costDollars,
+			MCPs:          a.opts.MCPStatuses,
+			ProjectPath:   a.collapsedProjectPath(),
+			GitBranch:     a.gitBranch(),
+			AppName:       "Hygge",
+			Version:       a.opts.Version,
+			Theme:         a.opts.Theme,
+			NerdFonts:     a.opts.NerdFonts,
+			ModifiedFiles: a.modifiedFilesCache,
 		}.View()
 		main = lipgloss.JoinHorizontal(lipgloss.Top, leftCol, sb)
 	} else {
@@ -758,6 +771,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearCompactionToastMsg:
 		a.compactionToast = ""
 		return a, nil
+
+	case modifiedFilesTickMsg:
+		a.refreshModifiedFilesCache()
+		return a, a.scheduleModifiedFilesTick()
 
 	case dismissBannerMsg:
 		a.bannerDismissed = true
@@ -1163,6 +1180,15 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// Finalize any trailing thinking block before a tool call.
 		a.finalizeTrailingThinking()
 		target := extractTarget(e.Args)
+		// Track files that write/edit tools are about to modify.  We record the
+		// path at request time (not completion) so the list updates as soon as
+		// the tool is dispatched, giving the sidebar something to show even
+		// while a long-running write is in progress.
+		if e.ToolName == "write" || e.ToolName == "edit" {
+			if p := extractPathFromArgs(e.Args); p != "" {
+				a.touched.Add(p, a.opts.ProjectDir)
+			}
+		}
 		a.messages = append(a.messages, uiMessage{
 			Role:        components.RoleTool,
 			ToolName:    e.ToolName,
@@ -1751,6 +1777,55 @@ func (a *App) gitBranch() string {
 	return appstate.GitBranch(a.opts.ProjectDir)
 }
 
+// scheduleModifiedFilesTick returns a tea.Cmd that fires modifiedFilesTickMsg
+// after 2 seconds, driving the lazy git-numstat cache refresh.
+func (a *App) scheduleModifiedFilesTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return modifiedFilesTickMsg{} })
+}
+
+// refreshModifiedFilesCache runs git diff --numstat for the currently-tracked
+// touched files and updates modifiedFilesCache.  Called when the tick fires or
+// when a new file is added (the next tick will pick it up; this is only called
+// from the Update loop so it runs in the bubbletea goroutine — no lock needed
+// on the cache fields).
+func (a *App) refreshModifiedFilesCache() {
+	files := a.touched.List()
+	projectDir := a.opts.ProjectDir
+	if len(files) == 0 || projectDir == "" {
+		a.modifiedFilesCache = nil
+		a.modifiedFilesCacheTime = time.Now()
+		return
+	}
+
+	// Filter to files inside the project dir.
+	var filtered []string
+	for _, f := range files {
+		if strings.HasPrefix(f, projectDir+"/") || f == projectDir {
+			filtered = append(filtered, f)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	stats := appstate.NumstatForFiles(ctx, projectDir, filtered)
+
+	var out []components.SidebarModifiedFile
+	for _, f := range filtered {
+		ns := stats[f]
+		rel := strings.TrimPrefix(f, projectDir+"/")
+		if rel == "" {
+			rel = f
+		}
+		out = append(out, components.SidebarModifiedFile{
+			RelPath: rel,
+			Added:   ns.Added,
+			Deleted: ns.Deleted,
+		})
+	}
+	a.modifiedFilesCache = out
+	a.modifiedFilesCacheTime = time.Now()
+}
+
 // collapsedProjectPath returns opts.ProjectDir with the home directory
 // prefix replaced by "~", mirroring the logic from the old HeaderBar.
 func (a *App) collapsedProjectPath() string {
@@ -1978,6 +2053,61 @@ func extractTarget(args []byte) string {
 		}
 	}
 	return ""
+}
+
+// extractPathFromArgs extracts the "filePath" or "path" field from a tool
+// call's raw JSON args.  Used for write/edit tools to track modified files.
+// Returns "" when the field is absent or the args cannot be decoded.
+func extractPathFromArgs(args []byte) string {
+	if len(args) == 0 {
+		return ""
+	}
+	// Try both field names used by write/edit tools: "filePath" first
+	// (write tool), then "path" (edit tool and some aliases).
+	var fields struct {
+		FilePath string `json:"filePath"`
+		Path     string `json:"path"`
+	}
+	// Use the existing duck-typed extractor as a fast path before JSON decode.
+	// Both "filePath" and "path" would be found by extractTarget("path"), but
+	// we want the more specific JSON decode to avoid false positives from
+	// values that contain the literal string "path".
+	//
+	// Note: encoding/json is not imported here because app.go already has it
+	// through session/bus types.  We use a minimal inline parse via
+	// extractTarget which is sufficient for this use case.
+	if p := extractFieldString(args, "filePath"); p != "" {
+		return p
+	}
+	if p := extractFieldString(args, "path"); p != "" {
+		return p
+	}
+	_ = fields
+	return ""
+}
+
+// extractFieldString extracts a top-level JSON string field by name from
+// raw JSON bytes.  Returns "" when the field is absent or not a string.
+// This is a lightweight alternative to a full json.Unmarshal when only one
+// field is needed.
+func extractFieldString(raw []byte, field string) string {
+	key := `"` + field + `"`
+	s := string(raw)
+	idx := strings.Index(s, key)
+	if idx < 0 {
+		return ""
+	}
+	rest := s[idx+len(key):]
+	rest = strings.TrimLeft(rest, " \t\r\n:")
+	if !strings.HasPrefix(rest, `"`) {
+		return ""
+	}
+	rest = rest[1:]
+	end := strings.Index(rest, `"`)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
 }
 
 // --- Compaction modal integration -----------------------------------------

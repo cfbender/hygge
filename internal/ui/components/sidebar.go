@@ -20,6 +20,17 @@ type SidebarMCPStatus struct {
 	ToolCount int
 }
 
+// SidebarModifiedFile is a single file entry for the "Modified Files" sidebar
+// section, carrying a path relative to the project root and git diff counts.
+type SidebarModifiedFile struct {
+	// RelPath is the file path relative to the project root.
+	RelPath string
+	// Added is the number of lines added (from git diff --numstat).
+	Added int
+	// Deleted is the number of lines deleted.
+	Deleted int
+}
+
 // Sidebar renders the fixed-width right-side panel containing session
 // context, MCPs, modified files (stub), and footer identity.
 //
@@ -64,6 +75,11 @@ type Sidebar struct {
 
 	// MCPs is the list of configured MCP server statuses.
 	MCPs []SidebarMCPStatus
+
+	// ModifiedFiles is the list of files touched during the session,
+	// populated by the App from TouchedFiles + git numstat.
+	// Nil or empty renders "—" (the fallback stub).
+	ModifiedFiles []SidebarModifiedFile
 
 	// ProjectPath is the tilde-collapsed project directory path.
 	ProjectPath string
@@ -135,9 +151,7 @@ func (s Sidebar) View() string {
 
 	// ── Modified Files section ─────────────────────────────────────────────
 	lines = append(lines, sectionStyle.Render(sidebarTruncate("Modified Files", innerW)))
-	// TODO(post-sidebar): wire real file-modification tracking; see TODOS.md
-	// under "Sidebar follow-ups".
-	lines = append(lines, mutedStyle.Render(sidebarTruncate("—", innerW)))
+	lines = append(lines, s.renderModifiedFiles(innerW, mutedStyle)...)
 	lines = append(lines, "")
 
 	// ── Bottom block ──────────────────────────────────────────────────────
@@ -192,6 +206,100 @@ func (s Sidebar) renderMCP(m SidebarMCPStatus, _ int, mutedStyle lipgloss.Style)
 		label += mutedStyle.Render(fmt.Sprintf(" · %d tools", m.ToolCount))
 	}
 	return label
+}
+
+// renderModifiedFiles renders the Modified Files section body: up to 6 file
+// rows with +N/-M diff counts, then an "… +K more" row when there are more
+// than 6 files.  Returns "—" when the list is empty.
+func (s Sidebar) renderModifiedFiles(innerW int, mutedStyle lipgloss.Style) []string {
+	if len(s.ModifiedFiles) == 0 {
+		return []string{mutedStyle.Render(sidebarTruncate("—", innerW))}
+	}
+
+	const maxVisible = 6
+	successStyle := s.atomStyle(theme.AtomSuccess)
+	errorStyle := s.atomStyle(theme.AtomError)
+
+	var lines []string
+	visible := s.ModifiedFiles
+	extra := 0
+	if len(visible) > maxVisible {
+		extra = len(visible) - maxVisible
+		visible = visible[:maxVisible]
+	}
+
+	for _, f := range visible {
+		lines = append(lines, s.renderModifiedFileRow(f, innerW, mutedStyle, successStyle, errorStyle))
+	}
+	if extra > 0 {
+		lines = append(lines, mutedStyle.Render(sidebarTruncate(fmt.Sprintf("… +%d more", extra), innerW)))
+	}
+	return lines
+}
+
+// renderModifiedFileRow renders one file row: truncated relPath then +N -M
+// right-aligned within innerW.
+func (s Sidebar) renderModifiedFileRow(f SidebarModifiedFile, innerW int, mutedStyle, successStyle, errorStyle lipgloss.Style) string {
+	// Build the stat suffix: "+N -M" with colors applied.
+	addStr := fmt.Sprintf("+%d", f.Added)
+	delStr := fmt.Sprintf("-%d", f.Deleted)
+	addRendered := successStyle.Render(addStr)
+	delRendered := errorStyle.Render(delStr)
+	statPlain := addStr + " " + delStr
+	statVisualW := lipgloss.Width(statPlain)
+
+	// How much room is left for the path?
+	// 1 space separator between path and stat.
+	pathBudget := innerW - statVisualW - 1
+	if pathBudget < 1 {
+		pathBudget = 1
+	}
+
+	path := truncatePathLeft(f.RelPath, pathBudget)
+	pathRendered := mutedStyle.Render(path)
+
+	// Pad the path to fill the available width so the stat column is right-aligned.
+	pathVisualW := lipgloss.Width(path)
+	padding := pathBudget - pathVisualW
+	if padding < 0 {
+		padding = 0
+	}
+
+	return pathRendered + strings.Repeat(" ", padding) + " " + addRendered + " " + delRendered
+}
+
+// truncatePathLeft truncates a file path to fit within budget columns,
+// keeping the rightmost (most informative) portion and prepending "…/".
+// Truncation is done at path-segment boundaries so the result is always
+// a clean partial path (e.g. "…/cli/main.go" not "…/cli/main.g").
+// If the full path fits, it is returned unchanged.
+func truncatePathLeft(p string, budget int) string {
+	if budget <= 0 {
+		return "…"
+	}
+	if lipgloss.Width(p) <= budget {
+		return p
+	}
+	// Split into segments and try progressively shorter tails.
+	segments := strings.Split(p, "/")
+	for i := 1; i < len(segments); i++ {
+		tail := strings.Join(segments[i:], "/")
+		candidate := "…/" + tail
+		if lipgloss.Width(candidate) <= budget {
+			return candidate
+		}
+	}
+	// Even the last segment alone is too wide: fall back to character trim.
+	last := segments[len(segments)-1]
+	runes := []rune(last)
+	for len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+		candidate := "…/" + string(runes)
+		if lipgloss.Width(candidate) <= budget {
+			return candidate
+		}
+	}
+	return "…"
 }
 
 // renderBottom builds the bottom identity block lines.

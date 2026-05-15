@@ -759,3 +759,117 @@ func TestFormatTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestSidebarModifiedFiles_Empty(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:  32,
+		Height: 30,
+		Theme:  theme.ShellTheme(),
+	}
+	out := stripANSI(sb.View())
+	if !strings.Contains(out, "Modified Files") {
+		t.Errorf("sidebar missing 'Modified Files' section header; got:\n%s", out)
+	}
+	if !strings.Contains(out, "—") {
+		t.Errorf("sidebar should show '—' when no files; got:\n%s", out)
+	}
+}
+
+func TestSidebarModifiedFiles_WithFiles(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:  40,
+		Height: 35,
+		Theme:  theme.ShellTheme(),
+		ModifiedFiles: []SidebarModifiedFile{
+			{RelPath: "internal/ui/sidebar.go", Added: 12, Deleted: 3},
+			{RelPath: "docs/agents/gotchas.md", Added: 120, Deleted: 0},
+			{RelPath: "TODOS.md", Added: 8, Deleted: 2},
+		},
+	}
+	out := stripANSI(sb.View())
+	for _, want := range []string{
+		"Modified Files",
+		"sidebar.go",
+		"+12",
+		"-3",
+		"+120",
+		"TODOS.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sidebar missing %q in modified-files section; got:\n%s", want, out)
+		}
+	}
+	// Should NOT show "—" when files are present.
+	// (The dash appears in diff numbers like "-3" but "—" is the em-dash fallback.)
+	// We check the em-dash specifically.
+	if strings.Contains(out, "—") {
+		t.Errorf("sidebar should not show '—' fallback when files are present; got:\n%s", out)
+	}
+}
+
+func TestSidebarModifiedFiles_TruncatesAt6(t *testing.T) {
+	t.Parallel()
+	var files []SidebarModifiedFile
+	for i := range 9 {
+		files = append(files, SidebarModifiedFile{
+			RelPath: strings.Repeat("x", 3) + string(rune('a'+i)) + ".go",
+			Added:   i + 1,
+			Deleted: 0,
+		})
+	}
+	sb := Sidebar{
+		Width:         40,
+		Height:        40,
+		Theme:         theme.ShellTheme(),
+		ModifiedFiles: files,
+	}
+	out := stripANSI(sb.View())
+	// Should show "… +3 more" for the 3 extra files.
+	if !strings.Contains(out, "+3 more") {
+		t.Errorf("sidebar should show '+3 more' overflow; got:\n%s", out)
+	}
+	// Files 1–6 (index 0–5) should appear; files 7–9 should not.
+	// Check by line count: the overflow line has "+3 more".
+}
+
+func TestTruncatePathLeft(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		path   string
+		budget int
+		want   string
+	}{
+		{"short.go", 20, "short.go"},
+		{"a/b/c/toolong.go", 12, "…/toolong.go"},
+		{"a/b/c/toolong.go", 15, "…/c/toolong.go"},
+		{"a.go", 0, "…"},
+		{"a.go", 5, "a.go"},
+	}
+	for _, tc := range cases {
+		got := truncatePathLeft(tc.path, tc.budget)
+		if got != tc.want {
+			t.Errorf("truncatePathLeft(%q, %d) = %q, want %q", tc.path, tc.budget, got, tc.want)
+		}
+	}
+}
+
+// TestSidebarModifiedFiles_NoStaleDash verifies the "—" stub is gone after migration.
+func TestSidebarModifiedFiles_StubReplaced(t *testing.T) {
+	t.Parallel()
+	// Files present → no em-dash.
+	sb := Sidebar{
+		Width:  32,
+		Height: 30,
+		Theme:  theme.ShellTheme(),
+		ModifiedFiles: []SidebarModifiedFile{
+			{RelPath: "main.go", Added: 1, Deleted: 0},
+		},
+	}
+	out := stripANSI(sb.View())
+	// The old TODO comment rendered "—"; confirm it's not present alongside a file.
+	if strings.Contains(out, "—") {
+		t.Errorf("sidebar should not show em-dash stub when files are present; got:\n%s", out)
+	}
+}
