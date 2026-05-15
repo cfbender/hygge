@@ -34,11 +34,14 @@ func TestSubagentBlockDoneState(t *testing.T) {
 		"$0.0042",                           // cost
 		"ctrl+g",                            // hint
 		"view subagent",                     // hint label
-		"\u2502",                            // │ gutter
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("DONE view missing %q in:\n%s", want, out)
 		}
+	}
+	// Must NOT contain the │ gutter (the outer bubble border now provides containment).
+	if strings.Contains(out, "\u2502") {
+		t.Errorf("DONE view must not contain │ gutter (double-border); got:\n%s", out)
 	}
 	// Must NOT contain the old format strings.
 	for _, bad := range []string{

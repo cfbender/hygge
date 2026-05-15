@@ -12,7 +12,7 @@
 //   - Header row with left and right labels.
 //   - Optional body-height cap with truncation indicator.
 //   - Left or right alignment within a parent width budget.
-//   - No speech-bubble tail decorations (Phase 4).
+//   - Phase 4: speech-bubble tail decorations (ShowTail).
 //   - AgentColor seam: pass AccentColor directly; per-agent theming is a
 //     later slice.  Nil value falls back to theme.AtomBubbleBorder.
 package bubble
@@ -97,6 +97,13 @@ type Bubble struct {
 	// 0 means no cap.  When the body exceeds this, the last visible line is
 	// replaced by a "… +K more" indicator in muted color.
 	MaxBodyHeight int
+
+	// ShowTail, when true, appends a single decorative tail glyph below the
+	// bubble on its own line.  The tail is aligned to match the bubble's
+	// Alignment: bottom-right (◢) for AlignRight, bottom-left (◣) for AlignLeft.
+	// Only user and assistant bubbles set this to true; tool/subagent bubbles
+	// leave it false.
+	ShowTail bool
 }
 
 // View renders the bubble and returns the composed string.
@@ -157,12 +164,64 @@ func (b Bubble) View() string {
 	if pad < 0 {
 		pad = 0
 	}
+
+	var result string
 	if b.Alignment == AlignRight {
 		// Right-align: leading whitespace on the left.
-		return strings.Repeat(" ", pad) + composed
+		result = strings.Repeat(" ", pad) + composed
+	} else {
+		// Left-align: trailing whitespace on the right.
+		result = composed + strings.Repeat(" ", pad)
 	}
-	// Left-align: trailing whitespace on the right.
-	return composed + strings.Repeat(" ", pad)
+
+	// Append tail line when requested.
+	if b.ShowTail {
+		tail := b.renderTail(accentColor, pad, composedW, width)
+		result = result + "\n" + tail
+	}
+
+	return result
+}
+
+// renderTail builds the decorative single-character tail line.
+//
+// Glyph choice (Phase 4):
+//
+//	◣ (U+25E3) — solid black lower-left triangle, used for left-aligned
+//	             (assistant) bubbles.  Points toward the bottom-left corner.
+//	◢ (U+25E2) — solid black lower-right triangle, used for right-aligned
+//	             (user) bubbles.  Points toward the bottom-right corner.
+//
+// These filled triangles look like natural speech-bubble pointer cusps when
+// placed directly below the rounded border corner.  They were chosen over
+// alternatives (╲/╱, └/┘, ◤/◥) because the filled shape is visually
+// heavier and easier to spot as a "tail" at terminal font sizes.
+func (b Bubble) renderTail(accentColor color.Color, pad, composedW, width int) string {
+	style := lipgloss.NewStyle()
+	if accentColor != nil {
+		style = style.Foreground(accentColor)
+	} else if b.Theme != nil {
+		style = b.Theme.Style(theme.AtomBubbleBorder)
+	}
+
+	if b.Alignment == AlignRight {
+		// ◢ at the bottom-right corner: leading spaces + glyph flush with bubble's right edge.
+		glyph := style.Render("◢")
+		glyphW := lipgloss.Width(glyph)
+		lineW := pad + composedW - glyphW
+		if lineW < 0 {
+			lineW = 0
+		}
+		return strings.Repeat(" ", lineW) + glyph
+	}
+	// Left-aligned: ◣ at the bottom-left corner, then trailing pad to full width.
+	glyph := style.Render("◣")
+	glyphW := lipgloss.Width(glyph)
+	trailing := width - glyphW
+	if trailing < 0 {
+		trailing = 0
+	}
+	return glyph + strings.Repeat(" ", trailing)
 }
 
 // resolveAccentColor returns the accent color to use.

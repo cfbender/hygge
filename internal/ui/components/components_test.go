@@ -101,8 +101,211 @@ func TestMessageListEmpty(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
 	out := ml.View()
-	if !strings.Contains(out, "no messages") {
-		t.Errorf("expected empty hint, got:\n%s", out)
+	// New empty state: centered welcome with hygge glyph and hints.
+	for _, want := range []string{"hygge", "Type a message", "ctrl+p", "ctrl+g"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("empty state missing %q in:\n%s", want, out)
+		}
+	}
+	// Old "no messages" placeholder must no longer appear.
+	if strings.Contains(out, "no messages") {
+		t.Errorf("empty state should not contain old placeholder text; got:\n%s", out)
+	}
+}
+
+// TestMessageListEmptyState_NoMessagesShowsWelcome verifies the empty state
+// is shown only when Messages is nil/empty.
+func TestMessageListEmptyState_NoMessagesShowsWelcome(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	out := ml.View()
+	if !strings.Contains(out, "·hygge·") {
+		t.Errorf("empty state must contain '·hygge·' glyph; got:\n%s", out)
+	}
+}
+
+// TestMessageListEmptyState_DisappearsWithMessage verifies the empty state is
+// not rendered once at least one message is present.
+func TestMessageListEmptyState_DisappearsWithMessage(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 80,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleUser, Raw: "hello"},
+		},
+	}
+	out := ml.View()
+	if strings.Contains(out, "·hygge·") {
+		t.Errorf("welcome glyph must not appear when messages are present; got:\n%s", out)
+	}
+	if strings.Contains(out, "Type a message to get started") {
+		t.Errorf("empty-state hint must not appear when messages are present; got:\n%s", out)
+	}
+}
+
+// TestThinkingTruncation verifies that thinking text longer than 8 lines is
+// capped with a "… +N more lines (thinking)" indicator.
+func TestThinkingTruncation(t *testing.T) {
+	t.Parallel()
+	// Build 12 lines of thinking.
+	var thinkLines []string
+	for i := 0; i < 12; i++ {
+		thinkLines = append(thinkLines, "thought line "+itoa(i))
+	}
+	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	result := ml.truncateThinking(strings.Join(thinkLines, "\n"))
+	plain := stripANSI(result)
+
+	// First 7 lines (thinkingMaxLines-1=7) must appear.
+	for i := 0; i < 7; i++ {
+		if !strings.Contains(plain, "thought line "+itoa(i)) {
+			t.Errorf("expected line %d to be visible in truncated thinking: %q", i, plain)
+		}
+	}
+	// The indicator must appear.
+	if !strings.Contains(plain, "more lines (thinking)") {
+		t.Errorf("expected truncation indicator in thinking output; got: %q", plain)
+	}
+	// The overflow count must be correct: 12 total - 7 visible = 5 overflow.
+	if !strings.Contains(plain, "+5 more lines (thinking)") {
+		t.Errorf("expected '+5 more lines (thinking)' indicator; got: %q", plain)
+	}
+}
+
+// TestThinkingTruncation_NoIndicatorWhenFits verifies that short thinking is
+// rendered in full without a truncation indicator.
+func TestThinkingTruncation_NoIndicatorWhenFits(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	thinking := "line1\nline2\nline3"
+	result := ml.truncateThinking(thinking)
+	plain := stripANSI(result)
+	if strings.Contains(plain, "more lines (thinking)") {
+		t.Errorf("expected no indicator when thinking fits within max lines; got: %q", plain)
+	}
+	if !strings.Contains(plain, "line3") {
+		t.Errorf("expected all lines visible when thinking fits; got: %q", plain)
+	}
+}
+
+// TestThinkingTruncation_ExactlyAtMaxNoIndicator verifies that exactly
+// thinkingMaxLines lines is NOT truncated.
+func TestThinkingTruncation_ExactlyAtMaxNoIndicator(t *testing.T) {
+	t.Parallel()
+	var lines []string
+	for i := 0; i < thinkingMaxLines; i++ {
+		lines = append(lines, "line")
+	}
+	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	result := ml.truncateThinking(strings.Join(lines, "\n"))
+	plain := stripANSI(result)
+	if strings.Contains(plain, "more lines (thinking)") {
+		t.Errorf("expected no indicator at exactly thinkingMaxLines lines; got: %q", plain)
+	}
+}
+
+// TestBubbleTail_UserBubble verifies user (right-aligned) bubbles have the ◢ tail.
+func TestBubbleTail_UserBubble(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 80,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleUser, Raw: "hello"},
+		},
+	}
+	out := ml.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "◢") {
+		t.Errorf("user bubble must contain ◢ tail; got:\n%s", plain)
+	}
+}
+
+// TestBubbleTail_AssistantBubble verifies assistant (left-aligned) bubbles have the ◣ tail.
+func TestBubbleTail_AssistantBubble(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 80,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleAssistant, Raw: "hi there", AgentType: "General"},
+		},
+	}
+	out := ml.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "◣") {
+		t.Errorf("assistant bubble must contain ◣ tail; got:\n%s", plain)
+	}
+}
+
+// TestBubbleTail_ToolGroupNoTail verifies tool-group bubbles have no tail glyphs.
+func TestBubbleTail_ToolGroupNoTail(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 80,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "/tmp/x"},
+		},
+	}
+	out := ml.View()
+	plain := stripANSI(out)
+	if strings.Contains(plain, "◢") || strings.Contains(plain, "◣") {
+		t.Errorf("tool-group bubble must not contain tail glyphs; got:\n%s", plain)
+	}
+}
+
+// TestInputBorder_FocusedUsesAccent verifies that the bordered input view
+// renders and contains the typed text.
+func TestInputBorder_FocusedUsesAccent(t *testing.T) {
+	t.Parallel()
+	in := NewInput(theme.ShellTheme())
+	in.Focused = true
+	in.SetWidth(60)
+	in.Textarea.SetValue("test input")
+	view := in.View()
+	if !strings.Contains(view, "test input") {
+		t.Errorf("focused input view should contain typed text; got:\n%s", view)
+	}
+	// The view should contain rounded border characters.
+	plain := stripANSI(view)
+	if !strings.ContainsAny(plain, "╭╰╮╯") {
+		t.Errorf("input view should contain rounded border characters; got:\n%s", plain)
+	}
+}
+
+// TestInputBorder_BlurredAccepted verifies blurred input renders without panic.
+func TestInputBorder_BlurredAccepted(t *testing.T) {
+	t.Parallel()
+	in := NewInput(theme.ShellTheme())
+	in.Focused = false
+	in.SetWidth(60)
+	view := in.View()
+	if view == "" {
+		t.Errorf("blurred input view should not be empty")
+	}
+}
+
+// TestSubagentBlock_NoGutter verifies the │ gutter is absent from subagent block output.
+func TestSubagentBlock_NoGutter(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Second)
+	st := &SubagentState{
+		SubSessionID: "sub-1",
+		Type:         "general",
+		Description:  "test task",
+		StartedAt:    start,
+		EndedAt:      end,
+	}
+	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
+	if strings.Contains(out, "\u2502") { // │
+		t.Errorf("subagent block must not contain │ gutter; got:\n%s", out)
+	}
+	// Content must still be present.
+	if !strings.Contains(out, "General Subagent") {
+		t.Errorf("subagent block must still contain heading; got:\n%s", out)
 	}
 }
 
@@ -379,4 +582,24 @@ func TestSubagentBubbleWrap(t *testing.T) {
 	if strings.Contains(out, "▌tool: task") {
 		t.Errorf("subagent bubble must not contain '▌tool: task' gutter; got:\n%s", out)
 	}
+}
+
+// stripANSI is a naive ANSI escape stripper for test assertions.
+// Removes ESC[...m sequences so tests can check plain text.
+func stripANSI(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			i++ // consume 'm'
+			continue
+		}
+		out.WriteByte(s[i])
+		i++
+	}
+	return out.String()
 }

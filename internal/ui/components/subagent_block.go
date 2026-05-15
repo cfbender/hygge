@@ -88,12 +88,12 @@ func (s *SubagentState) IsRunning() bool {
 // SubagentBlock renders a single nested sub-agent state in the compact
 // heading + subtitle + hint layout.
 //
-// Layout:
+// Layout (rendered inside a distinct bubble by wrapSubagentBubble):
 //
-//	│ {Type} Subagent — {Description}
-//	│ {subtitle}
-//	│
-//	│ ctrl+g  view subagent
+//	{Type} Subagent — {Description}
+//	{subtitle}
+//
+//	ctrl+g  view subagent
 //
 // Width is the available column count for the parent message list; Theme
 // is the active theme; Now is the wall-clock used for elapsed-time math
@@ -108,13 +108,12 @@ type SubagentBlock struct {
 }
 
 // View renders the compact block.  Returns the empty string when State is nil.
+// The output has no leading │ gutter — the surrounding bubble border provides
+// the visual containment.
 func (b SubagentBlock) View() string {
 	if b.State == nil {
 		return ""
 	}
-
-	muted := b.muted()
-	gutter := muted.Render("│")
 
 	// Heading: "{Type} Subagent — {Description}" or "{Type} Subagent"
 	heading := b.heading()
@@ -126,10 +125,10 @@ func (b SubagentBlock) View() string {
 	hint := b.hintLine()
 
 	var out strings.Builder
-	out.WriteString(gutter + " " + heading)
-	out.WriteString("\n" + gutter + " " + subtitle)
-	out.WriteString("\n" + gutter)
-	out.WriteString("\n" + gutter + " " + hint)
+	out.WriteString(heading)
+	out.WriteString("\n" + subtitle)
+	out.WriteString("\n")
+	out.WriteString("\n" + hint)
 	return out.String()
 }
 
@@ -149,8 +148,8 @@ func (b SubagentBlock) heading() string {
 
 	// Only truncate when a meaningful width constraint is provided.
 	if b.Width > 0 {
-		// Available width: terminal width minus "│ " gutter (2 runes) and
-		// leave a small margin.
+		// Available width: terminal width minus outer bubble border (2 runes) and
+		// a small margin.
 		avail := b.Width - 2
 		if utf8.RuneCountInString(full) > avail && avail >= 5 {
 			// Truncate description with ellipsis.

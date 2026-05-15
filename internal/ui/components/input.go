@@ -19,6 +19,8 @@ import (
 type Input struct {
 	Textarea textarea.Model
 	Theme    *theme.Theme
+	// Focused controls the border color: accent when true, muted when false.
+	Focused bool
 }
 
 // NewInput builds a configured textarea wrapped in Input.
@@ -37,20 +39,34 @@ func NewInput(t *theme.Theme) *Input {
 		ta.SetStyles(styles)
 	}
 	ta.Focus()
-	return &Input{Textarea: ta, Theme: t}
+	return &Input{Textarea: ta, Theme: t, Focused: true}
 }
 
-// SetWidth resizes the underlying textarea.
+// SetWidth resizes the underlying textarea.  The outer border adds 2 columns
+// per side, so the textarea itself is narrowed by 2 (border chars) to keep
+// the total within the requested width.
 func (i *Input) SetWidth(w int) {
-	i.Textarea.SetWidth(w)
+	inner := w - 2 // subtract left+right border columns
+	if inner < 1 {
+		inner = 1
+	}
+	i.Textarea.SetWidth(inner)
 }
 
-// View renders the textarea wrapped in a thin border styled by theme.
+// View renders the textarea wrapped in a rounded border whose color reflects
+// focus state: accent (AtomBubbleBorder) when focused, muted when blurred.
 func (i *Input) View() string {
-	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1)
 	if i.Theme != nil {
-		// Use modal-border atom as a generic chrome stroke.
-		bs := i.Theme.Style(theme.AtomModalBorder)
+		var borderAtom theme.Atom
+		if i.Focused {
+			borderAtom = theme.AtomBubbleBorder
+		} else {
+			borderAtom = theme.AtomMuted
+		}
+		bs := i.Theme.Style(borderAtom)
 		style = style.BorderForeground(bs.GetForeground())
 	}
 	return style.Render(i.Textarea.View())
