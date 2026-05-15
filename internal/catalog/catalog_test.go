@@ -541,6 +541,31 @@ func TestCatwalkFetcher_Success(t *testing.T) {
 	}
 }
 
+func TestCatwalkFetcher_AppendsProvidersPathOnce(t *testing.T) {
+	t.Parallel()
+	for _, baseSuffix := range []string{"", "/"} {
+		baseSuffix := baseSuffix
+		t.Run("suffix="+baseSuffix, func(t *testing.T) {
+			t.Parallel()
+			paths := make(chan string, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths <- r.URL.Path
+				_, _ = w.Write(fixtureBodyBytes(t))
+			}))
+			defer srv.Close()
+
+			f := NewCatwalkFetcher(srv.Client(), srv.URL+baseSuffix)
+			if _, err := f.Fetch(context.Background()); err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+			gotPath := <-paths
+			if gotPath != "/v2/providers" {
+				t.Fatalf("path = %q, want /v2/providers", gotPath)
+			}
+		})
+	}
+}
+
 func TestCatwalkFetcher_Non2xx(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -656,21 +681,43 @@ func TestRefresh_SingleFlight(t *testing.T) {
 // Snapshot file / versioning tests
 // ---------------------------------------------------------------------------
 
-func TestSnapshotFile_VersionRejected(t *testing.T) {
+func TestSnapshotFile_IncompatibleVersionIsCacheMiss(t *testing.T) {
 	t.Parallel()
 	dir := tempStateDir(t)
 	path := filepath.Join(dir, "catalog.json")
-	// Write a snapshot file with the wrong version.
+	// Write a pre-catwalk snapshot file with the old version.
 	bad := struct {
 		Version int `json:"version"`
-	}{Version: 99}
+	}{Version: 1}
 	data, _ := json.Marshal(bad)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	_, err := readSnapshotFile(path)
-	if err == nil || !strings.Contains(err.Error(), "unsupported snapshot version") {
-		t.Errorf("expected version error, got %v", err)
+	if !errors.Is(err, ErrIncompatibleSnapshot) {
+		t.Fatalf("expected incompatible snapshot error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unsupported snapshot version") {
+		t.Fatalf("error should not use scary unsupported-version wording: %v", err)
+	}
+}
+
+func TestLoad_IncompatibleDiskSnapshotFallsBackCleanly(t *testing.T) {
+	t.Parallel()
+	dir := tempStateDir(t)
+	path := filepath.Join(dir, "catalog.json")
+	data, _ := json.Marshal(struct {
+		Version int `json:"version"`
+	}{Version: 1})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	c, err := Load(LoadOptions{StateDir: dir, BackgroundRefresh: boolPtr(false)})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.Loaded().Source; got != SourceEmbedded {
+		t.Fatalf("source = %q, want embedded", got)
 	}
 }
 

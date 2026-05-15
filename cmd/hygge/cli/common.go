@@ -786,20 +786,8 @@ func buildProviderResolver(cfg *config.Config, stateOpts state.LoadOptions, pare
 	}
 }
 
-func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, catSrc *catalog.Catalog, parentModel fantasy.LanguageModel) subagent.FantasyModelResolver {
-	var mu sync.Mutex
-	cache := map[string]fantasy.LanguageModel{}
-	if cfg != nil && cfg.Model.Provider != "" && cfg.Model.Name != "" && parentModel != nil {
-		cache[cfg.Model.Provider+"/"+cfg.Model.Name] = parentModel
-	}
+func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, catSrc *catalog.Catalog, _ fantasy.LanguageModel) subagent.FantasyModelResolver {
 	return func(ctx context.Context, providerName, modelID string) (fantasy.LanguageModel, error) {
-		key := providerName + "/" + modelID
-		mu.Lock()
-		cached, ok := cache[key]
-		mu.Unlock()
-		if ok {
-			return cached, nil
-		}
 		opts, err := resolveProviderOptionsFor(providerName, cfg, stateOpts)
 		if err != nil {
 			return nil, err
@@ -808,13 +796,6 @@ func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, 
 		if err != nil {
 			return nil, err
 		}
-		mu.Lock()
-		if existing, ok := cache[key]; ok {
-			mu.Unlock()
-			return existing, nil
-		}
-		cache[key] = resolved.Model
-		mu.Unlock()
 		return resolved.Model, nil
 	}
 }

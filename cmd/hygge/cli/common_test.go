@@ -9,10 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/state"
 )
 
 // fakeProvider is a no-network provider stand-in used by every test
@@ -46,6 +49,23 @@ func (fakeProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 func fakeProviderFactory(_ map[string]any) (provider.Provider, error) {
 	return fakeProvider{}, nil
 }
+
+type fakeFantasyLanguageModel struct{}
+
+func (fakeFantasyLanguageModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return nil, nil
+}
+func (fakeFantasyLanguageModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	return nil, nil
+}
+func (fakeFantasyLanguageModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+func (fakeFantasyLanguageModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+func (fakeFantasyLanguageModel) Provider() string { return "test" }
+func (fakeFantasyLanguageModel) Model() string    { return "test-model" }
 
 // optsCapture is a thread-safe map[string]any sink used by tests that
 // need to assert on what was passed to the provider factory.
@@ -169,6 +189,34 @@ func TestBootstrapBuildsAllComponents(t *testing.T) {
 	if rt.Theme == nil {
 		t.Error("Theme nil")
 	}
+}
+
+func TestFantasyModelResolverDoesNotReuseParentAfterConfigChange(t *testing.T) {
+	cfg := &config.Config{Model: config.ModelConfig{
+		Provider: "test-provider",
+		Name:     "model-a",
+		Options: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://first.invalid/v1",
+		},
+	}}
+	resolver := buildFantasyModelResolver(cfg, stateLoadOptionsForTest(), nil, fakeFantasyLanguageModel{})
+
+	cfg.Model.Options["base_url"] = "https://second.invalid/v1"
+	got, err := resolver(context.Background(), "test-provider", "model-a")
+	if err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
+	if got == nil {
+		t.Fatal("resolver returned nil model")
+	}
+	if _, reused := got.(fakeFantasyLanguageModel); reused {
+		t.Fatal("resolver reused parent model instead of rebuilding with current options")
+	}
+}
+
+func stateLoadOptionsForTest() state.LoadOptions {
+	return state.LoadOptions{}
 }
 
 // TestBootstrap_AuthStoreInjectsAPIKey verifies that with no
