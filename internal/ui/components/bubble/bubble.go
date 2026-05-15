@@ -205,15 +205,17 @@ func (b Bubble) View() string {
 // innerW. Every line is exactly innerW cells wide, including horizontal padding.
 // When backgroundColor is set, the padded cells are filled too.
 func (b Bubble) composeInner(header, body string, contentW int, accentColor, backgroundColor color.Color) string {
-	// Collect logical segments.
+	// Collect logical segments with vertical padding.
 	var segments []string
 	if header != "" {
+		segments = append(segments, "") // top padding
 		segments = append(segments, header)
 		sep := b.renderSeparator(contentW, accentColor)
 		segments = append(segments, sep)
 	}
 	if body != "" {
 		segments = append(segments, body)
+		segments = append(segments, "") // bottom padding
 	}
 
 	// Flatten into lines.
