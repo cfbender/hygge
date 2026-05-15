@@ -2,11 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cfbender/hygge/internal/config"
+	"github.com/cfbender/hygge/internal/state"
 )
 
 func TestResumeNoMatchExitsWithError(t *testing.T) {
@@ -345,5 +349,127 @@ func TestResumeAnyDisablesCwdScope(t *testing.T) {
 	rootAny.SetArgs([]string{"resume", "--any"})
 	if err := rootAny.Execute(); err != nil {
 		t.Fatalf("--any should find global session, got: %v\noutput: %s", err, bufAny.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// setupTUILog / HYGGE_LOG_LEVEL tests
+// ---------------------------------------------------------------------------
+
+// minimalRuntime returns an *appRuntime with only the fields setupTUILog reads.
+func minimalRuntime(stateDir string) *appRuntime {
+	return &appRuntime{
+		Config: &config.Config{},
+		StateOpts: state.LoadOptions{
+			XDGStateHome: stateDir,
+		},
+	}
+}
+
+// TestSetupTUILog_DefaultIsDebug verifies that without HYGGE_LOG_LEVEL set,
+// debug-level messages appear in the log file (backward-compatible default).
+func TestSetupTUILog_DefaultIsDebug(t *testing.T) {
+	t.Setenv("HYGGE_LOG_LEVEL", "")
+	dir := t.TempDir()
+	rt := minimalRuntime(dir)
+
+	closer := setupTUILog(rt)
+	if closer == nil {
+		t.Fatal("expected non-nil closer")
+	}
+	slog.Debug("test-debug-line")
+	closer()
+
+	logPath := filepath.Join(dir, "hygge", "hygge.log")
+	data, err := os.ReadFile(logPath) //nolint:gosec // logPath is under t.TempDir()
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "test-debug-line") {
+		t.Errorf("expected debug line in log; got:\n%s", data)
+	}
+}
+
+// TestSetupTUILog_InfoSuppressesDebug verifies that HYGGE_LOG_LEVEL=info
+// suppresses debug-level messages.
+func TestSetupTUILog_InfoSuppressesDebug(t *testing.T) {
+	t.Setenv("HYGGE_LOG_LEVEL", "info")
+	dir := t.TempDir()
+	rt := minimalRuntime(dir)
+
+	closer := setupTUILog(rt)
+	if closer == nil {
+		t.Fatal("expected non-nil closer")
+	}
+	slog.Debug("should-not-appear")
+	slog.Info("should-appear")
+	closer()
+
+	logPath := filepath.Join(dir, "hygge", "hygge.log")
+	data, err := os.ReadFile(logPath) //nolint:gosec // logPath is under t.TempDir()
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if strings.Contains(string(data), "should-not-appear") {
+		t.Errorf("debug line must be suppressed at info level; got:\n%s", data)
+	}
+	if !strings.Contains(string(data), "should-appear") {
+		t.Errorf("info line should appear at info level; got:\n%s", data)
+	}
+}
+
+// TestSetupTUILog_CaseInsensitive verifies HYGGE_LOG_LEVEL is parsed
+// case-insensitively (e.g. "INFO", "Info").
+func TestSetupTUILog_CaseInsensitive(t *testing.T) {
+	for _, raw := range []string{"INFO", "Info", "  info  "} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("HYGGE_LOG_LEVEL", raw)
+			dir := t.TempDir()
+			rt := minimalRuntime(dir)
+
+			closer := setupTUILog(rt)
+			if closer == nil {
+				t.Fatal("expected non-nil closer")
+			}
+			slog.Debug("debug-suppressed")
+			slog.Info("info-present")
+			closer()
+
+			logPath := filepath.Join(dir, "hygge", "hygge.log")
+			data, err := os.ReadFile(logPath) //nolint:gosec // logPath is under t.TempDir()
+			if err != nil {
+				t.Fatalf("read log: %v", err)
+			}
+			if strings.Contains(string(data), "debug-suppressed") {
+				t.Errorf("debug must be suppressed for HYGGE_LOG_LEVEL=%q; got:\n%s", raw, data)
+			}
+			if !strings.Contains(string(data), "info-present") {
+				t.Errorf("info must appear for HYGGE_LOG_LEVEL=%q; got:\n%s", raw, data)
+			}
+		})
+	}
+}
+
+// TestSetupTUILog_UnknownValueFallsBackToDebug verifies that an unrecognised
+// HYGGE_LOG_LEVEL value silently falls back to debug.
+func TestSetupTUILog_UnknownValueFallsBackToDebug(t *testing.T) {
+	t.Setenv("HYGGE_LOG_LEVEL", "verbose")
+	dir := t.TempDir()
+	rt := minimalRuntime(dir)
+
+	closer := setupTUILog(rt)
+	if closer == nil {
+		t.Fatal("expected non-nil closer")
+	}
+	slog.Debug("debug-should-appear-fallback")
+	closer()
+
+	logPath := filepath.Join(dir, "hygge", "hygge.log")
+	data, err := os.ReadFile(logPath) //nolint:gosec // logPath is under t.TempDir()
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "debug-should-appear-fallback") {
+		t.Errorf("unknown HYGGE_LOG_LEVEL should fall back to debug; got:\n%s", data)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	tea "charm.land/bubbletea/v2"
@@ -217,6 +218,10 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 // that warnings emitted under bubbletea's alt-screen are recoverable.
 // Returns a close function (or nil if redirection failed) that restores
 // the previous slog default handler and closes the file.
+//
+// Log level: reads HYGGE_LOG_LEVEL (case-insensitive).  Accepted values:
+// debug, info, warn, error.  When unset the level defaults to debug,
+// matching the historical behaviour so existing users see no change.
 func setupTUILog(rt *appRuntime) func() {
 	dir := rt.StateOpts.XDGStateHome
 	if dir == "" {
@@ -235,8 +240,27 @@ func setupTUILog(rt *appRuntime) func() {
 	if err != nil {
 		return nil
 	}
+
+	// Resolve log level from HYGGE_LOG_LEVEL; default to debug for
+	// backward compatibility (the level was hard-coded to debug before
+	// this env var was introduced).
+	level := slog.LevelDebug
+	if raw := strings.TrimSpace(os.Getenv("HYGGE_LOG_LEVEL")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "debug":
+			level = slog.LevelDebug
+		case "info":
+			level = slog.LevelInfo
+		case "warn":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+		// Unknown values are silently ignored; level stays at debug.
+	}
+
 	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: level})))
 	slog.Info("hygge: tui session started",
 		"pwd", rt.Pwd,
 		"provider", rt.Config.Model.Provider,

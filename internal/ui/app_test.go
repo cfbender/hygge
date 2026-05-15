@@ -390,25 +390,28 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	if app.renderer == r1 {
 		t.Errorf("expected new renderer instance after resize")
 	}
-	if app.rendererW != 60 {
-		t.Errorf("renderer width = %d, want 60", app.rendererW)
+	if app.rendererW != 46 {
+		t.Errorf("renderer width = %d, want 46 (bubble inner: int(60*0.80)-2)", app.rendererW)
 	}
 }
 
 // TestRendererWidthRespectsSidebar verifies that the glamour renderer is built
-// at leftW (terminal width minus sidebar), not the full terminal width.
-// On a 250-column terminal with a 32-column sidebar the renderer must be 218,
-// not 250.  This regression test covers the bug where ensureRenderer used
-// a.width instead of a.msgColW, causing markdown lines to overflow bubble
-// BubbleWidth and the bubbles to visually span ~95% of the left column.
+// at the bubble inner width, not the full terminal or left-column width.
+// On a 250-column terminal with a 32-column sidebar, leftW = 218, and the
+// bubble inner width = int(218*0.80)-2 = 172.  This regression test covers
+// the bug where ensureRenderer used a.width (or leftW) instead of the bubble
+// inner width, causing markdown lines to overflow the bubble and expand it
+// to ~97% of the left column.
 func TestRendererWidthRespectsSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
 	// Wide terminal: sidebar is 32 cols, leftW = 250 - 32 = 218.
+	// Bubble inner = int(218*0.80)-2 = 172.
 	const termW = 250
 	const sidebarW = 32
-	const wantRendererW = termW - sidebarW // 218
+	leftW := termW - sidebarW                     // 218
+	wantRendererW := int(float64(leftW)*0.80) - 2 // 172
 	app.Update(tea.WindowSizeMsg{Width: termW, Height: 40})
 
 	// Trigger a renderer build via a stream-complete event.
@@ -419,9 +422,9 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 		t.Fatal("expected renderer to be built after MessageAppended")
 	}
 	if app.rendererW != wantRendererW {
-		t.Errorf("renderer width = %d, want %d (leftW = terminal %d - sidebar %d); "+
-			"ensureRenderer must use msgColW, not a.width",
-			app.rendererW, wantRendererW, termW, sidebarW)
+		t.Errorf("renderer width = %d, want %d (bubble inner: int(%d*0.80)-2); "+
+			"ensureRenderer must use bubble inner width, not leftW or a.width",
+			app.rendererW, wantRendererW, leftW)
 	}
 	// Sanity: msgColW must also equal wantRendererW.
 	if app.msgColW != wantRendererW {
@@ -430,24 +433,25 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 }
 
 // TestRendererWidthNarrowTerminalNoSidebar verifies that on a narrow terminal
-// (< 100 cols) where the sidebar is hidden, the renderer is built at the full
-// terminal width (leftW == a.width since sidebarW == 0).
+// (< 100 cols) where the sidebar is hidden, the renderer is built at the
+// bubble inner width for the full terminal width (int(termW*0.80)-2).
 func TestRendererWidthNarrowTerminalNoSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
-	const termW = 80
+	termW := 80
+	wantRendererW := int(float64(termW)*0.80) - 2 // 62
 	app.Update(tea.WindowSizeMsg{Width: termW, Height: 24})
 
 	app.Handle(bus.AssistantTextDelta{Text: "hello"})
 	app.Handle(bus.MessageAppended{Role: "assistant"})
 
-	if app.rendererW != termW {
-		t.Errorf("renderer width = %d, want %d (no sidebar on narrow terminal)",
-			app.rendererW, termW)
+	if app.rendererW != wantRendererW {
+		t.Errorf("renderer width = %d, want %d (bubble inner: int(%d*0.80)-2)",
+			app.rendererW, wantRendererW, termW)
 	}
-	if app.msgColW != termW {
-		t.Errorf("msgColW = %d, want %d", app.msgColW, termW)
+	if app.msgColW != wantRendererW {
+		t.Errorf("msgColW = %d, want %d", app.msgColW, wantRendererW)
 	}
 }
 
