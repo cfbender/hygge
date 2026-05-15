@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 
+	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/tool"
 )
@@ -39,6 +41,47 @@ func (r *Runtime) hasFantasyModel() bool {
 
 func (r *Runtime) newFantasyAgent(tools []fantasy.AgentTool) fantasy.Agent {
 	return fantasy.NewAgent(r.model, fantasy.WithTools(tools...), fantasy.WithStopConditions(fantasy.StepCountIs(r.maxIterations)))
+}
+
+func (r *Runtime) newInternalAgent() fantasy.Agent {
+	return fantasy.NewAgent(r.model, fantasy.WithTools())
+}
+
+// Summarize runs a no-tool Fantasy agent for internal conversation compaction.
+func (r *Runtime) Summarize(ctx context.Context, messages []fantasy.Message, maxTokens int) (string, provider.Usage, error) {
+	if !r.hasFantasyModel() {
+		return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
+	}
+	maxOutputTokens := int64(maxTokens)
+	res, err := r.newInternalAgent().Generate(ctx, fantasy.AgentCall{Messages: messages, MaxOutputTokens: &maxOutputTokens})
+	if err != nil {
+		return "", provider.Usage{}, err
+	}
+	if res == nil {
+		return "", provider.Usage{}, fmt.Errorf("agent: fantasy summary returned nil result")
+	}
+	return strings.TrimSpace(res.Response.Content.Text()), usageFromFantasy(res.TotalUsage), nil
+}
+
+// GenerateTitle is the narrow no-tool seam for future model-generated session
+// titles/slugs. Hygge currently displays FirstMessagePreview or a user-edited
+// Slug, so this is intentionally not wired into UI/store mutation yet.
+func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens int) (string, provider.Usage, error) {
+	if !r.hasFantasyModel() {
+		return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
+	}
+	maxOutputTokens := int64(maxTokens)
+	res, err := r.newInternalAgent().Generate(ctx, fantasy.AgentCall{Messages: []fantasy.Message{
+		fantasy.NewSystemMessage("Generate a concise session title. Return only the title."),
+		fantasy.NewUserMessage(prompt),
+	}, MaxOutputTokens: &maxOutputTokens})
+	if err != nil {
+		return "", provider.Usage{}, err
+	}
+	if res == nil {
+		return "", provider.Usage{}, fmt.Errorf("agent: fantasy title returned nil result")
+	}
+	return strings.TrimSpace(res.Response.Content.Text()), usageFromFantasy(res.TotalUsage), nil
 }
 
 func (r *Runtime) buildFantasyTools(opts fantasyToolOptions) []fantasy.AgentTool {

@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -247,9 +249,11 @@ const compactionSystemPrompt = "Summarize the following conversation in 2-3 para
 	"preserving all decisions, file paths, and outstanding tasks. " +
 	"Be concrete; do not editorialize."
 
-// generateCompactionSummary calls the provider with the compaction system
-// prompt over msgs, drains the stream collecting text deltas, and returns
-// the resulting summary together with the final Usage.
+// generateCompactionSummary calls the no-tool Fantasy internal agent when a
+// Fantasy model is configured, otherwise falls back to the legacy provider test
+// seam. Summary usage is stored on the compaction marker for saved-token UX;
+// it is not added to per-session cost totals, matching the pre-migration
+// accounting behavior for background summarization.
 func (a *Agent) generateCompactionSummary(
 	ctx context.Context, modelName string, msgs []*session.Message,
 ) (string, provider.Usage, error) {
@@ -259,6 +263,11 @@ func (a *Agent) generateCompactionSummary(
 			continue
 		}
 		values = append(values, *m)
+	}
+	if a.runtime != nil && a.runtime.hasFantasyModel() {
+		fmsgs := append([]fantasy.Message{fantasy.NewSystemMessage(compactionSystemPrompt)}, toFantasyMessages(msgs, nil, "", nil)...)
+		fmsgs = append(fmsgs, fantasy.NewUserMessage("Summarize the conversation above."))
+		return a.runtime.Summarize(ctx, fmsgs, a.opts.CompactionMaxTokens)
 	}
 
 	req := provider.Request{

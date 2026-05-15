@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -236,6 +238,39 @@ func TestCompact_PublishesStartedCompleted(t *testing.T) {
 	}
 	if completed.DurationMs < 0 {
 		t.Errorf("CompactionCompleted.DurationMs = %d, want ≥0", completed.DurationMs)
+	}
+}
+
+func TestCompact_UsesFantasySummaryWhenConfigured(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	prov := newFakeProvider("fake")
+	fantasyModel := &fakeFantasyModel{provider: "fake", model: "fake-model", text: "fantasy compact summary", usage: fantasy.Usage{InputTokens: 42, OutputTokens: 7}}
+	a := env.newAgent(prov, func(o *Options) { o.FantasyModel = fantasyModel })
+	for i := 0; i < 3; i++ {
+		if _, err := env.Store.AppendMessage(ctx, env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: userText(fmt.Sprintf("q%d", i))}); err != nil {
+			t.Fatalf("append user %d: %v", i, err)
+		}
+		if _, err := env.Store.AppendMessage(ctx, env.sessionID, session.NewMessage{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: fmt.Sprintf("a%d", i)}}}); err != nil {
+			t.Fatalf("append assistant %d: %v", i, err)
+		}
+	}
+
+	marker, err := a.Compact(ctx, env.sessionID)
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if marker.Summary != "fantasy compact summary" {
+		t.Fatalf("marker summary = %q", marker.Summary)
+	}
+	if marker.InputTokensSaved != 42 {
+		t.Fatalf("marker InputTokensSaved = %d, want 42", marker.InputTokensSaved)
+	}
+	if fantasyModel.calls.Load() != 1 {
+		t.Fatalf("fantasy calls = %d, want 1", fantasyModel.calls.Load())
+	}
+	if prov.calls.Load() != 0 {
+		t.Fatalf("provider calls = %d, want 0", prov.calls.Load())
 	}
 }
 
