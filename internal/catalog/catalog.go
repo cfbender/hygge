@@ -87,7 +87,7 @@ import (
 
 // DefaultBaseURL is the canonical catwalk catalog host.  The full URL
 // fetched is BaseURL + "/v2/providers".
-const DefaultBaseURL = "https://api.catwalk.sh"
+const DefaultBaseURL = "https://catwalk.charm.land"
 
 // DefaultMaxStaleness is the freshness window used when [LoadOptions]
 // does not set one explicitly.  After this much time has passed since the
@@ -367,7 +367,7 @@ func Load(opts LoadOptions) (*Catalog, error) {
 	if snap, err := readSnapshotFile(statePath); err == nil && snap != nil {
 		c.snapshot = snap
 		c.src = SourceDisk
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrIncompatibleSnapshot) {
 		slog.Warn("catalog: failed to read disk snapshot; falling back to embedded",
 			"path", statePath, "err", err)
 	}

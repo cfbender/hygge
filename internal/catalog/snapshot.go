@@ -45,6 +45,11 @@ type snapshotFileFormat struct {
 //	    reasoning_levels / default_reasoning_effort added to Entry)
 const snapshotFileVersion = 2
 
+// ErrIncompatibleSnapshot marks an expected on-disk cache miss caused by an
+// older cache schema. Callers should fall back without surfacing it as
+// corruption.
+var ErrIncompatibleSnapshot = errors.New("catalog: incompatible disk snapshot")
+
 // loadEmbeddedSnapshot loads the catalog from the catwalk module's
 // built-in provider configs.  These are the same JSON files the catwalk
 // binary ships with, accessed via charm.land/catwalk/pkg/embedded.GetAll().
@@ -70,8 +75,9 @@ func loadEmbeddedSnapshot() (*Snapshot, error) {
 // errors.Is; other errors signal corruption that the caller logs and
 // falls back from.
 //
-// Version-1 snapshots (models.dev format) are rejected; the caller
-// falls back to the embedded snapshot and a fresh network fetch.
+// Version-1 snapshots use the previous cache schema. They are treated as a
+// cache miss so upgrades fall back to the embedded snapshot and refresh without
+// a user-visible corruption warning.
 func readSnapshotFile(path string) (*Snapshot, error) {
 	if path == "" {
 		return nil, os.ErrNotExist
@@ -88,7 +94,7 @@ func readSnapshotFile(path string) (*Snapshot, error) {
 		return nil, fmt.Errorf("catalog: parse disk snapshot: %w", err)
 	}
 	if f.Version != snapshotFileVersion {
-		return nil, fmt.Errorf("catalog: unsupported snapshot version %d (want %d)", f.Version, snapshotFileVersion)
+		return nil, fmt.Errorf("%w: version %d (want %d)", ErrIncompatibleSnapshot, f.Version, snapshotFileVersion)
 	}
 	if f.Providers == nil {
 		f.Providers = map[string]map[string]Entry{}
