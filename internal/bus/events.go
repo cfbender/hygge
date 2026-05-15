@@ -332,6 +332,19 @@ type QueueChanged struct {
 	At time.Time
 }
 
+// TodoChanged fires when a session's lightweight agent todo list changes.
+// Consumers use the summary counts for compact live status without needing
+// the full item list.
+type TodoChanged struct {
+	SessionID  string
+	Total      int
+	Incomplete int
+	InProgress int
+	Completed  int
+	Cancelled  int
+	At         time.Time
+}
+
 // TurnStarted fires at the moment the agent begins executing a turn —
 // after the user message is persisted and hooks have run, just before the
 // provider stream loop starts.  Paired with TurnCompleted.  The UI uses

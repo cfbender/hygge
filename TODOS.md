@@ -128,4 +128,5 @@ Migration plan artifact: `7yLWjW`.
   - [x] **Phase 6A — UX foundation** — Queue status pills near the input/footer and input-event filtering for OSC leaks plus 15ms mouse wheel/motion spam throttling.
   - [x] **Phase 6B — Slash-command completion popover** — Fuzzy inline completions with descriptions, keyboard navigation, and Hygge styling.
   - [x] **Phase 6C — Dialog overlay stack** — Typed overlay stack routes topmost keys first, centralizes input-focus state, renders help, and wraps the existing permission queue as a compatibility overlay while preserving queue semantics.
-  - [ ] **Phase 6D+ follow-ups** — API-key/model/theme dialogs on the overlay stack; richer command dialogs; todo persistence/agent todo tracking; attachments; optional backdrop rendering over preserved app content instead of full-screen modal replacement.
+  - [x] **Phase 6D — Session todo status** — Added an in-memory per-session `todo` tool, live `TodoChanged` events, and a compact todo status pill with an in-progress marker while the agent is busy.
+  - [ ] **Phase 6E+ follow-ups** — API-key/model/theme dialogs on the overlay stack; richer command dialogs; durable todo persistence/hydration; attachments; optional backdrop rendering over preserved app content instead of full-screen modal replacement.

@@ -18,6 +18,7 @@ type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
 	reads *readTracker
+	todos *todoStore
 }
 
 // NewRegistry returns an empty Registry with a fresh read-tracker.
@@ -25,6 +26,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		tools: make(map[string]Tool),
 		reads: newReadTracker(),
+		todos: newTodoStore(),
 	}
 }
 
@@ -96,9 +98,9 @@ func (r *Registry) ReadTracker() *readTracker { //nolint:revive // exported inte
 	return r.reads
 }
 
-// Default returns a Registry preloaded with the six v0.1 built-in tools:
-// read, write, edit, bash, grep, glob.  The returned registry owns its
-// own read-tracker; the built-ins are wired to use it.
+// Default returns a Registry preloaded with the built-in tools. The returned
+// registry owns its own read-tracker and todo store; the built-ins are wired
+// to use them.
 //
 // Equivalent to DefaultWith(DefaultOptions{}).
 func Default() *Registry {
@@ -114,9 +116,9 @@ type DefaultOptions struct {
 	SkillRegistry *skill.Registry
 }
 
-// DefaultWith returns a Registry preloaded with the six v0.1 built-in
-// tools, plus any optional tools enabled by opts.  Callers that need
-// the skill tool pass DefaultOptions{SkillRegistry: reg}.
+// DefaultWith returns a Registry preloaded with the built-in tools, plus any
+// optional tools enabled by opts. Callers that need the skill tool pass
+// DefaultOptions{SkillRegistry: reg}.
 func DefaultWith(opts DefaultOptions) *Registry {
 	r := NewRegistry()
 	mustRegister(r, newReadTool(r.reads))
@@ -125,6 +127,7 @@ func DefaultWith(opts DefaultOptions) *Registry {
 	mustRegister(r, newBashTool())
 	mustRegister(r, newGrepTool())
 	mustRegister(r, newGlobTool())
+	mustRegister(r, newTodoTool(r.todos))
 	if opts.SkillRegistry != nil {
 		mustRegister(r, NewSkillTool(opts.SkillRegistry))
 	}
