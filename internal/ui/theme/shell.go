@@ -49,7 +49,7 @@ func ShellTheme() *Theme {
 
 			// Phase 5: distinct user vs agent bubble border colors.
 			AtomBubbleUserBorder:  {kind: colorKindANSI, raw: "4"}, // blue  — user bubble
-			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "1"}, // red — agent bubble default
+			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "5"}, // magenta — agent bubble default
 		},
 	}
 }
