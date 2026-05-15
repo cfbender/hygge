@@ -430,17 +430,18 @@ func TestUiEntryFromStoreMessage_ThinkingPartProducesThinkingEntry(t *testing.T)
 		Role:  session.RoleAssistant,
 		Parts: []session.Part{{Kind: session.PartThinking, Text: "thinking..."}},
 	}
-	// Assistant with only thinking parts: uiEntryFromStoreMessage returns the
-	// thinking entry (first entry from uiEntriesFromStoreMessage).
+	// Phase 2: assistant with only thinking parts returns an assistant entry
+	// with the Thinking field populated and empty Raw (tool-only check skipped
+	// since Thinking is non-empty).
 	entry, ok := uiEntryFromStoreMessage(m)
 	if !ok {
 		t.Fatalf("expected ok=true for assistant with thinking parts")
 	}
-	if entry.Role != components.RoleThinking {
-		t.Errorf("role = %q, want RoleThinking", entry.Role)
+	if entry.Role != components.RoleAssistant {
+		t.Errorf("role = %q, want RoleAssistant (Phase 2: thinking is inline)", entry.Role)
 	}
-	if entry.Raw != "thinking..." {
-		t.Errorf("raw = %q, want 'thinking...'", entry.Raw)
+	if entry.Thinking != "thinking..." {
+		t.Errorf("Thinking = %q, want 'thinking...'", entry.Thinking)
 	}
 }
 
@@ -449,8 +450,8 @@ func TestUiEntryFromStoreMessage_ThinkingPartProducesThinkingEntry(t *testing.T)
 // ---------------------------------------------------------------------------
 
 // TestUiEntriesFromStoreMessage_ThinkingBeforeText verifies that an assistant
-// message with both a thinking part and a text part produces two entries in
-// order: thinking first, then text.
+// message with both a thinking part and a text part produces ONE entry
+// (Phase 2: thinking is collapsed into the assistant message's Thinking field).
 func TestUiEntriesFromStoreMessage_ThinkingBeforeText(t *testing.T) {
 	t.Parallel()
 	m := &session.Message{
@@ -461,27 +462,24 @@ func TestUiEntriesFromStoreMessage_ThinkingBeforeText(t *testing.T) {
 		},
 	}
 	entries := uiEntriesFromStoreMessage(m, map[string]session.Part{}, map[string]struct{}{})
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d: %+v", len(entries), entries)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (Phase 2: thinking inline), got %d: %+v", len(entries), entries)
 	}
-	if entries[0].Role != components.RoleThinking {
-		t.Errorf("entries[0].Role = %q, want RoleThinking", entries[0].Role)
+	if entries[0].Role != components.RoleAssistant {
+		t.Errorf("entries[0].Role = %q, want RoleAssistant", entries[0].Role)
 	}
-	if entries[0].Raw != "let me think" {
-		t.Errorf("entries[0].Raw = %q", entries[0].Raw)
+	if entries[0].Thinking != "let me think" {
+		t.Errorf("entries[0].Thinking = %q, want 'let me think'", entries[0].Thinking)
 	}
-	if entries[1].Role != components.RoleAssistant {
-		t.Errorf("entries[1].Role = %q, want RoleAssistant", entries[1].Role)
-	}
-	if entries[1].Raw != "here is the answer" {
-		t.Errorf("entries[1].Raw = %q", entries[1].Raw)
+	if entries[0].Raw != "here is the answer" {
+		t.Errorf("entries[0].Raw = %q, want 'here is the answer'", entries[0].Raw)
 	}
 }
 
-// TestHydrate_ThinkingPartsProduceRoleThinkingEntries verifies that resuming a
+// TestHydrate_ThinkingPartsProduceInlineThinking verifies that resuming a
 // session with assistant messages that contain thinking parts produces
-// RoleThinking entries in the correct chronological position.
-func TestHydrate_ThinkingPartsProduceRoleThinkingEntries(t *testing.T) {
+// a single assistant message with the Thinking field populated (Phase 2).
+func TestHydrate_ThinkingPartsProduceInlineThinking(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
 		{
@@ -498,31 +496,30 @@ func TestHydrate_ThinkingPartsProduceRoleThinkingEntries(t *testing.T) {
 	})
 	_ = app.Init()
 
-	// Expect: user, thinking, assistant (3 entries).
-	if got := len(app.messages); got != 3 {
-		t.Fatalf("expected 3 messages, got %d: %+v", got, app.messages)
+	// Expect: user, assistant (2 entries — thinking is inline on the assistant).
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages, got %d: %+v", got, app.messages)
 	}
 	if app.messages[0].Role != components.RoleUser {
 		t.Errorf("messages[0].Role = %q, want user", app.messages[0].Role)
 	}
-	if app.messages[1].Role != components.RoleThinking {
-		t.Errorf("messages[1].Role = %q, want thinking", app.messages[1].Role)
+	if app.messages[1].Role != components.RoleAssistant {
+		t.Errorf("messages[1].Role = %q, want assistant", app.messages[1].Role)
 	}
-	if app.messages[1].Raw != "let me reason about this" {
+	if app.messages[1].Thinking != "let me reason about this" {
+		t.Errorf("messages[1].Thinking = %q, want 'let me reason about this'", app.messages[1].Thinking)
+	}
+	if app.messages[1].Raw != "here is my answer" {
 		t.Errorf("messages[1].Raw = %q", app.messages[1].Raw)
-	}
-	if app.messages[2].Role != components.RoleAssistant {
-		t.Errorf("messages[2].Role = %q, want assistant", app.messages[2].Role)
-	}
-	if app.messages[2].Raw != "here is my answer" {
-		t.Errorf("messages[2].Raw = %q", app.messages[2].Raw)
 	}
 }
 
 // TestLiveThinkingDelta_StreamsAndFinalizes verifies that:
-//  1. AssistantThinkingDelta events produce a streaming RoleThinking message.
-//  2. When AssistantTextDelta arrives, the thinking message is finalized
-//     (IsStreaming=false) and text streaming begins as a new assistant entry.
+//  1. AssistantThinkingDelta events produce a streaming RoleAssistant message
+//     with Thinking populated (Phase 2: thinking is inline on the assistant).
+//  2. When AssistantTextDelta arrives, it appends to the SAME streaming
+//     assistant message (no separate row).
+//  3. MessageAppended finalizes the single assistant message.
 func TestLiveThinkingDelta_StreamsAndFinalizes(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
@@ -535,35 +532,46 @@ func TestLiveThinkingDelta_StreamsAndFinalizes(t *testing.T) {
 		t.Fatalf("expected 1 message after thinking deltas, got %d", got)
 	}
 	th := app.messages[0]
-	if th.Role != components.RoleThinking {
-		t.Errorf("role = %q, want thinking", th.Role)
+	if th.Role != components.RoleAssistant {
+		t.Errorf("role = %q, want assistant (Phase 2: thinking is inline)", th.Role)
 	}
-	if th.Raw != "step 1: step 2" {
-		t.Errorf("raw = %q, want 'step 1: step 2'", th.Raw)
+	if th.Thinking != "step 1: step 2" {
+		t.Errorf("Thinking = %q, want 'step 1: step 2'", th.Thinking)
+	}
+	if th.Raw != "" {
+		t.Errorf("Raw = %q, want empty (no text yet)", th.Raw)
 	}
 	if !th.IsStreaming {
 		t.Errorf("expected IsStreaming=true while thinking")
 	}
 
-	// Emit a text delta — thinking should finalize.
+	// Emit a text delta — should accumulate on the SAME assistant message.
 	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "here is the answer"})
 
-	if got := len(app.messages); got != 2 {
-		t.Fatalf("expected 2 messages after text delta, got %d", got)
+	// Still 1 message (thinking + text on same entry).
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message after text delta (same entry), got %d", got)
 	}
+	if app.messages[0].Thinking != "step 1: step 2" {
+		t.Errorf("Thinking changed after text delta: %q", app.messages[0].Thinking)
+	}
+	if app.messages[0].Raw != "here is the answer" {
+		t.Errorf("Raw = %q, want 'here is the answer'", app.messages[0].Raw)
+	}
+	if !app.messages[0].IsStreaming {
+		t.Errorf("expected still streaming before MessageAppended")
+	}
+
+	// MessageAppended finalizes.
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m1"})
 	if app.messages[0].IsStreaming {
-		t.Errorf("thinking message should be finalized after text delta")
-	}
-	if app.messages[1].Role != components.RoleAssistant {
-		t.Errorf("messages[1].Role = %q, want assistant", app.messages[1].Role)
-	}
-	if app.messages[1].Raw != "here is the answer" {
-		t.Errorf("messages[1].Raw = %q", app.messages[1].Raw)
+		t.Errorf("expected IsStreaming=false after MessageAppended")
 	}
 }
 
-// TestLiveThinkingDelta_FinalizedOnToolCall verifies that a trailing thinking
-// block is finalized when a ToolCallRequested event arrives.
+// TestLiveThinkingDelta_FinalizedOnToolCall verifies that when a thinking
+// delta arrives followed by a ToolCallRequested, the assistant message
+// accumulates thinking and then a tool row is appended (Phase 2 behavior).
 func TestLiveThinkingDelta_FinalizedOnToolCall(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
@@ -575,12 +583,15 @@ func TestLiveThinkingDelta_FinalizedOnToolCall(t *testing.T) {
 		Args:      []byte(`{"path":"/tmp/x"}`),
 	})
 
-	// messages[0] = thinking (finalized), messages[1] = tool
+	// Phase 2: messages[0] = streaming assistant with Thinking, messages[1] = tool.
 	if got := len(app.messages); got != 2 {
 		t.Fatalf("expected 2 messages, got %d", got)
 	}
-	if app.messages[0].IsStreaming {
-		t.Errorf("thinking should be finalized on ToolCallRequested")
+	if app.messages[0].Role != components.RoleAssistant {
+		t.Errorf("messages[0].Role = %q, want assistant", app.messages[0].Role)
+	}
+	if app.messages[0].Thinking != "thinking" {
+		t.Errorf("messages[0].Thinking = %q, want 'thinking'", app.messages[0].Thinking)
 	}
 	if app.messages[1].Role != components.RoleTool {
 		t.Errorf("messages[1].Role = %q, want tool", app.messages[1].Role)
@@ -1152,8 +1163,8 @@ func TestHydrate_ToolCallNoResult(t *testing.T) {
 }
 
 // TestHydrate_ThinkingTextToolSplitRows verifies that an assistant message
-// with thinking + text + tool_use produces 3 entries in order: thinking, text,
-// tool — with the result from the split tool row.
+// with thinking + text + tool_use produces 2 entries (Phase 2: thinking is
+// inline on the assistant): assistant (with Thinking+Raw), tool.
 func TestHydrate_ThinkingTextToolSplitRows(t *testing.T) {
 	t.Parallel()
 	toolUseID := "toolu_think01"
@@ -1180,27 +1191,24 @@ func TestHydrate_ThinkingTextToolSplitRows(t *testing.T) {
 	})
 	_ = app.Init()
 
-	// Expected: thinking, assistant-text, tool
-	if got := len(app.messages); got != 3 {
-		t.Fatalf("expected 3 messages, got %d: %+v", got, app.messages)
+	// Expected: assistant (thinking+text), tool
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages, got %d: %+v", got, app.messages)
 	}
-	if app.messages[0].Role != components.RoleThinking {
-		t.Errorf("[0].Role = %q, want thinking", app.messages[0].Role)
+	if app.messages[0].Role != components.RoleAssistant {
+		t.Errorf("[0].Role = %q, want assistant", app.messages[0].Role)
 	}
-	if app.messages[0].Raw != "planning…" {
+	if app.messages[0].Thinking != "planning…" {
+		t.Errorf("[0].Thinking = %q, want 'planning…'", app.messages[0].Thinking)
+	}
+	if app.messages[0].Raw != "I'll grep for it." {
 		t.Errorf("[0].Raw = %q", app.messages[0].Raw)
 	}
-	if app.messages[1].Role != components.RoleAssistant {
-		t.Errorf("[1].Role = %q, want assistant", app.messages[1].Role)
+	if app.messages[1].Role != components.RoleTool {
+		t.Errorf("[1].Role = %q, want tool", app.messages[1].Role)
 	}
-	if app.messages[1].Raw != "I'll grep for it." {
+	if app.messages[1].Raw != "found it" {
 		t.Errorf("[1].Raw = %q", app.messages[1].Raw)
-	}
-	if app.messages[2].Role != components.RoleTool {
-		t.Errorf("[2].Role = %q, want tool", app.messages[2].Role)
-	}
-	if app.messages[2].Raw != "found it" {
-		t.Errorf("[2].Raw = %q", app.messages[2].Raw)
 	}
 }
 
@@ -1415,5 +1423,209 @@ func TestHydrate_IdempotentWithToolCalls(t *testing.T) {
 	}
 	if firstLen != 2 {
 		t.Errorf("expected 2 messages (assistant text + tool), got %d", firstLen)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 new tests: UIMessage fields, live-streaming flow, hydration
+// ---------------------------------------------------------------------------
+
+// TestHydrate_UserMessageHasTimestamp verifies that hydrating a user message
+// populates the Timestamp field from the store's CreatedAt.
+func TestHydrate_UserMessageHasTimestamp(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "timestamped question"}},
+		},
+	})
+	_ = app.Init()
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	if app.messages[0].Role != components.RoleUser {
+		t.Errorf("role = %q, want user", app.messages[0].Role)
+	}
+	// Timestamp should be non-zero (store sets CreatedAt).
+	if app.messages[0].Timestamp.IsZero() {
+		t.Errorf("expected non-zero Timestamp for user message")
+	}
+}
+
+// TestHydrate_AssistantThinkingOnly verifies that an assistant message with
+// ONLY thinking parts (no text) produces one assistant entry with Thinking
+// populated and empty Raw.
+func TestHydrate_AssistantThinkingOnly(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartThinking, Text: "deep thoughts"}},
+		},
+	})
+	_ = app.Init()
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message (thinking-only assistant), got %d", got)
+	}
+	if app.messages[0].Role != components.RoleAssistant {
+		t.Errorf("role = %q, want assistant", app.messages[0].Role)
+	}
+	if app.messages[0].Thinking != "deep thoughts" {
+		t.Errorf("Thinking = %q, want 'deep thoughts'", app.messages[0].Thinking)
+	}
+	if app.messages[0].Raw != "" {
+		t.Errorf("Raw = %q, want empty for thinking-only", app.messages[0].Raw)
+	}
+}
+
+// TestHydrate_AssistantTextOnly verifies that an assistant message with only
+// text parts (no thinking) produces one assistant entry with Raw populated
+// and empty Thinking.
+func TestHydrate_AssistantTextOnly(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "just an answer"}},
+		},
+	})
+	_ = app.Init()
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	if app.messages[0].Thinking != "" {
+		t.Errorf("Thinking = %q, want empty for text-only", app.messages[0].Thinking)
+	}
+	if app.messages[0].Raw != "just an answer" {
+		t.Errorf("Raw = %q, want 'just an answer'", app.messages[0].Raw)
+	}
+}
+
+// TestHydrate_AssistantBothThinkingAndText verifies that an assistant message
+// with both thinking and text parts produces one entry with both fields set.
+func TestHydrate_AssistantBothThinkingAndText(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{Kind: session.PartThinking, Text: "let me consider"},
+				{Kind: session.PartText, Text: "my answer"},
+			},
+		},
+	})
+	_ = app.Init()
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	if app.messages[0].Thinking != "let me consider" {
+		t.Errorf("Thinking = %q", app.messages[0].Thinking)
+	}
+	if app.messages[0].Raw != "my answer" {
+		t.Errorf("Raw = %q", app.messages[0].Raw)
+	}
+}
+
+// TestHydrate_AssistantToolOnly verifies that an assistant message with ONLY
+// tool_use parts (no text, no thinking) emits no assistant uiMessage — only
+// the tool row.  This prevents empty bubbles.
+func TestHydrate_AssistantToolOnly(t *testing.T) {
+	t.Parallel()
+	toolUseID := "toolu_toolonly01"
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{
+				{
+					Kind:      session.PartToolUse,
+					ToolID:    toolUseID,
+					ToolName:  "bash",
+					ToolInput: []byte(`{"command":"ls"}`),
+				},
+			},
+		},
+		{
+			Role: session.RoleTool,
+			Parts: []session.Part{
+				{Kind: session.PartToolResult, ToolUseID: toolUseID, Content: "file.go"},
+			},
+		},
+	})
+	_ = app.Init()
+	// Expect: tool only (no assistant bubble because Raw and Thinking are both empty).
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message (tool only, no empty assistant bubble), got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleTool {
+		t.Errorf("[0].Role = %q, want tool", app.messages[0].Role)
+	}
+	if app.messages[0].Raw != "file.go" {
+		t.Errorf("[0].Raw = %q, want 'file.go'", app.messages[0].Raw)
+	}
+}
+
+// TestLiveThinkingThenTextThenFinalize verifies the full live streaming
+// lifecycle: thinking deltas → text deltas → MessageAppended.
+func TestLiveThinkingThenTextThenFinalize(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Thinking phase.
+	app.Handle(bus.AssistantThinkingDelta{SessionID: "fg-session", Text: "think "})
+	app.Handle(bus.AssistantThinkingDelta{SessionID: "fg-session", Text: "more"})
+
+	// Text phase — same message.
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "result "})
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "here"})
+
+	// Exactly 1 streaming assistant message with both fields.
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	msg := app.messages[0]
+	if msg.Role != components.RoleAssistant {
+		t.Errorf("role = %q, want assistant", msg.Role)
+	}
+	if msg.Thinking != "think more" {
+		t.Errorf("Thinking = %q, want 'think more'", msg.Thinking)
+	}
+	if msg.Raw != "result here" {
+		t.Errorf("Raw = %q, want 'result here'", msg.Raw)
+	}
+	if !msg.IsStreaming {
+		t.Errorf("expected IsStreaming=true before finalize")
+	}
+
+	// Finalize.
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m1"})
+	if app.messages[0].IsStreaming {
+		t.Errorf("expected IsStreaming=false after MessageAppended")
+	}
+	if app.messages[0].FinalMarkdown == "" {
+		t.Errorf("expected FinalMarkdown populated on finalize")
+	}
+}
+
+// TestLiveTextOnlyThenFinalize verifies that text-only streaming (no thinking)
+// works correctly with MessageAppended.
+func TestLiveTextOnlyThenFinalize(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "hello"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m2"})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	if app.messages[0].IsStreaming {
+		t.Errorf("expected not streaming after MessageAppended")
+	}
+	if app.messages[0].Raw != "hello" {
+		t.Errorf("Raw = %q, want 'hello'", app.messages[0].Raw)
+	}
+	if app.messages[0].Thinking != "" {
+		t.Errorf("Thinking = %q, want empty for text-only", app.messages[0].Thinking)
 	}
 }
