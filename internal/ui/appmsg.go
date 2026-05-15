@@ -87,3 +87,8 @@ type clearCompactionToastMsg struct{}
 // dismissBannerMsg asks the App to hide the threshold suggestion banner for
 // the current crossing.  Fired when the user presses Ctrl+X.
 type dismissBannerMsg struct{}
+
+// modifiedFilesTickMsg fires on a 2-second interval to trigger a re-run of
+// git diff --numstat so the sidebar's Modified Files section stays current
+// without running the subprocess on every render frame.
+type modifiedFilesTickMsg struct{}

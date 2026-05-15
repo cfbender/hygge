@@ -686,3 +686,50 @@ func TestOpenSessionsModalOnStart_SelectSessionSwitches(t *testing.T) {
 		t.Errorf("expected SessionID=%q, got %q", sess.ID, app.opts.SessionID)
 	}
 }
+
+// TestToolCallAddsTouchedFiles verifies that write and edit tool calls add
+// the target file to the App's touched-files tracker.
+func TestToolCallAddsTouchedFiles(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	// "write" tool with filePath key.
+	app.Handle(bus.ToolCallRequested{
+		ToolName: "write",
+		Args:     []byte(`{"filePath":"/Users/cfb/proj/internal/foo.go","content":"package main"}`),
+	})
+
+	// "edit" tool with path key.
+	app.Handle(bus.ToolCallRequested{
+		ToolName: "edit",
+		Args:     []byte(`{"path":"/Users/cfb/proj/internal/bar.go","oldString":"x","newString":"y"}`),
+	})
+
+	// "read" tool should NOT add a file.
+	app.Handle(bus.ToolCallRequested{
+		ToolName: "read",
+		Args:     []byte(`{"path":"/Users/cfb/proj/README.md"}`),
+	})
+
+	got := app.touched.List()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 touched files, got %d: %v", len(got), got)
+	}
+	// Both absolute paths should be present.
+	want := map[string]bool{
+		"/Users/cfb/proj/internal/foo.go": false,
+		"/Users/cfb/proj/internal/bar.go": false,
+	}
+	for _, p := range got {
+		if _, ok := want[p]; ok {
+			want[p] = true
+		} else {
+			t.Errorf("unexpected touched path %q", p)
+		}
+	}
+	for p, found := range want {
+		if !found {
+			t.Errorf("expected touched path %q not found", p)
+		}
+	}
+}
