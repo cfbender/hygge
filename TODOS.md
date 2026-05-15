@@ -112,3 +112,15 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 ---
 
 _Last updated after the prompt-queue + desktop-notifications slice (wave 1 of crush adoption)._
+
+## Catwalk + Fantasy migration
+
+Target architecture documented in `docs/architecture/catwalk-fantasy.md`.
+Migration plan artifact: `7yLWjW`.
+
+- [x] **Phase 0 — Preparation** — `charm.land/catwalk v0.40.0` and `charm.land/fantasy v0.23.2` added as direct deps. `internal/llm/probe_test.go` confirms packages compile. Architecture doc written. *(this commit)*
+- [ ] **Phase 1 — LLM layer** — Replace `internal/catalog/` with catwalk client wrapper in `internal/llm/`; embedded snapshot + ETag refresh.
+- [ ] **Phase 2 — Provider adapters** — Replace `internal/provider/*` with `fantasy.LanguageModel` implementations; keep `Provider` interface as shim during transition.
+- [ ] **Phase 3 — Tools** — Convert `internal/tool/*` to `fantasy.AgentTool`; rewire MCP bridge + plugin `pluginToolAdapter`; add plain `fetch` tool.
+- [ ] **Phase 4 — Agent loop + coordinator** — Replace `internal/agent/loop.go` with `fantasy.Agent`; extract `internal/coordinator`; adapt `internal/subagent/runtime.go` impl.
+- [ ] **Phase 5 — UI** — Theme/model-select/API-key dialogs; slash command system update.
