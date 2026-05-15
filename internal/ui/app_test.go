@@ -2,7 +2,9 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -792,4 +794,234 @@ func TestToolCallAddsTouchedFiles(t *testing.T) {
 			t.Errorf("expected touched path %q not found", p)
 		}
 	}
+}
+
+// --- startSend goroutine tests ----------------------------------------------
+
+// newTestAppWithSendFn builds a test App wired with testAgentSendFn and a
+// real store so ensureSession can create a session.  The out-of-band message
+// sink is collected into msgs (thread-safe).
+func newTestAppWithSendFn(
+	t *testing.T,
+	sendFn func(ctx context.Context, sid string, parts []session.Part) (*session.Message, error),
+) (*App, *[]tea.Msg, *sync.Mutex) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	b := bus.New()
+	t.Cleanup(func() { b.Close() })
+
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "claude-sonnet-4-5",
+		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	app.testAgentSendFn = sendFn
+
+	var mu sync.Mutex
+	var collected []tea.Msg
+	app.testSendFn = func(msg tea.Msg) {
+		mu.Lock()
+		defer mu.Unlock()
+		collected = append(collected, msg)
+	}
+
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	return app, &collected, &mu
+}
+
+// waitForMsg blocks until msgs contains at least one message or deadline.
+func waitForMsg(t *testing.T, msgs *[]tea.Msg, mu *sync.Mutex, deadline time.Duration) tea.Msg {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		mu.Lock()
+		n := len(*msgs)
+		mu.Unlock()
+		if n > 0 {
+			mu.Lock()
+			m := (*msgs)[0]
+			mu.Unlock()
+			return m
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil
+}
+
+// TestStartSend_ReturnsImmediately verifies that the tea.Cmd returned by
+// startSend yields sendStarted without waiting for Agent.Send to complete.
+// The stub send function sleeps 100ms — the cmd must return before that.
+// Not marked parallel: shares SQLite migration state with other store tests.
+func TestStartSend_ReturnsImmediately(t *testing.T) {
+	done := make(chan struct{})
+	app, _, _ := newTestAppWithSendFn(t, func(ctx context.Context, _ string, _ []session.Part) (*session.Message, error) {
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+		}
+		close(done)
+		return nil, nil
+	})
+
+	cmd := app.startSend("hello")
+	if cmd == nil {
+		t.Fatal("startSend returned nil cmd")
+	}
+
+	start := time.Now()
+	msg := cmd()
+	elapsed := time.Since(start)
+
+	if _, ok := msg.(sendStarted); !ok {
+		t.Errorf("expected sendStarted, got %T", msg)
+	}
+	if elapsed > 10*time.Millisecond {
+		t.Errorf("cmd() took %v; expected sub-millisecond (agent stub sleeps 100ms)", elapsed)
+	}
+
+	// Wait for stub goroutine to finish so test cleanup is clean.
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		// goroutine may have been cancelled; that's fine
+	}
+}
+
+// TestStartSend_AgentRunsInGoroutine verifies that subsequent Update calls
+// return while Agent.Send is still blocked.
+// Not marked parallel: shares SQLite migration state with other store tests.
+func TestStartSend_AgentRunsInGoroutine(t *testing.T) {
+	release := make(chan struct{})
+	app, _, _ := newTestAppWithSendFn(t, func(ctx context.Context, _ string, _ []session.Part) (*session.Message, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil, nil
+	})
+
+	_ = app.startSend("test")
+
+	// A subsequent Update call should return immediately without blocking.
+	updateDone := make(chan struct{})
+	go func() {
+		app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		close(updateDone)
+	}()
+
+	select {
+	case <-updateDone:
+		// Good: Update returned while agent is still blocked.
+	case <-time.After(50 * time.Millisecond):
+		t.Error("Update blocked while Agent.Send is in flight (not running in goroutine)")
+	}
+
+	close(release)
+}
+
+// TestStartSend_SendCompletedFires verifies that sendCompleted arrives via
+// sendOutOfBand after Agent.Send returns successfully.
+// Not marked parallel: shares SQLite migration state with other store tests.
+func TestStartSend_SendCompletedFires(t *testing.T) {
+	app, msgs, mu := newTestAppWithSendFn(t, func(_ context.Context, _ string, _ []session.Part) (*session.Message, error) {
+		return nil, nil
+	})
+
+	_ = app.startSend("hi")
+
+	got := waitForMsg(t, msgs, mu, 2*time.Second)
+	if got == nil {
+		t.Fatal("sendCompleted never arrived")
+	}
+	sc, ok := got.(sendCompleted)
+	if !ok {
+		t.Fatalf("expected sendCompleted, got %T", got)
+	}
+	if sc.Err != nil {
+		t.Errorf("unexpected error in sendCompleted: %v", sc.Err)
+	}
+}
+
+// TestStartSend_SendFailedFires verifies that an error from Agent.Send
+// produces a sendCompleted with Err set.
+// Not marked parallel: shares SQLite migration state with other store tests.
+func TestStartSend_SendFailedFires(t *testing.T) {
+	boom := errors.New("agent exploded")
+	app, msgs, mu := newTestAppWithSendFn(t, func(_ context.Context, _ string, _ []session.Part) (*session.Message, error) {
+		return nil, boom
+	})
+
+	_ = app.startSend("hi")
+
+	got := waitForMsg(t, msgs, mu, 2*time.Second)
+	if got == nil {
+		t.Fatal("sendCompleted never arrived after error")
+	}
+	sc, ok := got.(sendCompleted)
+	if !ok {
+		t.Fatalf("expected sendCompleted, got %T", got)
+	}
+	if !errors.Is(sc.Err, boom) {
+		t.Errorf("expected boom error, got %v", sc.Err)
+	}
+}
+
+// TestStartSend_InflightCancelStopsGoroutine verifies that cancelling
+// inflightCancel causes the goroutine to stop (Agent.Send returns ctx error).
+// Not marked parallel: shares SQLite migration state with other store tests.
+func TestStartSend_InflightCancelStopsGoroutine(t *testing.T) {
+	var sendCtx context.Context
+	started := make(chan struct{})
+	app, msgs, mu := newTestAppWithSendFn(t, func(ctx context.Context, _ string, _ []session.Part) (*session.Message, error) {
+		sendCtx = ctx
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	_ = app.startSend("hi")
+
+	// Wait for goroutine to enter Agent.Send.
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("goroutine never started Agent.Send")
+	}
+
+	// Cancel via inflightCancel (simulates Esc / Ctrl+C handler).
+	if app.inflightCancel != nil {
+		app.inflightCancel()
+	}
+
+	// sendCompleted should arrive with a cancellation error.
+	got := waitForMsg(t, msgs, mu, 2*time.Second)
+	if got == nil {
+		t.Fatal("sendCompleted never arrived after cancel")
+	}
+	sc, ok := got.(sendCompleted)
+	if !ok {
+		t.Fatalf("expected sendCompleted, got %T", got)
+	}
+	if sc.Err == nil {
+		t.Error("expected non-nil error after cancellation")
+	}
+	if !errors.Is(sc.Err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", sc.Err)
+	}
+	_ = sendCtx // suppress unused-variable warning
 }

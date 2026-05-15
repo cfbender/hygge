@@ -23,6 +23,8 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [ ] **`ModalHelp` close handler + render path**
   Wired up the open path during the input-focus cleanup, but the help overlay has no render path in `View()` yet and no close handler. Implement when the help dialog itself lands.
 
+- [ ] Subagent view doesn't show initial message on first render, but does later on resume and re-view
+
 ## Architecture
 
 - [ ] **Unify modal state**
@@ -80,7 +82,9 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 - [ ] **OSC probe leak** — The TUI emits OSC probes that are not fully reclaimed on exit. Needs investigation into bubbletea v2 internals (alt-screen teardown sequence). Separate slice.
 
-- [ ] **UI hang between Enter and modal (agent-loop goroutine)** — The agent loop currently runs synchronously relative to the bubbletea event loop. Heavy inference turns can hang the UI between when the user presses Enter and when a modal appears. Fix: run the agent loop in its own goroutine with a command-channel bridge. Architectural change; separate slice.
+- [x] **OSC response leak → garbage in textarea** — bubbletea v2.0.6's OSC parser doesn't fully consume the terminal color-query response; inner content (`11;rgb:...`) leaks as `tea.KeyPressMsg.Text`. Fixed with a `tea.WithFilter` hook (`dropOSCResponses`) in `cmd/hygge/cli/osc_filter.go`. Secondary defence on top of `WithColorProfile(TrueColor)`. Remove filter if upstream fixes parsing. See `docs/agents/ui-v2-gotchas.md`. *(commit: see fix(ui) decouple send pipeline)*
+
+- [x] **UI hang between Enter and modal (agent-loop goroutine)** — `startSend` now launches the `ensureSession` + `Agent.Send` call in a goroutine and injects `sendCompleted` back into the event loop via `app.program.Send` (bubbletea v2 `*tea.Program.Send`, `tea.go:1183`). The bubbletea event loop remains responsive during agent turns. *(commit: see fix(ui) decouple send pipeline)*
 
 ---
 
@@ -92,7 +96,8 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - ✅ Delete unused `StatusBar` component (commit `55a0f2d`)
 - ✅ Sessions modal: show own cost + rolled-up in parens (subagents)
 - ✅ **Subagent dispatch `invalid_request` (OpenRouter 400)** — fork-chain CTE leaked parent transcript into subagent sessions because the recursive step had no guard on `fork_message_id IS NOT NULL`; a dangling `tool_use` with no matching output caused the provider to reject the request. Fixed by adding `AND a.fork_message_id IS NOT NULL` to the CTE's recursive arm in `internal/store/messages.go`. `PropagateTotals` recursive CTE is intentionally left alone — it correctly rolls subagent costs up to ancestor sessions.
-
+- ✅ **OSC response filter** — `dropOSCResponses` filter via `tea.WithFilter` drops leaked terminal color-query responses before they reach the textarea. (`cmd/hygge/cli/osc_filter.go`)
+- ✅ **Decouple `startSend`** — `Agent.Send` now runs in a goroutine; `sendCompleted` arrives via `program.Send` (`tea.go:1183`). UI event loop is responsive during agent turns.
 ---
 
-_Last updated after the subagent CTE fix (commit pending)._
+_Last updated after the OSC filter + startSend goroutine decoupling slice._

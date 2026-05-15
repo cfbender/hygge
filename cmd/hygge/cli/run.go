@@ -190,7 +190,15 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		// by the renderer rather than by us.
 		// See: https://github.com/charmbracelet/lipgloss/issues/XXX (upstream v2 tracking issue)
 		tea.WithColorProfile(colorprofile.TrueColor),
+		// Drop any OSC terminal-response events that slip through bubbletea
+		// v2.0.6's input parser as raw KeyPressMsg text.  This is a
+		// secondary defence on top of WithColorProfile — some terminals still
+		// emit responses to probes fired before the profile override takes
+		// effect.  Remove when upstream fixes OSC response parsing.
+		// See docs/agents/ui-v2-gotchas.md.
+		tea.WithFilter(dropOSCResponses),
 	)
+	app.SetProgram(prog)
 
 	// Translate SIGINT/SIGTERM into a clean Quit so deferred Close runs.
 	sigCh := make(chan os.Signal, 1)
