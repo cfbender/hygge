@@ -48,12 +48,13 @@ tools = ["read", "grep", "glob"]
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reg.Len() != 2 {
+	// User-defined types displace the built-in "general".
+	if reg.Len() != 1 {
 		names := []string{}
 		for _, t := range reg.List() {
 			names = append(names, t.Name)
 		}
-		t.Fatalf("Len: got %d (%v) want 2", reg.Len(), names)
+		t.Fatalf("Len: got %d (%v) want 1", reg.Len(), names)
 	}
 	got, ok := reg.Get("searcher")
 	if !ok {
@@ -278,11 +279,12 @@ prompt = "a"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+	// User-defined types displace the built-in "general".
 	all := reg.List()
-	if len(all) != 3 {
-		t.Fatalf("List len: got %d want 3", len(all))
+	if len(all) != 2 {
+		t.Fatalf("List len: got %d want 2", len(all))
 	}
-	want := []string{"alpha", "general", "zebra"}
+	want := []string{"alpha", "zebra"}
 	for i, t2 := range all {
 		if t2.Name != want[i] {
 			t.Fatalf("List[%d]: got %q want %q", i, t2.Name, want[i])

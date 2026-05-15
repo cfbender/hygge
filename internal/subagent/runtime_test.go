@@ -360,26 +360,21 @@ tools = ["subagent", "read", "grep"]
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Also use the "general" type (which inherits defaults including
-	// "subagent" we just added) -- the runtime must still strip it.
-
 	subReg := r2SubTools(env, reg)
 	_ = subReg
 
-	// Build the per-call tool registry for both types and confirm
-	// neither contains `subagent`.
+	// Build the per-call tool registry and confirm it doesn't contain
+	// `subagent` (the runtime's recursion guard must strip it).
 	prov := newFakeProvider(scriptText("ok"))
 	run := env.newRunner(reg, prov)
 
-	for _, typeName := range []string{"general", "evil"} {
-		ty, ok := reg.Get(typeName)
-		if !ok {
-			t.Fatalf("missing type %q", typeName)
-		}
-		built := run.buildToolRegistry(ty)
-		if _, ok := built.Get("subagent"); ok {
-			t.Fatalf("type %q: subagent tool leaked into sub-agent registry", typeName)
-		}
+	ty, ok := reg.Get("evil")
+	if !ok {
+		t.Fatal("missing type \"evil\"")
+	}
+	built := run.buildToolRegistry(ty)
+	if _, ok := built.Get("subagent"); ok {
+		t.Fatal("type \"evil\": subagent tool leaked into sub-agent registry")
 	}
 	if called.Load() {
 		t.Fatal("recording tool was invoked, but it should never have been")
