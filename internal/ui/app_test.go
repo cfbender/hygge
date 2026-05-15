@@ -364,9 +364,32 @@ func TestBusyStateIsTracked(t *testing.T) {
 		t.Errorf("expected app.busy=true after sendStarted")
 	}
 
+	// sendCompleted with nil error no longer clears busy — that is now the
+	// responsibility of bus.TurnCompleted (or sendCompleted with an error).
 	app.Update(sendCompleted{})
+	if !app.busy {
+		t.Errorf("expected app.busy=true after sendCompleted{Err:nil} (turn not yet finished)")
+	}
+
+	// Simulate TurnStarted (increments activeTurns) + TurnCompleted (busy→false).
+	app.Handle(bus.TurnStarted{})
+	app.Handle(bus.TurnCompleted{})
 	if app.busy {
-		t.Errorf("expected app.busy=false after sendCompleted")
+		t.Errorf("expected app.busy=false after TurnCompleted with empty queue")
+	}
+}
+
+func TestBusyStateIsTracked_ErrorClearsBusy(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(sendStarted{})
+	if !app.busy {
+		t.Errorf("expected app.busy=true after sendStarted")
+	}
+	// sendCompleted with an error MUST clear busy (no TurnCompleted will fire).
+	app.Update(sendCompleted{Err: errors.New("agent exploded")})
+	if app.busy {
+		t.Errorf("expected app.busy=false after sendCompleted with error")
 	}
 }
 

@@ -394,6 +394,14 @@ type App struct {
 	// queuedPrompts holds the prompt texts for queued sends (for display).
 	// Updated on bus.QueueChanged.
 	queuedPrompts []string
+
+	// activeTurns is the number of agent turns currently executing for the
+	// foreground session.  Incremented on bus.TurnStarted; decremented on
+	// bus.TurnCompleted.  The UI flips busy=false only when activeTurns
+	// reaches zero AND queueCount is also zero, so the "Thinking…"
+	// placeholder stays on through the brief gap between one turn completing
+	// and the next queued turn's TurnStarted arriving.
+	activeTurns int
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the
@@ -508,6 +516,7 @@ func (a *App) bridge() {
 	subCmpDone := bus.Subscribe[bus.CompactionCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subCmpFail := bus.Subscribe[bus.CompactionFailed](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subQueueChanged := bus.Subscribe[bus.QueueChanged](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
+	subTurnStarted := bus.Subscribe[bus.TurnStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subTurnDone := bus.Subscribe[bus.TurnCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 
 	stop := a.ctx.Done()
@@ -533,6 +542,7 @@ func (a *App) bridge() {
 	go forward(subCmpDone.C(), a.busCh, stop, subCmpDone.Unsubscribe)
 	go forward(subCmpFail.C(), a.busCh, stop, subCmpFail.Unsubscribe)
 	go forward(subQueueChanged.C(), a.busCh, stop, subQueueChanged.Unsubscribe)
+	go forward(subTurnStarted.C(), a.busCh, stop, subTurnStarted.Unsubscribe)
 	go forward(subTurnDone.C(), a.busCh, stop, subTurnDone.Unsubscribe)
 }
 
@@ -971,18 +981,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case sendCompleted:
-		a.busy = false
+		// The goroutine is done; no more cancellable work on this context.
 		a.inflightCancel = nil
-		a.input.SetBusy(false, "")
-		if m.Err != nil && !errors.Is(m.Err, context.Canceled) {
-			// Surface the failure so the user has something to react to;
-			// silently dropping errors leaves the UI looking dead.
-			a.messages = append(a.messages, uiMessage{
-				Role:    components.RoleSystem,
-				Raw:     "error: " + m.Err.Error(),
-				IsError: true,
-			})
+		if m.Err != nil {
+			// An error means no TurnCompleted will fire (the turn failed or was
+			// cancelled), so we must flip busy=false here.  Also reset the
+			// activeTurns counter since no matching TurnCompleted is coming.
+			a.activeTurns = 0
+			a.busy = false
+			a.input.SetBusy(false, "")
+			if !errors.Is(m.Err, context.Canceled) {
+				// Surface the failure so the user has something to react to;
+				// silently dropping errors leaves the UI looking dead.
+				a.messages = append(a.messages, uiMessage{
+					Role:    components.RoleSystem,
+					Raw:     "error: " + m.Err.Error(),
+					IsError: true,
+				})
+			}
 		}
+		// When Err == nil the agent either completed normally (TurnCompleted
+		// will handle busy) or returned nil,nil (queued — TurnStarted /
+		// TurnCompleted for the actual turn drive the busy state).
 		return a, nil
 
 	case tea.KeyPressMsg:
@@ -1573,6 +1593,22 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			a.input.SetBusy(true, suffix)
 		}
 
+	case bus.TurnStarted:
+		// Gate on foreground session.  Increment the in-flight turn counter
+		// and make sure the UI shows busy.  This fires from the agent's own
+		// context goroutine, so it always arrives even when the caller's ctx
+		// was cancelled (queue-drain path).
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		a.activeTurns++
+		a.busy = true
+		suffix := ""
+		if a.queueCount > 0 {
+			suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
+		}
+		a.input.SetBusy(true, suffix)
+
 	case bus.TurnCompleted:
 		// Gate on foreground session and send turn-complete notification.
 		if !a.isForeground(e.SessionID) {
@@ -1582,6 +1618,17 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Title:   "Hygge is waiting…",
 			Message: fmt.Sprintf("Turn completed in %q", a.sessionTitle),
 		}, "turn_complete")
+		// Decrement the in-flight turn counter.  Flip busy=false only when no
+		// more turns are running AND the queue is empty.  If a queued send is
+		// about to start, its TurnStarted will arrive shortly and re-set busy;
+		// keeping it set here avoids a visible flicker.
+		if a.activeTurns > 0 {
+			a.activeTurns--
+		}
+		if a.activeTurns == 0 && a.queueCount == 0 {
+			a.busy = false
+			a.input.SetBusy(false, "")
+		}
 	}
 	return nil
 }
