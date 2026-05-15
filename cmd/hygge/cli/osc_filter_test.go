@@ -17,6 +17,22 @@ func TestDropOSCResponses_DropsLeakedBackgroundQuery(t *testing.T) {
 	}
 }
 
+func TestDropOSCResponses_DropsConcatenatedTerminalReports(t *testing.T) {
+	t.Parallel()
+	msg := dropOSCResponses(nil, tea.KeyPressMsg{Text: "1;rgb:1818/0808/1010[?2026;2$y"})
+	if msg != nil {
+		t.Errorf("expected nil for concatenated terminal reports, got %T(%v)", msg, msg)
+	}
+}
+
+func TestDropOSCResponses_DropsModeReport(t *testing.T) {
+	t.Parallel()
+	msg := dropOSCResponses(nil, tea.KeyPressMsg{Text: "[?2026;2$y"})
+	if msg != nil {
+		t.Errorf("expected nil for CSI mode report, got %T(%v)", msg, msg)
+	}
+}
+
 // TestDropOSCResponses_DropsOSC10ForegroundQuery verifies that an OSC 10
 // foreground response is also suppressed.
 func TestDropOSCResponses_DropsOSC10ForegroundQuery(t *testing.T) {
@@ -58,6 +74,15 @@ func TestDropOSCResponses_PassesRGBSubstring(t *testing.T) {
 	msg := dropOSCResponses(nil, in)
 	if msg != in {
 		t.Errorf("expected partial-match text to pass through, got %T(%v)", msg, msg)
+	}
+}
+
+func TestDropOSCResponses_PassesColorResponseWithUserText(t *testing.T) {
+	t.Parallel()
+	in := tea.KeyPressMsg{Text: "11;rgb:1818/0808/1010 is a string"}
+	msg := dropOSCResponses(nil, in)
+	if msg != in {
+		t.Errorf("expected mixed user text to pass through, got %T(%v)", msg, msg)
 	}
 }
 

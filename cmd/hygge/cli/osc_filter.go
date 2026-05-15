@@ -2,6 +2,7 @@ package cli
 
 import (
 	"regexp"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,7 +22,12 @@ import (
 //
 // See docs/agents/ui-v2-gotchas.md and the note in run.go about bubbletea
 // v2.0.6's OSC parser; remove this filter if upstream fixes parsing.
-var oscResponsePattern = regexp.MustCompile(`^\d+;rgb:[0-9a-fA-F]+(?:/[0-9a-fA-F]+){2}$`)
+var (
+	oscResponsePattern        = regexp.MustCompile(`^\d+;rgb:[0-9a-fA-F]+(?:/[0-9a-fA-F]+){2}`)
+	csiModeReportPattern      = regexp.MustCompile(`^\[?\?\d+(?:;\d+)?\$y`)
+	keyboardEnhancePattern    = regexp.MustCompile(`^>\d+(?:;\d+)*[uU]`)
+	terminalAttributesPattern = regexp.MustCompile(`^\?\d+(?:;\d+)*[cC]`)
+)
 
 const mouseSpamThrottle = 15 * time.Millisecond
 
@@ -49,14 +55,50 @@ func newInputEventFilter() func(tea.Model, tea.Msg) tea.Msg {
 }
 
 // dropOSCResponses is a bubbletea v2 filter function (see tea.WithFilter).
-// It drops KeyPressMsg events whose Text field matches the pattern of a
-// terminal OSC background/foreground color response that leaked through
-// bubbletea v2.0.6's input parser.  All other messages pass through unchanged.
+// It drops KeyPressMsg events whose Text field consists only of terminal query
+// responses that leaked through bubbletea v2.0.6's input parser.  We handle
+// both single responses ("11;rgb:...") and concatenated fragments such as the
+// field report users have seen in the prompt:
+//
+//	1;rgb:1818/0808/1010[?2026;2$y
+//
+// The first fragment is an OSC colour response after the parser stripped the
+// control bytes; the second is a CSI mode report for synchronized output.
+// Ordinary user text still passes through unchanged.
 func dropOSCResponses(_ tea.Model, msg tea.Msg) tea.Msg {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
-		if oscResponsePattern.MatchString(k.Text) {
+		if isTerminalResponseText(k.Text) {
 			return nil
 		}
 	}
 	return msg
+}
+
+func isTerminalResponseText(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	matched := false
+	for s != "" {
+		var loc []int
+		switch {
+		case oscResponsePattern.MatchString(s):
+			loc = oscResponsePattern.FindStringIndex(s)
+		case csiModeReportPattern.MatchString(s):
+			loc = csiModeReportPattern.FindStringIndex(s)
+		case keyboardEnhancePattern.MatchString(s):
+			loc = keyboardEnhancePattern.FindStringIndex(s)
+		case terminalAttributesPattern.MatchString(s):
+			loc = terminalAttributesPattern.FindStringIndex(s)
+		default:
+			return false
+		}
+		if len(loc) != 2 || loc[0] != 0 || loc[1] == 0 {
+			return false
+		}
+		matched = true
+		s = strings.TrimLeft(s[loc[1]:], "\x1b ")
+	}
+	return matched
 }

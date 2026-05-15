@@ -536,6 +536,7 @@ func (a *App) bridge() {
 	subCtx := bus.Subscribe[bus.ContextUsageUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 64})
 	subPerm := bus.Subscribe[bus.PermissionAsked](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subPermReplied := bus.Subscribe[bus.PermissionReplied](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
+	subMCPStatus := bus.Subscribe[bus.MCPStatusUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subIter := bus.Subscribe[bus.IterationLimitReached](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subSubStart := bus.Subscribe[bus.SubagentStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subSubDone := bus.Subscribe[bus.SubagentCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
@@ -563,6 +564,7 @@ func (a *App) bridge() {
 	go forward(subCtx.C(), a.busCh, stop, subCtx.Unsubscribe)
 	go forward(subPerm.C(), a.busCh, stop, subPerm.Unsubscribe)
 	go forward(subPermReplied.C(), a.busCh, stop, subPermReplied.Unsubscribe)
+	go forward(subMCPStatus.C(), a.busCh, stop, subMCPStatus.Unsubscribe)
 	go forward(subIter.C(), a.busCh, stop, subIter.Unsubscribe)
 	go forward(subSubStart.C(), a.busCh, stop, subSubStart.Unsubscribe)
 	go forward(subSubDone.C(), a.busCh, stop, subSubDone.Unsubscribe)
@@ -955,6 +957,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Glamour renderer is sized to the body width; rebuild lazily.
 		a.renderer = nil
 		a.rendererW = 0
+		return a, nil
+
+	case tea.EnvMsg, tea.ColorProfileMsg, tea.TerminalVersionMsg, tea.ModeReportMsg, tea.KeyboardEnhancementsMsg:
+		// Bubble Tea emits terminal capability/report messages during startup and
+		// around mode changes. Hygge currently does not need them; consume them at
+		// the root so they never fall through to the textarea component.
 		return a, nil
 
 	case spinner.TickMsg:
@@ -1665,6 +1673,14 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			)
 		}
 
+	case bus.MCPStatusUpdated:
+		a.upsertMCPStatus(components.SidebarMCPStatus{
+			Name:      e.Name,
+			Ready:     e.Ready,
+			Error:     e.Error,
+			ToolCount: e.ToolCount,
+		})
+
 	case bus.IterationLimitReached:
 		// Route iter-limit notices to a sub-agent when the session
 		// matches; otherwise it's a parent-loop event.  The matching
@@ -1804,6 +1820,16 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (a *App) upsertMCPStatus(status components.SidebarMCPStatus) {
+	for i := range a.opts.MCPStatuses {
+		if a.opts.MCPStatuses[i].Name == status.Name {
+			a.opts.MCPStatuses[i] = status
+			return
+		}
+	}
+	a.opts.MCPStatuses = append(a.opts.MCPStatuses, status)
 }
 
 // foregroundID returns the current foreground session id (top of the

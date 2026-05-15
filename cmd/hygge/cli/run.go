@@ -96,6 +96,7 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		ProfileName:       rootFlags.Profile,
 		Pwd:               rootFlags.Pwd,
 		ReasoningOverride: reasoningFlag,
+		AsyncMCP:          true,
 	})
 	if err != nil {
 		return err
@@ -303,6 +304,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		tea.WithFilter(newInputEventFilter()),
 	)
 	app.SetProgram(prog)
+	rt.StartAsyncMCP(ctx)
 
 	// Translate SIGINT/SIGTERM into a clean Quit so deferred Close runs.
 	sigCh := make(chan os.Signal, 1)
