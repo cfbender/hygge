@@ -471,7 +471,10 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 
 	model := s.Model.Provider + "/" + s.Model.Name
 	updated := humanAgo(s.UpdatedAt, m.Now)
-	cost := fmt.Sprintf("$%.2f", s.Totals.CostUSD)
+	ownCost := formatCostValue(s.OwnTotals.CostUSD)
+	rolledUp := formatCostValue(s.Totals.CostUSD)
+	// Show rolled-up in parentheses only when it materially exceeds own cost.
+	showRollup := s.Totals.CostUSD > s.OwnTotals.CostUSD*1.001 && s.Totals.CostUSD > s.OwnTotals.CostUSD+0.00001
 	kind := string(s.Kind)
 
 	rowStyle := lipgloss.NewStyle()
@@ -488,17 +491,34 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 		rowStyle = m.style(theme.AtomMuted)
 	}
 
-	row := fmt.Sprintf("%s %-38s %-22s %-10s %5s  %7s  %s",
-		prefix,
-		truncate(name, 38),
-		truncate(model, 22),
-		updated,
-		"", // turns — store doesn't expose this cheaply; leave blank
-		cost,
-		kind,
-	)
+	// The cost column is %7s wide.  When we have a rolled-up suffix we
+	// render the own-cost in that slot and append the muted parens after.
 	var b strings.Builder
-	b.WriteString(rowStyle.Render(row))
+	if showRollup {
+		// Render the row with own cost, then append muted rolled-up suffix.
+		row := fmt.Sprintf("%s %-38s %-22s %-10s %5s  %7s  %s",
+			prefix,
+			truncate(name, 38),
+			truncate(model, 22),
+			updated,
+			"", // turns — store doesn't expose this cheaply; leave blank
+			ownCost,
+			kind,
+		)
+		b.WriteString(rowStyle.Render(row))
+		b.WriteString(m.style(theme.AtomMuted).Render(" (" + rolledUp + ")"))
+	} else {
+		row := fmt.Sprintf("%s %-38s %-22s %-10s %5s  %7s  %s",
+			prefix,
+			truncate(name, 38),
+			truncate(model, 22),
+			updated,
+			"", // turns — store doesn't expose this cheaply; leave blank
+			ownCost,
+			kind,
+		)
+		b.WriteString(rowStyle.Render(row))
+	}
 	b.WriteString("\n")
 
 	// Inline rename.
@@ -518,6 +538,15 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 	}
 
 	return b.String()
+}
+
+// formatCostValue formats a cost in USD as $X.XXXX (4 decimal places).
+// Returns "—" when cost is zero.
+func formatCostValue(cost float64) string {
+	if cost == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("$%.4f", cost)
 }
 
 func (m SessionsModal) renderHelp() string {

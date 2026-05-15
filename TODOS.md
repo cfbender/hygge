@@ -2,12 +2,16 @@
 
 Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: top of each section is higher-leverage. None are blocking; most are small, well-scoped slices.
 
+## For carpenter / future UI work
+
+- **Read `docs/agents/ui-v2-gotchas.md` before editing anything under `internal/ui/`.** It documents the bubbletea / lipgloss / bubbles v2 traps the agent has hit repeatedly (especially: `lipgloss.Color` is a function, not a type — fields hold `color.Color` from `image/color`).
+
 ## High-impact UX
 
 - [ ] **First-class agent profiles + `AgentType` plumbing**
   Today `AgentType` is hardcoded to `"General"` in the footer and assistant bubble header. Wire it from a real agent-profile concept on the active session. This also unlocks per-agent accent colors (the `AccentColor` seam is already plumbed end-to-end through the bubble primitive).
 
-- [ ] **Sessions modal per-row cost: split own vs rolled-up**
+- [x] **Sessions modal per-row cost: split own vs rolled-up**
   T2.1 added a recursive CTE for cost roll-up. The sessions modal currently shows the rolled-up total; users often want to see their own session's cost vs cost-including-subagents. Add a column or toggle.
 
 - [ ] **Foreground-switch into a completed subagent should reload history from store**
@@ -16,8 +20,13 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [ ] **Proper scrollable thinking viewport in assistant bubbles**
   Phase 4 added max-line truncation with `… +N more lines (thinking)`. A real per-bubble viewport with key-driven expand/collapse would let users actually read long thinking on resume.
 
-- [ ] **`Input.Focused` toggled on modal open / close**
-  The bordered input from Phase 4 has a focus-aware border color, but the App never sets `input.Focused = false` when a modal opens. Border always renders accent-colored at runtime. Cosmetic; one or two call sites in `app.go`.
+- [ ] **`ModalHelp` close handler + render path**
+  Wired up the open path during the input-focus cleanup, but the help overlay has no render path in `View()` yet and no close handler. Implement when the help dialog itself lands.
+
+## Architecture
+
+- [ ] **Unify modal state**
+  Modal state today is split across `activeModal string` (single-slot: `""`/`"sessions"`/`"help"`/`"compact-confirm"`) and `pendingPerms []PermissionRequest` (independent queue that can coexist with any active modal). The two don't compose: if a `PermissionAsked` fires while compaction is open, both look "true". `handleKey` happens to route to perms first, so it works — but the invariant is implicit, not enforced. Refactor to a single modal stack with typed entries.
 
 ## Plugin host
 
@@ -42,21 +51,22 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [ ] **`uiMessage` `CreatedAt`-based sorting for compaction markers**
   Phase 2 added a `Timestamp` field, but the multi-compaction ordering path still falls back to "append at end" when `BeforeMessageID` isn't found. Use `Timestamp` for chronological insertion.
 
+## Sidebar follow-ups
+
+- [ ] **Modified files: respect `.gitignore` and binary skips**
+  `git diff --numstat` reports binaries as `-` (treated as 0/0); fine. But staged-only / ignored files might still surface if a tool writes them. Verify against `.gitignore`. Also: if running outside a git repo, the section silently empties — consider a fallback like raw mtime tracking.
+
+- [ ] **Sidebar session-title caching**
+  Today every `App.View()` calls `Store.GetSession` to resolve the session preview/slug. Same pattern as the breadcrumb. Cache on the App and invalidate on `bus.MessageAppended` / `SessionRenamed`.
+
 ## Animation / polish
 
-- [ ] **Status-bar `spinner.Model` pre-rendered frames**
-  The status-bar busy spinner re-creates lipgloss styles per tick. Same pre-rendered cached frames pattern as `components/anim` would eliminate the per-frame allocations.
-
-- [ ] **`RoleThinking` dead-branch cleanup**
-  Phase 2 collapsed thinking into the assistant `UIMessage`. The `RoleThinking` enum value and its `renderOne` case still exist but are never emitted. Safe to delete.
-
-- [ ] **Delete unused `StatusBar` component**
-  Phase 1 replaced it with `HeaderBar` but left the file in the codebase. Remove it.
+- [ ] **Status-bar busy-spinner pre-rendered frames** *(low priority — status-bar location changed since the spinner audit; verify it still exists in its old form, or close out)*
 
 ## Testing / hermeticity
 
 - [ ] **Extract `GitRunner` interface on `PackageManager` for test injection**
-  Today `internal/plugin/pkgmgr.go` defensively neuters git credential helpers via env vars and `gitCommand` wrapping. Extracting a `GitRunner` interface lets tests inject a fake — no real `git` invocation, no keychain prompts.
+  Today `internal/plugin/pkgmgr.go` defensively neuters git credential helpers via env vars and `gitCommand` wrapping. The new `internal/state/git_numstat.go` also shells out to git. Extracting a shared `GitRunner` interface lets both inject a fake — no real `git` invocation, no keychain prompts.
 
 ## External / upstream
 
@@ -65,19 +75,15 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 ---
 
-## For carpenter / future UI work
+## Recently completed (since this file was created)
 
-- Read `docs/agents/ui-v2-gotchas.md` before editing anything under `internal/ui/`. It documents the bubbletea / lipgloss / bubbles v2 traps the agent has hit repeatedly (especially: `lipgloss.Color` is a function, not a type — fields hold `color.Color` from `image/color`).
+- ✅ Modified Files in sidebar — real data with git numstat (commit `deae712`)
+- ✅ Right-side sidebar replaces header bar (commit `f4c7dd0`)
+- ✅ `Input.Focused` toggle on modal open/close (commit `55a0f2d`)
+- ✅ `RoleThinking` dead-branch cleanup (commit `55a0f2d`)
+- ✅ Delete unused `StatusBar` component (commit `55a0f2d`)
+- ✅ Sessions modal: show own cost + rolled-up in parens (subagents)
 
 ---
 
-_Last updated after the sidebar slice (commit `f4c7dd0`)._
-
-## Sidebar follow-ups
-
-- [ ] **Modified files tracking in sidebar**
-  The "Modified Files" section in the right sidebar currently shows a stub `—`.
-  Wire real file-modification tracking: detect files changed since the session
-  started (e.g. from tool call targets or an inotify/fsevents watcher) and
-  surface them in the sidebar.  The `// TODO(post-sidebar)` comment in
-  `internal/ui/components/sidebar.go` marks the exact stub location.
+_Last updated after the cleanup bundle (commit `55a0f2d`)._

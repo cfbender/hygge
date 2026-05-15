@@ -100,8 +100,9 @@ type Session struct {
 	Slug                string
 	ProjectDir          string
 	Model               ModelRef
-	Kind                Kind // "primary" or "subagent"; empty on read means "primary"
-	Totals              Totals
+	Kind                Kind   // "primary" or "subagent"; empty on read means "primary"
+	Totals              Totals // rolled-up totals: includes all descendant subagents
+	OwnTotals           Totals // own totals: direct messages of this session only
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	DeletedAt           time.Time // zero value if not deleted
