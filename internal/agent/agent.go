@@ -162,10 +162,18 @@ type Options struct {
 type Agent struct {
 	opts Options
 
-	// mu guards closed, locks, pendingLazy, thresholdFired, pluginInjects,
-	// activeRuns, and queues.
+	// mu guards closed, ctx, cancel, locks, pendingLazy, thresholdFired,
+	// pluginInjects, activeRuns, and queues.
 	mu     sync.Mutex
 	closed bool
+
+	// ctx / cancel are the agent's own lifetime context.  Used by the
+	// queue-drain goroutine so that queued sends survive cancellation of
+	// the caller's context (e.g. the UI's per-send cancel fires as soon as
+	// Agent.Send returns for a queued message).  Set once at construction
+	// and cancelled by Close.
+	ctx    context.Context //nolint:containedctx
+	cancel context.CancelFunc
 	locks  map[string]*sync.Mutex
 	// pendingLazy maps sessionID -> lazy context blocks queued for
 	// the next provider turn.  Drained before each buildRequest in
@@ -222,8 +230,11 @@ func New(opts Options) (*Agent, error) {
 	if opts.CompactionMaxTokens <= 0 {
 		opts.CompactionMaxTokens = 1024
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Agent{
 		opts:           opts,
+		ctx:            ctx,
+		cancel:         cancel,
 		locks:          make(map[string]*sync.Mutex),
 		pendingLazy:    make(map[string][]agentsmd.Block),
 		thresholdFired: make(map[string]bool),
@@ -237,7 +248,11 @@ func New(opts Options) (*Agent, error) {
 func (a *Agent) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closed {
+		return nil
+	}
 	a.closed = true
+	a.cancel()
 	if a.opts.Hooks != nil {
 		a.opts.Hooks.Close()
 	}
@@ -356,10 +371,13 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 
 	// Kick off the next queued send.  We use a goroutine so that this
 	// Send's caller gets their result immediately; the next send runs
-	// independently.
+	// independently.  We use a.ctx (the agent's own lifetime context)
+	// rather than the caller's ctx, which may already be cancelled by the
+	// time this goroutine starts (the UI's defer cancel() fires as soon as
+	// Agent.Send returns).
 	if next != nil {
 		go func() {
-			_, _ = a.Send(ctx, sessionID, next.Parts)
+			_, _ = a.Send(a.ctx, sessionID, next.Parts)
 		}()
 	}
 
@@ -433,6 +451,14 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	if err != nil {
 		return nil, fmt.Errorf("agent: Send: load session: %w", err)
 	}
+
+	// Publish TurnStarted so the UI can flip to busy before the first token
+	// arrives.  This fires regardless of outcome — even if runLoop returns an
+	// error, the turn did start.
+	bus.Publish(a.opts.Bus, bus.TurnStarted{
+		SessionID: sessionID,
+		At:        a.opts.Now(),
+	})
 
 	result, runErr := a.runLoop(ctx, sessionID, sess.Model.Name)
 
