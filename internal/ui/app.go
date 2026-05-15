@@ -227,6 +227,8 @@ type App struct {
 
 	// lastEscAt records when Esc was last pressed for double-Esc detection.
 	lastEscAt time.Time
+	// lastCtrlCAt records when Ctrl+C was last pressed for double-tap quit.
+	lastCtrlCAt time.Time
 
 	// sel tracks mouse-driven text selection.
 	sel selection
@@ -1012,7 +1014,13 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.inflightCancel()
 			return a, nil
 		}
-		return a, tea.Quit
+		// Double Ctrl+C within 500ms to quit.
+		now := a.opts.Now()
+		if now.Sub(a.lastCtrlCAt) < 500*time.Millisecond {
+			return a, tea.Quit
+		}
+		a.lastCtrlCAt = now
+		return a, a.setNotice("press Ctrl+C again to quit")
 	case "ctrl+l":
 		a.input.Reset()
 		a.slashPaletteDismissed = false
