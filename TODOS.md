@@ -20,8 +20,8 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [ ] **Proper scrollable thinking viewport in assistant bubbles**
   Phase 4 added max-line truncation with `… +N more lines (thinking)`. A real per-bubble viewport with key-driven expand/collapse would let users actually read long thinking on resume.
 
-- [ ] **`ModalHelp` close handler + render path**
-  Wired up the open path during the input-focus cleanup, but the help overlay has no render path in `View()` yet and no close handler. Implement when the help dialog itself lands.
+- [x] **`ModalHelp` close handler + render path**
+  Phase 6C added a typed overlay stack and a Hygge-styled help overlay with Esc/q close handling.
 
 - [ ] Subagent view doesn't show initial message on first render, but does later on resume and re-view
 
@@ -29,8 +29,8 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 ## Architecture
 
-- [ ] **Unify modal state**
-  Modal state today is split across `activeModal string` (single-slot: `""`/`"sessions"`/`"help"`/`"compact-confirm"`) and `pendingPerms []PermissionRequest` (independent queue that can coexist with any active modal). The two don't compose: if a `PermissionAsked` fires while compaction is open, both look "true". `handleKey` happens to route to perms first, so it works — but the invariant is implicit, not enforced. Refactor to a single modal stack with typed entries.
+- [x] **Unify modal state**
+  Phase 6C introduced a typed overlay stack for help, sessions, compaction confirmation, and a compatibility permission overlay. `activeModal` remains only as a compatibility mirror for current tests/callers.
 
 ## Plugin host
 
@@ -127,4 +127,5 @@ Migration plan artifact: `7yLWjW`.
 - [ ] **Phase 6 — UI** — Theme/model-select/API-key dialogs; slash command system update.
   - [x] **Phase 6A — UX foundation** — Queue status pills near the input/footer and input-event filtering for OSC leaks plus 15ms mouse wheel/motion spam throttling.
   - [x] **Phase 6B — Slash-command completion popover** — Fuzzy inline completions with descriptions, keyboard navigation, and Hygge styling.
-  - [ ] **Phase 6C+ follow-ups** — Dialog overlay stack, todo persistence/agent todo tracking, attachments, API key/model/theme dialogs.
+  - [x] **Phase 6C — Dialog overlay stack** — Typed overlay stack routes topmost keys first, centralizes input-focus state, renders help, and wraps the existing permission queue as a compatibility overlay while preserving queue semantics.
+  - [ ] **Phase 6D+ follow-ups** — API-key/model/theme dialogs on the overlay stack; richer command dialogs; todo persistence/agent todo tracking; attachments; optional backdrop rendering over preserved app content instead of full-screen modal replacement.

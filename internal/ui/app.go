@@ -228,6 +228,7 @@ type App struct {
 	// permission state
 	pendingPerms []components.PermissionRequest // FIFO queue
 	modalToast   string                         // transient message inside the modal
+	overlays     overlayStack                   // typed topmost-first dialog routing foundation
 
 	// status state
 	busy        bool
@@ -258,8 +259,8 @@ type App struct {
 	// the next input edit. The typed slash buffer is preserved.
 	slashPaletteDismissed bool
 
-	// activeModal is the named modal currently open from a slash
-	// command Outcome (help / sessions).  Empty means none.
+	// activeModal mirrors the top non-permission overlay for existing tests and
+	// compatibility; overlay routing/rendering uses overlays.
 	activeModal string
 
 	// sessionsModal holds the live state of the sessions picker
@@ -423,7 +424,7 @@ func (a *App) Init() tea.Cmd {
 	}
 	if a.opts.OpenSessionsModalOnStart {
 		// Initialise the modal and schedule a load.
-		a.activeModal = "sessions"
+		a.openOverlay(overlaySessions)
 		a.sessionsModal = components.SessionsModal{
 			Theme:        a.opts.Theme,
 			ForegroundID: a.opts.SessionID,
@@ -817,40 +818,41 @@ func (a *App) View() tea.View {
 		main = leftCol
 	}
 
-	// Modal overlays the entire screen when there's a pending permission.
-	if len(a.pendingPerms) > 0 {
-		modal := components.PermissionModal{
-			Width:   width,
-			Height:  height,
-			Theme:   a.opts.Theme,
-			Request: a.pendingPerms[0],
-			Toast:   a.modalToast,
-		}.View()
-		v := tea.NewView(modal)
-		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
-		return v
-	}
-
-	// Sessions modal overlay.
-	if a.activeModal == "sessions" {
-		a.sessionsModal.Width = width
-		a.sessionsModal.Height = height
-		a.sessionsModal.Now = a.opts.Now()
-		v := tea.NewView(a.sessionsModal.View())
-		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
-		return v
-	}
-
-	// Compaction confirmation modal overlay.
-	if a.activeModal == command.ModalCompactConfirm {
-		a.compactionModal.Width = width
-		a.compactionModal.Height = height
-		v := tea.NewView(a.compactionModal.View())
-		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
-		return v
+	if top, ok := a.overlays.Top(); ok {
+		switch top {
+		case overlayPermission:
+			modal := components.PermissionModal{
+				Width:   width,
+				Height:  height,
+				Theme:   a.opts.Theme,
+				Request: a.pendingPerms[0],
+				Toast:   a.modalToast,
+			}.View()
+			v := tea.NewView(modal)
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
+		case overlaySessions:
+			a.sessionsModal.Width = width
+			a.sessionsModal.Height = height
+			a.sessionsModal.Now = a.opts.Now()
+			v := tea.NewView(a.sessionsModal.View())
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
+		case overlayCompactConfirm:
+			a.compactionModal.Width = width
+			a.compactionModal.Height = height
+			v := tea.NewView(a.compactionModal.View())
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
+		case overlayHelp:
+			v := tea.NewView(a.renderHelpOverlay(width, height))
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
+		}
 	}
 
 	v := tea.NewView(main)
@@ -1026,7 +1028,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		// Route mouse wheel to the viewport when no modal is open.
 		// Track userScrolled when the user scrolls up.
-		if len(a.pendingPerms) == 0 && a.activeModal == "" {
+		if !a.anyOverlayOpen() {
 			prevOffset := a.msgViewport.YOffset()
 			a.msgViewport, _ = a.msgViewport.Update(m)
 			if a.msgViewport.YOffset() < prevOffset {
@@ -1055,16 +1057,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKey dispatches a key.  When the modal is open, only the modal
 // keybinds work; everything else is dropped.
 func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if len(a.pendingPerms) > 0 {
-		return a.handleModalKey(k)
-	}
-
-	if a.activeModal == "sessions" {
-		return a.handleSessionsModalKey(k)
-	}
-
-	if a.activeModal == command.ModalCompactConfirm {
-		return a.handleCompactionModalKey(k)
+	if top, ok := a.overlays.Top(); ok {
+		switch top {
+		case overlayPermission:
+			return a.handleModalKey(k)
+		case overlaySessions:
+			return a.handleSessionsModalKey(k)
+		case overlayCompactConfirm:
+			return a.handleCompactionModalKey(k)
+		case overlayHelp:
+			if k.String() == "esc" || k.String() == "q" {
+				a.closeOverlay(overlayHelp)
+			}
+			return a, nil
+		}
 	}
 
 	switch k.String() {
@@ -1231,6 +1237,7 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		a.pendingPerms = a.pendingPerms[1:]
 		a.modalToast = ""
+		a.syncPermissionOverlay()
 		a.updateInputFocus()
 		return a, reply("deny", "once")
 	default:
@@ -1241,21 +1248,25 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case 'y':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("allow", "once")
 		case 'Y':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("allow", "session")
 		case 'A':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("allow", "always")
 		case 'n', 'N':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("deny", "once")
 		case 'e', 'E':
@@ -1508,6 +1519,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Category:  e.Category,
 			Target:    e.Target,
 		})
+		a.syncPermissionOverlay()
 		a.updateInputFocus()
 		// Stamp the matching tool row as awaiting permission.  We correlate
 		// by ToolName (most recent streaming row with that name) because
@@ -2519,8 +2531,76 @@ func extractFieldString(raw []byte, field string) string {
 // covering the input area.  Any open modal → muted border; all modals
 // dismissed → accent border.
 func (a *App) updateInputFocus() {
-	modalOpen := a.activeModal != "" || len(a.pendingPerms) > 0
-	a.input.Focused = !modalOpen
+	a.input.Focused = !a.anyOverlayOpen()
+}
+
+func (a *App) anyOverlayOpen() bool {
+	a.syncPermissionOverlay()
+	return a.overlays.Open()
+}
+
+func (a *App) openOverlay(kind overlayKind) {
+	a.overlays.Push(kind)
+	a.syncActiveModal()
+}
+
+func (a *App) closeOverlay(kind overlayKind) {
+	a.overlays.Remove(kind)
+	a.syncActiveModal()
+	a.updateInputFocus()
+}
+
+func (a *App) syncPermissionOverlay() {
+	if len(a.pendingPerms) > 0 {
+		a.overlays.Push(overlayPermission)
+		return
+	}
+	a.overlays.Remove(overlayPermission)
+}
+
+func (a *App) syncActiveModal() {
+	a.activeModal = ""
+	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
+		switch a.overlays.entries[i] {
+		case overlayHelp, overlaySessions, overlayCompactConfirm:
+			a.activeModal = string(a.overlays.entries[i])
+			return
+		}
+	}
+}
+
+func (a *App) renderHelpOverlay(width, height int) string {
+	border := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
+	if a.opts.Theme != nil {
+		bs := a.opts.Theme.Style(theme.AtomModalBorder)
+		border = border.BorderForeground(bs.GetForeground())
+		modal := a.opts.Theme.Style(theme.AtomModalBg)
+		if modal.GetBackground() != nil {
+			border = border.Background(modal.GetBackground())
+		}
+	}
+	primary := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle()
+	if a.opts.Theme != nil {
+		primary = a.opts.Theme.Style(theme.AtomPrimary).Bold(true)
+		muted = a.opts.Theme.Style(theme.AtomMuted)
+	}
+	body := primary.Render("Help") + "\n\n" +
+		"Type / to open command completions.\n" +
+		"Use ↑/↓ to navigate completions and Enter to accept.\n\n" +
+		"Common commands:\n" +
+		"  /sessions  open the session picker\n" +
+		"  /compact   compact recent context\n" +
+		"  /clear     clear the visible transcript\n\n" +
+		muted.Render("[esc] close   [q] close")
+	box := border.Render(body)
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 // --- Compaction modal integration -----------------------------------------
@@ -2530,8 +2610,7 @@ func (a *App) updateInputFocus() {
 func (a *App) handleCompactionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
-		a.activeModal = ""
-		a.updateInputFocus()
+		a.closeOverlay(overlayCompactConfirm)
 		return a, nil
 	default:
 		if len(k.Text) != 1 {
@@ -2544,12 +2623,10 @@ func (a *App) handleCompactionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 			sid := a.foregroundID()
-			a.activeModal = ""
-			a.updateInputFocus()
+			a.closeOverlay(overlayCompactConfirm)
 			return a, func() tea.Msg { return compactionRunMsg{SessionID: sid} }
 		case 'n', 'N':
-			a.activeModal = ""
-			a.updateInputFocus()
+			a.closeOverlay(overlayCompactConfirm)
 			return a, nil
 		}
 	}
@@ -2690,8 +2767,7 @@ func (a *App) handleSessionsModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 	switch m := msg.(type) {
 	case components.CloseSessionsModal:
-		a.activeModal = ""
-		a.updateInputFocus()
+		a.closeOverlay(overlaySessions)
 		// When the picker was opened on start (OpenSessionsModalOnStart) and
 		// there is no foreground session bound, the user chose to cancel
 		// without picking — exit the App.
@@ -2703,8 +2779,7 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 	case components.NewSessionAction:
 		// User pressed 'n' in the picker with no sessions.  Close the picker
 		// and start fresh (no session id → lazy create on first input).
-		a.activeModal = ""
-		a.updateInputFocus()
+		a.closeOverlay(overlaySessions)
 		// Start the bus bridge now that we have a concrete "start fresh" intent.
 		if a.opts.SessionID == "" && a.opts.OpenSessionsModalOnStart {
 			a.bridge()
@@ -2713,13 +2788,11 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 		return a.setNotice("starting a new session")
 
 	case components.SwitchSessionAction:
-		a.activeModal = ""
-		a.updateInputFocus()
+		a.closeOverlay(overlaySessions)
 		return a.applySwitchSession(m.ID)
 
 	case components.ForkSessionAction:
-		a.activeModal = ""
-		a.updateInputFocus()
+		a.closeOverlay(overlaySessions)
 		return a.applyForkSession(m.ID, m.MessageID)
 
 	case components.RenameSessionAction:
