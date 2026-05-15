@@ -395,6 +395,62 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	}
 }
 
+// TestRendererWidthRespectsSidebar verifies that the glamour renderer is built
+// at leftW (terminal width minus sidebar), not the full terminal width.
+// On a 250-column terminal with a 32-column sidebar the renderer must be 218,
+// not 250.  This regression test covers the bug where ensureRenderer used
+// a.width instead of a.msgColW, causing markdown lines to overflow bubble
+// BubbleWidth and the bubbles to visually span ~95% of the left column.
+func TestRendererWidthRespectsSidebar(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	// Wide terminal: sidebar is 32 cols, leftW = 250 - 32 = 218.
+	const termW = 250
+	const sidebarW = 32
+	const wantRendererW = termW - sidebarW // 218
+	app.Update(tea.WindowSizeMsg{Width: termW, Height: 40})
+
+	// Trigger a renderer build via a stream-complete event.
+	app.Handle(bus.AssistantTextDelta{Text: "# heading\n\nbody text"})
+	app.Handle(bus.MessageAppended{Role: "assistant"})
+
+	if app.renderer == nil {
+		t.Fatal("expected renderer to be built after MessageAppended")
+	}
+	if app.rendererW != wantRendererW {
+		t.Errorf("renderer width = %d, want %d (leftW = terminal %d - sidebar %d); "+
+			"ensureRenderer must use msgColW, not a.width",
+			app.rendererW, wantRendererW, termW, sidebarW)
+	}
+	// Sanity: msgColW must also equal wantRendererW.
+	if app.msgColW != wantRendererW {
+		t.Errorf("msgColW = %d, want %d", app.msgColW, wantRendererW)
+	}
+}
+
+// TestRendererWidthNarrowTerminalNoSidebar verifies that on a narrow terminal
+// (< 100 cols) where the sidebar is hidden, the renderer is built at the full
+// terminal width (leftW == a.width since sidebarW == 0).
+func TestRendererWidthNarrowTerminalNoSidebar(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	const termW = 80
+	app.Update(tea.WindowSizeMsg{Width: termW, Height: 24})
+
+	app.Handle(bus.AssistantTextDelta{Text: "hello"})
+	app.Handle(bus.MessageAppended{Role: "assistant"})
+
+	if app.rendererW != termW {
+		t.Errorf("renderer width = %d, want %d (no sidebar on narrow terminal)",
+			app.rendererW, termW)
+	}
+	if app.msgColW != termW {
+		t.Errorf("msgColW = %d, want %d", app.msgColW, termW)
+	}
+}
+
 func TestCostUpdatesHeader(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)

@@ -136,6 +136,7 @@ func New(opts AppOptions) (*App, error) {
 		spinner:       spinner.New(),
 		width:         80,
 		height:        24,
+		msgColW:       80, // default: no sidebar at 80 cols
 		subagents:     make(map[string]*components.SubagentState),
 		subagentAnims: make(map[string]*anim.Anim),
 		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
@@ -167,6 +168,13 @@ type App struct {
 	// width and height come from tea.WindowSizeMsg.
 	width  int
 	height int
+
+	// msgColW is the left-column (message list) width: terminal width minus
+	// the sidebar width.  Updated alongside a.width in the WindowSizeMsg
+	// handler and kept in sync in View().  Used to size the glamour renderer
+	// so word-wrap is relative to the actual message column, not the full
+	// terminal.
+	msgColW int
 
 	// renderer is the glamour TermRenderer; rebuilt on resize.
 	renderer  *glamour.TermRenderer
@@ -484,6 +492,9 @@ func (a *App) View() tea.View {
 		sidebarW = sidebarFixedWidth
 	}
 	leftW := width - sidebarW
+	// Keep msgColW in sync so ensureRenderer uses the correct word-wrap width
+	// even when View() is called before the first WindowSizeMsg.
+	a.msgColW = leftW
 
 	// T2.2 — breadcrumb: shown above the message list when depth > 1.
 	breadcrumb := components.Breadcrumb{
@@ -722,6 +733,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sidebarW = sidebarFixedWidth
 		}
 		leftW := m.Width - sidebarW
+		a.msgColW = leftW           // keep in sync for ensureRenderer
 		a.input.SetWidth(leftW - 2) // border padding
 		a.msgViewport.SetWidth(leftW)
 		// Height is recomputed per-frame in View(); set a sane default here
@@ -2020,12 +2032,15 @@ func (a *App) updateLastTool(e bus.ToolCallCompleted) {
 }
 
 // ensureRenderer constructs (or returns the cached) glamour renderer for the
-// current width.
+// current message-column width.  Using msgColW (post-sidebar left column)
+// rather than the full terminal width ensures glamour's word-wrap matches the
+// actual space available inside the bubble, preventing markdown lines from
+// overflowing the bubble's BubbleWidth constraint.
 func (a *App) ensureRenderer() *glamour.TermRenderer {
-	if a.renderer != nil && a.rendererW == a.width {
+	if a.renderer != nil && a.rendererW == a.msgColW {
 		return a.renderer
 	}
-	w := a.width
+	w := a.msgColW
 	if w <= 0 {
 		w = 80
 	}
