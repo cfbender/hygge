@@ -189,7 +189,10 @@ func New(opts AppOptions) (*App, error) {
 		notifyBackend: nb,
 	}
 	a.msgViewport.MouseWheelEnabled = true
-	a.spinner.Spinner = spinner.Dot
+	a.spinner.Spinner = spinner.Meter
+	if themeStyles.WorkingGradFromColor != nil {
+		a.spinner.Style = lipgloss.NewStyle().Foreground(themeStyles.WorkingGradFromColor)
+	}
 	a.history = newInputHistory(xdgStateHome(opts.HomeDir))
 	a.initModes()
 	if opts.SessionID != "" || !opts.OpenSessionsModalOnStart {
