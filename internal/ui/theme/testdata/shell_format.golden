@@ -13,3 +13,8 @@ theme: shell
   statusbar.fg     = ansi:15
   modal.bg         = (default)
   modal.border     = ansi:8
+  bubble.border    = ansi:5
+  bubble.border.distinct = ansi:8
+  bubble.header    = ansi:5
+  bubble.header.muted = ansi:8
+  bubble.body.muted = ansi:8

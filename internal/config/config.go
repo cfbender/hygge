@@ -64,6 +64,7 @@ type Config struct {
 	Model      ModelConfig      `mapstructure:"model"`
 	Permission PermissionConfig `mapstructure:"permission"`
 	Theme      ThemeConfig      `mapstructure:"theme"`
+	UI         UIConfig         `mapstructure:"ui"`
 	Compaction CompactionConfig `mapstructure:"compaction"`
 	Session    SessionConfig    `mapstructure:"session"`
 	Catalog    CatalogConfig    `mapstructure:"catalog"`
@@ -215,6 +216,15 @@ type PermissionConfig struct {
 // ThemeConfig holds display-theme selection.
 type ThemeConfig struct {
 	Name string `mapstructure:"name"`
+}
+
+// UIConfig holds UI behaviour knobs.
+type UIConfig struct {
+	// NerdFonts controls whether nerd-font glyphs are used in the TUI.
+	// Disable if your terminal font does not include nerd-font glyphs; we'll
+	// render plain ASCII alternatives (e.g. ":main" instead of " main").
+	// Default: true.
+	NerdFonts bool `mapstructure:"nerd_fonts"`
 }
 
 // Source identifies where a config key value originated.

@@ -58,6 +58,11 @@ error          = "#F7768E"
 "statusbar.bg" = "8"
 "modal.bg"     = ""
 "modal.border" = "8"
+"bubble.border"         = "5"
+"bubble.border.distinct" = "8"
+"bubble.header"         = "5"
+"bubble.header.muted"   = "8"
+"bubble.body.muted"     = "8"
 `
 }
 
@@ -303,6 +308,11 @@ error          = "inherit:code.fg"
 "statusbar.bg" = "8"
 "modal.bg"     = ""
 "modal.border" = "8"
+"bubble.border"         = "5"
+"bubble.border.distinct" = "8"
+"bubble.header"         = "5"
+"bubble.header.muted"   = "8"
+"bubble.body.muted"     = "8"
 `
 	_, err := parseTOMLTheme([]byte(content))
 	if err == nil {
@@ -422,8 +432,8 @@ func TestParseTOMLTheme_BadColor(t *testing.T) {
 
 func TestAllAtoms_Stable(t *testing.T) {
 	atoms := AllAtoms()
-	if len(atoms) != 14 {
-		t.Errorf("AllAtoms(): len = %d, want 14", len(atoms))
+	if len(atoms) != 19 {
+		t.Errorf("AllAtoms(): len = %d, want 19", len(atoms))
 	}
 
 	// Exact order must match the const list.
@@ -433,6 +443,8 @@ func TestAllAtoms_Stable(t *testing.T) {
 		AtomDiffAddBg, AtomDiffDelBg,
 		AtomStatusBarBg, AtomStatusBarFg,
 		AtomModalBg, AtomModalBorder,
+		AtomBubbleBorder, AtomBubbleBorderDistinct,
+		AtomBubbleHeader, AtomBubbleHeaderMuted, AtomBubbleBodyMuted,
 	}
 	for i, want := range expected {
 		if atoms[i] != want {

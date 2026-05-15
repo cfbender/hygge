@@ -1,7 +1,6 @@
 package components
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -9,21 +8,22 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-// Footer renders the bottom-of-screen status line.
+// Footer renders the bottom-of-screen identity line.
 //
-// Layout (separated by `·`):
+// Layout (segments separated by ` · `):
 //
-//	$0.0123 · ctx 12.4% (24.8k/200k) · enter send · ctrl-c cancel
+//	{AgentType Capitalized} · {ModelName} · {Provider Capitalized} · {ReasoningLevel}
 //
-// When Busy is true the keybind hints change to reflect the in-flight Send.
+// Cost, context usage, and keybind hints have been moved to the header bar
+// (Phase 1 chat-bubble redesign) or dropped entirely.  Only session identity
+// remains.  When AgentType is empty (no active session), "(no session)" is shown.
 type Footer struct {
-	Width   int
-	Theme   *theme.Theme
-	Cost    float64 // dollars
-	UsedTok int64
-	MaxTok  int64
-	PctUsed float64 // 0..1
-	Busy    bool
+	Width          int
+	Theme          *theme.Theme
+	AgentType      string // e.g. "General"; rendered capitalized
+	ModelName      string // e.g. "Claude Opus 4.7"
+	Provider       string // e.g. "openrouter"; rendered capitalized
+	ReasoningLevel string // e.g. "medium"; empty → omitted
 }
 
 // View renders the footer.
@@ -33,25 +33,30 @@ func (f Footer) View() string {
 		width = 80
 	}
 
-	cost := fmt.Sprintf("$%.4f", f.Cost)
-
-	ctx := f.contextSegment()
-
-	hints := "enter send · ctrl-c cancel"
-	if f.Busy {
-		hints = "ctrl-c cancel · enter blocked"
-	}
-
 	muted := f.style(theme.AtomMuted)
 
-	parts := []string{
-		muted.Render(cost),
-		ctx,
-		muted.Render(hints),
+	agentType := f.AgentType
+	if agentType == "" {
+		agentType = "(no session)"
+	} else {
+		agentType = capitalize(agentType)
 	}
+
+	var parts []string
+	parts = append(parts, muted.Render(agentType))
+	if f.ModelName != "" {
+		parts = append(parts, muted.Render(f.ModelName))
+	}
+	if f.Provider != "" {
+		parts = append(parts, muted.Render(capitalize(f.Provider)))
+	}
+	if f.ReasoningLevel != "" {
+		parts = append(parts, muted.Render(f.ReasoningLevel))
+	}
+
 	line := strings.Join(parts, muted.Render(" · "))
 
-	// Pad/trim to width so the footer occupies a clean line.
+	// Pad to width so the footer occupies a clean terminal line.
 	visible := lipgloss.Width(line)
 	if visible < width {
 		line += strings.Repeat(" ", width-visible)
@@ -59,46 +64,8 @@ func (f Footer) View() string {
 	return line
 }
 
-// contextSegment renders the `ctx X%` token with severity coloring.
-func (f Footer) contextSegment() string {
-	if f.MaxTok <= 0 {
-		return f.style(theme.AtomMuted).Render("ctx —")
-	}
-	atom := theme.AtomSuccess
-	switch {
-	case f.PctUsed > 0.90:
-		atom = theme.AtomError
-	case f.PctUsed > 0.70:
-		atom = theme.AtomWarn
-	}
-	text := fmt.Sprintf("ctx %.1f%% (%s/%s)",
-		f.PctUsed*100,
-		formatTokens(f.UsedTok),
-		formatTokens(f.MaxTok),
-	)
-	return f.style(atom).Render(text)
-}
-
-// SeverityAtom returns the theme atom selected for the current PctUsed.
-// Exposed for tests so they can assert on the chosen tone without
-// inspecting ANSI escape sequences.
-func (f Footer) SeverityAtom() theme.Atom {
-	if f.MaxTok <= 0 {
-		return theme.AtomMuted
-	}
-	switch {
-	case f.PctUsed > 0.90:
-		return theme.AtomError
-	case f.PctUsed > 0.70:
-		return theme.AtomWarn
-	default:
-		return theme.AtomSuccess
-	}
-}
-
 // style returns a styled lipgloss.Style for the given atom, or a blank style
-// when no theme is configured.  Centralised so View/contextSegment don't
-// nil-check each call site.
+// when no theme is configured.
 func (f Footer) style(a theme.Atom) lipgloss.Style {
 	if f.Theme == nil {
 		return lipgloss.NewStyle()
@@ -106,10 +73,15 @@ func (f Footer) style(a theme.Atom) lipgloss.Style {
 	return f.Theme.Style(a)
 }
 
-// formatTokens renders a token count as a compact "12.3k" string.
-func formatTokens(n int64) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
+// capitalize returns s with the first rune uppercased.  Used to display
+// AgentType and Provider in title case without importing unicode.
+func capitalize(s string) string {
+	if s == "" {
+		return s
 	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
+	runes := []rune(s)
+	if runes[0] >= 'a' && runes[0] <= 'z' {
+		runes[0] -= 'a' - 'A'
+	}
+	return string(runes)
 }
