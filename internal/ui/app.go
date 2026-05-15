@@ -1045,6 +1045,25 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// `ctrl+t` is otherwise unbound by the textarea bubble.
 		a.toggleLatestSubagent()
 		return a, nil
+	case "ctrl+r":
+		// Cycle reasoning level: off → low → medium → high → off.
+		levels := []string{"", "low", "medium", "high"}
+		cur := a.opts.Reasoning.Effort
+		idx := 0
+		for i, l := range levels {
+			if l == cur {
+				idx = i
+				break
+			}
+		}
+		next := levels[(idx+1)%len(levels)]
+		a.opts.Reasoning.Effort = next
+		label := next
+		if label == "" {
+			label = "off"
+		}
+		a.invalidateMsgCache()
+		return a, a.showToast("Reasoning", label)
 	case "ctrl+e":
 		// Toggle all tool output expansion.
 		if len(a.expandedTools) > 0 {
