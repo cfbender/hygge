@@ -74,6 +74,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 		switch out.OpenModal {
 		case command.ModalHelp:
 			a.activeModal = out.OpenModal
+			a.updateInputFocus()
 		case command.ModalSessions:
 			a.activeModal = out.OpenModal
 			a.sessionsModal = components.SessionsModal{
@@ -82,6 +83,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 				ShowSubagents: false,
 				ShowDeleted:   false,
 			}
+			a.updateInputFocus()
 			return tea.Batch(append(cmds, a.openSessionsModal())...)
 		case command.ModalCompactConfirm:
 			// Populate the modal with live session metadata.
@@ -94,6 +96,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 				ContextWindow: a.opts.ContextWindow,
 			}
 			a.activeModal = command.ModalCompactConfirm
+			a.updateInputFocus()
 		default:
 			slogWarnUnknownModal(out.OpenModal)
 		}

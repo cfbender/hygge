@@ -331,6 +331,7 @@ func (a *App) Init() tea.Cmd {
 			ForegroundID: a.opts.SessionID,
 			AllowNew:     true,
 		}
+		a.updateInputFocus()
 		cmds = append(cmds, a.openSessionsModal())
 	}
 	// When resuming an existing session, pre-populate the message list from
@@ -1008,6 +1009,7 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		a.pendingPerms = a.pendingPerms[1:]
 		a.modalToast = ""
+		a.updateInputFocus()
 		return a, reply("deny", "once")
 	default:
 		if len(k.Text) != 1 {
@@ -1017,18 +1019,22 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case 'y':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.updateInputFocus()
 			return a, reply("allow", "once")
 		case 'Y':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.updateInputFocus()
 			return a, reply("allow", "session")
 		case 'A':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.updateInputFocus()
 			return a, reply("allow", "always")
 		case 'n', 'N':
 			a.pendingPerms = a.pendingPerms[1:]
 			a.modalToast = ""
+			a.updateInputFocus()
 			return a, reply("deny", "once")
 		case 'e', 'E':
 			a.modalToast = "edit not yet implemented (v0.2)"
@@ -1246,6 +1252,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Category:  e.Category,
 			Target:    e.Target,
 		})
+		a.updateInputFocus()
 
 	case bus.IterationLimitReached:
 		// Route iter-limit notices to a sub-agent when the session
@@ -1921,9 +1928,9 @@ func (a *App) appendThinkingDelta(text string) {
 // separately.  The function is preserved as a call-site placeholder so the
 // existing handleBusEvent call graph compiles without changes in Phase 3.
 func (a *App) finalizeTrailingThinking() {
-	// Phase 2: thinking lives inline on the assistant message — no separate
-	// RoleThinking row to finalize.  This function is intentionally empty;
-	// the old logic of marking a RoleThinking row non-streaming is gone.
+	// Thinking lives inline on the assistant message — no separate row to
+	// finalize.  This function is preserved as a call-site placeholder so the
+	// existing handleBusEvent call graph compiles without changes.
 }
 
 // appendAssistantDelta appends text to the streaming assistant message, or
@@ -2110,6 +2117,17 @@ func extractFieldString(raw []byte, field string) string {
 	return rest[:end]
 }
 
+// updateInputFocus sets input.Focused based on whether any modal is currently
+// visible.  Call this after any change to activeModal or pendingPerms.
+//
+// Rule: the input border renders in the accent color only when no modal is
+// covering the input area.  Any open modal → muted border; all modals
+// dismissed → accent border.
+func (a *App) updateInputFocus() {
+	modalOpen := a.activeModal != "" || len(a.pendingPerms) > 0
+	a.input.Focused = !modalOpen
+}
+
 // --- Compaction modal integration -----------------------------------------
 
 // handleCompactionModalKey routes key presses when the compaction
@@ -2118,6 +2136,7 @@ func (a *App) handleCompactionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
 		a.activeModal = ""
+		a.updateInputFocus()
 		return a, nil
 	default:
 		if len(k.Text) != 1 {
@@ -2131,9 +2150,11 @@ func (a *App) handleCompactionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			sid := a.foregroundID()
 			a.activeModal = ""
+			a.updateInputFocus()
 			return a, func() tea.Msg { return compactionRunMsg{SessionID: sid} }
 		case 'n', 'N':
 			a.activeModal = ""
+			a.updateInputFocus()
 			return a, nil
 		}
 	}
@@ -2239,6 +2260,7 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 	switch m := msg.(type) {
 	case components.CloseSessionsModal:
 		a.activeModal = ""
+		a.updateInputFocus()
 		// When the picker was opened on start (OpenSessionsModalOnStart) and
 		// there is no foreground session bound, the user chose to cancel
 		// without picking — exit the App.
@@ -2251,6 +2273,7 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 		// User pressed 'n' in the picker with no sessions.  Close the picker
 		// and start fresh (no session id → lazy create on first input).
 		a.activeModal = ""
+		a.updateInputFocus()
 		// Start the bus bridge now that we have a concrete "start fresh" intent.
 		if a.opts.SessionID == "" && a.opts.OpenSessionsModalOnStart {
 			a.bridge()
@@ -2260,10 +2283,12 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 
 	case components.SwitchSessionAction:
 		a.activeModal = ""
+		a.updateInputFocus()
 		return a.applySwitchSession(m.ID)
 
 	case components.ForkSessionAction:
 		a.activeModal = ""
+		a.updateInputFocus()
 		return a.applyForkSession(m.ID, m.MessageID)
 
 	case components.RenameSessionAction:
@@ -2727,8 +2752,8 @@ func buildToolResultIndex(msgs []*session.Message) (results map[string]session.P
 // Both must not be nil; pass empty maps for the legacy combined-row path.
 //
 // Phase 2 change: PartThinking parts are now collapsed into the assistant
-// uiMessage's Thinking field instead of being emitted as separate RoleThinking
-// rows.  An assistant message that has only PartToolUse parts (no text, no
+// uiMessage's Thinking field instead of being emitted as separate rows.
+// An assistant message that has only PartToolUse parts (no text, no
 // thinking) emits no uiMessage so the bubble is not rendered empty.
 func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]session.Part, toolUseIDs map[string]struct{}) []uiMessage {
 	if m == nil {
