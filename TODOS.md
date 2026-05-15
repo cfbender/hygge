@@ -86,3 +86,6 @@
 
 - [ ] **Double-Esc interrupts all processes**
   Support `Esc` + `Esc` to interrupt all running processes.
+
+- [ ] Text alignment and bubble fill
+  Text should take up the width of the bubble before wrapping.
