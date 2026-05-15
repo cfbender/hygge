@@ -114,7 +114,24 @@ type MessageList struct {
 	Now time.Time
 }
 
+// renderChunkKind labels the kind of a render chunk built by the View pre-pass.
+type renderChunkKind int
+
+const (
+	chunkSingle    renderChunkKind = iota // one UIMessage → rendered by renderOne
+	chunkToolGroup                        // consecutive non-task RoleTool entries → grouped bubble
+)
+
+// renderChunk is one item in the pre-pass output slice.
+type renderChunk struct {
+	kind   renderChunkKind
+	single UIMessage   // valid when kind == chunkSingle
+	group  []UIMessage // valid when kind == chunkToolGroup
+}
+
 // View renders all messages joined with a blank line between them.
+// The pre-pass groups consecutive non-task RoleTool entries into a single
+// tool-calls bubble; task tool calls and all other roles render individually.
 func (m MessageList) View() string {
 	if len(m.Messages) == 0 {
 		muted := m.muted()
@@ -124,15 +141,60 @@ func (m MessageList) View() string {
 	if collapseLimit <= 0 {
 		collapseLimit = 8
 	}
+
+	// Pre-pass: build chunks.
+	chunks := m.buildChunks()
+
 	var parts []string
-	for _, msg := range m.Messages {
-		rendered := m.renderOne(msg, collapseLimit)
+	for _, chunk := range chunks {
+		var rendered string
+		switch chunk.kind {
+		case chunkToolGroup:
+			rendered = m.renderToolGroup(chunk.group)
+		default:
+			rendered = m.renderOne(chunk.single, collapseLimit)
+		}
 		if rendered == "" {
-			continue // skip empty bubbles (e.g. tool-only assistant turns)
+			continue
 		}
 		parts = append(parts, rendered)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// buildChunks walks m.Messages and produces a slice of renderChunks.
+// Consecutive non-task RoleTool entries are folded into a chunkToolGroup.
+// task tool calls and all other roles become chunkSingle entries.
+func (m MessageList) buildChunks() []renderChunk {
+	chunks := make([]renderChunk, 0, len(m.Messages))
+	i := 0
+	for i < len(m.Messages) {
+		msg := m.Messages[i]
+		if isNonTaskTool(msg) {
+			// Collect run of consecutive non-task tool calls.
+			j := i + 1
+			for j < len(m.Messages) && isNonTaskTool(m.Messages[j]) {
+				j++
+			}
+			chunks = append(chunks, renderChunk{
+				kind:  chunkToolGroup,
+				group: m.Messages[i:j],
+			})
+			i = j
+		} else {
+			chunks = append(chunks, renderChunk{
+				kind:   chunkSingle,
+				single: msg,
+			})
+			i++
+		}
+	}
+	return chunks
+}
+
+// isNonTaskTool reports whether msg is a RoleTool entry that is NOT "task".
+func isNonTaskTool(msg UIMessage) bool {
+	return msg.Role == RoleTool && msg.ToolName != "task"
 }
 
 // renderOne renders a single message with its gutter, plus any nested
@@ -167,11 +229,11 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 		return m.renderMarker(msg)
 	}
 
-	// task tool call with a bound subagent: render ONLY the SubagentBlock —
-	// no "▌tool: task" gutter row, no tool-result body.
+	// task tool call with a bound subagent: wrap the SubagentBlock in a
+	// distinct bubble container.  No "▌tool: task" gutter row.
 	if msg.Role == RoleTool && msg.ToolName == "task" && msg.SubagentID != "" {
 		if nested := m.nestedFor(msg); nested != "" {
-			return nested
+			return m.wrapSubagentBubble(nested)
 		}
 		// SubagentID set but no matching state yet (edge case during hydration):
 		// fall through to the normal gutter render so nothing is lost.
@@ -390,7 +452,152 @@ func formatTokensSaved(n int64) string {
 	}
 }
 
-// or "" when no block applies.
+// renderToolGroup renders a group of consecutive non-task tool calls as a
+// single distinct bordered bubble.  Each tool call occupies one body row:
+//
+//	· {ToolName} {Target}   [— error]
+func (m MessageList) renderToolGroup(items []UIMessage) string {
+	if len(items) == 0 {
+		return ""
+	}
+
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
+	bubbleW := m.toolBubbleWidth(width)
+
+	// Inner width = bubble width minus 2 border columns.
+	innerW := bubbleW - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+
+	// Build body: one line per tool call.
+	dotStyle := m.muted()
+	nameStyle := lipgloss.NewStyle()
+	if m.Theme != nil {
+		nameStyle = m.Theme.Style(theme.AtomPrimary)
+	}
+	targetStyle := m.muted()
+	errStyle := lipgloss.NewStyle()
+	if m.Theme != nil {
+		errStyle = m.Theme.Style(theme.AtomError)
+	}
+
+	var rows []string
+	for _, msg := range items {
+		dot := dotStyle.Render("·")
+		name := nameStyle.Render(msg.ToolName)
+
+		// Plain visible width of "· {name} " prefix (without ANSI).
+		prefixVisW := 2 + len(msg.ToolName) + 1 // "· " + name + " "
+
+		var row string
+		if msg.Target != "" {
+			// Truncate target to fit inside innerW: leave room for prefix + error suffix.
+			errSuffix := ""
+			if msg.IsError {
+				errSuffix = " — error"
+			}
+			// Available characters for the target string (rune count).
+			avail := innerW - prefixVisW - len(errSuffix)
+			if avail < 1 {
+				avail = 1
+			}
+			target := truncateTarget(msg.Target, avail)
+			tgt := targetStyle.Render(target)
+			row = dot + " " + name + " " + tgt
+			if msg.IsError {
+				row += errStyle.Render(errSuffix)
+			}
+		} else {
+			row = dot + " " + name
+			if msg.IsError {
+				row += errStyle.Render(" — error")
+			}
+		}
+		rows = append(rows, row)
+	}
+	body := strings.Join(rows, "\n")
+
+	var accentColor color.Color
+	if m.Theme != nil {
+		fg := m.Theme.Style(theme.AtomBubbleBorderDistinct).GetForeground()
+		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
+			accentColor = fg
+		}
+	}
+
+	b := bubble.Bubble{
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignLeft,
+		HeaderLeft:  "",
+		HeaderRight: "",
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleDistinct,
+	}
+	return b.View()
+}
+
+// wrapSubagentBubble wraps existing SubagentBlock content in a distinct bubble.
+func (m MessageList) wrapSubagentBubble(body string) string {
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
+	bubbleW := m.toolBubbleWidth(width)
+
+	var accentColor color.Color
+	if m.Theme != nil {
+		fg := m.Theme.Style(theme.AtomBubbleBorderDistinct).GetForeground()
+		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
+			accentColor = fg
+		}
+	}
+
+	b := bubble.Bubble{
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignLeft,
+		HeaderLeft:  "",
+		HeaderRight: "",
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleDistinct,
+	}
+	return b.View()
+}
+
+// toolBubbleWidth returns the bubble width for tool-group and subagent bubbles:
+// ~70% of available width, capped at 100, minimum 40.
+func (m MessageList) toolBubbleWidth(width int) int {
+	w := int(float64(width) * 0.70)
+	if w < 40 {
+		w = 40
+	}
+	if w > 100 {
+		w = 100
+	}
+	return w
+}
+
+// truncateTarget truncates a path/command string to avail rune characters,
+// appending "…" at the end when truncation occurs.
+func truncateTarget(s string, avail int) string {
+	runes := []rune(s)
+	if len(runes) <= avail {
+		return s
+	}
+	if avail <= 1 {
+		return "…"
+	}
+	return string(runes[:avail-1]) + "…"
+}
 func (m MessageList) nestedFor(msg UIMessage) string {
 	if msg.SubagentID == "" || m.Subagents == nil {
 		return ""
