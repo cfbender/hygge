@@ -880,10 +880,41 @@ func (m MessageList) gutter(msg UIMessage) string {
 		}
 		if msg.IsError {
 			label += " — error"
+		} else if summary := toolResultSummary(msg); summary != "" {
+			label += " — " + summary
 		}
 	}
 	style := m.roleStyle(msg.Role)
 	return style.Render(label)
+}
+
+// toolResultSummary returns a brief summary of a tool result for the gutter.
+func toolResultSummary(msg UIMessage) string {
+	if msg.IsStreaming || msg.Raw == "" {
+		return ""
+	}
+	lines := strings.Count(msg.Raw, "\n") + 1
+	switch msg.ToolName {
+	case "grep":
+		if lines == 1 {
+			return "1 match"
+		}
+		return itoa(lines) + " matches"
+	case "glob":
+		if lines == 1 {
+			return "1 file"
+		}
+		return itoa(lines) + " files"
+	case "bash":
+		if lines > 1 {
+			return itoa(lines) + " lines"
+		}
+	case "read":
+		if lines > 1 {
+			return itoa(lines) + " lines"
+		}
+	}
+	return ""
 }
 
 // agentAccentColor returns the accent color for an assistant bubble.
