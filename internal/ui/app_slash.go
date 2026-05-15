@@ -73,10 +73,10 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 	if out.OpenModal != "" {
 		switch out.OpenModal {
 		case command.ModalHelp:
-			a.activeModal = out.OpenModal
+			a.openOverlay(overlayHelp)
 			a.updateInputFocus()
 		case command.ModalSessions:
-			a.activeModal = out.OpenModal
+			a.openOverlay(overlaySessions)
 			a.sessionsModal = components.SessionsModal{
 				Theme:         a.opts.Theme,
 				ForegroundID:  a.opts.SessionID,
@@ -95,7 +95,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 				ContextPct:    a.pctUsed * 100,
 				ContextWindow: a.opts.ContextWindow,
 			}
-			a.activeModal = command.ModalCompactConfirm
+			a.openOverlay(overlayCompactConfirm)
 			a.updateInputFocus()
 		default:
 			slogWarnUnknownModal(out.OpenModal)
