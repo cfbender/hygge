@@ -49,12 +49,14 @@ func TestMessageListRendersRoles(t *testing.T) {
 		Theme: theme.ShellTheme(),
 		Messages: []UIMessage{
 			{Role: RoleUser, Raw: "hello"},
-			{Role: RoleAssistant, Raw: "hi back"},
+			{Role: RoleAssistant, Raw: "hi back", AgentType: "General"},
 			{Role: RoleTool, ToolName: "read", Target: "/tmp/x", Raw: "line1\nline2"},
 		},
 	}
 	out := ml.View()
-	for _, want := range []string{"▌user", "hello", "▌assistant", "hi back", "▌tool: read", "/tmp/x", "line1", "line2"} {
+	// User and assistant now render as bubbles; gutter "▌user" / "▌assistant"
+	// are replaced by bubble borders.  Content and tool gutter still present.
+	for _, want := range []string{"hello", "General", "hi back", "▌tool: read", "/tmp/x", "line1", "line2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("messagelist missing %q in:\n%s", want, out)
 		}

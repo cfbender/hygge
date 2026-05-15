@@ -2,12 +2,14 @@ package components
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/components/anim"
+	"github.com/cfbender/hygge/internal/ui/components/bubble"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -57,6 +59,34 @@ type UIMessage struct {
 	// MarkerTokensSaved is the number of input tokens saved by the
 	// compaction, populated on RoleMarker messages.
 	MarkerTokensSaved int64
+
+	// Timestamp is the wall-clock time the message was created.
+	// Populated for RoleUser and RoleAssistant messages.
+	Timestamp time.Time
+
+	// Thinking holds the assistant's reasoning content (inline thinking).
+	// Populated for RoleAssistant messages that carry thinking blocks.
+	// Rendered in muted italic style at the top of the assistant bubble.
+	Thinking string
+
+	// OutputTokens is the number of output tokens for an assistant message.
+	// Zero while streaming or when the provider did not report usage.
+	OutputTokens int64
+
+	// CostUSD is the per-message cost in USD for an assistant message.
+	// Zero while streaming or when cost data is unavailable.
+	CostUSD float64
+
+	// DurationMs is the wall-clock elapsed milliseconds for an assistant message.
+	// Zero while streaming.
+	DurationMs int64
+
+	// AgentType is the agent identity label for the assistant bubble header-left.
+	// Defaults to "General" when empty.
+	AgentType string
+
+	// ModelName is the model name for the assistant bubble header-right metadata.
+	ModelName string
 }
 
 // MessageList renders the conversation history.
@@ -96,7 +126,11 @@ func (m MessageList) View() string {
 	}
 	var parts []string
 	for _, msg := range m.Messages {
-		parts = append(parts, m.renderOne(msg, collapseLimit))
+		rendered := m.renderOne(msg, collapseLimit)
+		if rendered == "" {
+			continue // skip empty bubbles (e.g. tool-only assistant turns)
+		}
+		parts = append(parts, rendered)
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -104,7 +138,19 @@ func (m MessageList) View() string {
 // renderOne renders a single message with its gutter, plus any nested
 // subagent block bound to it.
 func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
-	// RoleThinking: always-visible dim italic text, no gutter header line.
+	// RoleUser: right-aligned chat bubble with timestamp header.
+	if msg.Role == RoleUser {
+		return m.renderUserBubble(msg)
+	}
+
+	// RoleAssistant: left-aligned chat bubble with agent/model/metadata header
+	// and optional inline thinking above the response body.
+	if msg.Role == RoleAssistant {
+		return m.renderAssistantBubble(msg)
+	}
+
+	// RoleThinking: legacy path — should no longer be emitted after Phase 2.
+	// Kept as a dead branch for safety; renders as dim italic text.
 	if msg.Role == RoleThinking {
 		var style lipgloss.Style
 		if m.Theme != nil {
@@ -151,6 +197,156 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 		rendered += "\n" + nested
 	}
 	return rendered
+}
+
+// renderUserBubble renders a RoleUser message as a right-aligned chat bubble.
+func (m MessageList) renderUserBubble(msg UIMessage) string {
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
+
+	// BubbleWidth: ~70% of available width, capped at 100, minimum 40.
+	bubbleW := int(float64(width) * 0.70)
+	if bubbleW < 40 {
+		bubbleW = 40
+	}
+	if bubbleW > 100 {
+		bubbleW = 100
+	}
+
+	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
+	body := msg.Raw
+	if !msg.IsStreaming && msg.FinalMarkdown != "" {
+		body = msg.FinalMarkdown
+	}
+	body = strings.TrimRight(body, "\n")
+
+	// Header-right: human-friendly timestamp.
+	headerRight := ""
+	if !msg.Timestamp.IsZero() {
+		headerRight = msg.Timestamp.Format("01/02/2006 - 3:04 PM")
+	}
+
+	var accentColor color.Color
+	if m.Theme != nil {
+		fg := m.Theme.Style(theme.AtomAccent).GetForeground()
+		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
+			accentColor = fg
+		}
+	}
+
+	b := bubble.Bubble{
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignRight,
+		HeaderLeft:  "",
+		HeaderRight: headerRight,
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleNormal,
+	}
+	return b.View()
+}
+
+// renderAssistantBubble renders a RoleAssistant message as a left-aligned
+// chat bubble with optional inline thinking in muted italic style.
+// Returns "" when both Thinking and body are empty (skips empty bubbles).
+func (m MessageList) renderAssistantBubble(msg UIMessage) string {
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
+
+	// BubbleWidth: ~85% of available width, capped at 120, minimum 50.
+	bubbleW := int(float64(width) * 0.85)
+	if bubbleW < 50 {
+		bubbleW = 50
+	}
+	if bubbleW > 120 {
+		bubbleW = 120
+	}
+
+	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
+	rawBody := msg.Raw
+	if !msg.IsStreaming && msg.FinalMarkdown != "" {
+		rawBody = msg.FinalMarkdown
+	}
+	rawBody = strings.TrimRight(rawBody, "\n")
+	thinking := strings.TrimRight(msg.Thinking, "\n")
+
+	// Skip empty-bubble case: assistant turn with only tool_use, no text/thinking.
+	if thinking == "" && rawBody == "" {
+		return ""
+	}
+
+	// Compose body: thinking (muted italic) + blank line + response text.
+	var bodyParts []string
+	if thinking != "" {
+		// Render thinking in muted italic style.
+		var thinkStyle lipgloss.Style
+		if m.Theme != nil {
+			thinkStyle = m.Theme.Style(theme.AtomBubbleBodyMuted).Italic(true)
+		} else {
+			thinkStyle = lipgloss.NewStyle().Faint(true).Italic(true)
+		}
+		bodyParts = append(bodyParts, thinkStyle.Render(thinking))
+	}
+	if rawBody != "" {
+		bodyParts = append(bodyParts, rawBody)
+	}
+	body := strings.Join(bodyParts, "\n\n")
+
+	// Header-left: agent type.
+	agentType := msg.AgentType
+	if agentType == "" {
+		agentType = "General"
+	}
+
+	// Header-right: model · tokens · cost · duration (omit during streaming).
+	var headerRightParts []string
+	modelName := msg.ModelName
+	if modelName != "" {
+		headerRightParts = append(headerRightParts, modelName)
+	}
+	if !msg.IsStreaming {
+		if msg.OutputTokens > 0 {
+			headerRightParts = append(headerRightParts, fmt.Sprintf("%d tokens", msg.OutputTokens))
+		}
+		if msg.CostUSD > 0 {
+			headerRightParts = append(headerRightParts, fmt.Sprintf("$%.4f", msg.CostUSD))
+		}
+		if msg.DurationMs > 0 {
+			if msg.DurationMs >= 1000 {
+				headerRightParts = append(headerRightParts, fmt.Sprintf("%ds", msg.DurationMs/1000))
+			} else {
+				headerRightParts = append(headerRightParts, fmt.Sprintf("%dms", msg.DurationMs))
+			}
+		}
+	}
+	headerRight := strings.Join(headerRightParts, " · ")
+
+	var accentColor color.Color
+	if m.Theme != nil {
+		fg := m.Theme.Style(theme.AtomAccent).GetForeground()
+		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
+			accentColor = fg
+		}
+	}
+
+	b := bubble.Bubble{
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignLeft,
+		HeaderLeft:  agentType,
+		HeaderRight: headerRight,
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleNormal,
+	}
+	return b.View()
 }
 
 // renderMarker renders a RoleMarker message as a prominent banner-style

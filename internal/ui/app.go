@@ -934,7 +934,15 @@ func (a *App) startSend(text string) tea.Cmd {
 	}
 	// Optimistically render the user message so they see it before the
 	// provider responds.
-	a.messages = append(a.messages, uiMessage{Role: components.RoleUser, Raw: text})
+	userMsg := uiMessage{
+		Role:      components.RoleUser,
+		Raw:       text,
+		Timestamp: a.opts.Now(),
+	}
+	if text != "" {
+		userMsg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), text)
+	}
+	a.messages = append(a.messages, userMsg)
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.inflightCancel = cancel
@@ -1042,7 +1050,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		// Finalize any trailing thinking block when the message is committed.
 		a.finalizeTrailingThinking()
-		a.flushAssistantStream(e.Role)
+		a.flushAssistantStream(e.Role, e.MessageID)
 
 	case bus.ToolCallRequested:
 		if a.routeToSubagent(e.SessionID) {
@@ -1669,38 +1677,43 @@ func (a *App) toggleLatestSubagent() {
 	latest.Expanded = !latest.Expanded
 }
 
-// appendThinkingDelta appends thinking text to a streaming RoleThinking
-// message, or starts a new one if the last message isn't a streaming thinking
-// entry.  Thinking precedes the assistant's text in chronological order.
+// appendThinkingDelta appends thinking text to the trailing streaming
+// RoleAssistant message's Thinking field.  If the trailing message is not a
+// streaming assistant, a new one is created with Thinking populated and Raw
+// empty.  Thinking and text both live on one message; the message finalizes
+// when the assistant turn completes.
 func (a *App) appendThinkingDelta(text string) {
 	if n := len(a.messages); n > 0 {
 		last := &a.messages[n-1]
-		if last.Role == components.RoleThinking && last.IsStreaming {
-			last.Raw += text
+		if last.Role == components.RoleAssistant && last.IsStreaming {
+			last.Thinking += text
 			return
 		}
 	}
 	a.messages = append(a.messages, uiMessage{
-		Role:        components.RoleThinking,
-		Raw:         text,
+		Role:        components.RoleAssistant,
+		Thinking:    text,
+		Raw:         "",
 		IsStreaming: true,
+		AgentType:   "General",
+		ModelName:   a.opts.ModelName,
 	})
 }
 
-// finalizeTrailingThinking marks the most recent streaming thinking message
-// as no longer streaming.  Called when a non-thinking event (text delta,
-// tool call, message appended) arrives, signalling the thinking phase is over.
+// finalizeTrailingThinking is a no-op after Phase 2: thinking and text both
+// live on the same RoleAssistant message, so there is nothing to "finalize"
+// separately.  The function is preserved as a call-site placeholder so the
+// existing handleBusEvent call graph compiles without changes in Phase 3.
 func (a *App) finalizeTrailingThinking() {
-	if n := len(a.messages); n > 0 {
-		last := &a.messages[n-1]
-		if last.Role == components.RoleThinking && last.IsStreaming {
-			last.IsStreaming = false
-		}
-	}
+	// Phase 2: thinking lives inline on the assistant message — no separate
+	// RoleThinking row to finalize.  This function is intentionally empty;
+	// the old logic of marking a RoleThinking row non-streaming is gone.
 }
 
 // appendAssistantDelta appends text to the streaming assistant message, or
 // starts a new one if the last message isn't a streaming assistant.
+// Reuses the same streaming assistant uiMessage when thinking has already
+// accumulated on it (thinking and text share one message in Phase 2).
 func (a *App) appendAssistantDelta(text string) {
 	if n := len(a.messages); n > 0 {
 		last := &a.messages[n-1]
@@ -1713,12 +1726,15 @@ func (a *App) appendAssistantDelta(text string) {
 		Role:        components.RoleAssistant,
 		Raw:         text,
 		IsStreaming: true,
+		AgentType:   "General",
+		ModelName:   a.opts.ModelName,
 	})
 }
 
 // flushAssistantStream marks the most recent assistant message as final and
-// renders it through glamour.
-func (a *App) flushAssistantStream(role string) {
+// renders it through glamour.  The messageID parameter is used to look up
+// token/cost/duration data from the store when available.
+func (a *App) flushAssistantStream(role, messageID string) {
 	if role != "assistant" {
 		return
 	}
@@ -1731,7 +1747,20 @@ func (a *App) flushAssistantStream(role string) {
 		return
 	}
 	last.IsStreaming = false
+	last.Timestamp = a.opts.Now()
 	last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.Raw)
+
+	// Populate token/cost/duration from store if available.
+	if a.opts.Store != nil && messageID != "" {
+		if msg, err := a.opts.Store.GetMessage(a.ctx, messageID); err == nil && msg != nil {
+			last.OutputTokens = msg.OutputTokens
+			last.CostUSD = msg.CostUSD
+			last.DurationMs = msg.DurationMs
+			if !msg.CreatedAt.IsZero() {
+				last.Timestamp = msg.CreatedAt
+			}
+		}
+	}
 }
 
 // updateLastTool finds the most recent streaming tool entry with a matching
@@ -2169,7 +2198,25 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 				MarkerTokensSaved: mk.InputTokensSaved,
 			})
 		}
-		out = append(out, uiEntriesFromStoreMessage(m, toolResults, toolUseIDs)...)
+		entries := uiEntriesFromStoreMessage(m, toolResults, toolUseIDs)
+		// Wire AgentType and ModelName on assistant entries so bubbles render correctly.
+		// Also glamour-render the body text so hydrated messages look the same as
+		// finalized live messages.
+		for i := range entries {
+			switch entries[i].Role {
+			case components.RoleAssistant:
+				entries[i].AgentType = "General"
+				entries[i].ModelName = a.opts.ModelName
+				if entries[i].Raw != "" {
+					entries[i].FinalMarkdown = renderMarkdown(a.ensureRenderer(), entries[i].Raw)
+				}
+			case components.RoleUser:
+				if entries[i].Raw != "" {
+					entries[i].FinalMarkdown = renderMarkdown(a.ensureRenderer(), entries[i].Raw)
+				}
+			}
+		}
+		out = append(out, entries...)
 	}
 
 	// Handle markers whose BeforeMessageID no longer matches any message
@@ -2400,25 +2447,18 @@ func buildToolResultIndex(msgs []*session.Message) (results map[string]session.P
 
 // uiEntriesFromStoreMessage converts a persisted *session.Message into zero
 // or more uiMessages for the App's message buffer.  Multiple entries can be
-// returned from a single store row when the message has thinking, text, and
-// tool-use parts (entries are emitted in part order within the turn).
+// returned from a single store row when the message has text and tool-use
+// parts (entries are emitted in part order within the turn).
 //
 // toolResults is the cross-message result index built by buildToolResultIndex.
 // toolUseIDs is the set of ToolIDs that appeared in PartToolUse parts of
 // assistant messages, also from buildToolResultIndex.
 // Both must not be nil; pass empty maps for the legacy combined-row path.
 //
-// The conversion mirrors the live-event path in handleBusEvent:
-//   - RoleUser / RoleSystem → plain text from the first PartText part.
-//   - RoleAssistant → iterates parts in order:
-//   - PartThinking → RoleThinking entry.
-//   - PartText (consecutive) → single RoleAssistant entry (concatenated).
-//   - PartToolUse → RoleTool entry, result looked up from toolResults by
-//     ToolID.  Missing result → empty Raw (in-flight / interrupted).
-//   - RoleTool → if the row contains any PartToolUse, legacy combined-row
-//     path: pair each PartToolUse with its inline PartToolResult.  If the
-//     row has no PartToolUse (the common result-only shape), emit nothing —
-//     the result content was already inlined into the assistant turn above.
+// Phase 2 change: PartThinking parts are now collapsed into the assistant
+// uiMessage's Thinking field instead of being emitted as separate RoleThinking
+// rows.  An assistant message that has only PartToolUse parts (no text, no
+// thinking) emits no uiMessage so the bubble is not rendered empty.
 func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]session.Part, toolUseIDs map[string]struct{}) []uiMessage {
 	if m == nil {
 		return nil
@@ -2429,34 +2469,32 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 		if text == "" {
 			return nil
 		}
-		return []uiMessage{{Role: components.RoleUser, Raw: text}}
+		ts := m.CreatedAt
+		return []uiMessage{{Role: components.RoleUser, Raw: text, Timestamp: ts}}
 
 	case session.RoleAssistant:
-		var entries []uiMessage
-		// Accumulate consecutive PartText parts into a single assistant entry.
-		var textBuf strings.Builder
-		flushText := func() {
-			if s := textBuf.String(); s != "" {
-				entries = append(entries, uiMessage{Role: components.RoleAssistant, Raw: s})
-				textBuf.Reset()
+		// Collect all PartThinking texts (joined with "\n\n").
+		var thinkingParts []string
+		for _, p := range m.Parts {
+			if p.Kind == session.PartThinking && p.Text != "" {
+				thinkingParts = append(thinkingParts, p.Text)
 			}
 		}
+		thinking := strings.Join(thinkingParts, "\n\n")
+
+		// Accumulate consecutive PartText parts into a single assistant entry.
+		var textBuf strings.Builder
+		var toolEntries []uiMessage
 		for _, p := range m.Parts {
 			switch p.Kind {
 			case session.PartThinking:
-				if p.Text != "" {
-					flushText()
-					entries = append(entries, uiMessage{
-						Role: components.RoleThinking,
-						Raw:  p.Text,
-					})
-				}
+				// Already handled above; skip here.
 			case session.PartText:
 				textBuf.WriteString(p.Text)
 			case session.PartToolUse:
 				// Flush any accumulated text before emitting the tool row so
 				// the ordering (text before tool) is preserved.
-				flushText()
+				// (text is captured in textBuf; tool entries are separate)
 				target := extractTarget(p.ToolInput)
 				raw := ""
 				isError := false
@@ -2464,7 +2502,7 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 					raw = res.Content
 					isError = res.IsError
 				}
-				entries = append(entries, uiMessage{
+				toolEntries = append(toolEntries, uiMessage{
 					Role:      components.RoleTool,
 					ToolName:  p.ToolName,
 					ToolUseID: p.ToolID,
@@ -2474,8 +2512,24 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 				})
 			}
 		}
-		flushText()
-		return entries
+		rawText := textBuf.String()
+
+		// Skip entirely if no text and no thinking (tool-only assistant turn).
+		if thinking == "" && rawText == "" {
+			return toolEntries
+		}
+
+		// Emit one assistant uiMessage with thinking + text, then tool entries.
+		assistantMsg := uiMessage{
+			Role:         components.RoleAssistant,
+			Raw:          rawText,
+			Thinking:     thinking,
+			Timestamp:    m.CreatedAt,
+			OutputTokens: m.OutputTokens,
+			CostUSD:      m.CostUSD,
+			DurationMs:   m.DurationMs,
+		}
+		return append([]uiMessage{assistantMsg}, toolEntries...)
 
 	case session.RoleTool:
 		// Check whether this row contains any PartToolUse (legacy combined-row
@@ -2549,22 +2603,14 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 // coverage of the single-entry path.  It delegates to
 // uiEntriesFromStoreMessage with an empty result index (covers the legacy
 // combined-row shape where both PartToolUse and PartToolResult appear in
-// the same message row) and returns the first non-thinking entry, or the
-// first entry if all are thinking, or (zero, false) when empty.
+// the same message row) and returns the first entry, or (zero, false) when
+// empty.
 func uiEntryFromStoreMessage(m *session.Message) (uiMessage, bool) {
 	empty := map[string]session.Part{}
 	emptyIDs := map[string]struct{}{}
 	entries := uiEntriesFromStoreMessage(m, empty, emptyIDs)
 	if len(entries) == 0 {
 		return uiMessage{}, false
-	}
-	// Return the first non-thinking entry if multiple are present,
-	// preserving the original single-entry semantics for callers
-	// that only handle one result.
-	for _, e := range entries {
-		if e.Role != components.RoleThinking {
-			return e, true
-		}
 	}
 	return entries[0], true
 }

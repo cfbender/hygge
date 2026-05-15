@@ -135,7 +135,7 @@ func TestSlashCommandClearWipesMessages(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	app.appendAssistantDelta("hello")
-	app.flushAssistantStream("assistant")
+	app.flushAssistantStream("assistant", "")
 	if len(app.messages) == 0 {
 		t.Fatal("setup: expected a message before /clear")
 	}
