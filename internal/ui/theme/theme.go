@@ -72,6 +72,18 @@ const (
 	// will be overridden per agent session once per-agent theming lands.
 	AtomBubbleUserBorder  Atom = "bubble.user.border"  // user bubble border (default: blue / ANSI 4)
 	AtomBubbleAgentBorder Atom = "bubble.agent.border" // agent bubble border (default: magenta / ANSI 5)
+
+	// Sidebar atoms (right-side panel added in the sidebar phase).
+	// AtomSidebarBorder   — left-side divider color.
+	// AtomSidebarSection  — section header label (muted, bold).
+	// AtomSidebarValue    — value text (default: terminal fg).
+	// AtomSidebarAccent   — accent dot and version glyph.
+	// AtomSidebarMuted    — muted text such as "None" or "—".
+	AtomSidebarBorder  Atom = "sidebar.border"  // left-border divider color (default: ANSI 8)
+	AtomSidebarSection Atom = "sidebar.section" // section header label (default: ANSI 8)
+	AtomSidebarValue   Atom = "sidebar.value"   // value text (default: terminal fg)
+	AtomSidebarAccent  Atom = "sidebar.accent"  // accent dot/glyph (default: same as AtomAccent)
+	AtomSidebarMuted   Atom = "sidebar.muted"   // muted/empty state text (default: ANSI 8)
 )
 
 // allAtoms is the stable, ordered list of style atoms.
@@ -99,6 +111,12 @@ var allAtoms = []Atom{
 	// Phase 5: distinct user vs agent border colors.
 	AtomBubbleUserBorder,
 	AtomBubbleAgentBorder,
+	// Sidebar atoms.
+	AtomSidebarBorder,
+	AtomSidebarSection,
+	AtomSidebarValue,
+	AtomSidebarAccent,
+	AtomSidebarMuted,
 }
 
 // AllAtoms returns the locked list of v0.1 style atoms in stable order.

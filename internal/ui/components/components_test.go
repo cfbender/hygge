@@ -605,3 +605,157 @@ func stripANSI(s string) string {
 	}
 	return out.String()
 }
+
+// ── Sidebar tests ────────────────────────────────────────────────────────────
+
+func TestSidebar_AllSectionsPresent(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:        32,
+		Height:       30,
+		SessionTitle: "fix the auth bug",
+		UsedTokens:   97229,
+		PctUsed:      0.10,
+		CostUSD:      0.0042,
+		MCPs: []SidebarMCPStatus{
+			{Name: "server-a", Ready: true, ToolCount: 3},
+			{Name: "server-b", Ready: false},
+		},
+		ProjectPath: "~/code/hygge",
+		GitBranch:   "main",
+		AppName:     "Hygge",
+		Version:     "v0.1.0-dev",
+		Theme:       theme.ShellTheme(),
+		NerdFonts:   false,
+	}
+	out := sb.View()
+	plain := stripANSI(out)
+
+	// Session title.
+	if !strings.Contains(plain, "fix the auth bug") {
+		t.Errorf("sidebar missing session title; got:\n%s", plain)
+	}
+	// Context section.
+	for _, want := range []string{"Context", "97,229 tokens", "10% used", "$0.0042"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("sidebar missing context %q; got:\n%s", want, plain)
+		}
+	}
+	// MCPs section.
+	for _, want := range []string{"MCPs", "server-a", "server-b"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("sidebar missing MCP %q; got:\n%s", want, plain)
+		}
+	}
+	// Modified Files stub.
+	if !strings.Contains(plain, "Modified Files") {
+		t.Errorf("sidebar missing 'Modified Files' header; got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "—") {
+		t.Errorf("sidebar missing '—' stub; got:\n%s", plain)
+	}
+	// Bottom block.
+	for _, want := range []string{"~/code/hygge", ":main", "Hygge", "v0.1.0-dev"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("sidebar missing bottom %q; got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestSidebar_NoMCPs_ShowsNone(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:  32,
+		Height: 20,
+		Theme:  theme.ShellTheme(),
+	}
+	out := stripANSI(sb.View())
+	if !strings.Contains(out, "None") {
+		t.Errorf("sidebar should show 'None' when MCPs is empty; got:\n%s", out)
+	}
+}
+
+func TestSidebar_HidesContextWhenZero(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:      32,
+		Height:     20,
+		UsedTokens: 0,
+		CostUSD:    0,
+		Theme:      theme.ShellTheme(),
+	}
+	out := stripANSI(sb.View())
+	if strings.Contains(out, "Context") {
+		t.Errorf("sidebar should not show Context section when tokens=0 and cost=0; got:\n%s", out)
+	}
+}
+
+func TestSidebar_HidesSessionTitleWhenEmpty(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:        32,
+		Height:       20,
+		SessionTitle: "",
+		Theme:        theme.ShellTheme(),
+	}
+	out := sb.View()
+	// Just verify no panic and output is non-empty.
+	if out == "" {
+		t.Errorf("sidebar should produce non-empty output even with no session title")
+	}
+}
+
+func TestSidebar_NilTheme_NoCrash(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:   32,
+		Height:  20,
+		Theme:   nil,
+		AppName: "Hygge",
+		Version: "v0.1.0-dev",
+	}
+	out := sb.View()
+	if out == "" {
+		t.Errorf("sidebar should render with nil theme")
+	}
+}
+
+func TestSidebar_MCPStatus_Markers(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:  32,
+		Height: 20,
+		MCPs: []SidebarMCPStatus{
+			{Name: "ok", Ready: true},
+			{Name: "not-ready", Ready: false},
+			{Name: "broken", Error: "connection refused"},
+		},
+		Theme: theme.ShellTheme(),
+	}
+	out := stripANSI(sb.View())
+	for _, name := range []string{"ok", "not-ready", "broken"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("sidebar missing MCP name %q; got:\n%s", name, out)
+		}
+	}
+}
+
+func TestFormatTokens(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1,000"},
+		{97229, "97,229"},
+		{1000000, "1,000,000"},
+	}
+	for _, tc := range cases {
+		got := formatTokens(tc.n)
+		if got != tc.want {
+			t.Errorf("formatTokens(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}

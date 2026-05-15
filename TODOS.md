@@ -66,3 +66,12 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 ---
 
 _Last updated as part of UI redesign Phase 4 (commit `958ee6d`)._
+
+## Sidebar follow-ups
+
+- [ ] **Modified files tracking in sidebar**
+  The "Modified Files" section in the right sidebar currently shows a stub `—`.
+  Wire real file-modification tracking: detect files changed since the session
+  started (e.g. from tool call targets or an inotify/fsevents watcher) and
+  surface them in the sidebar.  The `// TODO(post-sidebar)` comment in
+  `internal/ui/components/sidebar.go` marks the exact stub location.

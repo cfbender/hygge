@@ -50,6 +50,13 @@ func ShellTheme() *Theme {
 			// Phase 5: distinct user vs agent bubble border colors.
 			AtomBubbleUserBorder:  {kind: colorKindANSI, raw: "4"}, // blue  — user bubble
 			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "5"}, // magenta — agent bubble default
+
+			// Sidebar atoms.
+			AtomSidebarBorder:  {kind: colorKindANSI, raw: "8"}, // grey divider
+			AtomSidebarSection: {kind: colorKindANSI, raw: "8"}, // grey section headers
+			AtomSidebarValue:   {kind: colorKindDefault},        // terminal default fg
+			AtomSidebarAccent:  {kind: colorKindANSI, raw: "5"}, // magenta accent dot
+			AtomSidebarMuted:   {kind: colorKindANSI, raw: "8"}, // grey muted text
 		},
 	}
 }

@@ -20,3 +20,8 @@ theme: shell
   bubble.body.muted = ansi:8
   bubble.user.border = ansi:4
   bubble.agent.border = ansi:5
+  sidebar.border   = ansi:8
+  sidebar.section  = ansi:8
+  sidebar.value    = (default)
+  sidebar.accent   = ansi:5
+  sidebar.muted    = ansi:8

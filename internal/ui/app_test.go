@@ -54,12 +54,17 @@ func TestColdStartEmptyState(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	out := app.View().Content
-	// Header bar: app name + version, profile, project path.
+	// Sidebar: app name, project path (no session yet so no session title).
 	// Footer: agent identity.
-	for _, want := range []string{"Hygge", "profile: work", "~/proj", "ype a message", "hygge"} {
+	// MessageList: empty-state welcome text.
+	for _, want := range []string{"Hygge", "~/proj", "ype a message", "hygge"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
+	}
+	// "profile: work" was rendered by the old header bar; it is no longer shown.
+	if strings.Contains(out, "profile: work") {
+		t.Errorf("profile token should not appear after header bar removal; got:\n%s", out)
 	}
 }
 
@@ -339,9 +344,10 @@ func TestContextUsageUpdatesHeader(t *testing.T) {
 	app, _ := newTestApp(t)
 	app.Handle(bus.ContextUsageUpdated{UsedTokens: 50, MaxTokens: 100, PctUsed: 0.5})
 	out := app.View().Content
-	// Context usage is now shown in the header bar as "50% ctx".
-	if !strings.Contains(out, "50% ctx") {
-		t.Errorf("expected '50%% ctx' in header after context update, got:\n%s", out)
+	// Context usage is now shown in the sidebar as "50% used" (sidebar is
+	// visible because the test window is 100 columns wide).
+	if !strings.Contains(out, "50% used") {
+		t.Errorf("expected '50%% used' in sidebar after context update, got:\n%s", out)
 	}
 }
 

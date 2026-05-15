@@ -65,6 +65,11 @@ error          = "#F7768E"
 "bubble.body.muted"     = "8"
 "bubble.user.border"    = "4"
 "bubble.agent.border"   = "5"
+"sidebar.border"        = "8"
+"sidebar.section"       = "8"
+"sidebar.value"         = ""
+"sidebar.accent"        = "5"
+"sidebar.muted"         = "8"
 `
 }
 
@@ -317,6 +322,11 @@ error          = "inherit:code.fg"
 "bubble.body.muted"     = "8"
 "bubble.user.border"    = "4"
 "bubble.agent.border"   = "5"
+"sidebar.border"        = "8"
+"sidebar.section"       = "8"
+"sidebar.value"         = ""
+"sidebar.accent"        = "5"
+"sidebar.muted"         = "8"
 `
 	_, err := parseTOMLTheme([]byte(content))
 	if err == nil {
@@ -436,8 +446,8 @@ func TestParseTOMLTheme_BadColor(t *testing.T) {
 
 func TestAllAtoms_Stable(t *testing.T) {
 	atoms := AllAtoms()
-	if len(atoms) != 21 {
-		t.Errorf("AllAtoms(): len = %d, want 21", len(atoms))
+	if len(atoms) != 26 {
+		t.Errorf("AllAtoms(): len = %d, want 26", len(atoms))
 	}
 
 	// Exact order must match the const list.
@@ -450,6 +460,8 @@ func TestAllAtoms_Stable(t *testing.T) {
 		AtomBubbleBorder, AtomBubbleBorderDistinct,
 		AtomBubbleHeader, AtomBubbleHeaderMuted, AtomBubbleBodyMuted,
 		AtomBubbleUserBorder, AtomBubbleAgentBorder,
+		AtomSidebarBorder, AtomSidebarSection, AtomSidebarValue,
+		AtomSidebarAccent, AtomSidebarMuted,
 	}
 	for i, want := range expected {
 		if atoms[i] != want {

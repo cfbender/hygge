@@ -118,6 +118,18 @@ func runRun(cmd *cobra.Command, _ []string) error {
 // immediately after the first render (used by resume_default="ask" and
 // `hygge resume` with multiple cwd sessions).
 func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
+	// Map CLI MCPServerStatus → UI SidebarMCPStatus so internal/ui has no
+	// dependency on cmd/.
+	mcpStatuses := make([]ui.SidebarMCPStatus, 0, len(rt.MCPStatuses))
+	for _, s := range rt.MCPStatuses {
+		mcpStatuses = append(mcpStatuses, ui.SidebarMCPStatus{
+			Name:      s.Name,
+			Ready:     s.Ready,
+			Error:     s.Error,
+			ToolCount: s.ToolCount,
+		})
+	}
+
 	app, err := ui.New(ui.AppOptions{
 		Bus:           rt.Bus,
 		Agent:         rt.Agent,
@@ -134,6 +146,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		Version:       Version,
 		HomeDir:       homeDir(),
 		NerdFonts:     rt.Config.UI.NerdFonts,
+		MCPStatuses:   mcpStatuses,
 		OnSessionCreated: func(id string) {
 			if err := state.AddRecentSession(id, rt.StateOpts); err != nil {
 				// State write failure is non-fatal for the running
