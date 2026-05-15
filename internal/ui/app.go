@@ -254,6 +254,9 @@ type App struct {
 	// command palette matches.  -1 means "no row highlighted".
 	// Reset on every buffer change.
 	paletteHighlight int
+	// slashPaletteDismissed tracks an Esc-dismissed slash palette until
+	// the next input edit. The typed slash buffer is preserved.
+	slashPaletteDismissed bool
 
 	// activeModal is the named modal currently open from a slash
 	// command Outcome (help / sessions).  Empty means none.
@@ -660,7 +663,7 @@ func (a *App) View() tea.View {
 	// Inline command palette: shown immediately above the input when
 	// the buffer starts with "/" and a registry is configured.
 	palette := ""
-	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
 		matches := a.paletteMatches()
 		head, _ := splitSlash(a.input.Value())
 		p := components.CommandPalette{
@@ -1073,6 +1076,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 	case "ctrl+l":
 		a.input.Reset()
+		a.slashPaletteDismissed = false
 		return a, nil
 	case "ctrl+x":
 		// Dismiss the compaction threshold-suggestion banner for this crossing.
@@ -1105,10 +1109,22 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if strings.HasPrefix(text, "/") {
+			if slashPrefixOnly(text) {
+				name, _ := splitSlash(text)
+				exact := false
+				if a.opts.Commands != nil {
+					_, exact = a.opts.Commands.Get(name)
+				}
+				if !exact && a.acceptPaletteCompletion() {
+					return a, nil
+				}
+			}
 			a.input.Reset()
+			a.slashPaletteDismissed = false
 			return a, a.runSlashCommand(text)
 		}
 		a.input.Reset()
+		a.slashPaletteDismissed = false
 		// Resume auto-scroll when the user sends a message.
 		a.userScrolled = false
 		return a, a.startSend(text)
@@ -1130,14 +1146,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Tab completes the currently-highlighted command palette
 		// entry when the input is in slash mode.  Outside slash
 		// mode it falls through to the textarea (default insert).
-		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
-			matches := a.paletteMatches()
-			hi := a.clampedPaletteHighlight(matches)
-			if hi >= 0 {
-				a.input.Textarea.SetValue("/" + matches[hi].Name() + " ")
-				// Move cursor to end so further typing extends args.
-				a.input.Textarea.CursorEnd()
-			}
+		if a.acceptPaletteCompletion() {
 			return a, nil
 		}
 	case "esc":
@@ -1164,10 +1173,16 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		// Existing Esc: dismisses the command palette without changing input.
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
-			a.input.Reset()
+			a.paletteHighlight = -1
+			a.slashPaletteDismissed = true
 			return a, nil
 		}
 	case "up":
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+			a.movePaletteHighlight(-1)
+			return a, nil
+		}
+	case "ctrl+p":
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(-1)
 			return a, nil
@@ -1177,10 +1192,20 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.movePaletteHighlight(+1)
 			return a, nil
 		}
+	case "ctrl+n":
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
+			a.movePaletteHighlight(+1)
+			return a, nil
+		}
 	}
 
 	var cmd tea.Cmd
+	before := a.input.Value()
 	a.input.Textarea, cmd = a.input.Textarea.Update(k)
+	if a.input.Value() != before {
+		a.paletteHighlight = -1
+		a.slashPaletteDismissed = false
+	}
 	return a, cmd
 }
 

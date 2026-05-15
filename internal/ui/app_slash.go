@@ -271,6 +271,27 @@ func (a *App) movePaletteHighlight(delta int) {
 	a.paletteHighlight = hi
 }
 
+func (a *App) acceptPaletteCompletion() bool {
+	if a.opts.Commands == nil || !strings.HasPrefix(a.input.Value(), "/") {
+		return false
+	}
+	matches := a.paletteMatches()
+	hi := a.clampedPaletteHighlight(matches)
+	if hi < 0 {
+		return false
+	}
+	a.input.Textarea.SetValue("/" + matches[hi].Name() + " ")
+	a.input.Textarea.CursorEnd()
+	return true
+}
+
+func slashPrefixOnly(text string) bool {
+	if !strings.HasPrefix(text, "/") {
+		return false
+	}
+	return !strings.ContainsAny(strings.TrimPrefix(text, "/"), " \t\n")
+}
+
 // commandAppAdapter is the read-only [command.App] view onto the
 // running App.  Commands hold a pointer to the App but see only
 // this narrow interface, so they can never mutate state directly.

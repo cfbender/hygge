@@ -172,8 +172,8 @@ func TestSlashCommandPaletteEscDismisses(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 	typeInto(app, "/co")
 	app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if app.input.Value() != "" {
-		t.Errorf("Esc should clear the slash buffer, got %q", app.input.Value())
+	if app.input.Value() != "/co" {
+		t.Errorf("Esc should preserve the slash buffer, got %q", app.input.Value())
 	}
 }
 
@@ -194,6 +194,43 @@ func TestSlashCommandPaletteArrowsNavigate(t *testing.T) {
 	app.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if app.paletteHighlight != 0 {
 		t.Errorf("after Up, highlight = %d, want 0", app.paletteHighlight)
+	}
+}
+
+func TestSlashCommandPaletteCtrlNPNavigate(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/co")
+	app.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	if app.paletteHighlight != 1 {
+		t.Errorf("after Ctrl+N, highlight = %d, want 1", app.paletteHighlight)
+	}
+	app.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if app.paletteHighlight != 0 {
+		t.Errorf("after Ctrl+P, highlight = %d, want 0", app.paletteHighlight)
+	}
+}
+
+func TestSlashCommandPaletteEnterCompletesPartialCommand(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/co")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("Enter on partial slash prefix should complete, not execute")
+	}
+	if got := app.input.Value(); !strings.HasPrefix(got, "/compact") {
+		t.Errorf("expected Enter to complete to /compact, got %q", got)
+	}
+}
+
+func TestSlashCommandPaletteFuzzyMatchesSubsequence(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/cpct")
+	view := app.View().Content
+	if !strings.Contains(view, "/compact") {
+		t.Errorf("palette should fuzzy-match /compact for /cpct buffer:\n%s", view)
 	}
 }
 
