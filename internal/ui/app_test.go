@@ -11,7 +11,6 @@ import (
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
-	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -55,7 +54,9 @@ func TestColdStartEmptyState(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	out := app.View().Content
-	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4-5", "ype a message", "$0.0000", "no messages"} {
+	// Header bar: app name + version, profile, project path.
+	// Footer: agent identity.
+	for _, want := range []string{"Hygge", "profile: work", "~/proj", "ype a message", "no messages"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
@@ -325,41 +326,28 @@ func TestPermissionModalStacks(t *testing.T) {
 	}
 }
 
-func TestFooterContextColoring(t *testing.T) {
+func TestContextUsageUpdatesHeader(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.ContextUsageUpdated{UsedTokens: 50, MaxTokens: 100, PctUsed: 0.5})
-	f := components.Footer{Theme: app.opts.Theme, MaxTok: app.maxTok, UsedTok: app.usedTok, PctUsed: app.pctUsed}
-	if got := f.SeverityAtom(); got != theme.AtomSuccess {
-		t.Errorf("0.5 → %q, want success", got)
-	}
-
-	app.Handle(bus.ContextUsageUpdated{UsedTokens: 85, MaxTokens: 100, PctUsed: 0.85})
-	f = components.Footer{Theme: app.opts.Theme, MaxTok: app.maxTok, UsedTok: app.usedTok, PctUsed: app.pctUsed}
-	if got := f.SeverityAtom(); got != theme.AtomWarn {
-		t.Errorf("0.85 → %q, want warn", got)
-	}
-
-	app.Handle(bus.ContextUsageUpdated{UsedTokens: 95, MaxTokens: 100, PctUsed: 0.95})
-	f = components.Footer{Theme: app.opts.Theme, MaxTok: app.maxTok, UsedTok: app.usedTok, PctUsed: app.pctUsed}
-	if got := f.SeverityAtom(); got != theme.AtomError {
-		t.Errorf("0.95 → %q, want error", got)
+	out := app.View().Content
+	// Context usage is now shown in the header bar as "50% ctx".
+	if !strings.Contains(out, "50% ctx") {
+		t.Errorf("expected '50%% ctx' in header after context update, got:\n%s", out)
 	}
 }
 
-func TestStatusBarSpinnerDuringSend(t *testing.T) {
+func TestBusyStateIsTracked(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Update(sendStarted{})
-	out := app.View().Content
-	if !strings.Contains(out, "●") {
-		t.Errorf("expected spinner glyph during send, got:\n%s", out)
+	if !app.busy {
+		t.Errorf("expected app.busy=true after sendStarted")
 	}
 
 	app.Update(sendCompleted{})
-	out = app.View().Content
-	if strings.Contains(out, "●") {
-		t.Errorf("did not expect spinner glyph after send completed, got:\n%s", out)
+	if app.busy {
+		t.Errorf("expected app.busy=false after sendCompleted")
 	}
 }
 
@@ -393,13 +381,13 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	}
 }
 
-func TestCostUpdatesFooter(t *testing.T) {
+func TestCostUpdatesHeader(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.CostUpdated{DollarsTotal: 0.1234})
 	out := app.View().Content
 	if !strings.Contains(out, "$0.1234") {
-		t.Errorf("expected updated cost in view, got:\n%s", out)
+		t.Errorf("expected updated cost in header, got:\n%s", out)
 	}
 }
 

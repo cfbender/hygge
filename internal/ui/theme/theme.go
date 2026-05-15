@@ -54,9 +54,19 @@ const (
 	AtomStatusBarFg Atom = "statusbar.fg"
 	AtomModalBg     Atom = "modal.bg"
 	AtomModalBorder Atom = "modal.border"
+
+	// Bubble-specific atoms introduced in Phase 1 of the chat-bubble redesign.
+	// The accent color for bubble borders defaults to a slightly muted version
+	// of the terminal accent.  Future per-agent-mode theming will override
+	// AccentColor at the call site; these atoms provide the session-level default.
+	AtomBubbleBorder         Atom = "bubble.border"          // default bubble border (≈ accent, slightly muted)
+	AtomBubbleBorderDistinct Atom = "bubble.border.distinct" // SubStyle=Distinct bubble border (≈ muted)
+	AtomBubbleHeader         Atom = "bubble.header"          // bubble header accent (matches accent)
+	AtomBubbleHeaderMuted    Atom = "bubble.header.muted"    // bubble right-side header muted text
+	AtomBubbleBodyMuted      Atom = "bubble.body.muted"      // muted body text (thinking in Phase 2)
 )
 
-// allAtoms is the stable, ordered list of v0.1 style atoms.
+// allAtoms is the stable, ordered list of style atoms.
 var allAtoms = []Atom{
 	AtomPrimary,
 	AtomAccent,
@@ -72,6 +82,12 @@ var allAtoms = []Atom{
 	AtomStatusBarFg,
 	AtomModalBg,
 	AtomModalBorder,
+	// Bubble atoms (Phase 1 chat-bubble redesign).
+	AtomBubbleBorder,
+	AtomBubbleBorderDistinct,
+	AtomBubbleHeader,
+	AtomBubbleHeaderMuted,
+	AtomBubbleBodyMuted,
 }
 
 // AllAtoms returns the locked list of v0.1 style atoms in stable order.

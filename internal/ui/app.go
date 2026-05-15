@@ -45,6 +45,7 @@ import (
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
+	appstate "github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/theme"
@@ -68,6 +69,19 @@ type AppOptions struct {
 	// ContextWindow is the model's maximum context size in tokens.  Used by
 	// the compaction modal to display usage info.  0 means unknown.
 	ContextWindow int64
+
+	// Version is the application version string for the header bar (e.g. "v0.4").
+	// Empty string hides the version.
+	Version string
+
+	// NerdFonts controls whether nerd-font glyphs are used in the header bar.
+	// When true, the git-branch glyph (U+EAFC) is used; otherwise ":branch".
+	// Default false; callers should set this from config.UI.NerdFonts.
+	NerdFonts bool
+
+	// HomeDir is the user's home directory, used for tilde-collapsing the
+	// project path in the header bar.  Empty → no collapse.
+	HomeDir string
 
 	// OnSessionCreated, if non-nil, is invoked after the App lazily
 	// creates a new session on first Send.  The CLI uses this to record
@@ -422,15 +436,18 @@ func (a *App) View() tea.View {
 		height = 24
 	}
 
-	sb := components.StatusBar{
-		Profile:     a.opts.ProfileName,
-		Provider:    a.opts.ModelProvider,
-		Model:       a.opts.ModelName,
-		Pwd:         a.opts.ProjectDir,
-		Busy:        a.busy,
-		SpinnerTick: a.spinnerTick,
+	hb := components.HeaderBar{
 		Width:       width,
+		AppName:     "Hygge",
+		Version:     a.opts.Version,
+		Profile:     a.opts.ProfileName,
+		ProjectPath: a.opts.ProjectDir,
+		GitBranch:   a.gitBranch(),
+		CtxPercent:  a.pctUsed,
+		CostUSD:     a.costDollars,
 		Theme:       a.opts.Theme,
+		NerdFonts:   a.opts.NerdFonts,
+		HomeDir:     a.opts.HomeDir,
 	}.View()
 
 	// T2.2 — breadcrumb: shown above the message list when depth > 1.
@@ -518,20 +535,19 @@ func (a *App) View() tea.View {
 	}.View()
 
 	fr := components.Footer{
-		Width:   width,
-		Theme:   a.opts.Theme,
-		Cost:    a.costDollars,
-		UsedTok: a.usedTok,
-		MaxTok:  a.maxTok,
-		PctUsed: a.pctUsed,
-		Busy:    a.busy,
+		Width:          width,
+		Theme:          a.opts.Theme,
+		AgentType:      "General", // Phase 1 placeholder; per-agent-mode type will replace this
+		ModelName:      a.opts.ModelName,
+		Provider:       a.opts.ModelProvider,
+		ReasoningLevel: a.opts.Reasoning.Effort,
 	}.View()
 
 	// Reserve a small fixed budget for chrome and let the message list take
 	// the remainder.  No hard scrolling in v0.1 — the message list just
 	// renders the full buffer and the bottom of the terminal shows whatever
 	// fits.  Task 13's CLI will wrap us in `tea.WithAltScreen` if desired.
-	chrome := lipgloss.Height(sb) + lipgloss.Height(in) + lipgloss.Height(fr)
+	chrome := lipgloss.Height(hb) + lipgloss.Height(in) + lipgloss.Height(fr)
 	if breadcrumb != "" {
 		chrome += lipgloss.Height(breadcrumb)
 	}
@@ -557,7 +573,7 @@ func (a *App) View() tea.View {
 	bodyStyle := lipgloss.NewStyle().Height(bodyHeight)
 	body := bodyStyle.Render(ml)
 
-	sections := []string{sb}
+	sections := []string{hb}
 	if breadcrumb != "" {
 		sections = append(sections, breadcrumb)
 	}
@@ -1616,6 +1632,15 @@ func (a *App) updateSubagentCost(subSessionID string, e bus.CostUpdated) {
 	st.Cost = e.DollarsTotal
 	st.InputTokens = e.InputTokens
 	st.OutputTokens = e.OutputTokens
+}
+
+// gitBranch returns the current git branch for the project directory.
+// Delegates to the state package which caches the result per-session.
+func (a *App) gitBranch() string {
+	if a.opts.ProjectDir == "" {
+		return ""
+	}
+	return appstate.GitBranch(a.opts.ProjectDir)
 }
 
 // toggleLatestSubagent flips the Expanded flag on the most recently

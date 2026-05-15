@@ -35,6 +35,15 @@ func ShellTheme() *Theme {
 			// Modal.
 			AtomModalBg:     {kind: colorKindDefault},        // no override
 			AtomModalBorder: {kind: colorKindANSI, raw: "8"}, // grey
+
+			// Bubble borders and header text (Phase 1 chat-bubble redesign).
+			// Border uses the accent slot (magenta); distinct/subdued uses the
+			// muted slot (bright-black/grey).  Header accents mirror accent/muted.
+			AtomBubbleBorder:         {kind: colorKindANSI, raw: "5"}, // magenta — agent accent
+			AtomBubbleBorderDistinct: {kind: colorKindANSI, raw: "8"}, // grey — subdued
+			AtomBubbleHeader:         {kind: colorKindANSI, raw: "5"}, // magenta
+			AtomBubbleHeaderMuted:    {kind: colorKindANSI, raw: "8"}, // grey
+			AtomBubbleBodyMuted:      {kind: colorKindANSI, raw: "8"}, // grey
 		},
 	}
 }

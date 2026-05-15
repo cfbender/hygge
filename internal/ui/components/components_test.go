@@ -96,48 +96,56 @@ func TestMessageListEmpty(t *testing.T) {
 	}
 }
 
-func TestFooterFormatsCostAndContext(t *testing.T) {
+func TestFooterRendersIdentity(t *testing.T) {
 	t.Parallel()
 	f := Footer{
-		Width:   80,
-		Theme:   theme.ShellTheme(),
-		Cost:    0.0123,
-		UsedTok: 24800,
-		MaxTok:  200000,
-		PctUsed: 24800.0 / 200000.0,
+		Width:          80,
+		Theme:          theme.ShellTheme(),
+		AgentType:      "general",
+		ModelName:      "Claude Opus 4.7",
+		Provider:       "openrouter",
+		ReasoningLevel: "medium",
 	}
 	out := f.View()
-	for _, want := range []string{"$0.0123", "ctx ", "24.8k", "200.0k", "enter send"} {
+	for _, want := range []string{"General", "Claude Opus 4.7", "Openrouter", "medium"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("footer missing %q in:\n%s", want, out)
 		}
 	}
-}
-
-func TestFooterSeverityColoring(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		pct      float64
-		wantAtom theme.Atom
-	}{
-		{0.5, theme.AtomSuccess},
-		{0.75, theme.AtomWarn},
-		{0.95, theme.AtomError},
-	}
-	for _, tc := range cases {
-		f := Footer{Width: 80, Theme: theme.ShellTheme(), MaxTok: 100000, UsedTok: int64(100000 * tc.pct), PctUsed: tc.pct}
-		if got := f.SeverityAtom(); got != tc.wantAtom {
-			t.Errorf("pct=%.2f: got severity atom %q, want %q", tc.pct, got, tc.wantAtom)
+	// Should NOT contain old cost/ctx/keybind hints.
+	for _, unwanted := range []string{"$", "ctx", "enter send", "ctrl-c"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("footer should not contain %q in:\n%s", unwanted, out)
 		}
 	}
 }
 
-func TestFooterBusyChangesHints(t *testing.T) {
+func TestFooterNoSession(t *testing.T) {
 	t.Parallel()
-	f := Footer{Width: 80, Theme: theme.ShellTheme(), MaxTok: 1000, PctUsed: 0.1, Busy: true}
+	f := Footer{
+		Width: 80,
+		Theme: theme.ShellTheme(),
+	}
 	out := f.View()
-	if !strings.Contains(out, "enter blocked") {
-		t.Errorf("busy footer should show 'enter blocked', got:\n%s", out)
+	if !strings.Contains(out, "(no session)") {
+		t.Errorf("expected '(no session)' when AgentType is empty, got:\n%s", out)
+	}
+}
+
+func TestFooterCapitalizesAgentAndProvider(t *testing.T) {
+	t.Parallel()
+	f := Footer{
+		Width:     80,
+		Theme:     theme.ShellTheme(),
+		AgentType: "general",
+		Provider:  "anthropic",
+	}
+	out := f.View()
+	if !strings.Contains(out, "General") {
+		t.Errorf("expected capitalized AgentType 'General', got:\n%s", out)
+	}
+	if !strings.Contains(out, "Anthropic") {
+		t.Errorf("expected capitalized Provider 'Anthropic', got:\n%s", out)
 	}
 }
 
