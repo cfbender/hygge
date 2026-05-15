@@ -154,6 +154,45 @@ type MessageList struct {
 	Now time.Time
 }
 
+// now returns the reference time for relative timestamps.
+func (m MessageList) now() time.Time {
+	if m.Now.IsZero() {
+		return time.Now()
+	}
+	return m.Now
+}
+
+// relativeTimestamp formats a timestamp relative to now:
+//   - Same hour: "3 minutes ago"
+//   - Same day, different hour: "4:50 PM"
+//   - Different day: "01/15/2026 - 4:50 PM"
+func relativeTimestamp(t, now time.Time) string {
+	t = t.Local()
+	now = now.Local()
+
+	tY, tM, tD := t.Date()
+	nY, nM, nD := now.Date()
+
+	if tY == nY && tM == nM && tD == nD {
+		// Same day.
+		if t.Hour() == now.Hour() {
+			// Same hour — show relative.
+			mins := int(now.Sub(t).Minutes())
+			if mins < 1 {
+				return "just now"
+			}
+			if mins == 1 {
+				return "1 minute ago"
+			}
+			return fmt.Sprintf("%d minutes ago", mins)
+		}
+		// Different hour — show time only.
+		return t.Format("3:04 PM")
+	}
+	// Different day — full timestamp.
+	return t.Format("01/02/2006 - 3:04 PM")
+}
+
 // renderChunkKind labels the kind of a render chunk built by the View pre-pass.
 type renderChunkKind int
 
@@ -376,10 +415,10 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	}
 	body = strings.TrimRight(body, "\n")
 
-	// Header-right: human-friendly timestamp.
+	// Header-right: relative timestamp.
 	headerRight := ""
 	if !msg.Timestamp.IsZero() {
-		headerRight = msg.Timestamp.Format("01/02/2006 - 3:04 PM")
+		headerRight = relativeTimestamp(msg.Timestamp, m.now())
 	}
 
 	var accentColor color.Color
