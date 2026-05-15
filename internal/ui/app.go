@@ -188,11 +188,7 @@ func New(opts AppOptions) (*App, error) {
 	}
 	a.msgViewport.MouseWheelEnabled = true
 	a.spinner.Spinner = spinner.Dot
-	// Only subscribe to bus events when there's a concrete foreground
-	// session.  When OpenSessionsModalOnStart is true and no SessionID is
-	// set, we skip the bridge so no goroutines block on a non-existent
-	// session.  The bridge is started (or re-started) inside
-	// applySwitchSession once the user picks a session.
+	a.history = newInputHistory(xdgStateHome(opts.HomeDir))
 	a.initModes()
 	if opts.SessionID != "" || !opts.OpenSessionsModalOnStart {
 		a.bridge()
@@ -220,6 +216,9 @@ type App struct {
 	// modeIndex is the index into opts.Modes for the currently active mode.
 	// Always >= 0; Modes is guaranteed non-empty after config loading.
 	modeIndex int
+
+	// history tracks previously sent inputs for up-arrow recall.
+	history *inputHistory
 
 	// toast is the active notification shown in the top-left corner.
 	toast        *toast
@@ -1039,6 +1038,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.slashPaletteDismissed = false
 			return a, a.runSlashCommand(text)
 		}
+		a.history.Add(text)
 		a.input.Reset()
 		a.slashPaletteDismissed = false
 		// Resume auto-scroll when the user sends a message.
@@ -1099,6 +1099,12 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.movePaletteHighlight(-1)
 			return a, nil
 		}
+		if text, ok := a.history.Up(a.input.Value()); ok {
+			a.input.Textarea.SetValue(text)
+			a.input.Textarea.CursorEnd()
+			return a, nil
+		}
+		return a, nil
 	case "ctrl+p":
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(-1)
@@ -1107,6 +1113,14 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down":
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(+1)
+			return a, nil
+		}
+		if a.history.Browsing() {
+			if text, ok := a.history.Down(); ok {
+				a.input.Textarea.SetValue(text)
+				a.input.Textarea.CursorEnd()
+				return a, nil
+			}
 			return a, nil
 		}
 	case "ctrl+n":
@@ -1120,6 +1134,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	before := a.input.Value()
 	a.input.Textarea, cmd = a.input.Textarea.Update(k)
 	if a.input.Value() != before {
+		a.history.Reset()
 		a.paletteHighlight = -1
 		a.slashPaletteDismissed = false
 	}

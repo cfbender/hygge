@@ -107,7 +107,7 @@ func newProviderAuthCmd() *cobra.Command {
 			// doesn't need interactive input).
 			method := "1"
 			if isTTY {
-				printf(out(cmd), "Auth method for %s:\n  1) API key (paste)\n  2) OAuth (not yet supported)\nPick (1 or 2): ", name)
+				printf(out(cmd), "Auth method for %s:\n  1) API key (paste)\n  2) OAuth (ChatGPT Pro/Plus)\nPick (1 or 2): ", name)
 				line, _ := reader.ReadString('\n')
 				if v := strings.TrimSpace(line); v != "" {
 					method = v
@@ -118,15 +118,53 @@ func newProviderAuthCmd() *cobra.Command {
 			case "1", "api_key", "api-key", "key":
 				return runProviderAuthAPIKey(cmd, reader, isTTY, name, authOpts)
 			case "2", "oauth":
-				printf(out(cmd),
-					"OAuth flow for %s is not yet implemented. Use the API-key flow (option 1) for now.\n",
-					name)
-				return nil
+				return runProviderAuthOAuth(cmd, name, authOpts)
 			default:
 				return die(cmd, "unknown auth method %q", method)
 			}
 		},
 	}
+}
+
+// runProviderAuthOAuth runs the OpenAI Codex device authorization flow.
+func runProviderAuthOAuth(cmd *cobra.Command, name string, authOpts auth.LoadOptions) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	printf(out(cmd), "Starting device authorization...\n")
+	device, err := auth.StartDeviceAuth(ctx)
+	if err != nil {
+		return fmt.Errorf("start device auth: %w", err)
+	}
+
+	printf(out(cmd), "\nOpen this URL:  %s\nEnter code:     %s\n\nWaiting for authorization...\n", device.VerifyURL, device.UserCode)
+
+	tokens, err := auth.PollDeviceAuth(ctx, device.DeviceAuthID, device.UserCode, device.Interval)
+	if err != nil {
+		return fmt.Errorf("device auth: %w", err)
+	}
+
+	accountID := auth.ExtractAccountID(tokens.AccessToken)
+	if accountID == "" {
+		accountID = auth.ExtractAccountID(tokens.IDToken)
+	}
+
+	expiresAt := time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+	cred := auth.Credential{
+		Type:         auth.CredOAuth,
+		AccessToken:  tokens.AccessToken,
+		RefreshToken: tokens.RefreshToken,
+		ExpiresAt:    expiresAt,
+		AccountID:    accountID,
+		AddedAt:      time.Now(),
+	}
+	if err := auth.Set(name, cred, authOpts); err != nil {
+		return fmt.Errorf("save credential: %w", err)
+	}
+	printf(out(cmd), "Saved OAuth credential for %s.\n", name)
+	return nil
 }
 
 // runProviderAuthAPIKey handles the "paste an API key" branch of

@@ -1097,8 +1097,43 @@ func resolveProviderOptionsFor(providerName string, cfg *config.Config, stateOpt
 		merged["api_key"] = cred.APIKey
 		slog.Debug("cli: api key from auth store", "provider", providerName, "key", maskKey(cred.APIKey))
 	case auth.CredOAuth:
-		slog.Warn("cli: auth store has OAuth credential but OAuth is not yet wired; falling back to adapter defaults",
-			"provider", providerName)
+		if cred.AccessToken == "" && cred.RefreshToken == "" {
+			slog.Warn("cli: auth store has OAuth credential with no tokens; skipping",
+				"provider", providerName)
+			return merged, nil
+		}
+		// Check if token needs refresh.
+		if !cred.ExpiresAt.IsZero() && time.Now().After(cred.ExpiresAt) && cred.RefreshToken != "" {
+			slog.Info("cli: OAuth token expired, refreshing", "provider", providerName)
+			tokens, err := auth.RefreshAccessToken(context.Background(), cred.RefreshToken)
+			if err != nil {
+				slog.Warn("cli: OAuth token refresh failed; using expired token",
+					"provider", providerName, "err", err)
+			} else {
+				cred.AccessToken = tokens.AccessToken
+				if tokens.RefreshToken != "" {
+					cred.RefreshToken = tokens.RefreshToken
+				}
+				cred.ExpiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+				if id := auth.ExtractAccountID(tokens.AccessToken); id != "" {
+					cred.AccountID = id
+				}
+				// Persist the refreshed token.
+				authOpts := auth.LoadOptions{
+					HomeDir:      stateOpts.HomeDir,
+					XDGStateHome: stateOpts.XDGStateHome,
+				}
+				if err := auth.Set(providerName, cred, authOpts); err != nil {
+					slog.Warn("cli: failed to persist refreshed OAuth token", "err", err)
+				}
+			}
+		}
+		merged["api_key"] = cred.AccessToken
+		merged["oauth"] = true
+		if cred.AccountID != "" {
+			merged["account_id"] = cred.AccountID
+		}
+		slog.Debug("cli: OAuth token from auth store", "provider", providerName)
 	default:
 		slog.Warn("cli: auth store entry has unknown credential type; skipping",
 			"provider", providerName, "type", cred.Type)

@@ -1,8 +1,13 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -12,6 +17,7 @@ import (
 	fopenaicompat "charm.land/fantasy/providers/openaicompat"
 	fopenrouter "charm.land/fantasy/providers/openrouter"
 
+	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
 )
@@ -76,7 +82,22 @@ func newFantasyProvider(providerID, apiKey string, opts map[string]any) (fantasy
 		return fanthropic.New(fopts...)
 	case "openai":
 		fopts := []fopenai.Option{fopenai.WithAPIKey(apiKey)}
-		if baseURL != "" {
+		if isOAuth(opts) {
+			// Codex OAuth: use the Responses API format (required by the
+			// Codex endpoint) and rewrite URLs to the Codex endpoint.
+			codexURL, _ := url.Parse(auth.CodexAPIEndpoint())
+			fopts = append(fopts,
+				fopenai.WithUseResponsesAPI(),
+				fopenai.WithHTTPClient(&codexRewriter{
+					target: codexURL,
+					inner:  http.DefaultClient,
+				}),
+			)
+			headers["originator"] = "hygge"
+			if v := stringOpt(opts, "account_id"); v != "" {
+				headers["ChatGPT-Account-Id"] = v
+			}
+		} else if baseURL != "" {
 			fopts = append(fopts, fopenai.WithBaseURL(baseURL))
 		}
 		if len(headers) > 0 {
@@ -174,6 +195,110 @@ func defaultAPIKeyEnv(providerID string) string {
 	default:
 		return ""
 	}
+}
+
+// codexRewriter is an HTTP client wrapper that rewrites request URLs to the
+// Codex API endpoint and ensures the request body has an "instructions" field
+// (required by Codex). Fantasy puts the system prompt into the input array
+// but Codex requires it in the top-level instructions field.
+type codexRewriter struct {
+	target *url.URL
+	inner  *http.Client
+}
+
+func (c *codexRewriter) Do(req *http.Request) (*http.Response, error) {
+	path := req.URL.Path
+	if strings.Contains(path, "/responses") || strings.Contains(path, "/chat/completions") {
+		req.URL.Scheme = c.target.Scheme
+		req.URL.Host = c.target.Host
+		req.URL.Path = c.target.Path
+
+		// Codex requires "instructions" at the top level. Fantasy sends
+		// the system prompt as a system/developer message in the input
+		// array. Extract it and promote to instructions.
+		if req.Body != nil {
+			bodyBytes, err := io.ReadAll(req.Body)
+			req.Body.Close()
+			if err == nil {
+				bodyBytes = codexPromoteInstructions(bodyBytes)
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				req.ContentLength = int64(len(bodyBytes))
+			}
+		}
+	}
+	return c.inner.Do(req)
+}
+
+// codexPromoteInstructions extracts system/developer messages from the input
+// array and promotes them to the top-level "instructions" field.
+func codexPromoteInstructions(body []byte) []byte {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body
+	}
+
+	// If instructions already set, leave it alone.
+	if raw, ok := obj["instructions"]; ok && len(raw) > 0 && string(raw) != `""` && string(raw) != "null" {
+		return body
+	}
+
+	// Look through the input array for system/developer messages.
+	inputRaw, ok := obj["input"]
+	if !ok {
+		return body
+	}
+	var input []json.RawMessage
+	if err := json.Unmarshal(inputRaw, &input); err != nil {
+		return body
+	}
+
+	var instructions []string
+	var filtered []json.RawMessage
+	for _, item := range input {
+		var msg struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(item, &msg); err == nil &&
+			(msg.Role == "system" || msg.Role == "developer") && msg.Content != "" {
+			instructions = append(instructions, msg.Content)
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	if len(instructions) == 0 {
+		return body
+	}
+
+	instructionText := strings.Join(instructions, "\n\n")
+	instrJSON, _ := json.Marshal(instructionText)
+	obj["instructions"] = instrJSON
+
+	if len(filtered) > 0 {
+		filteredJSON, _ := json.Marshal(filtered)
+		obj["input"] = filteredJSON
+	} else {
+		delete(obj, "input")
+	}
+
+	result, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return result
+}
+
+func isOAuth(opts map[string]any) bool {
+	if opts == nil {
+		return false
+	}
+	v, ok := opts["oauth"]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
 }
 
 func stringOpt(opts map[string]any, key string) string {
