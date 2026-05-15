@@ -115,6 +115,7 @@ func (a *App) renderChatContent() string {
 			AnimFor:         a.subagentAnims,
 			Now:             now,
 			HoverSubagentID: a.hoverSubagentID,
+			ExpandedTools:   a.expandedTools,
 		}
 		a.msgCache, a.subagentHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true

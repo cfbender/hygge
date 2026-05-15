@@ -182,6 +182,7 @@ func New(opts AppOptions) (*App, error) {
 		msgColW:       61, // default: bubble content at 80 cols (int(80*0.80)-3)
 		subagents:     make(map[string]*components.SubagentState),
 		subagentAnims: make(map[string]*anim.Anim),
+		expandedTools: make(map[string]bool),
 		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		touched:       appstate.NewTouchedFiles(),
 		focused:       true,
@@ -229,6 +230,9 @@ type App struct {
 	lastEscAt time.Time
 	// lastCtrlCAt records when Ctrl+C was last pressed for double-tap quit.
 	lastCtrlCAt time.Time
+
+	// expandedTools tracks which tool results are fully expanded (not truncated).
+	expandedTools map[string]bool
 
 	// sel tracks mouse-driven text selection.
 	sel selection
@@ -1037,6 +1041,19 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// over a bare letter key (would conflict with input mode).
 		// `ctrl+t` is otherwise unbound by the textarea bubble.
 		a.toggleLatestSubagent()
+		return a, nil
+	case "ctrl+e":
+		// Toggle all tool output expansion.
+		if len(a.expandedTools) > 0 {
+			a.expandedTools = make(map[string]bool)
+		} else {
+			for _, msg := range a.messages {
+				if msg.Role == components.RoleTool && msg.ToolUseID != "" {
+					a.expandedTools[msg.ToolUseID] = true
+				}
+			}
+		}
+		a.invalidateMsgCache()
 		return a, nil
 	case "ctrl+g":
 		return a, a.followIntoLatestSubagent()
