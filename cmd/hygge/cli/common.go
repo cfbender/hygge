@@ -58,6 +58,7 @@ type appRuntime struct {
 	Provenance      config.Provenance
 	State           *state.State
 	StateOpts       state.LoadOptions
+	XDGConfigHome   string
 	Bus             *bus.Bus
 	Store           *store.Store
 	Provider        provider.Provider
@@ -607,6 +608,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Provenance:      prov,
 		State:           st,
 		StateOpts:       stateOpts,
+		XDGConfigHome:   xdgConfig,
 		Bus:             b,
 		Store:           stOpen,
 		Provider:        prv,
