@@ -166,10 +166,18 @@ func TestToolCallDisplay(t *testing.T) {
 	}
 
 	out := app.View().Content
-	for _, want := range []string{"▌tool: read", "/etc/passwd", "line1"} {
+	// Non-task tool calls now render as tool-group bubbles (no "▌tool: read" gutter,
+	// no raw body in view).  Name and target must appear; raw lines must not.
+	for _, want := range []string{"read", "/etc/passwd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("tool view missing %q in:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "▌tool: read") {
+		t.Errorf("tool view must not contain old gutter '▌tool: read'; got:\n%s", out)
+	}
+	if strings.Contains(out, "line1") {
+		t.Errorf("tool view must not render raw body in tool-group bubble; got:\n%s", out)
 	}
 }
 

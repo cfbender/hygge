@@ -3,6 +3,7 @@ package components
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
@@ -54,12 +55,16 @@ func TestMessageListRendersRoles(t *testing.T) {
 		},
 	}
 	out := ml.View()
-	// User and assistant now render as bubbles; gutter "▌user" / "▌assistant"
-	// are replaced by bubble borders.  Content and tool gutter still present.
-	for _, want := range []string{"hello", "General", "hi back", "▌tool: read", "/tmp/x", "line1", "line2"} {
+	// User and assistant render as bubbles; content must still appear.
+	// Non-task tool calls now render as a tool-group bubble (no "▌tool: read" gutter).
+	for _, want := range []string{"hello", "General", "hi back", "read", "/tmp/x"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("messagelist missing %q in:\n%s", want, out)
 		}
+	}
+	// The old gutter format must not appear for non-task tools.
+	if strings.Contains(out, "▌tool: read") {
+		t.Errorf("messagelist should not render '▌tool: read' gutter for non-task tool; got:\n%s", out)
 	}
 }
 
@@ -74,18 +79,21 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 		CollapseLines: 5,
 		Theme:         theme.ShellTheme(),
 		Messages: []UIMessage{
-			{Role: RoleTool, ToolName: "read", Raw: strings.Join(lines, "\n")},
+			{Role: RoleTool, ToolName: "read", Target: "somefile.go", Raw: strings.Join(lines, "\n")},
 		},
 	}
 	out := ml.View()
-	if !strings.Contains(out, "line4") {
-		t.Errorf("expected line4 (within first 5 lines) in output:\n%s", out)
+	// Non-task tool calls render as a tool-group bubble showing name+target only.
+	// The raw body is not shown; no collapse hint is emitted.
+	if !strings.Contains(out, "read") {
+		t.Errorf("expected tool name 'read' in output:\n%s", out)
 	}
-	if strings.Contains(out, "line5\n") || strings.Contains(out, "line6") {
-		t.Errorf("expected lines beyond limit to be hidden, found in:\n%s", out)
+	if !strings.Contains(out, "somefile.go") {
+		t.Errorf("expected target 'somefile.go' in output:\n%s", out)
 	}
-	if !strings.Contains(out, "more lines") {
-		t.Errorf("expected expansion hint in:\n%s", out)
+	// The raw body lines must NOT appear (tool-group bubble omits body content).
+	if strings.Contains(out, "line0") {
+		t.Errorf("expected raw body lines to be absent from tool-group bubble, found in:\n%s", out)
 	}
 }
 
@@ -201,5 +209,174 @@ func TestInputBuildsAndReports(t *testing.T) {
 	in.Reset()
 	if in.Value() != "" {
 		t.Errorf("Reset: expected empty value, got %q", in.Value())
+	}
+}
+
+// ── Phase 3: tool-call grouping and subagent bubble wrap ────────────────────
+
+// TestToolGroupBubble_ThreeCallGroup verifies three consecutive non-task tool
+// calls render as a single bordered bubble with one row each.
+func TestToolGroupBubble_ThreeCallGroup(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "/tmp/a.go"},
+			{Role: RoleTool, ToolName: "grep", Target: "func Main"},
+			{Role: RoleTool, ToolName: "bash", Target: "go build ."},
+		},
+	}
+	out := ml.View()
+	// All three tool names and targets must appear.
+	for _, want := range []string{"read", "/tmp/a.go", "grep", "func Main", "bash", "go build ."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tool group missing %q in:\n%s", want, out)
+		}
+	}
+	// The middle dot prefix must appear.
+	if !strings.Contains(out, "·") {
+		t.Errorf("tool group missing '·' dot prefix in:\n%s", out)
+	}
+	// Old gutter format must be absent.
+	if strings.Contains(out, "▌tool:") {
+		t.Errorf("tool group must not contain '▌tool:' gutter; got:\n%s", out)
+	}
+	// All three tools in a single group → output has exactly one bubble
+	// (one pair of \n\n-separated blocks, not three separate ones).
+	blocks := strings.Split(strings.TrimSpace(out), "\n\n")
+	if len(blocks) != 1 {
+		t.Errorf("expected 1 bubble block for 3 grouped tool calls, got %d blocks", len(blocks))
+	}
+}
+
+// TestToolGroupBubble_SingleCall verifies a lone non-task tool call also
+// produces a tool-group bubble (group of one).
+func TestToolGroupBubble_SingleCall(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "/etc/hosts"},
+		},
+	}
+	out := ml.View()
+	if !strings.Contains(out, "read") {
+		t.Errorf("single-call group missing 'read' in:\n%s", out)
+	}
+	if !strings.Contains(out, "/etc/hosts") {
+		t.Errorf("single-call group missing target in:\n%s", out)
+	}
+	if strings.Contains(out, "▌tool:") {
+		t.Errorf("single-call group must not use old gutter format; got:\n%s", out)
+	}
+}
+
+// TestToolGroupBubble_ErrorToolStyling verifies that a tool with IsError set
+// renders the "— error" suffix.
+func TestToolGroupBubble_ErrorToolStyling(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "bash", Target: "make test", IsError: true},
+		},
+	}
+	out := ml.View()
+	if !strings.Contains(out, "bash") {
+		t.Errorf("error-tool group missing 'bash' in:\n%s", out)
+	}
+	if !strings.Contains(out, "error") {
+		t.Errorf("error-tool group missing 'error' suffix in:\n%s", out)
+	}
+}
+
+// TestToolGroupBubble_InterleavedWithTask verifies mixed sequences produce
+// three separate bubbles in chronological order:
+//
+//	[tool group: read+grep] [subagent: task] [tool group: bash]
+func TestToolGroupBubble_InterleavedWithTask(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	st := &SubagentState{
+		SubSessionID: "sub-1",
+		Type:         "general",
+		Description:  "deploy",
+		StartedAt:    now.Add(-time.Second),
+		EndedAt:      now,
+		Messages:     []UIMessage{{Role: RoleTool, ToolName: "bash"}},
+	}
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Now:   now,
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "main.go"},
+			{Role: RoleTool, ToolName: "grep", Target: "TODO"},
+			{Role: RoleTool, ToolName: "task", Target: "deploy", SubagentID: "sub-1"},
+			{Role: RoleTool, ToolName: "bash", Target: "go vet ./..."},
+		},
+		Subagents: map[string]*SubagentState{"sub-1": st},
+	}
+	out := ml.View()
+
+	// All content must appear.
+	for _, want := range []string{"read", "main.go", "grep", "TODO", "General Subagent", "deploy", "bash", "go vet ./..."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("interleaved output missing %q in:\n%s", want, out)
+		}
+	}
+
+	// There should be 3 bubble blocks (two tool groups + subagent bubble).
+	blocks := strings.Split(strings.TrimSpace(out), "\n\n")
+	if len(blocks) != 3 {
+		t.Errorf("expected 3 bubble blocks for read+grep / task / bash, got %d:\n%s", len(blocks), out)
+	}
+
+	// Chronological order: read/grep before task, task before bash.
+	readIdx := strings.Index(out, "read")
+	taskIdx := strings.Index(out, "General Subagent")
+	bashIdx := strings.LastIndex(out, "go vet")
+	if readIdx >= taskIdx || taskIdx >= bashIdx {
+		t.Errorf("chronological order violated: readIdx=%d taskIdx=%d bashIdx=%d", readIdx, taskIdx, bashIdx)
+	}
+}
+
+// TestSubagentBubbleWrap verifies that a task tool call with a bound SubagentID
+// renders the compact subagent block content wrapped in a bordered bubble
+// (no bare "▌tool: task" gutter line).
+func TestSubagentBubbleWrap(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	st := &SubagentState{
+		SubSessionID: "sub-1",
+		Type:         "general",
+		Description:  "find LICENSE",
+		StartedAt:    now.Add(-time.Second),
+		EndedAt:      now,
+		Cost:         0.001,
+		Messages:     []UIMessage{{Role: RoleTool, ToolName: "grep"}},
+	}
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Now:   now,
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "task", Target: "find LICENSE", SubagentID: "sub-1"},
+		},
+		Subagents: map[string]*SubagentState{"sub-1": st},
+	}
+	out := ml.View()
+	// Subagent content must appear (from SubagentBlock.View() inside the bubble).
+	for _, want := range []string{"General Subagent", "find LICENSE", "ctrl+g"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("subagent bubble missing %q in:\n%s", want, out)
+		}
+	}
+	// Old gutter must not appear.
+	if strings.Contains(out, "▌tool: task") {
+		t.Errorf("subagent bubble must not contain '▌tool: task' gutter; got:\n%s", out)
 	}
 }
