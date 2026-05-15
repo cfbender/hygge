@@ -306,6 +306,16 @@ func (a *App) renderChromeContent() string {
 		}
 		sections = append(sections, style.Render(fmt.Sprintf("⌛  Compacting %d messages…", a.compactionInFlightCount)))
 	}
+	// Scroll position indicator when user has scrolled up.
+	if a.userScrolled && !a.msgViewport.AtBottom() {
+		pct := int(a.msgViewport.ScrollPercent() * 100)
+		style := lipgloss.NewStyle()
+		if a.opts.Theme != nil {
+			style = a.opts.Theme.Style(theme.AtomMuted)
+		}
+		sections = append(sections, style.Render(fmt.Sprintf("↑ scrolled — %d%%", pct)))
+	}
+
 	if a.compactionToast != "" {
 		style := lipgloss.NewStyle()
 		if a.opts.Theme != nil {
