@@ -24,9 +24,9 @@ func TestParallelizable_BuiltinMapping(t *testing.T) {
 		{"write", newWriteTool(rt), false},
 		{"edit", newEditTool(rt), false},
 		{"skill", NewSkillTool(nil), true},
-		// TaskTool requires a runner; use NewTaskTool with nil runner — only
+		// SubagentTool requires a runner; use NewSubagentTool with nil runner — only
 		// Parallelizable() is called, no Execute.
-		{"task", NewTaskTool(nil), true},
+		{"subagent", NewSubagentTool(nil), true},
 	}
 
 	for _, tc := range cases {

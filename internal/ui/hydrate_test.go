@@ -752,7 +752,7 @@ func TestHydrate_CompactionMarkerInjectsRoleMarkerEntry(t *testing.T) {
 }
 
 // TestHydrate_SubagentReconstructsFromStore verifies that resuming a session
-// that spawned a subagent produces a parent task tool row with SubagentID set
+// that spawned a subagent produces a parent subagent tool row with SubagentID set
 // and the child's transcript in app.subagents.
 func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 	t.Parallel()
@@ -775,7 +775,7 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 		t.Fatalf("CreateSession parent: %v", err)
 	}
 
-	// Append user message + task tool call on the parent.
+	// Append user message + subagent tool call on the parent.
 	if _, err := st.AppendMessage(ctx, parent.ID, session.NewMessage{
 		Role:  session.RoleUser,
 		Parts: []session.Part{{Kind: session.PartText, Text: "do a task"}},
@@ -789,7 +789,7 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 			{
 				Kind:      session.PartToolUse,
 				ToolID:    toolUseID,
-				ToolName:  "task",
+				ToolName:  "subagent",
 				ToolInput: []byte(`{"subagent_type":"general","description":"find something"}`),
 			},
 			{
@@ -845,22 +845,22 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 	})
 	_ = app.Init()
 
-	// Find the task tool message.
-	var taskMsg *uiMessage
+	// Find the subagent tool message.
+	var subagentMsg *uiMessage
 	for i := range app.messages {
-		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "task" {
-			taskMsg = &app.messages[i]
+		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "subagent" {
+			subagentMsg = &app.messages[i]
 			break
 		}
 	}
-	if taskMsg == nil {
-		t.Fatalf("expected a task UIMessage in messages: %+v", app.messages)
+	if subagentMsg == nil {
+		t.Fatalf("expected a subagent UIMessage in messages: %+v", app.messages)
 	}
-	if taskMsg.SubagentID == "" {
-		t.Fatalf("expected task message to have SubagentID set, got empty")
+	if subagentMsg.SubagentID == "" {
+		t.Fatalf("expected subagent message to have SubagentID set, got empty")
 	}
-	if taskMsg.SubagentID != child.ID {
-		t.Errorf("SubagentID = %q, want %q", taskMsg.SubagentID, child.ID)
+	if subagentMsg.SubagentID != child.ID {
+		t.Errorf("SubagentID = %q, want %q", subagentMsg.SubagentID, child.ID)
 	}
 
 	// Verify the child session state is in app.subagents.
@@ -906,7 +906,7 @@ func TestHydrate_SubagentRecursiveTwoLevels(t *testing.T) {
 	if _, err := st.AppendMessage(ctx, root.ID, session.NewMessage{
 		Role: session.RoleTool,
 		Parts: []session.Part{
-			{Kind: session.PartToolUse, ToolID: toolUseL1, ToolName: "task", ToolInput: []byte(`{}`)},
+			{Kind: session.PartToolUse, ToolID: toolUseL1, ToolName: "subagent", ToolInput: []byte(`{}`)},
 			{Kind: session.PartToolResult, ToolUseID: toolUseL1, Content: "l1 done"},
 		},
 	}); err != nil {
@@ -929,7 +929,7 @@ func TestHydrate_SubagentRecursiveTwoLevels(t *testing.T) {
 	if _, err := st.AppendMessage(ctx, l1.ID, session.NewMessage{
 		Role: session.RoleTool,
 		Parts: []session.Part{
-			{Kind: session.PartToolUse, ToolID: toolUseL2, ToolName: "task", ToolInput: []byte(`{}`)},
+			{Kind: session.PartToolUse, ToolID: toolUseL2, ToolName: "subagent", ToolInput: []byte(`{}`)},
 			{Kind: session.PartToolResult, ToolUseID: toolUseL2, Content: "l2 done"},
 		},
 	}); err != nil {
@@ -987,19 +987,19 @@ func TestHydrate_SubagentRecursiveTwoLevels(t *testing.T) {
 		t.Fatal("l1 state is nil")
 	}
 
-	// Level-1 state should have a task tool message pointing at l2.
-	var l1TaskMsg *uiMessage
+	// Level-1 state should have a subagent tool message pointing at l2.
+	var l1SubagentMsg *uiMessage
 	for i := range stateL1.Messages {
-		if stateL1.Messages[i].Role == components.RoleTool && stateL1.Messages[i].ToolName == "task" {
-			l1TaskMsg = &stateL1.Messages[i]
+		if stateL1.Messages[i].Role == components.RoleTool && stateL1.Messages[i].ToolName == "subagent" {
+			l1SubagentMsg = &stateL1.Messages[i]
 			break
 		}
 	}
-	if l1TaskMsg == nil {
-		t.Fatalf("expected task message in l1 messages: %+v", stateL1.Messages)
+	if l1SubagentMsg == nil {
+		t.Fatalf("expected subagent message in l1 messages: %+v", stateL1.Messages)
 	}
-	if l1TaskMsg.SubagentID != l2.ID {
-		t.Errorf("l1 task SubagentID = %q, want %q", l1TaskMsg.SubagentID, l2.ID)
+	if l1SubagentMsg.SubagentID != l2.ID {
+		t.Errorf("l1 subagent SubagentID = %q, want %q", l1SubagentMsg.SubagentID, l2.ID)
 	}
 
 	// Level-2 subagent should also be in app.subagents.
@@ -1300,7 +1300,7 @@ func TestHydrate_LegacyCombinedToolRow(t *testing.T) {
 
 // TestHydrate_SplitRowSubagentTaskRow verifies the real-world pong-test shape:
 // user → assistant(text+task_tool_use) → tool(task_result) → assistant(text).
-// The task tool row must be present with ToolUseID set, so subagent
+// The subagent tool row must be present with ToolUseID set, so subagent
 // reconstruction can attach SubagentID to it.
 func TestHydrate_SplitRowSubagentTaskRow(t *testing.T) {
 	t.Parallel()
@@ -1336,7 +1336,7 @@ func TestHydrate_SplitRowSubagentTaskRow(t *testing.T) {
 				{
 					Kind:      session.PartToolUse,
 					ToolID:    toolUseID,
-					ToolName:  "task",
+					ToolName:  "subagent",
 					ToolInput: []byte(`{"subagent_type":"general","description":"pong"}`),
 				},
 			},
@@ -1409,8 +1409,8 @@ func TestHydrate_SplitRowSubagentTaskRow(t *testing.T) {
 	if toolMsg.Role != components.RoleTool {
 		t.Fatalf("[2].Role = %q, want tool", toolMsg.Role)
 	}
-	if toolMsg.ToolName != "task" {
-		t.Errorf("[2].ToolName = %q, want task", toolMsg.ToolName)
+	if toolMsg.ToolName != "subagent" {
+		t.Errorf("[2].ToolName = %q, want subagent", toolMsg.ToolName)
 	}
 	if toolMsg.ToolUseID != toolUseID {
 		t.Errorf("[2].ToolUseID = %q, want %q", toolMsg.ToolUseID, toolUseID)

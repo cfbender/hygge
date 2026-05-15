@@ -45,7 +45,7 @@ func TestSubagentBlockDoneState(t *testing.T) {
 	}
 	// Must NOT contain the old format strings.
 	for _, bad := range []string{
-		"task[general]",
+		"subagent[general]",
 		"\u25b8", // ▸ old chevron
 		"running",
 		"tokens",
@@ -173,9 +173,9 @@ func TestSubagentBlockNilStateReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestMessageListTaskWithSubagentRendersBlockOnly verifies that a task tool
-// message with SubagentID renders ONLY the subagent block (no "▌tool: task" gutter).
-func TestMessageListTaskWithSubagentRendersBlockOnly(t *testing.T) {
+// TestMessageListSubagentWithSubagentRendersBlockOnly verifies that a subagent tool
+// message with SubagentID renders ONLY the subagent block (no "▌tool: subagent" gutter).
+func TestMessageListSubagentWithSubagentRendersBlockOnly(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	start := now.Add(-time.Second)
@@ -198,7 +198,7 @@ func TestMessageListTaskWithSubagentRendersBlockOnly(t *testing.T) {
 			{Role: RoleUser, Raw: "find LICENSE"},
 			{
 				Role:       RoleTool,
-				ToolName:   "task",
+				ToolName:   "subagent",
 				Target:     "find LICENSE",
 				Raw:        "(running…)",
 				SubagentID: "sub-1",
@@ -220,21 +220,21 @@ func TestMessageListTaskWithSubagentRendersBlockOnly(t *testing.T) {
 	}
 	// Must NOT contain the old format.
 	for _, bad := range []string{
-		"\u25cctools: task", // ▌tool: task
-		"task[general]",
+		"\u25cctools: subagent", // ▌tool: subagent
+		"subagent[general]",
 	} {
 		if strings.Contains(out, bad) {
-			t.Errorf("messagelist should not render %q for task+SubagentID; got:\n%s", bad, out)
+			t.Errorf("messagelist should not render %q for subagent+SubagentID; got:\n%s", bad, out)
 		}
 	}
-	// Must NOT contain "▌tool: task" specifically (check the actual gutter prefix).
-	if strings.Contains(out, "\u258ctool: task") {
-		t.Errorf("messagelist should not render '▌tool: task' for task+SubagentID; got:\n%s", out)
+	// Must NOT contain "▌tool: subagent" specifically (check the actual gutter prefix).
+	if strings.Contains(out, "\u258ctool: subagent") {
+		t.Errorf("messagelist should not render '▌tool: subagent' for subagent+SubagentID; got:\n%s", out)
 	}
 }
 
-// TestMessageListTaskWithSubagentNoGutter: ensure the "▌tool: task" gutter is absent.
-func TestMessageListTaskWithSubagentNoGutter(t *testing.T) {
+// TestMessageListSubagentWithSubagentNoGutter: ensure the "▌tool: subagent" gutter is absent.
+func TestMessageListSubagentWithSubagentNoGutter(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	st := &SubagentState{
@@ -250,7 +250,7 @@ func TestMessageListTaskWithSubagentNoGutter(t *testing.T) {
 		Messages: []UIMessage{
 			{
 				Role:       RoleTool,
-				ToolName:   "task",
+				ToolName:   "subagent",
 				Raw:        "",
 				SubagentID: "sub-1",
 			},
@@ -258,31 +258,31 @@ func TestMessageListTaskWithSubagentNoGutter(t *testing.T) {
 		Subagents: map[string]*SubagentState{"sub-1": st},
 	}
 	out := ml.View()
-	// The old "▌tool: task" gutter must not appear.
-	if strings.Contains(out, "tool: task") {
-		t.Errorf("task+subagent row must not render 'tool: task' gutter; got:\n%s", out)
+	// The old "▌tool: subagent" gutter must not appear.
+	if strings.Contains(out, "tool: subagent") {
+		t.Errorf("subagent+subagent row must not render 'tool: subagent' gutter; got:\n%s", out)
 	}
 }
 
-// TestMessageListNoNestedWhenSubagentIDMissing verifies non-task tools render normally.
+// TestMessageListNoNestedWhenSubagentIDMissing verifies non-subagent tools render normally.
 func TestMessageListNoNestedWhenSubagentIDMissing(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
 		Theme: theme.ShellTheme(),
 		Messages: []UIMessage{
-			{Role: RoleTool, ToolName: "task", Raw: "(running…)"},
+			{Role: RoleTool, ToolName: "subagent", Raw: "(running…)"},
 		},
 		// no Subagents map, no SubagentID
 	}
 	out := ml.View()
-	// A plain task tool message (no SubagentID) renders the regular gutter.
-	if strings.Contains(out, "task[") {
+	// A plain subagent tool message (no SubagentID) renders the regular gutter.
+	if strings.Contains(out, "subagent[") {
 		t.Errorf("expected no nested block when SubagentID empty, got:\n%s", out)
 	}
 	// The regular gutter should still appear.
-	if !strings.Contains(out, "tool: task") {
-		t.Errorf("plain task tool message should still render gutter; got:\n%s", out)
+	if !strings.Contains(out, "tool: subagent") {
+		t.Errorf("plain subagent tool message should still render gutter; got:\n%s", out)
 	}
 }
 

@@ -121,13 +121,13 @@ tools = ["read"]
 	}
 }
 
-func TestLoad_TaskToolStrippedFromTOML(t *testing.T) {
+func TestLoad_SubagentToolStrippedFromTOML(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
 [subagents.evil]
 description = "tries to recurse"
 prompt = "go"
-tools = ["read", "task", "grep"]
+tools = ["read", "subagent", "grep"]
 `)
 	reg, err := Load(LoadOptions{HomeDir: home})
 	if err != nil {
@@ -138,8 +138,8 @@ tools = ["read", "task", "grep"]
 		t.Fatal("evil type missing")
 	}
 	for _, name := range got.Tools {
-		if name == "task" {
-			t.Fatalf("task tool not stripped from TOML: %v", got.Tools)
+		if name == "subagent" {
+			t.Fatalf("subagent tool not stripped from TOML: %v", got.Tools)
 		}
 	}
 	if want := []string{"read", "grep"}; !equalSlices(got.Tools, want) {

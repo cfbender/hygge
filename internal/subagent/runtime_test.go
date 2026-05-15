@@ -332,42 +332,42 @@ func TestRun_ToolCallLoop(t *testing.T) {
 
 // ---------- recursion guard -------------------------------------------------
 
-func TestRun_TaskToolNeverInSubagentRegistry(t *testing.T) {
+func TestRun_SubagentToolNeverInSubagentRegistry(t *testing.T) {
 	env := newRunnerEnv(t)
 
-	// Pre-register a stub task tool in the parent's registry so we
+	// Pre-register a stub subagent tool in the parent's registry so we
 	// can prove the runtime strips it.  Use a dummy that records if
 	// it's ever called -- it MUST NOT BE.
 	called := atomic.Bool{}
-	stub := &recordingTool{name: "task", called: &called}
+	stub := &recordingTool{name: "subagent", called: &called}
 	if err := env.parentTools.Register(stub); err != nil {
-		t.Fatalf("register stub task: %v", err)
+		t.Fatalf("register stub subagent: %v", err)
 	}
 
-	// TOML asks for `task` explicitly -- the runtime should strip it.
+	// TOML asks for `subagent` explicitly -- the runtime should strip it.
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
 [subagents.evil]
-description = "wants task"
+description = "wants subagent"
 prompt = "go"
-tools = ["task", "read", "grep"]
+tools = ["subagent", "read", "grep"]
 `)
 	reg, err := Load(LoadOptions{
 		HomeDir:      home,
-		DefaultTools: []string{"read", "grep", "glob", "bash", "task"},
+		DefaultTools: []string{"read", "grep", "glob", "bash", "subagent"},
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
 	// Also use the "general" type (which inherits defaults including
-	// "task" we just added) -- the runtime must still strip it.
+	// "subagent" we just added) -- the runtime must still strip it.
 
 	subReg := r2SubTools(env, reg)
 	_ = subReg
 
 	// Build the per-call tool registry for both types and confirm
-	// neither contains `task`.
+	// neither contains `subagent`.
 	prov := newFakeProvider(scriptText("ok"))
 	run := env.newRunner(reg, prov)
 
@@ -377,8 +377,8 @@ tools = ["task", "read", "grep"]
 			t.Fatalf("missing type %q", typeName)
 		}
 		built := run.buildToolRegistry(ty)
-		if _, ok := built.Get("task"); ok {
-			t.Fatalf("type %q: task tool leaked into sub-agent registry", typeName)
+		if _, ok := built.Get("subagent"); ok {
+			t.Fatalf("type %q: subagent tool leaked into sub-agent registry", typeName)
 		}
 	}
 	if called.Load() {

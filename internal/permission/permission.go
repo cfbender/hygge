@@ -68,7 +68,7 @@ const (
 	// relies on the per-server permission gate to give users a
 	// granular consent decision when an MCP tool runs.
 	CategoryMCP Category = "mcp"
-	// CategoryAgent gates the `task` tool's launch of a sub-agent.
+	// CategoryAgent gates the `subagent` tool's launch of a sub-agent.
 	// One ask covers the entire sub-agent run; tools invoked inside
 	// the sub-agent still go through their own permission checks
 	// against the SAME engine, so the user retains granular control

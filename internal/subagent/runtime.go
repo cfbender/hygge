@@ -172,7 +172,7 @@ func (r *Runner) Types() []tool.SubagentType {
 }
 
 // ToolAdapter returns a [tool.SubagentRunner] that delegates to this
-// Runner.  cmd/hygge/cli passes the result to [tool.NewTaskTool] when
+// Runner.  cmd/hygge/cli passes the result to [tool.NewSubagentTool] when
 // wiring the orchestrator's tool set.  Keeping the adapter in a tiny
 // type lets the tool package stay free of an internal/subagent
 // dependency (which would create an import cycle).
@@ -437,7 +437,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 // runner's parent registry so they share the read-tracker and other
 // cross-tool state.
 //
-// `task` is filtered out unconditionally -- defence in depth even
+// `subagent` is filtered out unconditionally -- defence in depth even
 // after registry.go's normalizeEntry already stripped it.  This is
 // the runtime's recursion guard.
 func (r *Runner) buildToolRegistry(t *Type) *tool.Registry {
@@ -447,8 +447,8 @@ func (r *Runner) buildToolRegistry(t *Type) *tool.Registry {
 	}
 	filtered := make([]string, 0, len(allowed))
 	for _, name := range allowed {
-		if name == "task" {
-			slog.Warn("subagent: task tool ignored in tools list (recursion guard)",
+		if name == "subagent" {
+			slog.Warn("subagent: subagent tool ignored in tools list (recursion guard)",
 				"type", t.Name)
 			continue
 		}
