@@ -74,6 +74,34 @@ type fakeProvider struct {
 	onStream func(req provider.Request)
 }
 
+type fakeFantasyModel struct {
+	provider string
+	model    string
+	text     string
+	usage    fantasy.Usage
+	calls    atomic.Int32
+}
+
+func (f *fakeFantasyModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	f.calls.Add(1)
+	return &fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: f.text}}, Usage: f.usage}, nil
+}
+
+func (f *fakeFantasyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	return nil, fmt.Errorf("fakeFantasyModel: Stream not implemented")
+}
+
+func (f *fakeFantasyModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, fmt.Errorf("fakeFantasyModel: GenerateObject not implemented")
+}
+
+func (f *fakeFantasyModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, fmt.Errorf("fakeFantasyModel: StreamObject not implemented")
+}
+
+func (f *fakeFantasyModel) Provider() string { return f.provider }
+func (f *fakeFantasyModel) Model() string    { return f.model }
+
 type fakeScript struct {
 	events []provider.Event
 	// initErr, if non-nil, is returned from Stream itself (Stream returns
