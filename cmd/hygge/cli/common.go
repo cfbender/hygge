@@ -13,6 +13,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/hook"
+	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/mcp"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/plugin"
@@ -340,7 +342,6 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		b.Close()
 		return nil, err
 	}
-
 	permEngine, err := permission.New(permission.EngineOptions{
 		Bus:    b,
 		Config: cfg,
@@ -363,6 +364,16 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	anthropicShim.SetCatalog(catSrc)
 	openaiShim.SetCatalog(catSrc)
 	openrouterShim.SetCatalog(catSrc)
+	fantasyResolved, err := llm.ResolveProviderModel(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc)
+	if err != nil {
+		if !errors.Is(err, provider.ErrAuth) {
+			permEngine.Close()
+			_ = stOpen.Close()
+			b.Close()
+			return nil, fmt.Errorf("cli: build fantasy model: %w", err)
+		}
+		slog.Debug("cli: fantasy model unavailable; legacy provider remains for non-turn commands", "err", err)
+	}
 
 	catalog := cost.NewCatalog(cost.CatalogOptions{
 		Catalog: catSrc,
@@ -556,6 +567,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Bus:           b,
 		Store:         stOpen,
 		Provider:      prv,
+		FantasyModel:  fantasyResolved.Model,
 		Permission:    permEngine,
 		Tools:         tools,
 		Catalog:       catalog,
