@@ -20,6 +20,10 @@ import (
 //
 // If the input cannot be interpreted (nil, no-color, unknown type), it is
 // returned as-is.
+//
+// Currently unused by bubble.go — border color is the configured atom
+// directly.  Reserved for future per-agent color customization where a
+// saturation-boosted variant may be desirable for contrast on tinted surfaces.
 func SaturationBoost(c color.Color) color.Color {
 	if c == nil {
 		return c

@@ -13,9 +13,8 @@
 //   - Optional body-height cap with truncation indicator.
 //   - Left or right alignment within a parent width budget.
 //   - ShowTail field retained for forward-compatibility but never set to true.
-//   - BackgroundColor: caller passes the ANSI accent atom directly; the
-//     terminal renders the user's actual palette color.  Border uses a
-//     saturation-boosted variant (bright ANSI 8–15 for base ANSI 0–7).
+//   - Border color is the configured accent atom directly — no saturation boost.
+//   - Bubble interior is transparent (terminal default background).
 package bubble
 
 import (
@@ -103,12 +102,11 @@ type Bubble struct {
 	// anywhere.  Leaving it false means no tail glyphs are emitted.
 	ShowTail bool
 
-	// BackgroundColor is the background tint for the bubble interior.
-	// The caller passes the ANSI accent atom directly (e.g. lipgloss.Color("4"))
-	// so the terminal renders the user's actual palette color.  When nil the
-	// terminal's default background is used.
-	// Each inner line is padded to innerWidth and filled with this color so the
-	// bubble is a uniform rectangle.
+	// BackgroundColor is reserved for future opt-in background tinting of the
+	// bubble interior.  It is currently unused — View() does not apply a
+	// background fill, and the terminal's default background shows through.
+	// Kept on the struct so callers can set it without a compile error; the
+	// value is accepted but ignored.
 	BackgroundColor color.Color
 }
 
@@ -141,8 +139,7 @@ func (b Bubble) View() string {
 	}
 
 	accentColor := b.resolveAccentColor()
-	borderColor := theme.SaturationBoost(accentColor)
-	borderStyle := b.buildBorderStyle(borderColor, bubbleW)
+	borderStyle := b.buildBorderStyle(accentColor, bubbleW)
 
 	// Build header line if either side is non-empty.
 	header := ""
@@ -153,11 +150,10 @@ func (b Bubble) View() string {
 	// Build body with optional height cap.
 	body := b.renderBody()
 
-	// Compose inner lines, applying per-line width padding and bg fill.
+	// Compose inner lines, applying per-line width padding.
 	// This ensures every line of the bubble is exactly innerW cells wide
 	// so the rendered rectangle is uniform.
-	bg := b.BackgroundColor
-	inner := b.composeInner(header, body, innerW, bg, accentColor)
+	inner := b.composeInner(header, body, innerW, accentColor)
 
 	// Apply the border — do NOT set Width on the border style; the inner
 	// content is already padded to innerW per-line, so the border wraps it
@@ -196,10 +192,9 @@ func (b Bubble) View() string {
 }
 
 // composeInner builds the full inner content string with each line padded to
-// innerW and filled with bg.  This is the fix for the alignment bug: applying
-// background to a multi-line string without per-line width padding caused
-// different lines to have different horizontal extents.
-func (b Bubble) composeInner(header, body string, innerW int, bg color.Color, accentColor color.Color) string {
+// innerW.  Every line is exactly innerW cells wide so the rendered rectangle
+// is uniform.  The terminal's default background shows through (no bg fill).
+func (b Bubble) composeInner(header, body string, innerW int, accentColor color.Color) string {
 	// Collect logical segments.
 	var segments []string
 	if header != "" {
@@ -217,12 +212,8 @@ func (b Bubble) composeInner(header, body string, innerW int, bg color.Color, ac
 		allLines = append(allLines, strings.Split(seg, "\n")...)
 	}
 
-	// Per-line: apply Width(innerW) and optional Background so every line
-	// occupies exactly innerW cells.
+	// Per-line: apply Width(innerW) so every line occupies exactly innerW cells.
 	lineStyle := lipgloss.NewStyle().Width(innerW)
-	if bg != nil {
-		lineStyle = lineStyle.Background(bg)
-	}
 
 	padded := make([]string, len(allLines))
 	for i, line := range allLines {
@@ -278,14 +269,14 @@ func (b Bubble) resolveAccentColor() color.Color {
 
 // buildBorderStyle returns a lipgloss.Style with the correct border type and
 // color for this bubble.  The width argument is reserved for future use.
+// Border color is the accent atom directly — no saturation boost.
 func (b Bubble) buildBorderStyle(borderColor color.Color, _ int) lipgloss.Style {
 	style := lipgloss.NewStyle()
 	if b.SubStyle == StyleDistinct {
 		style = style.Border(lipgloss.RoundedBorder())
 		distinctColor := b.resolveDistinctColor()
 		if distinctColor != nil {
-			boosted := theme.SaturationBoost(distinctColor)
-			style = style.BorderForeground(boosted)
+			style = style.BorderForeground(distinctColor)
 		} else if borderColor != nil {
 			style = style.BorderForeground(borderColor)
 		}

@@ -364,16 +364,15 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:           width,
-		BubbleWidth:     bubbleW,
-		Alignment:       bubble.AlignRight,
-		HeaderLeft:      "",
-		HeaderRight:     headerRight,
-		Body:            body,
-		Theme:           m.Theme,
-		AccentColor:     accentColor,
-		BackgroundColor: accentColor, // use ANSI atom directly; terminal renders palette color
-		SubStyle:        bubble.StyleNormal,
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignRight,
+		HeaderLeft:  "",
+		HeaderRight: headerRight,
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleNormal,
 	}
 	return b.View()
 }
@@ -467,16 +466,15 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:           width,
-		BubbleWidth:     bubbleW,
-		Alignment:       bubble.AlignLeft,
-		HeaderLeft:      agentType,
-		HeaderRight:     headerRight,
-		Body:            body,
-		Theme:           m.Theme,
-		AccentColor:     accentColor,
-		BackgroundColor: accentColor, // use ANSI atom directly; terminal renders palette color
-		SubStyle:        bubble.StyleNormal,
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignLeft,
+		HeaderLeft:  agentType,
+		HeaderRight: headerRight,
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleNormal,
 	}
 	return b.View()
 }
@@ -600,16 +598,15 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:           width,
-		BubbleWidth:     bubbleW,
-		Alignment:       bubble.AlignLeft,
-		HeaderLeft:      "",
-		HeaderRight:     "",
-		Body:            body,
-		Theme:           m.Theme,
-		AccentColor:     accentColor,
-		BackgroundColor: accentColor, // use ANSI atom directly
-		SubStyle:        bubble.StyleDistinct,
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignLeft,
+		HeaderLeft:  "",
+		HeaderRight: "",
+		Body:        body,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleDistinct,
 	}
 	return b.View()
 }
@@ -637,16 +634,15 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 	paddedBody := "\n" + body + "\n"
 
 	b := bubble.Bubble{
-		Width:           width,
-		BubbleWidth:     bubbleW,
-		Alignment:       bubble.AlignLeft,
-		HeaderLeft:      "",
-		HeaderRight:     "",
-		Body:            paddedBody,
-		Theme:           m.Theme,
-		AccentColor:     accentColor,
-		BackgroundColor: accentColor, // use ANSI atom directly
-		SubStyle:        bubble.StyleDistinct,
+		Width:       width,
+		BubbleWidth: bubbleW,
+		Alignment:   bubble.AlignLeft,
+		HeaderLeft:  "",
+		HeaderRight: "",
+		Body:        paddedBody,
+		Theme:       m.Theme,
+		AccentColor: accentColor,
+		SubStyle:    bubble.StyleDistinct,
 	}
 	return b.View()
 }

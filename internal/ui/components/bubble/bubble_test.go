@@ -299,21 +299,42 @@ func TestBubble_ShowTailFalse_NoTail(t *testing.T) {
 
 func TestBubble_BackgroundColor_Applied(t *testing.T) {
 	t.Parallel()
-	// Verify that a BackgroundColor is accepted and the bubble renders without
-	// panic.  BackgroundColor is now the same ANSI atom as AccentColor (the
-	// terminal renders the user's palette color directly).
+	// BackgroundColor is accepted without panic but is currently unused —
+	// View() does not emit any background ANSI sequence.  The bubble interior
+	// remains transparent (terminal default background).
 	b := Bubble{
 		Width:           80,
 		BubbleWidth:     40,
 		Body:            "bg tinted",
 		Theme:           theme.ShellTheme(),
 		AccentColor:     lipgloss.Color("5"),
-		BackgroundColor: lipgloss.Color("5"), // same atom as accent — no 256-mapping
+		BackgroundColor: lipgloss.Color("5"), // accepted but not applied
 	}
 	out := b.View()
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "bg tinted") {
 		t.Errorf("bubble body must be visible with BackgroundColor set; got:\n%s", plain)
+	}
+	// No background ANSI escape sequence (ESC[4Xm or ESC[10Xm) must appear.
+	// Background sequences use codes 40-47, 100-107 (basic), or 48;5;N (256-color).
+	if strings.Contains(out, "\x1b[4") && strings.Contains(out, "m") {
+		// Narrow check: look for background-color-specific patterns.
+		// A background set would appear as ESC[4Nm or ESC[48;5;Nm.
+		// We scan for ESC[ followed by 4[0-9] (which covers 40-49 including 48).
+		for i := 0; i+3 < len(out); i++ {
+			if out[i] == '\x1b' && out[i+1] == '[' && out[i+2] == '4' && out[i+3] >= '0' && out[i+3] <= '9' {
+				// Verify it ends with 'm' (is an SGR sequence).
+				for j := i + 2; j < len(out) && j < i+20; j++ {
+					if out[j] == 'm' {
+						t.Errorf("View() emitted a background ANSI sequence at offset %d; want no background fill.\nOutput: %q", i, out)
+						return
+					}
+					if out[j] == '\x1b' {
+						break
+					}
+				}
+			}
+		}
 	}
 }
 

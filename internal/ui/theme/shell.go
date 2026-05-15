@@ -39,6 +39,8 @@ func ShellTheme() *Theme {
 			// Bubble borders and header text (Phase 1 chat-bubble redesign).
 			// Border uses the accent slot (magenta); distinct/subdued uses the
 			// muted slot (bright-black/grey).  Header accents mirror accent/muted.
+			// Phase 5 distinct borders: user=blue (4), agent default=red (1).
+			// Each agent profile will configure its own color; red is the fallback.
 			AtomBubbleBorder:         {kind: colorKindANSI, raw: "5"}, // magenta — agent accent
 			AtomBubbleBorderDistinct: {kind: colorKindANSI, raw: "8"}, // grey — subdued
 			AtomBubbleHeader:         {kind: colorKindANSI, raw: "5"}, // magenta
@@ -47,7 +49,7 @@ func ShellTheme() *Theme {
 
 			// Phase 5: distinct user vs agent bubble border colors.
 			AtomBubbleUserBorder:  {kind: colorKindANSI, raw: "4"}, // blue  — user bubble
-			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "5"}, // magenta — agent bubble
+			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "1"}, // red — agent bubble default
 		},
 	}
 }
