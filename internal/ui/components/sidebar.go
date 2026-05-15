@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/cfbender/hygge/internal/ui/styles"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -20,19 +21,33 @@ type SidebarMCPStatus struct {
 	ToolCount int
 }
 
-// SidebarModifiedFile is a single file entry for the "Modified Files" sidebar
-// section, carrying a path relative to the project root and git diff counts.
-type SidebarModifiedFile struct {
-	// RelPath is the file path relative to the project root.
-	RelPath string
-	// Added is the number of lines added (from git diff --numstat).
-	Added int
-	// Deleted is the number of lines deleted.
-	Deleted int
+// SidebarTodoStatus is the rendering status for a single sidebar todo row.
+// Mirrors session.TodoStatus values; defined here so the components package
+// has no import dependency on internal/session.
+type SidebarTodoStatus string
+
+// Sidebar todo status constants.
+const (
+	// SidebarTodoPending is a queued, not-yet-started item.
+	SidebarTodoPending SidebarTodoStatus = "pending"
+	// SidebarTodoInProgress is the currently-active item.
+	SidebarTodoInProgress SidebarTodoStatus = "in_progress"
+	// SidebarTodoCompleted is a finished item.
+	SidebarTodoCompleted SidebarTodoStatus = "completed"
+	// SidebarTodoCancelled is an abandoned item.
+	SidebarTodoCancelled SidebarTodoStatus = "cancelled"
+)
+
+// SidebarTodo is one row in the sidebar Todos section.
+type SidebarTodo struct {
+	// Title is the human-readable todo text.
+	Title string
+	// Status drives the leading glyph and color.
+	Status SidebarTodoStatus
 }
 
 // Sidebar renders the fixed-width right-side panel containing session
-// context, MCPs, modified files (stub), and footer identity.
+// context, MCPs, todos, and footer identity.
 //
 // Layout (top to bottom):
 //
@@ -47,8 +62,10 @@ type SidebarModifiedFile struct {
 //	  ● server-a · N tools
 //	  ○ server-b
 //
-//	Modified Files  (section header)
-//	  —  (stub; see TODO)
+//	Todos  (section header)
+//	  ✓ completed item
+//	  → in-progress item
+//	  ○ pending item
 //
 //	(flex space)
 //
@@ -76,10 +93,9 @@ type Sidebar struct {
 	// MCPs is the list of configured MCP server statuses.
 	MCPs []SidebarMCPStatus
 
-	// ModifiedFiles is the list of files touched during the session,
-	// populated by the App from TouchedFiles + git numstat.
+	// Todos is the agent's lightweight todo list for the current session.
 	// Nil or empty renders "—" (the fallback stub).
-	ModifiedFiles []SidebarModifiedFile
+	Todos []SidebarTodo
 
 	// ProjectPath is the tilde-collapsed project directory path.
 	ProjectPath string
@@ -90,13 +106,9 @@ type Sidebar struct {
 	// Version is the application version string, e.g. "v0.1.0-dev".
 	Version string
 
-	// Theme is the active theme.  Nil is accepted (plain styles used).
-	Theme *theme.Theme
-	// SurfaceBackground optionally overrides theme.AtomSidebarBg for runtime-
-	// detected shell surfaces. Set UseSurfaceBackground to force the override,
-	// including a nil/transparent value while terminal colors are still unknown.
-	SurfaceBackground    color.Color
-	UseSurfaceBackground bool
+	// Theme is the active theme. Nil is accepted (plain styles used).
+	Theme  *theme.Theme
+	Styles *styles.Styles
 	// NerdFonts controls whether to use the nerd-font git-branch glyph.
 	NerdFonts bool
 }
@@ -154,9 +166,9 @@ func (s Sidebar) View() string {
 	}
 	lines = append(lines, "")
 
-	// ── Modified Files section ─────────────────────────────────────────────
-	lines = append(lines, sectionStyle.Render(sidebarTruncate("Modified Files", innerW)))
-	lines = append(lines, s.renderModifiedFiles(innerW, mutedStyle)...)
+	// ── Todos section ─────────────────────────────────────────────────────
+	lines = append(lines, sectionStyle.Render(sidebarTruncate("Todos", innerW)))
+	lines = append(lines, s.renderTodos(innerW, mutedStyle)...)
 	lines = append(lines, "")
 
 	// ── Bottom block ──────────────────────────────────────────────────────
@@ -221,28 +233,26 @@ func (s Sidebar) renderMCP(m SidebarMCPStatus, _ int, mutedStyle lipgloss.Style)
 	return label
 }
 
-// renderModifiedFiles renders the Modified Files section body: up to 6 file
-// rows with +N/-M diff counts, then an "… +K more" row when there are more
-// than 6 files.  Returns "—" when the list is empty.
-func (s Sidebar) renderModifiedFiles(innerW int, mutedStyle lipgloss.Style) []string {
-	if len(s.ModifiedFiles) == 0 {
+// renderTodos renders the Todos section body: up to maxVisibleTodos rows
+// with a status glyph + truncated title, then an "… +K more" row when there
+// are more.  Returns "—" when the list is empty.
+func (s Sidebar) renderTodos(innerW int, mutedStyle lipgloss.Style) []string {
+	if len(s.Todos) == 0 {
 		return []string{mutedStyle.Render(sidebarTruncate("—", innerW))}
 	}
 
 	const maxVisible = 6
-	successStyle := s.atomStyle(theme.AtomSuccess)
-	errorStyle := s.atomStyle(theme.AtomError)
 
 	var lines []string
-	visible := s.ModifiedFiles
+	visible := s.Todos
 	extra := 0
 	if len(visible) > maxVisible {
 		extra = len(visible) - maxVisible
 		visible = visible[:maxVisible]
 	}
 
-	for _, f := range visible {
-		lines = append(lines, s.renderModifiedFileRow(f, innerW, mutedStyle, successStyle, errorStyle))
+	for _, t := range visible {
+		lines = append(lines, s.renderTodoRow(t, innerW, mutedStyle))
 	}
 	if extra > 0 {
 		lines = append(lines, mutedStyle.Render(sidebarTruncate(fmt.Sprintf("… +%d more", extra), innerW)))
@@ -250,69 +260,44 @@ func (s Sidebar) renderModifiedFiles(innerW int, mutedStyle lipgloss.Style) []st
 	return lines
 }
 
-// renderModifiedFileRow renders one file row: truncated relPath then +N -M
-// right-aligned within innerW.
-func (s Sidebar) renderModifiedFileRow(f SidebarModifiedFile, innerW int, mutedStyle, successStyle, errorStyle lipgloss.Style) string {
-	// Build the stat suffix: "+N -M" with colors applied.
-	addStr := fmt.Sprintf("+%d", f.Added)
-	delStr := fmt.Sprintf("-%d", f.Deleted)
-	addRendered := successStyle.Render(addStr)
-	delRendered := errorStyle.Render(delStr)
-	statPlain := addStr + " " + delStr
-	statVisualW := lipgloss.Width(statPlain)
-
-	// How much room is left for the path?
-	// 1 space separator between path and stat.
-	pathBudget := innerW - statVisualW - 1
-	if pathBudget < 1 {
-		pathBudget = 1
+// renderTodoRow renders one todo row as "<glyph> <title>" truncated to
+// innerW.  The glyph and title styling depend on the todo status.
+func (s Sidebar) renderTodoRow(t SidebarTodo, innerW int, mutedStyle lipgloss.Style) string {
+	var (
+		glyph      string
+		glyphStyle lipgloss.Style
+		titleStyle lipgloss.Style
+	)
+	switch t.Status {
+	case SidebarTodoCompleted:
+		glyph = "✓"
+		glyphStyle = s.atomStyle(theme.AtomSuccess)
+		titleStyle = mutedStyle
+	case SidebarTodoInProgress:
+		glyph = "→"
+		glyphStyle = s.atomStyle(theme.AtomSidebarAccent)
+		titleStyle = s.atomStyle(theme.AtomSidebarValue).Bold(true)
+	case SidebarTodoCancelled:
+		glyph = "✕"
+		glyphStyle = s.atomStyle(theme.AtomError)
+		titleStyle = mutedStyle
+	default: // pending or unknown
+		glyph = "○"
+		glyphStyle = mutedStyle
+		titleStyle = s.atomStyle(theme.AtomSidebarValue)
 	}
 
-	path := truncatePathLeft(f.RelPath, pathBudget)
-	pathRendered := mutedStyle.Render(path)
+	// Flatten multiline titles to a single line.
+	title := strings.ReplaceAll(t.Title, "\n", " ")
+	title = strings.Join(strings.Fields(title), " ")
 
-	// Pad the path to fill the available width so the stat column is right-aligned.
-	pathVisualW := lipgloss.Width(path)
-	padding := pathBudget - pathVisualW
-	if padding < 0 {
-		padding = 0
+	glyphW := lipgloss.Width(glyph)
+	titleBudget := innerW - glyphW - 1
+	if titleBudget < 1 {
+		return glyphStyle.Render(glyph)
 	}
-
-	return pathRendered + strings.Repeat(" ", padding) + " " + addRendered + " " + delRendered
-}
-
-// truncatePathLeft truncates a file path to fit within budget columns,
-// keeping the rightmost (most informative) portion and prepending "…/".
-// Truncation is done at path-segment boundaries so the result is always
-// a clean partial path (e.g. "…/cli/main.go" not "…/cli/main.g").
-// If the full path fits, it is returned unchanged.
-func truncatePathLeft(p string, budget int) string {
-	if budget <= 0 {
-		return "…"
-	}
-	if lipgloss.Width(p) <= budget {
-		return p
-	}
-	// Split into segments and try progressively shorter tails.
-	segments := strings.Split(p, "/")
-	for i := 1; i < len(segments); i++ {
-		tail := strings.Join(segments[i:], "/")
-		candidate := "…/" + tail
-		if lipgloss.Width(candidate) <= budget {
-			return candidate
-		}
-	}
-	// Even the last segment alone is too wide: fall back to character trim.
-	last := segments[len(segments)-1]
-	runes := []rune(last)
-	for len(runes) > 0 {
-		runes = runes[:len(runes)-1]
-		candidate := "…/" + string(runes)
-		if lipgloss.Width(candidate) <= budget {
-			return candidate
-		}
-	}
-	return "…"
+	truncated := sidebarTruncate(title, titleBudget)
+	return glyphStyle.Render(glyph) + " " + titleStyle.Render(truncated)
 }
 
 // renderBottom builds the bottom identity block lines.
@@ -418,8 +403,8 @@ func (s Sidebar) sidebarBorderFg() color.Color {
 }
 
 func (s Sidebar) sidebarBackgroundColor() color.Color {
-	if s.UseSurfaceBackground {
-		return s.SurfaceBackground
+	if s.Styles != nil {
+		return s.Styles.SidebarBg
 	}
 	if s.Theme == nil {
 		return nil

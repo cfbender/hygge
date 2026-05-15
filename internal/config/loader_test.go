@@ -408,27 +408,34 @@ func TestSourceFileOf(t *testing.T) {
 	}
 }
 
-// TestAllHaveID exercises edge cases of allHaveID.
-func TestAllHaveID(t *testing.T) {
-	if !allHaveID([]any{}) {
+// TestAllHaveMergeKey exercises edge cases of allHaveMergeKey.
+func TestAllHaveMergeKey(t *testing.T) {
+	if !allHaveMergeKey([]any{}, "id") {
 		t.Error("empty slice should be vacuously true")
 	}
 	withID := []any{
 		map[string]any{"id": "a"},
 		map[string]any{"id": "b"},
 	}
-	if !allHaveID(withID) {
+	if !allHaveMergeKey(withID, "id") {
 		t.Error("all elements have id, should return true")
+	}
+	withName := []any{
+		map[string]any{"name": "smart"},
+		map[string]any{"name": "rush"},
+	}
+	if !allHaveMergeKey(withName, "name") {
+		t.Error("all elements have name, should return true")
 	}
 	withoutID := []any{
 		map[string]any{"id": "a"},
 		map[string]any{"name": "no-id"},
 	}
-	if allHaveID(withoutID) {
+	if allHaveMergeKey(withoutID, "id") {
 		t.Error("one element missing id, should return false")
 	}
 	notMap := []any{"scalar"}
-	if allHaveID(notMap) {
+	if allHaveMergeKey(notMap, "id") {
 		t.Error("scalar element, should return false")
 	}
 }

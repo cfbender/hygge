@@ -31,7 +31,6 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
-	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +40,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/cfbender/hygge/internal/agent"
 	"github.com/cfbender/hygge/internal/bus"
@@ -53,27 +53,24 @@ import (
 	appstate "github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/components/anim"
+	"github.com/cfbender/hygge/internal/ui/styles"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-// workingPlaceholders is the pool from which a random placeholder is drawn
-// while the agent is processing a turn.  Shown in the empty textarea so the
-// user sees immediate feedback that input is blocked.
-var workingPlaceholders = []string{
-	"Thinking…",
-	"Working…",
-	"Processing…",
-	"Computing…",
-	"Reasoning…",
-}
-
 // AppOptions configures the App.
 type AppOptions struct {
-	Bus           *bus.Bus
-	Agent         *agent.Agent
-	Store         session.Store
-	Catalog       *cost.Catalog
-	Theme         *theme.Theme
+	Bus     *bus.Bus
+	Agent   *agent.Agent
+	Store   session.Store
+	Catalog *cost.Catalog
+	Theme   *theme.Theme
+	// StyleTheme selects the built-in color theme for the new styles system.
+	StyleTheme string
+
+	// Modes is the ordered list of agent modes the user can cycle through
+	// with Tab. Each mode can override the base model, reasoning, and prompt.
+	// Empty means a single implicit mode using the base [model] config.
+	Modes         []config.ModeConfig
 	SessionID     string // existing session to resume, or "" to create on first input
 	ProjectDir    string
 	ModelProvider string // "anthropic" etc, for status bar display
@@ -164,13 +161,20 @@ func New(opts AppOptions) (*App, error) {
 		nb = notify.NativeBackend{}
 	}
 
+	// Initialize the styles system from the selected theme.
+	themeStyles := styles.ThemeByName(opts.StyleTheme)
+
 	ctx, cancel := context.WithCancel(context.Background())
+	inp := components.NewInput(opts.Theme)
+	inp.SetStyles(&themeStyles)
+
 	a := &App{
 		opts:          opts,
+		styles:        &themeStyles,
 		ctx:           ctx,
 		cancel:        cancel,
 		busCh:         make(chan any, 256),
-		input:         components.NewInput(opts.Theme),
+		input:         inp,
 		spinner:       spinner.New(),
 		width:         80,
 		height:        24,
@@ -179,7 +183,7 @@ func New(opts AppOptions) (*App, error) {
 		subagentAnims: make(map[string]*anim.Anim),
 		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		touched:       appstate.NewTouchedFiles(),
-		focused:       true, // assume focused until told otherwise
+		focused:       true,
 		notifyBackend: nb,
 	}
 	a.msgViewport.MouseWheelEnabled = true
@@ -189,6 +193,7 @@ func New(opts AppOptions) (*App, error) {
 	// set, we skip the bridge so no goroutines block on a non-existent
 	// session.  The bridge is started (or re-started) inside
 	// applySwitchSession once the user picks a session.
+	a.initModes()
 	if opts.SessionID != "" || !opts.OpenSessionsModalOnStart {
 		a.bridge()
 	}
@@ -209,6 +214,27 @@ type App struct {
 	width  int
 	height int
 
+	// styles is the resolved theme style system.
+	styles *styles.Styles
+
+	// modeIndex is the index into opts.Modes for the currently active mode.
+	// -1 means no modes configured (single implicit mode).
+	modeIndex int
+
+	// toast is the active notification shown in the top-left corner.
+	toast        *toast
+	toastCounter int
+
+	// sel tracks mouse-driven text selection.
+	sel selection
+	// lastCanvas is the most recently rendered screen buffer, kept for
+	// extracting selected text on mouse release.
+	lastCanvas uv.ScreenBuffer
+
+	// layout holds the pre-computed screen regions for the current frame.
+	// Recalculated on resize and when dynamic element heights change.
+	layout uiLayout
+
 	// msgColW is the glamour word-wrap width: the inner content width of
 	// assistant bubbles. Bubbles are 80% of the left column width and lose
 	// 1 column to their side accent bar plus 2 columns to horizontal padding, so:
@@ -224,6 +250,14 @@ type App struct {
 
 	// messages is the conversation buffer.
 	messages []uiMessage
+
+	// msgCache holds the pre-rendered message list content. Invalidated when
+	// messages change (append, stream delta, resize). This avoids re-rendering
+	// all messages on every frame — only the viewport scroll position changes.
+	msgCache      string
+	msgCacheValid bool
+	msgCacheW     int // width at which cache was rendered
+	msgCacheLen   int // message count at which cache was rendered
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -391,11 +425,10 @@ type App struct {
 	// session.  Populated on bus.ToolCallCompleted for write/edit tools.
 	touched *appstate.TouchedFiles
 
-	// modifiedFilesCache is the most-recently-computed sidebar file list.
-	// Recomputed on a 2-second tick (modifiedFilesTick) to avoid running
-	// git diff --numstat on every render frame.
-	modifiedFilesCache     []components.SidebarModifiedFile
-	modifiedFilesCacheTime time.Time
+	// todosCache is the most-recently-loaded sidebar todo list for the
+	// foreground session. Refreshed on TodoChanged for the foreground
+	// session and on session switches via hydrateTodoSummary's caller.
+	todosCache []components.SidebarTodo
 
 	// sessionTitle is a cached copy of the sidebar session display title
 	// (FirstMessagePreview > Slug > first-12-chars of ID).  Populated at
@@ -443,7 +476,6 @@ func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		a.input.Textarea.Focus(),
 		a.spinner.Tick,
-		a.scheduleModifiedFilesTick(),
 		tea.RequestBackgroundColor,
 		tea.RequestForegroundColor,
 	}
@@ -635,300 +667,33 @@ func (a *App) Handle(ev any) tea.Cmd {
 
 // View renders the App.
 func (a *App) View() tea.View {
-	width := a.width
-	if width <= 0 {
-		width = 80
+	w := a.width
+	if w <= 0 {
+		w = 80
 	}
-	height := a.height
-	if height <= 0 {
-		height = 24
-	}
-
-	// ── Sidebar / left-column split ───────────────────────────────────────
-	// The sidebar is hidden on narrow terminals (< 100 columns) so the
-	// message viewport doesn't get squeezed.
-	const sidebarMinWidth = 100
-	const sidebarFixedWidth = 32
-	sidebarW := 0
-	if width >= sidebarMinWidth {
-		sidebarW = sidebarFixedWidth
-	}
-	leftW := width - sidebarW
-	// Keep msgColW in sync so ensureRenderer uses the correct word-wrap width
-	// even when View() is called before the first WindowSizeMsg.
-	// glamour word-wrap = bubble content width = 80% of leftW minus side bar + padding.
-	a.msgColW = int(float64(leftW)*0.80) - 3
-	if a.msgColW < 1 {
-		a.msgColW = 1
+	h := a.height
+	if h <= 0 {
+		h = 24
 	}
 
-	// T2.2 — breadcrumb: shown above the message list when depth > 1.
-	breadcrumb := components.Breadcrumb{
-		Segments: a.breadcrumbSegments(),
-		Width:    leftW,
-		Theme:    a.opts.Theme,
-	}.View()
+	// Recompute layout regions for the current dimensions.
+	a.layout = a.generateLayout(w, h)
+	a.msgColW = a.layout.msgContentW
 
-	// T2.2 — when the foreground is a sub-session, show that sub-session's
-	// transcript.  Otherwise show the primary message buffer.
-	visibleMessages := a.messages
-	foreID := a.foregroundID()
-	rootID := a.rootSessionID()
-	if foreID != rootID && foreID != "" {
-		if st, ok := a.subagents[foreID]; ok {
-			visibleMessages = st.Messages
-		}
-	}
+	// Render into a UV screen buffer.
+	canvas := uv.NewScreenBuffer(w, h)
+	cursor := a.Draw(canvas, canvas.Bounds())
+	a.lastCanvas = canvas
 
-	surfaceBg, useSurfaceBg := a.runtimeSurfaceBackground()
-	mlContent := components.MessageList{
-		Width:                leftW,
-		Theme:                a.opts.Theme,
-		SurfaceBackground:    surfaceBg,
-		UseSurfaceBackground: useSurfaceBg,
-		Messages:             visibleMessages,
-		Subagents:            a.subagents,
-		AnimFor:              a.subagentAnims,
-		Now:                  a.opts.Now(),
-	}.View()
-
-	in := a.input.View()
-	statusPills := components.StatusPills{
-		Width:         leftW,
-		Theme:         a.opts.Theme,
-		QueueCount:    a.queueCount,
-		QueuedPrompts: a.queuedPrompts,
-		TodoCount:     a.todoIncomplete,
-		TodoRunning:   a.busy && a.todoInProgress > 0,
-	}.View()
-	attachmentChips := a.renderAttachmentChips(leftW)
-
-	// Inline command palette: shown immediately above the input when
-	// the buffer starts with "/" and a registry is configured.
-	palette := ""
-	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
-		matches := a.paletteMatches()
-		head, _ := splitSlash(a.input.Value())
-		p := components.CommandPalette{
-			Width:           leftW - 2,
-			Theme:           a.opts.Theme,
-			Matches:         matches,
-			Highlight:       a.clampedPaletteHighlight(matches),
-			QueryAfterSlash: head,
-		}
-		palette = p.View()
-	}
-
-	// Notice line: one row immediately under the input, dimmed.
-	// Rendered only when set so the layout stays compact otherwise.
-	notice := ""
-	if a.notice != "" {
-		style := lipgloss.NewStyle()
-		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(theme.AtomMuted)
-		}
-		notice = style.Render(a.notice)
-	}
-
-	// Compaction in-flight notice: shown while Agent.Compact is running.
-	compactingNotice := ""
-	if a.compactionInFlight {
-		style := lipgloss.NewStyle()
-		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(theme.AtomMuted)
-		}
-		compactingNotice = style.Render(fmt.Sprintf("⌛  Compacting %d messages…", a.compactionInFlightCount))
-	}
-
-	// Post-compaction toast (shown for ~5s after Compact completes).
-	compactToast := ""
-	if a.compactionToast != "" {
-		style := lipgloss.NewStyle()
-		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(theme.AtomMuted)
-		}
-		compactToast = style.Render(a.compactionToast)
-	}
-
-	// Threshold-suggestion banner.
-	bannerView := components.CompactionBanner{
-		Width:   leftW,
-		Theme:   a.opts.Theme,
-		Visible: a.bannerVisible && !a.bannerDismissed,
-		Pct:     a.bannerPct,
-	}.View()
-
-	fr := components.Footer{
-		Width:          leftW,
-		Theme:          a.opts.Theme,
-		AgentType:      "General", // Phase 1 placeholder; per-agent-mode type will replace this
-		ModelName:      a.opts.ModelName,
-		Provider:       a.opts.ModelProvider,
-		ReasoningLevel: a.opts.Reasoning.Effort,
-	}.View()
-
-	// Calculate the available height for the message list viewport.
-	// chrome = all rows except the scrollable message list.
-	chrome := lipgloss.Height(in) + lipgloss.Height(fr)
-	if statusPills != "" {
-		chrome += lipgloss.Height(statusPills)
-	}
-	if attachmentChips != "" {
-		chrome += lipgloss.Height(attachmentChips)
-	}
-	if breadcrumb != "" {
-		chrome += lipgloss.Height(breadcrumb)
-	}
-	if palette != "" {
-		chrome += lipgloss.Height(palette)
-	}
-	if notice != "" {
-		chrome += lipgloss.Height(notice)
-	}
-	if compactingNotice != "" {
-		chrome += lipgloss.Height(compactingNotice)
-	}
-	if compactToast != "" {
-		chrome += lipgloss.Height(compactToast)
-	}
-	if bannerView != "" {
-		chrome += lipgloss.Height(bannerView)
-	}
-	msgListHeight := height - chrome
-	if msgListHeight < 1 {
-		msgListHeight = 1
-	}
-
-	// Update viewport dimensions and content for this render pass.
-	a.msgViewport.SetWidth(leftW)
-	a.msgViewport.SetHeight(msgListHeight)
-	a.msgViewport.SetContent(mlContent)
-
-	// Auto-scroll to bottom when the user has not manually scrolled up.
-	if !a.userScrolled {
-		a.msgViewport.GotoBottom()
-	}
-
-	body := a.msgViewport.View()
-
-	var sections []string
-	if breadcrumb != "" {
-		sections = append(sections, breadcrumb)
-	}
-	sections = append(sections, body)
-	if bannerView != "" {
-		sections = append(sections, bannerView)
-	}
-	if palette != "" {
-		sections = append(sections, palette)
-	}
-	sections = append(sections, in)
-	if attachmentChips != "" {
-		sections = append(sections, attachmentChips)
-	}
-	if statusPills != "" {
-		sections = append(sections, statusPills)
-	}
-	if compactingNotice != "" {
-		sections = append(sections, compactingNotice)
-	}
-	if compactToast != "" {
-		sections = append(sections, compactToast)
-	}
-	if notice != "" {
-		sections = append(sections, notice)
-	}
-	sections = append(sections, fr)
-	leftCol := strings.Join(sections, "\n")
-
-	// ── Right column: sidebar ──────────────────────────────────────────────
-	var main string
-	if sidebarW > 0 {
-		sb := components.Sidebar{
-			Width:                sidebarW,
-			Height:               height,
-			SessionTitle:         a.sidebarSessionTitle(),
-			UsedTokens:           a.usedTok,
-			MaxTokens:            a.maxTok,
-			PctUsed:              a.pctUsed,
-			CostUSD:              a.costDollars,
-			MCPs:                 a.opts.MCPStatuses,
-			ProjectPath:          a.collapsedProjectPath(),
-			GitBranch:            a.gitBranch(),
-			AppName:              "Hygge",
-			Version:              a.opts.Version,
-			Theme:                a.opts.Theme,
-			SurfaceBackground:    surfaceBg,
-			UseSurfaceBackground: useSurfaceBg,
-			NerdFonts:            a.opts.NerdFonts,
-			ModifiedFiles:        a.modifiedFilesCache,
-		}.View()
-		main = lipgloss.JoinHorizontal(lipgloss.Top, leftCol, sb)
-	} else {
-		main = leftCol
-	}
-
-	if top, ok := a.overlays.Top(); ok {
-		switch top {
-		case overlayPermission:
-			modal := components.PermissionModal{
-				Width:   width,
-				Height:  height,
-				Theme:   a.opts.Theme,
-				Request: a.pendingPerms[0],
-				Toast:   a.modalToast,
-			}.View()
-			v := tea.NewView(modal)
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		case overlaySessions:
-			a.sessionsModal.Width = width
-			a.sessionsModal.Height = height
-			a.sessionsModal.Now = a.opts.Now()
-			v := tea.NewView(a.sessionsModal.View())
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		case overlayCompactConfirm:
-			a.compactionModal.Width = width
-			a.compactionModal.Height = height
-			v := tea.NewView(a.compactionModal.View())
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		case overlayHelp:
-			v := tea.NewView(a.renderHelpOverlay(width, height))
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		case overlayModel:
-			a.modelModal.Width = width
-			a.modelModal.Height = height
-			v := tea.NewView(a.modelModal.View())
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		case overlayAPIKey:
-			a.apiKeyModal.Width = width
-			a.apiKeyModal.Height = height
-			v := tea.NewView(a.apiKeyModal.View())
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		case overlayTheme:
-			a.themeModal.Width = width
-			a.themeModal.Height = height
-			v := tea.NewView(a.themeModal.View())
-			v.AltScreen = true
-			v.MouseMode = tea.MouseModeCellMotion
-			return v
-		}
-	}
-
-	v := tea.NewView(main)
+	v := tea.NewView(canvas.Render())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	if a.styles != nil {
+		v.BackgroundColor = a.styles.Background
+	}
+	if cursor != nil {
+		v.Cursor = cursor
+	}
 	return v
 }
 
@@ -947,6 +712,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = m.Width
 		a.height = m.Height
+		a.invalidateMsgCache()
 		// Compute the left column width accounting for the sidebar.
 		const sidebarMinWidth = 100
 		const sidebarFixedWidth = 32
@@ -1021,13 +787,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modalToast = ""
 		return a, nil
 
+	case clearToastByID:
+		a.handleToastClear(m.id)
+		return a, nil
+
 	case clearCompactionToastMsg:
 		a.compactionToast = ""
 		return a, nil
-
-	case modifiedFilesTickMsg:
-		a.refreshModifiedFilesCache()
-		return a, a.scheduleModifiedFilesTick()
 
 	case dismissBannerMsg:
 		a.bannerDismissed = true
@@ -1087,6 +853,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.setNotice("API key saved for " + m.provider)
 
+	case modeSwitchResult:
+		if m.err != nil {
+			return a, a.showToast("Mode Switch Failed", m.err.Error())
+		}
+		return a, nil // toast already shown by cycleMode
+
 	case themeSwitchResult:
 		if m.err != nil {
 			return a, a.setNotice("theme switch failed: " + m.err.Error())
@@ -1104,10 +876,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendStarted:
 		a.busy = true
-		// Pick a random working placeholder so the user sees immediate feedback
-		// that their message is being processed, even before the first token
-		// arrives from the provider.
-		a.input.WorkingPlaceholder = workingPlaceholders[rand.IntN(len(workingPlaceholders))] //nolint:gosec
 		suffix := ""
 		if a.queueCount > 0 {
 			suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
@@ -1141,19 +909,37 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyPressMsg:
+		a.clearSelection()
 		return a.handleKey(m)
 
+	case tea.MouseClickMsg:
+		if !a.anyOverlayOpen() && m.Button == tea.MouseLeft {
+			a.handleMouseDown(m.X, m.Y)
+		}
+		return a, nil
+
+	case tea.MouseMotionMsg:
+		if !a.anyOverlayOpen() {
+			a.handleMouseMotion(m.X, m.Y)
+		}
+		return a, nil
+
+	case tea.MouseReleaseMsg:
+		if !a.anyOverlayOpen() {
+			cmd := a.handleMouseUp(m.X, m.Y)
+			return a, cmd
+		}
+		return a, nil
+
 	case tea.MouseWheelMsg:
-		// Route mouse wheel to the viewport when no modal is open.
-		// Track userScrolled when the user scrolls up.
+		// Clear selection on scroll.
+		a.clearSelection()
 		if !a.anyOverlayOpen() {
 			prevOffset := a.msgViewport.YOffset()
 			a.msgViewport, _ = a.msgViewport.Update(m)
 			if a.msgViewport.YOffset() < prevOffset {
-				// Scrolled up — pause auto-scroll.
 				a.userScrolled = true
 			} else if a.msgViewport.AtBottom() {
-				// Scrolled back to bottom — resume auto-scroll.
 				a.userScrolled = false
 			}
 		}
@@ -1273,11 +1059,12 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "tab":
-		// Tab completes the currently-highlighted command palette
-		// entry when the input is in slash mode.  Outside slash
-		// mode it falls through to the textarea (default insert).
+		// Tab completes the palette in slash mode, otherwise cycles agent modes.
 		if a.acceptPaletteCompletion() {
 			return a, nil
+		}
+		if cmd := a.cycleMode(); cmd != nil {
+			return a, cmd
 		}
 	case "esc":
 		// T2.2 — Esc pops the foreground stack when depth > 1.
@@ -1537,6 +1324,9 @@ func (a *App) ensureSession(ctx context.Context) (string, error) {
 // when the limit was hit by a sub-agent) are always routed to the
 // primary path on the assumption they describe the active focus.
 func (a *App) handleBusEvent(ev any) tea.Cmd {
+	// Invalidate the message render cache — any bus event may mutate messages.
+	a.invalidateMsgCache()
+
 	switch e := ev.(type) {
 
 	case bus.SubagentStarted:
@@ -1802,6 +1592,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		a.todoIncomplete = e.Incomplete
 		a.todoInProgress = e.InProgress
+		a.refreshTodosCache()
 
 	case bus.TurnStarted:
 		// Gate on foreground session.  Increment the in-flight turn counter
@@ -2304,53 +2095,36 @@ func (a *App) gitBranch() string {
 	return appstate.GitBranch(a.opts.ProjectDir)
 }
 
-// scheduleModifiedFilesTick returns a tea.Cmd that fires modifiedFilesTickMsg
-// after 2 seconds, driving the lazy git-numstat cache refresh.
-func (a *App) scheduleModifiedFilesTick() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return modifiedFilesTickMsg{} })
-}
-
-// refreshModifiedFilesCache runs git diff --numstat for the currently-tracked
-// touched files and updates modifiedFilesCache.  Called when the tick fires or
-// when a new file is added (the next tick will pick it up; this is only called
-// from the Update loop so it runs in the bubbletea goroutine — no lock needed
-// on the cache fields).
-func (a *App) refreshModifiedFilesCache() {
-	files := a.touched.List()
-	projectDir := a.opts.ProjectDir
-	if len(files) == 0 || projectDir == "" {
-		a.modifiedFilesCache = nil
-		a.modifiedFilesCacheTime = time.Now()
+// refreshTodosCache loads the foreground session's todo list from the store
+// into todosCache.  Called when the foreground session changes or when a
+// bus.TodoChanged event arrives for the foreground session.  Runs from the
+// Update loop in the bubbletea goroutine so no lock is needed on todosCache.
+func (a *App) refreshTodosCache() {
+	a.todosCache = nil
+	if a.opts.Store == nil {
 		return
 	}
-
-	// Filter to files inside the project dir.
-	var filtered []string
-	for _, f := range files {
-		if strings.HasPrefix(f, projectDir+"/") || f == projectDir {
-			filtered = append(filtered, f)
-		}
+	sid := a.rootSessionID()
+	if sid == "" {
+		return
 	}
-
-	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
-	defer cancel()
-	stats := appstate.NumstatForFiles(ctx, projectDir, filtered)
-
-	var out []components.SidebarModifiedFile
-	for _, f := range filtered {
-		ns := stats[f]
-		rel := strings.TrimPrefix(f, projectDir+"/")
-		if rel == "" {
-			rel = f
-		}
-		out = append(out, components.SidebarModifiedFile{
-			RelPath: rel,
-			Added:   ns.Added,
-			Deleted: ns.Deleted,
+	items, _, err := a.opts.Store.GetSessionTodos(a.ctx, sid)
+	if err != nil {
+		slog.Warn("ui: refreshTodosCache: failed to load todos",
+			"session_id", sid, "err", err)
+		return
+	}
+	if len(items) == 0 {
+		return
+	}
+	out := make([]components.SidebarTodo, 0, len(items))
+	for _, it := range items {
+		out = append(out, components.SidebarTodo{
+			Title:  it.Content,
+			Status: components.SidebarTodoStatus(it.Status),
 		})
 	}
-	a.modifiedFilesCache = out
-	a.modifiedFilesCacheTime = time.Now()
+	a.todosCache = out
 }
 
 // collapsedProjectPath returns opts.ProjectDir with the home directory
@@ -2460,8 +2234,9 @@ func (a *App) appendThinkingDelta(text string) {
 		Thinking:    text,
 		Raw:         "",
 		IsStreaming: true,
-		AgentType:   "General",
+		AgentType:   a.ActiveModeName(),
 		ModelName:   a.opts.ModelName,
+		ModeColor:   a.activeModeColor(),
 	})
 }
 
@@ -2491,8 +2266,9 @@ func (a *App) appendAssistantDelta(text string) {
 		Role:        components.RoleAssistant,
 		Raw:         text,
 		IsStreaming: true,
-		AgentType:   "General",
+		AgentType:   a.ActiveModeName(),
 		ModelName:   a.opts.ModelName,
+		ModeColor:   a.activeModeColor(),
 	})
 }
 
@@ -2766,49 +2542,6 @@ func currentThemeName(t *theme.Theme) string {
 		return "shell"
 	}
 	return t.Name
-}
-
-func (a *App) runtimeSurfaceBackground() (color.Color, bool) {
-	if currentThemeName(a.opts.Theme) != "shell" {
-		return nil, false
-	}
-	if a.terminalBg == nil {
-		// Avoid a startup flash from the static fallback before the terminal's
-		// actual background-color report arrives.
-		return nil, true
-	}
-	return blendTerminalSurface(a.terminalBg, a.terminalFg), true
-}
-
-func blendTerminalSurface(bg, fg color.Color) color.Color {
-	if bg == nil {
-		return nil
-	}
-	br, bgc, bb, _ := bg.RGBA()
-	tr, tg, tb := uint32(0xffff), uint32(0xffff), uint32(0xffff)
-	if fg != nil {
-		tr, tg, tb, _ = fg.RGBA()
-	} else if luminance16(br, bgc, bb) > 0x8000 {
-		tr, tg, tb = 0, 0, 0
-	}
-	const bgWeight = uint32(97)
-	const tintWeight = uint32(3)
-	r := colorComponent8((br*bgWeight + tr*tintWeight) / 100)
-	g := colorComponent8((bgc*bgWeight + tg*tintWeight) / 100)
-	b := colorComponent8((bb*bgWeight + tb*tintWeight) / 100)
-	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", r, g, b))
-}
-
-func colorComponent8(v uint32) uint8 {
-	v >>= 8
-	if v > 0xff {
-		return 0xff
-	}
-	return uint8(v)
-}
-
-func luminance16(r, g, b uint32) uint32 {
-	return (r*2126 + g*7152 + b*722) / 10000
 }
 
 func (a *App) switchThemeCmd(name string) tea.Cmd {
@@ -3180,6 +2913,7 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 
 	a.opts.SessionID = id
 	a.messages = nil
+	a.invalidateMsgCache()
 	a.subagents = map[string]*components.SubagentState{}
 	a.subagentAnims = map[string]*anim.Anim{}
 	a.renderer = nil
@@ -3295,21 +3029,34 @@ func (a *App) hydrateMessagesFromStore(sid string) {
 	visited := make(map[string]struct{})
 	msgs := a.hydrateSessionMessages(sid, visited)
 	a.messages = msgs
+	a.invalidateMsgCache()
 }
 
 func (a *App) hydrateTodoSummary(sid string) {
 	a.todoIncomplete = 0
 	a.todoInProgress = 0
+	a.todosCache = nil
 	if a.opts.Store == nil || sid == "" {
 		return
 	}
-	_, summary, err := a.opts.Store.GetSessionTodos(a.ctx, sid)
+	items, summary, err := a.opts.Store.GetSessionTodos(a.ctx, sid)
 	if err != nil {
 		slog.Warn("ui: hydrateTodoSummary: failed to load todos", "session_id", sid, "err", err)
 		return
 	}
 	a.todoIncomplete = summary.Incomplete
 	a.todoInProgress = summary.InProgress
+	if len(items) == 0 {
+		return
+	}
+	out := make([]components.SidebarTodo, 0, len(items))
+	for _, it := range items {
+		out = append(out, components.SidebarTodo{
+			Title:  it.Content,
+			Status: components.SidebarTodoStatus(it.Status),
+		})
+	}
+	a.todosCache = out
 }
 
 // hydrateSessionMessages is the recursive implementation shared by
@@ -3390,8 +3137,9 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 		for i := range entries {
 			switch entries[i].Role {
 			case components.RoleAssistant:
-				entries[i].AgentType = "General"
+				entries[i].AgentType = a.ActiveModeName()
 				entries[i].ModelName = a.opts.ModelName
+				entries[i].ModeColor = a.activeModeColor()
 				if entries[i].Raw != "" {
 					entries[i].FinalMarkdown = renderMarkdown(a.ensureRenderer(), entries[i].Raw)
 				}

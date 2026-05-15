@@ -27,9 +27,11 @@ const unsetSentinel = "__hygge_unset__"
 //   - Maps: merged recursively by key.  Keys only in dst are kept.
 //   - Arrays of scalars: replaced wholesale by src (last writer wins).
 //     This is intentional and deliberate.
-//   - Arrays of tables: if every element has an "id" field, merged by id
-//     (higher-precedence wins per-id; all ids from both layers are kept).
-//     If any element lacks an "id", the array is replaced wholesale and
+//   - Arrays of tables: if every element has a stable merge key, merged by
+//     that key (higher-precedence wins per key; all keys from both layers are
+//     kept). The default merge key is "id"; config-schema-specific arrays may
+//     use another key, e.g. modes merge by "name".
+//     If any element lacks the merge key, the array is replaced wholesale and
 //     a slog.Warn is emitted.
 //   - Unset sentinel ("__hygge_unset__"): removes the key from dst.
 func deepMergeInto(dst, src map[string]any, prov Provenance, source Source) error {
@@ -110,61 +112,69 @@ func deepMerge(dst, src map[string]any, prov Provenance, source Source, prefix s
 }
 
 // mergeArrays handles array merging:
-//   - If every element in both slices is a map[string]any with an "id" key,
-//     the arrays are merged by id.
+//   - If every element in both slices is a map[string]any with the array's
+//     merge key, the arrays are merged by that key.
 //   - Otherwise, src replaces dst wholesale and a warning is logged.
 func mergeArrays(dst, src []any, prov Provenance, source Source, key string) ([]any, error) {
-	if allHaveID(dst) && allHaveID(src) {
-		return mergeByID(dst, src, prov, source, key)
+	mergeKey := arrayMergeKey(key)
+	if allHaveMergeKey(dst, mergeKey) && allHaveMergeKey(src, mergeKey) {
+		return mergeByKey(dst, src, prov, source, key, mergeKey)
 	}
 
 	// Wholesale replacement.
 	if len(dst) > 0 {
-		slog.Warn("config: array replaced wholesale (elements lack 'id' field)",
-			"key", key, "source", source.File)
+		slog.Warn("config: array replaced wholesale (elements lack merge key field)",
+			"key", key, "merge_key", mergeKey, "source", source.File)
 	}
 	prov[key] = append(prov[key], source)
 	return src, nil
 }
 
-// allHaveID returns true if every element in slc is a map[string]any that
-// contains an "id" key.
-func allHaveID(slc []any) bool {
+func arrayMergeKey(key string) string {
+	if key == "modes" {
+		return "name"
+	}
+	return "id"
+}
+
+// allHaveMergeKey returns true if every element in slc is a map[string]any that
+// contains mergeKey.
+func allHaveMergeKey(slc []any, mergeKey string) bool {
 	if len(slc) == 0 {
-		return true // vacuously — empty arrays always "have ids"
+		return true // vacuously — empty arrays always "have" the merge key
 	}
 	for _, v := range slc {
 		m, ok := v.(map[string]any)
 		if !ok {
 			return false
 		}
-		if _, has := m["id"]; !has {
+		if _, has := m[mergeKey]; !has {
 			return false
 		}
 	}
 	return true
 }
 
-// mergeByID merges two arrays of tables using the "id" field as a stable
-// key.  Elements from dst that are not overridden by src are kept.
-// Elements in src not in dst are appended.
-func mergeByID(dst, src []any, prov Provenance, source Source, key string) ([]any, error) {
-	byID := make(map[any]map[string]any)
+// mergeByKey merges two arrays of tables using mergeKey as a stable key.
+// Elements from dst that are not overridden by src are kept. Elements in src
+// not in dst are appended.
+func mergeByKey(dst, src []any, prov Provenance, source Source, key, mergeKey string) ([]any, error) {
+	byKey := make(map[any]map[string]any)
 	order := make([]any, 0, len(dst))
 
 	for _, elem := range dst {
 		m := elem.(map[string]any)
-		id := m["id"]
-		byID[fmt.Sprint(id)] = m
-		order = append(order, fmt.Sprint(id))
+		mergeValue := fmt.Sprint(m[mergeKey])
+		byKey[mergeValue] = m
+		order = append(order, mergeValue)
 	}
 
 	for _, elem := range src {
 		m := elem.(map[string]any)
-		idStr := fmt.Sprint(m["id"])
-		existing, exists := byID[idStr]
+		mergeValue := fmt.Sprint(m[mergeKey])
+		existing, exists := byKey[mergeValue]
 		if exists {
-			subKey := key + "." + idStr
+			subKey := key + "." + mergeValue
 			subProv := make(Provenance)
 			if err := deepMerge(existing, m, subProv, source, subKey); err != nil {
 				return nil, err
@@ -173,20 +183,20 @@ func mergeByID(dst, src []any, prov Provenance, source Source, key string) ([]an
 				prov[pk] = append(prov[pk], ps...)
 			}
 		} else {
-			byID[idStr] = m
-			order = append(order, idStr)
-			recordLeafProvenance(prov, m, source, key+"."+idStr)
+			byKey[mergeValue] = m
+			order = append(order, mergeValue)
+			recordLeafProvenance(prov, m, source, key+"."+mergeValue)
 		}
 	}
 
 	result := make([]any, 0, len(order))
 	seen := make(map[any]bool)
-	for _, id := range order {
-		if seen[id] {
+	for _, mergeValue := range order {
+		if seen[mergeValue] {
 			continue
 		}
-		seen[id] = true
-		result = append(result, byID[fmt.Sprint(id)])
+		seen[mergeValue] = true
+		result = append(result, byKey[fmt.Sprint(mergeValue)])
 	}
 	return result, nil
 }

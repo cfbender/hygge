@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
+
+	"github.com/cfbender/hygge/internal/config"
 )
 
 // builtinGeneral is the default sub-agent type.  It is always present in
@@ -171,8 +173,9 @@ func loadOneFile(byName map[string]Type, path, source string) {
 		return
 	}
 
+	baseDir := filepath.Dir(path)
 	for name, entry := range schema.Subagents {
-		t, err := normalizeEntry(name, entry, source)
+		t, err := normalizeEntry(name, entry, source, baseDir)
 		if err != nil {
 			slog.Warn("subagent: skipping entry", "path", path, "name", name, "err", err)
 			continue
@@ -186,7 +189,7 @@ func loadOneFile(byName map[string]Type, path, source string) {
 }
 
 // normalizeEntry validates one TOML entry and returns a Type.
-func normalizeEntry(name string, e tomlEntry, source string) (Type, error) {
+func normalizeEntry(name string, e tomlEntry, source, baseDir string) (Type, error) {
 	name = strings.TrimSpace(name)
 	if !nameRe.MatchString(name) {
 		return Type{}, fmt.Errorf("invalid name %q (must match [a-z][a-z0-9_]*)", name)
@@ -195,7 +198,7 @@ func normalizeEntry(name string, e tomlEntry, source string) (Type, error) {
 	if desc == "" {
 		return Type{}, fmt.Errorf("description is required")
 	}
-	prompt := strings.TrimSpace(e.Prompt)
+	prompt := config.ResolvePrompt(e.Prompt, baseDir)
 	if prompt == "" {
 		return Type{}, fmt.Errorf("prompt is required")
 	}

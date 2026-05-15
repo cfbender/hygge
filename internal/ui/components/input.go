@@ -1,100 +1,150 @@
 package components
 
 import (
+	"math/rand/v2"
+
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
 
+	"github.com/cfbender/hygge/internal/ui/styles"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-// Input wraps a bubbles textarea.Model with theming.
+const (
+	inputMinHeight = 3
+	inputMaxHeight = 15
+)
+
+// readyPlaceholders are shown when the agent is idle.
+var readyPlaceholders = []string{
+	"Ready!",
+	"Ready...",
+	"Ready?",
+	"Ready for instructions",
+	"What's on your mind?",
+	"Listening...",
+}
+
+// workingPlaceholders are shown while the agent is processing.
+var workingPlaceholders = []string{
+	"Thinking…",
+	"Working…",
+	"Brrrrr…",
+	"Prrrrrrrr…",
+	"Processing…",
+	"Reasoning…",
+}
+
+// Input wraps a bubbles textarea with dynamic height, custom prompts,
+// and theme-aware styling.
 //
-// The contract for v0.1:
-//   - Enter submits (handled by the App, NOT the textarea).
-//   - Alt+Enter inserts a newline (the textarea's default for KeyAltEnter).
-//   - The App routes KeyEnter to a submit path before forwarding the message
-//     to the textarea, so plain Enter never adds a newline.
-//
-// Other keybinds (Ctrl+C, Ctrl+L) are also handled by the App.
+// Keybind contract:
+//   - Enter submits (handled by the App, not the textarea).
+//   - Alt+Enter inserts a newline.
+//   - Ctrl+C, Ctrl+L handled by the App.
 type Input struct {
 	Textarea textarea.Model
-	Theme    *theme.Theme
-	// Focused controls the border color: accent when true, muted when false.
-	Focused bool
-	// ReadyPlaceholder is shown when the agent is idle.
-	ReadyPlaceholder string
-	// WorkingPlaceholder is shown while the agent is processing a turn.
-	WorkingPlaceholder string
+	Styles   *styles.Styles
+	Theme    *theme.Theme // kept for gradual migration
+	Focused  bool
+	prevH    int // track height changes for layout recalc
 }
 
-// NewInput builds a configured textarea wrapped in Input.
+// NewInput builds a configured textarea with dynamic height and custom prompts.
 func NewInput(t *theme.Theme) *Input {
 	ta := textarea.New()
-	ta.Placeholder = "Type a message…"
+	ta.Placeholder = randomPlaceholder(readyPlaceholders)
 	ta.ShowLineNumbers = false
-	ta.CharLimit = 0 // unlimited
-	ta.SetHeight(3)
-	// Match the rest of the chrome via theme atoms.
+	ta.CharLimit = 0
+
+	// Dynamic height: grows with content, bounded.
+	ta.DynamicHeight = true
+	ta.MinHeight = inputMinHeight
+	ta.MaxHeight = inputMaxHeight
+	ta.SetHeight(inputMinHeight)
+
+	// Apply theme-aware styles.
 	if t != nil {
 		muted := t.Style(theme.AtomMuted)
-		styles := ta.Styles()
-		styles.Focused.Placeholder = muted
-		styles.Blurred.Placeholder = muted
-		ta.SetStyles(styles)
+		s := ta.Styles()
+		s.Focused.Placeholder = muted
+		s.Blurred.Placeholder = muted
+		ta.SetStyles(s)
 	}
+
 	ta.Focus()
+
 	return &Input{
-		Textarea:         ta,
-		Theme:            t,
-		Focused:          true,
-		ReadyPlaceholder: "Type a message…",
+		Textarea: ta,
+		Theme:    t,
+		Focused:  true,
+		prevH:    inputMinHeight,
 	}
 }
 
-// SetBusy switches the textarea placeholder based on whether the agent is
-// currently processing a turn.  When busy is true, WorkingPlaceholder is
-// used (if non-empty), with suffix appended (e.g. " (2 queued)"); when false
-// the placeholder reverts to ReadyPlaceholder.
-// The placeholder is only visible when the textarea is empty, so this has no
-// visual effect while the user is typing.
+// SetStyles applies the theme style system.
+func (i *Input) SetStyles(s *styles.Styles) {
+	i.Styles = s
+	ta := i.Textarea.Styles()
+	ta.Focused = s.Editor.Textarea.Focused
+	ta.Blurred = s.Editor.Textarea.Blurred
+	ta.Cursor = s.Editor.Textarea.Cursor
+	i.Textarea.SetStyles(ta)
+}
+
+// SetBusy switches the placeholder based on agent state.
 func (i *Input) SetBusy(busy bool, suffix string) {
 	if busy {
-		if i.WorkingPlaceholder != "" {
-			i.Textarea.Placeholder = i.WorkingPlaceholder + suffix
-		}
+		i.Textarea.Placeholder = randomPlaceholder(workingPlaceholders) + suffix
 	} else {
-		i.Textarea.Placeholder = i.ReadyPlaceholder
+		i.Textarea.Placeholder = randomPlaceholder(readyPlaceholders)
 	}
 }
 
-// SetWidth resizes the underlying textarea.  The outer border adds 2 columns
-// per side, so the textarea itself is narrowed by 2 (border chars) to keep
-// the total within the requested width.
+// SetWidth resizes the underlying textarea, accounting for border and padding.
 func (i *Input) SetWidth(w int) {
-	inner := w - 2 // subtract left+right border columns
+	frame := 0
+	if i.Styles != nil {
+		frame = 4 // border (1) + padding (1) on each side
+	}
+	inner := w - frame
 	if inner < 1 {
 		inner = 1
 	}
 	i.Textarea.SetWidth(inner)
 }
 
-// View renders the textarea wrapped in a rounded border whose color reflects
-// focus state: accent (AtomBubbleBorder) when focused, muted when blurred.
-func (i *Input) View() string {
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1)
-	if i.Theme != nil {
-		var borderAtom theme.Atom
-		if i.Focused {
-			borderAtom = theme.AtomBubbleBorder
-		} else {
-			borderAtom = theme.AtomMuted
-		}
-		bs := i.Theme.Style(borderAtom)
-		style = style.BorderForeground(bs.GetForeground())
+// HeightChanged reports whether the textarea height changed since the last
+// check. Call this after Update to know if layout needs recalculation.
+func (i *Input) HeightChanged() bool {
+	h := i.Textarea.Height()
+	if h != i.prevH {
+		i.prevH = h
+		return true
 	}
-	return style.Render(i.Textarea.View())
+	return false
+}
+
+// View renders the input area with a themed border.
+func (i *Input) View() string {
+	content := i.Textarea.View()
+	if i.Styles == nil {
+		return content
+	}
+
+	style := lipgloss.NewStyle().Padding(0, 1)
+
+	if i.Focused {
+		style = style.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(i.Styles.Dialog.TitleGradFrom)
+	} else {
+		style = style.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(i.Styles.Section.Line.GetForeground())
+	}
+
+	return style.Render(content)
 }
 
 // Value returns the current input text.
@@ -102,3 +152,7 @@ func (i *Input) Value() string { return i.Textarea.Value() }
 
 // Reset clears the input.
 func (i *Input) Reset() { i.Textarea.Reset() }
+
+func randomPlaceholder(pool []string) string {
+	return pool[rand.IntN(len(pool))]
+}

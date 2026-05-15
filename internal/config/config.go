@@ -69,6 +69,12 @@ type Config struct {
 	Session       SessionConfig       `mapstructure:"session"`
 	Catalog       CatalogConfig       `mapstructure:"catalog"`
 	Notifications NotificationsConfig `mapstructure:"notifications"`
+	// Modes defines named agent modes, each with optional model/reasoning
+	// overrides and a system prompt. Users cycle modes with Tab in the TUI.
+	// The first mode is the default; if empty, a single mode using the
+	// [model] section is synthesized at load time.
+	Modes []ModeConfig `mapstructure:"modes"`
+
 	// Plugins holds plugin source and per-plugin configuration.
 	// Sources is the list of plugin source URIs declared in [plugins].sources.
 	// PluginSettings maps plugin names to their [plugins.<name>] config tables.
@@ -201,6 +207,29 @@ type ModelConfig struct {
 	// adapters; only the discrete effort knob affects their wire
 	// format.
 	ReasoningBudget int `mapstructure:"reasoning_budget"`
+}
+
+// ModeConfig defines a named agent mode. Each mode can override the
+// base model, reasoning level, and system prompt. Modes are declared
+// as [[modes]] array-of-tables in TOML.
+type ModeConfig struct {
+	// Name is the display name for the mode (e.g. "smart", "rush", "deep").
+	Name string `mapstructure:"name"`
+	// Provider overrides model.provider for this mode. Empty inherits base.
+	Provider string `mapstructure:"provider"`
+	// Model overrides model.name for this mode. Empty inherits base.
+	Model string `mapstructure:"model"`
+	// Reasoning overrides model.reasoning for this mode. Empty inherits base.
+	Reasoning string `mapstructure:"reasoning"`
+	// Prompt is an optional system prompt appended to the base system prompt
+	// when this mode is active. Use "file:path" to read from a file (relative
+	// paths resolve against the config directory, ~/... is expanded).
+	Prompt string `mapstructure:"prompt"`
+	// Description is a short human-readable description shown in the mode picker.
+	Description string `mapstructure:"description"`
+	// Color is the hex accent color for bubbles rendered in this mode.
+	// Empty uses the theme default.
+	Color string `mapstructure:"color"`
 }
 
 // PermissionConfig controls which operations require user approval.

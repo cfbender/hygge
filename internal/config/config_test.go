@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,6 +180,71 @@ name = "claude-opus-4-5"
 	}
 
 	_ = prov
+}
+
+func TestLoad_ProfileModesMergeByName(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "work-or"
+
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	profilesDir := filepath.Join(cfgDir, "profiles")
+
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[[modes]]
+name = "smart"
+description = "Balanced — routes work, delegates to subagents"
+reasoning = "medium"
+prompt = "file:prompts/smart.md"
+
+[[modes]]
+name = "rush"
+description = "Fast local edits, minimal verification"
+prompt = "file:prompts/rush.md"
+`)
+
+	writeTOML(t, filepath.Join(profilesDir, "work-or.toml"), `
+[[modes]]
+name = "smart"
+provider = "openrouter"
+model = "anthropic/claude-opus-4-7"
+
+[[modes]]
+name = "rush"
+provider = "openrouter"
+model = "anthropic/claude-haiku-4-5"
+`)
+
+	var logs bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if strings.Contains(logs.String(), "array replaced wholesale") {
+		t.Fatalf("modes should merge by name without replacement warning, logs=%q", logs.String())
+	}
+	if len(cfg.Modes) != 2 {
+		t.Fatalf("Modes length: got %d, want 2", len(cfg.Modes))
+	}
+	if got := cfg.Modes[0].Name; got != "smart" {
+		t.Fatalf("Modes[0].Name: got %q, want smart", got)
+	}
+	if got := cfg.Modes[0].Prompt; got != "file:prompts/smart.md" {
+		t.Errorf("smart prompt should survive profile merge, got %q", got)
+	}
+	if got := cfg.Modes[0].Description; got != "Balanced — routes work, delegates to subagents" {
+		t.Errorf("smart description should survive profile merge, got %q", got)
+	}
+	if got := cfg.Modes[0].Provider; got != "openrouter" {
+		t.Errorf("smart provider: got %q, want openrouter", got)
+	}
+	if got := cfg.Modes[0].Model; got != "anthropic/claude-opus-4-7" {
+		t.Errorf("smart model: got %q", got)
+	}
 }
 
 func TestLoad_ProfileCycleDetected(t *testing.T) {

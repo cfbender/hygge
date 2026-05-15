@@ -16,6 +16,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/components/bubble"
+	"github.com/cfbender/hygge/internal/ui/styles"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -121,6 +122,10 @@ type UIMessage struct {
 
 	// ModelName is the model name for the assistant bubble header-right metadata.
 	ModelName string
+
+	// ModeColor is the per-mode accent color for the bubble border/header.
+	// When non-nil, overrides the theme's default agent border color.
+	ModeColor color.Color
 }
 
 // MessageList renders the conversation history.
@@ -136,12 +141,8 @@ type MessageList struct {
 	Width         int
 	CollapseLines int // 0 → 8 (tool result collapse threshold)
 	Theme         *theme.Theme
-	// SurfaceBackground optionally overrides theme.AtomBubbleBg for runtime-
-	// detected shell surfaces. Set UseSurfaceBackground to force the override,
-	// including a nil/transparent value while terminal colors are still unknown.
-	SurfaceBackground    color.Color
-	UseSurfaceBackground bool
-	Messages             []UIMessage
+	Styles        *styles.Styles
+	Messages      []UIMessage
 	Subagents            map[string]*SubagentState
 	// AnimFor, when non-nil, maps SubSessionID to the running Anim for
 	// that sub-agent.  Passed through to SubagentBlock so the running
@@ -484,13 +485,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 	}
 	headerRight := strings.Join(headerRightParts, " · ")
 
-	var accentColor color.Color
-	if m.Theme != nil {
-		fg := m.Theme.Style(theme.AtomBubbleAgentBorder).GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
-			accentColor = fg
-		}
-	}
+	accentColor := m.agentAccentColor(msg)
 
 	b := bubble.Bubble{
 		Width:           width,
@@ -776,9 +771,24 @@ func (m MessageList) gutter(msg UIMessage) string {
 	return style.Render(label)
 }
 
+// agentAccentColor returns the accent color for an assistant bubble.
+// Per-mode color takes priority, then falls back to the theme atom.
+func (m MessageList) agentAccentColor(msg UIMessage) color.Color {
+	if msg.ModeColor != nil {
+		return msg.ModeColor
+	}
+	if m.Theme != nil {
+		fg := m.Theme.Style(theme.AtomBubbleAgentBorder).GetForeground()
+		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
+			return fg
+		}
+	}
+	return nil
+}
+
 func (m MessageList) bubbleBackgroundColor() color.Color {
-	if m.UseSurfaceBackground {
-		return m.SurfaceBackground
+	if m.Styles != nil {
+		return m.Styles.BubbleBg
 	}
 	if m.Theme == nil {
 		return nil
