@@ -76,9 +76,14 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [ ] **Glamour transitive `lipgloss` v1 dep**
   `github.com/charmbracelet/glamour` still pulls in `github.com/charmbracelet/lipgloss` v1 indirectly. Will linger until glamour ships a `lipgloss/v2`-compatible release. Track upstream.
 
+## Known issues — follow-up slices
+
+- [ ] **OSC probe leak** — The TUI emits OSC probes that are not fully reclaimed on exit. Needs investigation into bubbletea v2 internals (alt-screen teardown sequence). Separate slice.
+
+- [ ] **UI hang between Enter and modal (agent-loop goroutine)** — The agent loop currently runs synchronously relative to the bubbletea event loop. Heavy inference turns can hang the UI between when the user presses Enter and when a modal appears. Fix: run the agent loop in its own goroutine with a command-channel bridge. Architectural change; separate slice.
+
 ---
 
-## Recently completed (since this file was created)
 
 - ✅ Modified Files in sidebar — real data with git numstat (commit `deae712`)
 - ✅ Right-side sidebar replaces header bar (commit `f4c7dd0`)
