@@ -20,7 +20,7 @@ import (
 // a discovered TOML file.
 var builtinGeneral = Type{
 	Name: "general",
-	Description: "General-purpose sub-agent with access to all built-in tools (except task). " +
+	Description: "General-purpose sub-agent with access to all built-in tools (except subagent). " +
 		"Use for self-contained missions that should not pollute the main context.",
 	SystemPrompt: `You are a general-purpose sub-agent of hygge.  You are operating in isolation:
 your conversation is invisible to the user and to the parent agent.  Complete the
@@ -36,7 +36,7 @@ you have.`,
 // Mirrors the tool-name convention.
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// Registry is the resolved set of [Type]s available to the `task` tool.
+// Registry is the resolved set of [Type]s available to the `subagent` tool.
 // Construct via [Load]; the zero value is not usable.
 type Registry struct {
 	types  []Type
@@ -44,7 +44,7 @@ type Registry struct {
 
 	// defaultTools is the tool-name allowlist applied when a Type's
 	// Tools is empty.  Resolved at Load time from the parent's tool
-	// registry (minus `task`).
+	// registry (minus `subagent`).
 	defaultTools []string
 }
 
@@ -64,7 +64,7 @@ type LoadOptions struct {
 
 	// DefaultTools is the tool-name allowlist applied when a Type's
 	// Tools is empty.  Callers pass the parent's built-in tool list
-	// MINUS "task" so sub-agents inherit the orchestrator's full
+	// MINUS "subagent" so sub-agents inherit the orchestrator's full
 	// toolbox by default.
 	DefaultTools []string
 }
@@ -202,7 +202,7 @@ func normalizeEntry(name string, e tomlEntry, source, baseDir string) (Type, err
 	if prompt == "" {
 		return Type{}, fmt.Errorf("prompt is required")
 	}
-	// Filter `task` out of the tools list eagerly -- defence in depth
+	// Filter `subagent` out of the tools list eagerly -- defence in depth
 	// alongside the runtime's own guard.  Warn so the user knows their
 	// TOML had no effect.
 	var tools []string
@@ -211,8 +211,8 @@ func normalizeEntry(name string, e tomlEntry, source, baseDir string) (Type, err
 		if t == "" {
 			continue
 		}
-		if t == "task" {
-			slog.Warn("subagent: task tool ignored in tools list (recursion guard)",
+		if t == "subagent" {
+			slog.Warn("subagent: subagent tool ignored in tools list (recursion guard)",
 				"type", name)
 			continue
 		}

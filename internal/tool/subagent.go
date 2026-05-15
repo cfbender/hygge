@@ -12,14 +12,14 @@ import (
 	"github.com/cfbender/hygge/internal/provider"
 )
 
-// SubagentRunner is the interface the `task` tool needs from the
+// SubagentRunner is the interface the `subagent` tool needs from the
 // sub-agent runtime.  Defining it here (rather than importing
 // internal/subagent) keeps the tool package free of an agent / store
 // dependency loop: internal/subagent imports internal/tool to build a
 // per-call tool registry, so the reverse direction must be cut.
 //
 // internal/subagent.Runner satisfies this interface; cmd/hygge/cli
-// wires the concrete runner into [NewTaskTool] at bootstrap.
+// wires the concrete runner into [NewSubagentTool] at bootstrap.
 type SubagentRunner interface {
 	// Run executes one sub-agent invocation synchronously and
 	// returns the result.  See internal/subagent.Runner.Run for full
@@ -33,7 +33,7 @@ type SubagentRunner interface {
 }
 
 // SubagentType is the tool-facing view of an internal/subagent.Type.
-// We mirror only the fields the task tool needs for its input schema.
+// We mirror only the fields the subagent tool needs for its input schema.
 type SubagentType struct {
 	Name        string
 	Description string
@@ -51,7 +51,7 @@ type SubagentRunInput struct {
 }
 
 // SubagentResult mirrors internal/subagent.Result with the subset of
-// fields the task tool surfaces in its Metadata.
+// fields the subagent tool surfaces in its Metadata.
 type SubagentResult struct {
 	SessionID    string
 	FinalText    string
@@ -61,7 +61,7 @@ type SubagentResult struct {
 	HitIterLimit bool
 }
 
-// TaskTool dispatches a mission to a registered sub-agent type.  The
+// SubagentTool dispatches a mission to a registered sub-agent type.  The
 // tool blocks until the sub-agent finishes (success, iteration-limit
 // abort, or hard error) and returns the sub-agent's final assistant
 // text as the tool result.
@@ -69,48 +69,48 @@ type SubagentResult struct {
 // The tool is registered ONLY in the orchestrator's tool registry.
 // Sub-agents NEVER see it -- the subagent runtime strips it from
 // every sub-agent's tool set regardless of TOML config.  This is the
-// recursion guard that prevents a `task` tool from launching another
-// `task` tool.
+// recursion guard that prevents a `subagent` tool from launching another
+// `subagent` tool.
 //
 // Permission category: [permission.CategoryAgent].  One ask covers
 // the entire sub-agent run; individual tools the sub-agent invokes
 // still go through their own permission gate (same engine).
-type TaskTool struct {
+type SubagentTool struct {
 	runner SubagentRunner
 }
 
-// NewTaskTool builds a TaskTool backed by runner.  runner must not be
+// NewSubagentTool builds a SubagentTool backed by runner.  runner must not be
 // nil; callers building the orchestrator's tool set are responsible
 // for omitting the tool entirely when no runner is configured.
-func NewTaskTool(runner SubagentRunner) *TaskTool {
-	return &TaskTool{runner: runner}
+func NewSubagentTool(runner SubagentRunner) *SubagentTool {
+	return &SubagentTool{runner: runner}
 }
 
 // Name implements [Tool].
-func (t *TaskTool) Name() string { return "task" }
+func (t *SubagentTool) Name() string { return "subagent" }
 
 // Parallelizable implements [Tool].  Each sub-agent runs in an isolated
-// session with its own message history, so concurrent task calls are safe:
+// session with its own message history, so concurrent subagent calls are safe:
 // they do not share per-turn state within the parent session.
 //
 // Note: tools invoked INSIDE a sub-agent still go through their own
 // permission checks, and sub-agents share the parent's permission engine.
 // The engine's session cache is mutex-guarded, so concurrent sub-agent
 // dispatches are safe.
-func (t *TaskTool) Parallelizable() bool { return true }
+func (t *SubagentTool) Parallelizable() bool { return true }
 
 // Description implements [Tool].
-func (t *TaskTool) Description() string {
+func (t *SubagentTool) Description() string {
 	return "Dispatch a mission to a sub-agent that runs in isolation and returns a single " +
 		"summary message. Use this for self-contained work (codebase searches, focused " +
 		"refactors, documentation lookups) that would otherwise pollute the main context. " +
-		"Sub-agents cannot recursively invoke `task`."
+		"Sub-agents cannot recursively invoke `subagent`."
 }
 
 // InputSchema implements [Tool].  The schema is built lazily so newly
 // loaded TOML types (if any) become visible to the model on the next
 // request.
-func (t *TaskTool) InputSchema() map[string]any {
+func (t *SubagentTool) InputSchema() map[string]any {
 	var types []SubagentType
 	if t.runner != nil {
 		types = t.runner.Types()
@@ -156,8 +156,8 @@ func (t *TaskTool) InputSchema() map[string]any {
 	}
 }
 
-// taskArgs is the decoded shape of the model's tool input.
-type taskArgs struct {
+// subagentArgs is the decoded shape of the model's tool input.
+type subagentArgs struct {
 	SubagentType string `json:"subagent_type"`
 	Description  string `json:"description"`
 	Prompt       string `json:"prompt"`
@@ -174,12 +174,12 @@ type taskArgs struct {
 //   - Iteration limit -> non-error Result with hit_iter_limit=true and
 //     the agent's abort note as the Content.
 //   - Success -> the sub-agent's final assistant text as Content.
-func (t *TaskTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecContext) (Result, error) {
+func (t *SubagentTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecContext) (Result, error) {
 	if t.runner == nil {
 		return Result{}, newExecutionFailed("subagent runner not configured", nil)
 	}
 
-	var a taskArgs
+	var a subagentArgs
 	if err := decodeArgs(raw, &a); err != nil {
 		return Result{}, err
 	}

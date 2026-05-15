@@ -538,7 +538,7 @@ func TestToolGroupBubble_InterleavedWithTask(t *testing.T) {
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "main.go"},
 			{Role: RoleTool, ToolName: "grep", Target: "TODO"},
-			{Role: RoleTool, ToolName: "task", Target: "deploy", SubagentID: "sub-1"},
+			{Role: RoleTool, ToolName: "subagent", Target: "deploy", SubagentID: "sub-1"},
 			{Role: RoleTool, ToolName: "bash", Target: "go vet ./..."},
 		},
 		Subagents: map[string]*SubagentState{"sub-1": st},
@@ -587,7 +587,7 @@ func TestSubagentBubbleWrap(t *testing.T) {
 		Theme: theme.ShellTheme(),
 		Now:   now,
 		Messages: []UIMessage{
-			{Role: RoleTool, ToolName: "task", Target: "find LICENSE", SubagentID: "sub-1"},
+			{Role: RoleTool, ToolName: "subagent", Target: "find LICENSE", SubagentID: "sub-1"},
 		},
 		Subagents: map[string]*SubagentState{"sub-1": st},
 	}

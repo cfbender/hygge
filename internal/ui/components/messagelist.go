@@ -267,16 +267,16 @@ func (m MessageList) View() string {
 
 // buildChunks walks m.Messages and produces a slice of renderChunks.
 // Consecutive non-task RoleTool entries are folded into a chunkToolGroup.
-// task tool calls and all other roles become chunkSingle entries.
+// subagent tool calls and all other roles become chunkSingle entries.
 func (m MessageList) buildChunks() []renderChunk {
 	chunks := make([]renderChunk, 0, len(m.Messages))
 	i := 0
 	for i < len(m.Messages) {
 		msg := m.Messages[i]
-		if isNonTaskTool(msg) {
-			// Collect run of consecutive non-task tool calls.
+		if isNonSubagentTool(msg) {
+			// Collect run of consecutive non-subagent tool calls.
 			j := i + 1
-			for j < len(m.Messages) && isNonTaskTool(m.Messages[j]) {
+			for j < len(m.Messages) && isNonSubagentTool(m.Messages[j]) {
 				j++
 			}
 			chunks = append(chunks, renderChunk{
@@ -295,9 +295,9 @@ func (m MessageList) buildChunks() []renderChunk {
 	return chunks
 }
 
-// isNonTaskTool reports whether msg is a RoleTool entry that is NOT "task".
-func isNonTaskTool(msg UIMessage) bool {
-	return msg.Role == RoleTool && msg.ToolName != "task"
+// isNonSubagentTool reports whether msg is a RoleTool entry that is NOT "subagent".
+func isNonSubagentTool(msg UIMessage) bool {
+	return msg.Role == RoleTool && msg.ToolName != "subagent"
 }
 
 // renderOne renders a single message with its gutter, plus any nested
@@ -319,9 +319,9 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 		return m.renderMarker(msg)
 	}
 
-	// task tool call with a bound subagent: wrap the SubagentBlock in a
-	// distinct bubble container.  No "▌tool: task" gutter row.
-	if msg.Role == RoleTool && msg.ToolName == "task" && msg.SubagentID != "" {
+	// subagent tool call with a bound subagent: wrap the SubagentBlock in a
+	// distinct bubble container.  No "▌tool: subagent" gutter row.
+	if msg.Role == RoleTool && msg.ToolName == "subagent" && msg.SubagentID != "" {
 		if nested := m.nestedFor(msg); nested != "" {
 			return m.wrapSubagentBubble(nested)
 		}

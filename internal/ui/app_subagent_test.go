@@ -21,14 +21,14 @@ func makeForegroundApp(t *testing.T) (*App, *bus.Bus) {
 	return app, b
 }
 
-func TestSubagentStarted_AddsCollapsedBlockUnderTaskMessage(t *testing.T) {
+func TestSubagentStarted_AddsCollapsedBlockUnderSubagentMessage(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	// Simulate the parent's `task` tool call landing first WITH ToolUseID.
+	// Simulate the parent's `subagent` tool call landing first WITH ToolUseID.
 	app.Handle(bus.ToolCallRequested{
 		SessionID: "fg-session",
-		ToolName:  "task",
+		ToolName:  "subagent",
 		ToolUseID: "tool_use_1",
 		Args:      []byte(`{"subagent_type":"general","description":"find LICENSE"}`),
 	})
@@ -57,19 +57,19 @@ func TestSubagentStarted_AddsCollapsedBlockUnderTaskMessage(t *testing.T) {
 		t.Errorf("expected state to be running")
 	}
 
-	// The task tool UIMessage should now carry SubagentID.
-	var taskMsg *uiMessage
+	// The subagent tool UIMessage should now carry SubagentID.
+	var subagentMsg *uiMessage
 	for i := range app.messages {
-		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "task" {
-			taskMsg = &app.messages[i]
+		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "subagent" {
+			subagentMsg = &app.messages[i]
 			break
 		}
 	}
-	if taskMsg == nil {
-		t.Fatal("expected a task UIMessage")
+	if subagentMsg == nil {
+		t.Fatal("expected a subagent UIMessage")
 	}
-	if taskMsg.SubagentID != "sub-1" {
-		t.Errorf("expected task message to be stamped with SubagentID=sub-1, got %q", taskMsg.SubagentID)
+	if subagentMsg.SubagentID != "sub-1" {
+		t.Errorf("expected subagent message to be stamped with SubagentID=sub-1, got %q", subagentMsg.SubagentID)
 	}
 
 	out := app.View().Content
@@ -83,7 +83,7 @@ func TestSubagentStarted_AddsCollapsedBlockUnderTaskMessage(t *testing.T) {
 		}
 	}
 	// Old format must be gone.
-	for _, bad := range []string{"task[general]", "anthropic/claude-haiku-4-5", "running"} {
+	for _, bad := range []string{"subagent[general]", "anthropic/claude-haiku-4-5", "running"} {
 		if strings.Contains(out, bad) {
 			t.Errorf("view should not contain old format string %q in:\n%s", bad, out)
 		}
@@ -94,7 +94,7 @@ func TestSubagentToggleExpandsLatest(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
 		ParentSessionID: "fg-session",
@@ -140,7 +140,7 @@ func TestSubagentStreamingAndCompletion(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	startedAt := time.Now().Add(-3 * time.Second)
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
@@ -216,7 +216,7 @@ func TestSubagentStreamingAndCompletion(t *testing.T) {
 func TestSubagentIterationLimitMarksFailed(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
 		ParentSessionID: "fg-session",
@@ -246,8 +246,8 @@ func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	// Two `task` tool calls in the same session.
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	// Two `subagent` tool calls in the same session.
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-a",
 		ParentSessionID: "fg-session",
@@ -256,7 +256,7 @@ func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 		Model:           "anthropic/claude-haiku-4-5",
 		At:              time.Now().Add(-2 * time.Second),
 	})
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-b",
 		ParentSessionID: "fg-session",
@@ -436,22 +436,22 @@ func TestIsInForegroundChainEmptyParentReturnsFalse(t *testing.T) {
 }
 
 // TestSubagentAnchor_ExactToolUseIDMatch verifies that when ToolUseID is
-// set on the task UIMessage, attachSubagentToTaskMessage uses it for
+// set on the subagent UIMessage, attachSubagentToSubagentMessage uses it for
 // exact matching rather than the recency fallback.
 func TestSubagentAnchor_ExactToolUseIDMatch(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	// Two task tool calls for the same session with distinct ToolUseIDs.
+	// Two subagent tool calls for the same session with distinct ToolUseIDs.
 	app.Handle(bus.ToolCallRequested{
 		SessionID: "fg-session",
-		ToolName:  "task",
+		ToolName:  "subagent",
 		ToolUseID: "tu-first",
 		Args:      []byte(`{}`),
 	})
 	app.Handle(bus.ToolCallRequested{
 		SessionID: "fg-session",
-		ToolName:  "task",
+		ToolName:  "subagent",
 		ToolUseID: "tu-second",
 		Args:      []byte(`{}`),
 	})
@@ -482,7 +482,7 @@ func TestSubagentAnchor_ExactToolUseIDMatch(t *testing.T) {
 	var firstMsg, secondMsg *uiMessage
 	for i := range app.messages {
 		msg := &app.messages[i]
-		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+		if msg.Role != components.RoleTool || msg.ToolName != "subagent" {
 			continue
 		}
 		switch msg.ToolUseID {
@@ -493,10 +493,10 @@ func TestSubagentAnchor_ExactToolUseIDMatch(t *testing.T) {
 		}
 	}
 	if firstMsg == nil {
-		t.Fatal("expected task UIMessage for tu-first")
+		t.Fatal("expected subagent UIMessage for tu-first")
 	}
 	if secondMsg == nil {
-		t.Fatal("expected task UIMessage for tu-second")
+		t.Fatal("expected subagent UIMessage for tu-second")
 	}
 	if firstMsg.SubagentID != "sub-first" {
 		t.Errorf("tu-first message bound to %q, want sub-first", firstMsg.SubagentID)
@@ -513,10 +513,10 @@ func TestSubagentAnchor_FallbackWarnsWhenToolUseIDAbsent(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	// A task tool call WITHOUT ToolUseID (pre-ToolUseID-field scenario).
+	// A subagent tool call WITHOUT ToolUseID (pre-ToolUseID-field scenario).
 	app.Handle(bus.ToolCallRequested{
 		SessionID: "fg-session",
-		ToolName:  "task",
+		ToolName:  "subagent",
 		ToolUseID: "", // intentionally empty — exercises fallback
 		Args:      []byte(`{}`),
 	})
@@ -532,19 +532,19 @@ func TestSubagentAnchor_FallbackWarnsWhenToolUseIDAbsent(t *testing.T) {
 		At:              time.Now().Add(-time.Second),
 	})
 
-	// Fallback should still attach the subagent to the task message.
-	var taskMsg *uiMessage
+	// Fallback should still attach the subagent to the subagent message.
+	var subagentMsg *uiMessage
 	for i := range app.messages {
-		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "task" {
-			taskMsg = &app.messages[i]
+		if app.messages[i].Role == components.RoleTool && app.messages[i].ToolName == "subagent" {
+			subagentMsg = &app.messages[i]
 			break
 		}
 	}
-	if taskMsg == nil {
-		t.Fatal("expected task UIMessage")
+	if subagentMsg == nil {
+		t.Fatal("expected subagent UIMessage")
 	}
-	if taskMsg.SubagentID != "sub-fallback" {
-		t.Errorf("fallback did not attach subagent; SubagentID=%q, want sub-fallback", taskMsg.SubagentID)
+	if subagentMsg.SubagentID != "sub-fallback" {
+		t.Errorf("fallback did not attach subagent; SubagentID=%q, want sub-fallback", subagentMsg.SubagentID)
 	}
 }
 
@@ -571,7 +571,7 @@ func TestCtrlGFollowsIntoSubagent(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
 		ParentSessionID: "fg-session",
@@ -619,7 +619,7 @@ func TestEscAtDepth2_PopsStack(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
 		ParentSessionID: "fg-session",
@@ -662,7 +662,7 @@ func TestBreadcrumbVisibleAtDepth2(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
 		ParentSessionID: "fg-session",
@@ -716,7 +716,7 @@ func TestSubagentAnimLifecycle(t *testing.T) {
 	}
 
 	// SubagentStarted: anim must be created.
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "task", Args: []byte(`{}`)})
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-anim",
 		ParentSessionID: "fg-session",

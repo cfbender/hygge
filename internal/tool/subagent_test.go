@@ -13,7 +13,7 @@ import (
 	"github.com/cfbender/hygge/internal/provider"
 )
 
-// stubRunner is a hand-rolled SubagentRunner used to drive the task
+// stubRunner is a hand-rolled SubagentRunner used to drive the subagent
 // tool's tests without spinning up the full internal/subagent runtime.
 type stubRunner struct {
 	types  []SubagentType
@@ -37,7 +37,7 @@ func standardTypes() []SubagentType {
 	}
 }
 
-func taskExecCtx(t *testing.T, decide func(bus.PermissionAsked) bus.PermissionReplied) ExecContext {
+func subagentExecCtx(t *testing.T, decide func(bus.PermissionAsked) bus.PermissionReplied) ExecContext {
 	t.Helper()
 	e, b := testEngine(t, decide)
 	return ExecContext{
@@ -63,12 +63,12 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 
 // ---------- happy path -----------------------------------------------------
 
-func TestTaskTool_NameDescriptionSchema(t *testing.T) {
+func TestSubagentTool_NameDescriptionSchema(t *testing.T) {
 	stub := &stubRunner{types: standardTypes()}
-	tt := NewTaskTool(stub)
+	tt := NewSubagentTool(stub)
 
-	if tt.Name() != "task" {
-		t.Fatalf("Name: got %q want task", tt.Name())
+	if tt.Name() != "subagent" {
+		t.Fatalf("Name: got %q want subagent", tt.Name())
 	}
 	if tt.Description() == "" {
 		t.Fatal("Description must not be empty")
@@ -91,9 +91,9 @@ func TestTaskTool_NameDescriptionSchema(t *testing.T) {
 	}
 }
 
-func TestTaskTool_InputSchema_EmptyTypesFallback(t *testing.T) {
+func TestSubagentTool_InputSchema_EmptyTypesFallback(t *testing.T) {
 	stub := &stubRunner{types: nil}
-	tt := NewTaskTool(stub)
+	tt := NewSubagentTool(stub)
 	schema := tt.InputSchema()
 	props := schema["properties"].(map[string]any)
 	subType := props["subagent_type"].(map[string]any)
@@ -106,7 +106,7 @@ func TestTaskTool_InputSchema_EmptyTypesFallback(t *testing.T) {
 	}
 }
 
-func TestTaskTool_HappyPath(t *testing.T) {
+func TestSubagentTool_HappyPath(t *testing.T) {
 	stub := &stubRunner{
 		types: standardTypes(),
 		res: SubagentResult{
@@ -117,8 +117,8 @@ func TestTaskTool_HappyPath(t *testing.T) {
 			Duration:  150 * time.Millisecond,
 		},
 	}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
 	})
 
@@ -157,13 +157,13 @@ func TestTaskTool_HappyPath(t *testing.T) {
 	}
 }
 
-func TestTaskTool_EmptyFinalTextHasPlaceholder(t *testing.T) {
+func TestSubagentTool_EmptyFinalTextHasPlaceholder(t *testing.T) {
 	stub := &stubRunner{
 		types: standardTypes(),
 		res:   SubagentResult{SessionID: "sub_2", FinalText: ""},
 	}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
 	})
 	args := mustJSON(t, map[string]any{
@@ -182,10 +182,10 @@ func TestTaskTool_EmptyFinalTextHasPlaceholder(t *testing.T) {
 
 // ---------- error paths ----------------------------------------------------
 
-func TestTaskTool_UnknownTypeIsError(t *testing.T) {
+func TestSubagentTool_UnknownTypeIsError(t *testing.T) {
 	stub := &stubRunner{types: standardTypes()}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
 	})
 	args := mustJSON(t, map[string]any{
@@ -208,10 +208,10 @@ func TestTaskTool_UnknownTypeIsError(t *testing.T) {
 	}
 }
 
-func TestTaskTool_PermissionDeniedIsError(t *testing.T) {
+func TestSubagentTool_PermissionDeniedIsError(t *testing.T) {
 	stub := &stubRunner{types: standardTypes()}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "deny", Scope: "once"}
 	})
 	args := mustJSON(t, map[string]any{
@@ -231,14 +231,14 @@ func TestTaskTool_PermissionDeniedIsError(t *testing.T) {
 	}
 }
 
-func TestTaskTool_RunnerErrorSurfacesAsIsError(t *testing.T) {
+func TestSubagentTool_RunnerErrorSurfacesAsIsError(t *testing.T) {
 	stub := &stubRunner{
 		types:  standardTypes(),
 		res:    SubagentResult{SessionID: "sub_3"},
 		runErr: errors.New("boom"),
 	}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
 	})
 	args := mustJSON(t, map[string]any{
@@ -261,7 +261,7 @@ func TestTaskTool_RunnerErrorSurfacesAsIsError(t *testing.T) {
 	}
 }
 
-func TestTaskTool_IterationLimitReturnedToModel(t *testing.T) {
+func TestSubagentTool_IterationLimitReturnedToModel(t *testing.T) {
 	stub := &stubRunner{
 		types: standardTypes(),
 		res: SubagentResult{
@@ -270,8 +270,8 @@ func TestTaskTool_IterationLimitReturnedToModel(t *testing.T) {
 			HitIterLimit: true,
 		},
 	}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
 	})
 	args := mustJSON(t, map[string]any{
@@ -291,10 +291,10 @@ func TestTaskTool_IterationLimitReturnedToModel(t *testing.T) {
 	}
 }
 
-func TestTaskTool_MissingArgs(t *testing.T) {
+func TestSubagentTool_MissingArgs(t *testing.T) {
 	stub := &stubRunner{types: standardTypes()}
-	tt := NewTaskTool(stub)
-	ec := taskExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
 	})
 	tests := []struct {
@@ -320,8 +320,8 @@ func TestTaskTool_MissingArgs(t *testing.T) {
 	}
 }
 
-func TestTaskTool_NilRunner(t *testing.T) {
-	tt := NewTaskTool(nil)
+func TestSubagentTool_NilRunner(t *testing.T) {
+	tt := NewSubagentTool(nil)
 	args := mustJSON(t, map[string]any{
 		"subagent_type": "general",
 		"description":   "x",
@@ -337,9 +337,9 @@ func TestTaskTool_NilRunner(t *testing.T) {
 	}
 }
 
-func TestTaskTool_MissingModelInExecContext(t *testing.T) {
+func TestSubagentTool_MissingModelInExecContext(t *testing.T) {
 	stub := &stubRunner{types: standardTypes()}
-	tt := NewTaskTool(stub)
+	tt := NewSubagentTool(stub)
 	// ec with no permission engine but auto-allow won't matter --
 	// build a real engine but leave ModelName empty so the early
 	// check fires.

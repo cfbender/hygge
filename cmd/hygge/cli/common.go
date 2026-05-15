@@ -517,11 +517,11 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		b.Close()
 		return nil, fmt.Errorf("cli: build subagent runner: %w", err)
 	}
-	if err := tools.Register(tool.NewTaskTool(subRunner.ToolAdapter())); err != nil {
+	if err := tools.Register(tool.NewSubagentTool(subRunner.ToolAdapter())); err != nil {
 		permEngine.Close()
 		_ = stOpen.Close()
 		b.Close()
-		return nil, fmt.Errorf("cli: register task tool: %w", err)
+		return nil, fmt.Errorf("cli: register subagent tool: %w", err)
 	}
 
 	// Phase: plugin host init + plugin load

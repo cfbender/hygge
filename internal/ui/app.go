@@ -1824,7 +1824,7 @@ func (a *App) routeToSubagent(sessionID string) bool {
 // onSubagentStarted reacts to bus.SubagentStarted.  Filtering: only
 // track sub-agents whose parent chain roots at the foreground session.
 // The state is bound to the task tool message via exact ToolUseID match
-// (see attachSubagentToTaskMessage).
+// (see attachSubagentToSubagentMessage).
 func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 	if !a.isInForegroundChain(e.ParentSessionID) {
 		return nil
@@ -1840,7 +1840,7 @@ func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 	}
 	a.subagents[e.SubSessionID] = state
 
-	a.attachSubagentToTaskMessage(state)
+	a.attachSubagentToSubagentMessage(state)
 
 	// Create an Anim for the running sub-agent.  Resumed sessions are
 	// never live-started (they arrive via hydrateMessagesFromStore with
@@ -1857,7 +1857,7 @@ func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 	return tea.Batch(a.subagentTick(e.SubSessionID), an.Start())
 }
 
-// attachSubagentToTaskMessage walks the message buffer for the
+// attachSubagentToSubagentMessage walks the message buffer for the
 // matching `task` tool message and stamps SubagentID on it.
 //
 // Primary path: exact ToolUseID match — the task tool UIMessage whose
@@ -1868,12 +1868,12 @@ func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 // predates the ToolUseID field being populated), the most recent
 // unclaimed streaming task message is used.  An slog.Warn is emitted
 // so the condition is observable in logs.
-func (a *App) attachSubagentToTaskMessage(state *components.SubagentState) {
+func (a *App) attachSubagentToSubagentMessage(state *components.SubagentState) {
 	if state.ParentMessageID != "" {
 		// Primary path: exact ToolUseID match.
 		for i := len(a.messages) - 1; i >= 0; i-- {
 			msg := &a.messages[i]
-			if msg.Role != components.RoleTool || msg.ToolName != "task" {
+			if msg.Role != components.RoleTool || msg.ToolName != "subagent" {
 				continue
 			}
 			if msg.ToolUseID != state.ParentMessageID {
@@ -1890,13 +1890,13 @@ func (a *App) attachSubagentToTaskMessage(state *components.SubagentState) {
 	// Defensive fallback: most recent unclaimed streaming task message.
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		msg := &a.messages[i]
-		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+		if msg.Role != components.RoleTool || msg.ToolName != "subagent" {
 			continue
 		}
 		if msg.SubagentID != "" && msg.SubagentID != state.SubSessionID {
 			continue
 		}
-		slog.Warn("ui: subagent anchor fell back to recency heuristic; ToolUseID missing on task message",
+		slog.Warn("ui: subagent anchor fell back to recency heuristic; ToolUseID missing on subagent message",
 			"sub_session_id", state.SubSessionID,
 			"parent_message_id", state.ParentMessageID,
 		)
@@ -3224,7 +3224,7 @@ func (a *App) reconstructSubagentState(parentSID string, msgs []uiMessage, visit
 	matched := make(map[string]bool, len(childSessions))
 	for i := range msgs {
 		msg := &msgs[i]
-		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+		if msg.Role != components.RoleTool || msg.ToolName != "subagent" {
 			continue
 		}
 		cs, ok := toolUseToChild[msg.ToolUseID]
@@ -3252,7 +3252,7 @@ func (a *App) reconstructSubagentState(parentSID string, msgs []uiMessage, visit
 			break
 		}
 		msg := &msgs[i]
-		if msg.Role != components.RoleTool || msg.ToolName != "task" {
+		if msg.Role != components.RoleTool || msg.ToolName != "subagent" {
 			continue
 		}
 		if msg.SubagentID != "" {
