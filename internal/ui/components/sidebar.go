@@ -92,6 +92,11 @@ type Sidebar struct {
 
 	// Theme is the active theme.  Nil is accepted (plain styles used).
 	Theme *theme.Theme
+	// SurfaceBackground optionally overrides theme.AtomSidebarBg for runtime-
+	// detected shell surfaces. Set UseSurfaceBackground to force the override,
+	// including a nil/transparent value while terminal colors are still unknown.
+	SurfaceBackground    color.Color
+	UseSurfaceBackground bool
 	// NerdFonts controls whether to use the nerd-font git-branch glyph.
 	NerdFonts bool
 }
@@ -179,8 +184,16 @@ func (s Sidebar) View() string {
 		PaddingLeft(1).
 		PaddingRight(1).
 		Width(innerW)
+	bgOpen := ""
+	if bg := s.sidebarBackgroundColor(); bg != nil {
+		borderStyle = borderStyle.Background(bg)
+		bgOpen = sidebarBackgroundOpenSequence(bg)
+	}
 	var sb strings.Builder
 	for i, l := range lines {
+		if bgOpen != "" {
+			l = sidebarReassertBackgroundAfterReset(l, bgOpen)
+		}
 		rendered := borderStyle.Render(l)
 		sb.WriteString(rendered)
 		if i < len(lines)-1 {
@@ -370,7 +383,7 @@ func (s Sidebar) wrapTitle(title string, w int) []string {
 	if w <= 0 {
 		return nil
 	}
-	boldStyle := lipgloss.NewStyle().Bold(true)
+	boldStyle := s.atomStyle(theme.AtomSidebarValue).Bold(true)
 
 	runes := []rune(title)
 	if len(runes) <= w {
@@ -404,13 +417,54 @@ func (s Sidebar) sidebarBorderFg() color.Color {
 	return fg
 }
 
+func (s Sidebar) sidebarBackgroundColor() color.Color {
+	if s.UseSurfaceBackground {
+		return s.SurfaceBackground
+	}
+	if s.Theme == nil {
+		return nil
+	}
+	bg := s.Theme.Style(theme.AtomSidebarBg).GetBackground()
+	if _, isNo := bg.(lipgloss.NoColor); bg == nil || isNo {
+		return nil
+	}
+	return bg
+}
+
+func sidebarBackgroundOpenSequence(bg color.Color) string {
+	if bg == nil {
+		return ""
+	}
+	rendered := lipgloss.NewStyle().Background(bg).Render("x")
+	idx := strings.IndexRune(rendered, 'x')
+	if idx <= 0 {
+		return ""
+	}
+	return rendered[:idx]
+}
+
+func sidebarReassertBackgroundAfterReset(s, bgOpen string) string {
+	if bgOpen == "" || !strings.Contains(s, "\x1b[") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\x1b[m", "\x1b[m"+bgOpen)
+	s = strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+bgOpen)
+	s = strings.ReplaceAll(s, "\x1b[49m", "\x1b[49m"+bgOpen)
+	return s
+}
+
 // atomStyle returns the lipgloss.Style for the given atom, or a blank style
-// when no theme is configured.
+// when no theme is configured. Sidebar text also receives the sidebar
+// background so styled fragments do not punch transparent holes in the fill.
 func (s Sidebar) atomStyle(a theme.Atom) lipgloss.Style {
 	if s.Theme == nil {
 		return lipgloss.NewStyle()
 	}
-	return s.Theme.Style(a)
+	style := s.Theme.Style(a)
+	if bg := s.sidebarBackgroundColor(); bg != nil {
+		style = style.Background(bg)
+	}
+	return style
 }
 
 // sidebarTruncate truncates a plain string to at most w visual columns.

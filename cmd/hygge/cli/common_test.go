@@ -116,6 +116,7 @@ func hermeticHome(t *testing.T) string {
 		XDGStateHome:    xdgState,
 		Pwd:             home,
 		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})
@@ -243,6 +244,7 @@ func TestBootstrap_AuthStoreInjectsAPIKey(t *testing.T) {
 		XDGStateHome:    xdgState,
 		Pwd:             home,
 		ProviderFactory: captured.factory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})
@@ -283,6 +285,7 @@ func TestBootstrap_EnvVarBeatsAuthStore(t *testing.T) {
 		XDGStateHome:    xdgState,
 		Pwd:             home,
 		ProviderFactory: captured.factory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})
@@ -339,6 +342,7 @@ api_key = "sk-from-config-explicit"
 		XDGStateHome:    xdgState,
 		Pwd:             home,
 		ProviderFactory: captured.factory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})
@@ -417,6 +421,7 @@ func TestBootstrap_AgentsMDAppearsInSystemPrompt(t *testing.T) {
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             root,
 		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})

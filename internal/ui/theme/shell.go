@@ -41,22 +41,24 @@ func ShellTheme() *Theme {
 			// muted slot (bright-black/grey).  Header accents mirror accent/muted.
 			// Phase 5 distinct borders: user=blue (4), agent default=red (1).
 			// Each agent profile will configure its own color; red is the fallback.
-			AtomBubbleBorder:         {kind: colorKindANSI, raw: "5"}, // magenta — agent accent
-			AtomBubbleBorderDistinct: {kind: colorKindANSI, raw: "8"}, // grey — subdued
-			AtomBubbleHeader:         {kind: colorKindANSI, raw: "5"}, // magenta
-			AtomBubbleHeaderMuted:    {kind: colorKindANSI, raw: "8"}, // grey
-			AtomBubbleBodyMuted:      {kind: colorKindANSI, raw: "8"}, // grey
+			AtomBubbleBorder:         {kind: colorKindANSI, raw: "5"},   // magenta — agent accent
+			AtomBubbleBorderDistinct: {kind: colorKindANSI, raw: "8"},   // grey — subdued
+			AtomBubbleHeader:         {kind: colorKindANSI, raw: "5"},   // magenta
+			AtomBubbleHeaderMuted:    {kind: colorKindANSI, raw: "7"},   // foreground on highlight fill
+			AtomBubbleBodyMuted:      {kind: colorKindANSI, raw: "7"},   // foreground on highlight fill
+			AtomBubbleBg:             {kind: colorKindANSI, raw: "235"}, // dim terminal-background-adjacent fallback
 
 			// Phase 5: distinct user vs agent bubble border colors.
 			AtomBubbleUserBorder:  {kind: colorKindANSI, raw: "4"}, // blue  — user bubble
 			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "5"}, // magenta — agent bubble default
 
 			// Sidebar atoms.
-			AtomSidebarBorder:  {kind: colorKindANSI, raw: "8"}, // grey divider
-			AtomSidebarSection: {kind: colorKindANSI, raw: "8"}, // grey section headers
-			AtomSidebarValue:   {kind: colorKindDefault},        // terminal default fg
-			AtomSidebarAccent:  {kind: colorKindANSI, raw: "5"}, // magenta accent dot
-			AtomSidebarMuted:   {kind: colorKindANSI, raw: "8"}, // grey muted text
+			AtomSidebarBorder:  {kind: colorKindANSI, raw: "8"},   // grey divider
+			AtomSidebarSection: {kind: colorKindANSI, raw: "7"},   // readable on highlight fill
+			AtomSidebarValue:   {kind: colorKindDefault},          // terminal default fg
+			AtomSidebarAccent:  {kind: colorKindANSI, raw: "5"},   // magenta accent dot
+			AtomSidebarMuted:   {kind: colorKindANSI, raw: "7"},   // readable on highlight fill
+			AtomSidebarBg:      {kind: colorKindANSI, raw: "235"}, // dim terminal-background-adjacent fallback
 		},
 	}
 }

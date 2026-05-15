@@ -17,22 +17,23 @@ import (
 // compatibility surface for UI/CLI callers, while Runtime decides which
 // turn runner to use and how Fantasy tools are adapted from tool.Registry.
 type Runtime struct {
-	model         fantasy.LanguageModel
-	tools         *tool.Registry
-	maxIterations int
+	model fantasy.LanguageModel
+	tools *tool.Registry
 }
 
 // RuntimeOptions configures Runtime.
 type RuntimeOptions struct {
-	Model         fantasy.LanguageModel
-	Tools         *tool.Registry
+	Model fantasy.LanguageModel
+	Tools *tool.Registry
+	// MaxIterations is accepted for legacy construction compatibility. Fantasy
+	// active turns are intentionally uncapped; cancellation is context-driven.
 	MaxIterations int
 }
 
 // NewRuntime constructs the turn runtime. Tools may be nil only in tests that
 // do not execute turns; Agent.New validates the production path first.
 func NewRuntime(opts RuntimeOptions) *Runtime {
-	return &Runtime{model: opts.Model, tools: opts.Tools, maxIterations: opts.MaxIterations}
+	return &Runtime{model: opts.Model, tools: opts.Tools}
 }
 
 // SetModel replaces the Fantasy language model used to create future agents.
@@ -51,7 +52,7 @@ func (r *Runtime) hasFantasyModel() bool {
 }
 
 func (r *Runtime) newFantasyAgent(tools []fantasy.AgentTool) fantasy.Agent {
-	return fantasy.NewAgent(r.model, fantasy.WithTools(tools...), fantasy.WithStopConditions(fantasy.StepCountIs(r.maxIterations)))
+	return fantasy.NewAgent(r.model, fantasy.WithTools(tools...))
 }
 
 func (r *Runtime) newInternalAgent() fantasy.Agent {

@@ -301,6 +301,7 @@ func TestResumeAnyDisablesCwdScope(t *testing.T) {
 		XDGStateHome:    filepath.Join(filepath.Dir(otherDir), ".local", "state"),
 		Pwd:             otherDir,
 		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})
@@ -315,6 +316,7 @@ func TestResumeAnyDisablesCwdScope(t *testing.T) {
 		XDGStateHome:    xdgState2,
 		Pwd:             home2,
 		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})
@@ -327,6 +329,7 @@ func TestResumeAnyDisablesCwdScope(t *testing.T) {
 		XDGStateHome:    xdgState2,
 		Pwd:             otherDir,
 		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})

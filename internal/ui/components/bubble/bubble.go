@@ -1,20 +1,20 @@
 // Package bubble provides the Bubble rendering primitive for the chat-bubble
 // UI redesign (Phase 1).
 //
-// A Bubble wraps pre-rendered body content in a rounded border with an
-// optional header row.  The caller is responsible for markdown rendering and
+// A Bubble wraps pre-rendered body content in a filled block with a one-cell
+// accent bar on the message side. The caller is responsible for markdown rendering and
 // line-wrapping the body text before passing it in — Bubble is purely a
 // presentational frame.
 //
 // # Phase 1 scope
 //
-//   - Rounded border (normal) or faint normal border (distinct / subagent).
+//   - Side accent bar (left for agent/tool, right for user).
 //   - Header row with left and right labels.
 //   - Optional body-height cap with truncation indicator.
 //   - Left or right alignment within a parent width budget.
 //   - ShowTail field retained for forward-compatibility but never set to true.
-//   - Border color is the configured accent atom directly — no saturation boost.
-//   - Bubble interior is transparent (terminal default background).
+//   - Bar color is the configured accent atom directly — no saturation boost.
+//   - Optional interior background fill, supplied by theme.AtomBubbleBg.
 package bubble
 
 import (
@@ -40,10 +40,16 @@ const (
 type SubStyle int
 
 const (
-	// StyleNormal renders a standard rounded border at full accent weight.
+	// StyleNormal renders a standard side bar at full accent weight.
 	StyleNormal SubStyle = iota
 	// StyleDistinct renders a dimmer border (for subagent bubbles in Phase 3).
 	StyleDistinct
+)
+
+const (
+	sideBarWidth      = 1
+	horizontalPadding = 1
+	outerInset        = 2
 )
 
 // Bubble is the chat-bubble rendering primitive.
@@ -83,7 +89,7 @@ type Bubble struct {
 	// style is used instead.
 	Theme *theme.Theme
 
-	// AccentColor is the border and header accent color.
+	// AccentColor is the side bar and header accent color.
 	// Nil falls back to theme.AtomBubbleBorder.
 	// This is the seam for future per-agent-mode color; assign the agent's
 	// color (via lipgloss.Color("N") or lipgloss.Color("#RRGGBB")) here once
@@ -102,11 +108,7 @@ type Bubble struct {
 	// anywhere.  Leaving it false means no tail glyphs are emitted.
 	ShowTail bool
 
-	// BackgroundColor is reserved for future opt-in background tinting of the
-	// bubble interior.  It is currently unused — View() does not apply a
-	// background fill, and the terminal's default background shows through.
-	// Kept on the struct so callers can set it without a compile error; the
-	// value is accepted but ignored.
+	// BackgroundColor fills the bubble content block behind text and padding.
 	BackgroundColor color.Color
 }
 
@@ -132,19 +134,24 @@ func (b Bubble) View() string {
 		bubbleW = width
 	}
 
-	// Inner content width = bubble width minus 2 border columns.
-	innerW := bubbleW - 2
+	// Inner content width = bubble width minus the one-cell side bar and
+	// horizontal content padding.
+	innerW := bubbleW - sideBarWidth
 	if innerW < 1 {
 		innerW = 1
 	}
+	contentW := innerW - horizontalPadding*2
+	if contentW < 1 {
+		contentW = 1
+	}
 
 	accentColor := b.resolveAccentColor()
-	borderStyle := b.buildBorderStyle(accentColor, bubbleW)
+	backgroundColor := b.resolveBackgroundColor()
 
 	// Build header line if either side is non-empty.
 	header := ""
 	if b.HeaderLeft != "" || b.HeaderRight != "" {
-		header = b.renderHeader(innerW, accentColor)
+		header = b.renderHeader(contentW, accentColor)
 	}
 
 	// Build body with optional height cap.
@@ -153,12 +160,11 @@ func (b Bubble) View() string {
 	// Compose inner lines, applying per-line width padding.
 	// This ensures every line of the bubble is exactly innerW cells wide
 	// so the rendered rectangle is uniform.
-	inner := b.composeInner(header, body, innerW, accentColor)
+	inner := b.composeInner(header, body, contentW, accentColor, backgroundColor)
 
-	// Apply the border — do NOT set Width on the border style; the inner
-	// content is already padded to innerW per-line, so the border wraps it
-	// without reflowing.
-	composed := borderStyle.Render(inner)
+	// Apply the one-cell side bar. This avoids rounded-border/background ANSI
+	// interactions while preserving message direction and accent identity.
+	composed := b.renderFrame(inner, accentColor, backgroundColor, innerW)
 
 	// The actual rendered bubble width (should equal bubbleW after border).
 	composedW := lipgloss.Width(strings.SplitN(composed, "\n", 2)[0])
@@ -172,11 +178,15 @@ func (b Bubble) View() string {
 	// pads the last line, leaving interior lines shorter than `width`.
 	composedLines := strings.Split(composed, "\n")
 	paddedLines := make([]string, len(composedLines))
+	inset := outerInset
+	if pad < inset {
+		inset = pad
+	}
 	for i, line := range composedLines {
 		if b.Alignment == AlignRight {
-			paddedLines[i] = strings.Repeat(" ", pad) + line
+			paddedLines[i] = strings.Repeat(" ", pad-inset) + line + strings.Repeat(" ", inset)
 		} else {
-			paddedLines[i] = line + strings.Repeat(" ", pad)
+			paddedLines[i] = strings.Repeat(" ", inset) + line + strings.Repeat(" ", pad-inset)
 		}
 	}
 	result := strings.Join(paddedLines, "\n")
@@ -192,14 +202,14 @@ func (b Bubble) View() string {
 }
 
 // composeInner builds the full inner content string with each line padded to
-// innerW.  Every line is exactly innerW cells wide so the rendered rectangle
-// is uniform.  The terminal's default background shows through (no bg fill).
-func (b Bubble) composeInner(header, body string, innerW int, accentColor color.Color) string {
+// innerW. Every line is exactly innerW cells wide, including horizontal padding.
+// When backgroundColor is set, the padded cells are filled too.
+func (b Bubble) composeInner(header, body string, contentW int, accentColor, backgroundColor color.Color) string {
 	// Collect logical segments.
 	var segments []string
 	if header != "" {
 		segments = append(segments, header)
-		sep := b.renderSeparator(innerW, accentColor)
+		sep := b.renderSeparator(contentW, accentColor)
 		segments = append(segments, sep)
 	}
 	if body != "" {
@@ -212,12 +222,30 @@ func (b Bubble) composeInner(header, body string, innerW int, accentColor color.
 		allLines = append(allLines, strings.Split(seg, "\n")...)
 	}
 
-	// Per-line: apply Width(innerW) so every line occupies exactly innerW cells.
-	lineStyle := lipgloss.NewStyle().Width(innerW)
+	// Per-line: apply Width(contentW) and wrap it in horizontal padding so every
+	// line occupies exactly innerW cells.
+	lineStyle := lipgloss.NewStyle().Width(contentW)
+	padStyle := lipgloss.NewStyle()
+	bgOpen := ""
+	if backgroundColor != nil {
+		lineStyle = lineStyle.Background(backgroundColor)
+		padStyle = padStyle.Background(backgroundColor)
+		bgOpen = backgroundOpenSequence(backgroundColor)
+	}
 
-	padded := make([]string, len(allLines))
-	for i, line := range allLines {
-		padded[i] = lineStyle.Render(line)
+	var padded []string
+	for _, line := range allLines {
+		if bgOpen != "" {
+			line = reassertBackgroundAfterReset(line, bgOpen)
+		}
+		renderedLines := strings.Split(lineStyle.Render(line), "\n")
+		for _, rendered := range renderedLines {
+			padded = append(padded,
+				padStyle.Render(strings.Repeat(" ", horizontalPadding))+
+					rendered+
+					padStyle.Render(strings.Repeat(" ", horizontalPadding)),
+			)
+		}
 	}
 	return strings.Join(padded, "\n")
 }
@@ -267,26 +295,69 @@ func (b Bubble) resolveAccentColor() color.Color {
 	return nil
 }
 
-// buildBorderStyle returns a lipgloss.Style with the correct border type and
-// color for this bubble.  The width argument is reserved for future use.
-// Border color is the accent atom directly — no saturation boost.
-func (b Bubble) buildBorderStyle(borderColor color.Color, _ int) lipgloss.Style {
-	style := lipgloss.NewStyle()
-	if b.SubStyle == StyleDistinct {
-		style = style.Border(lipgloss.RoundedBorder())
-		distinctColor := b.resolveDistinctColor()
-		if distinctColor != nil {
-			style = style.BorderForeground(distinctColor)
-		} else if borderColor != nil {
-			style = style.BorderForeground(borderColor)
-		}
-	} else {
-		style = style.Border(lipgloss.RoundedBorder())
-		if borderColor != nil {
-			style = style.BorderForeground(borderColor)
+// resolveBackgroundColor returns the fill color to use for the bubble surface.
+func (b Bubble) resolveBackgroundColor() color.Color {
+	if b.BackgroundColor != nil {
+		return b.BackgroundColor
+	}
+	if b.Theme != nil {
+		style := b.Theme.Style(theme.AtomBubbleBg)
+		bg := style.GetBackground()
+		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor && bg != nil {
+			return bg
 		}
 	}
-	return style
+	return nil
+}
+
+func backgroundOpenSequence(bg color.Color) string {
+	if bg == nil {
+		return ""
+	}
+	rendered := lipgloss.NewStyle().Background(bg).Render("x")
+	idx := strings.IndexRune(rendered, 'x')
+	if idx <= 0 {
+		return ""
+	}
+	return rendered[:idx]
+}
+
+func reassertBackgroundAfterReset(s, bgOpen string) string {
+	if bgOpen == "" || !strings.Contains(s, "\x1b[") {
+		return s
+	}
+	// Fast path for the reset sequences emitted by Lip Gloss/Glamour in hot
+	// scroll renders. Avoid a byte-by-byte ANSI parser for every visible line.
+	s = strings.ReplaceAll(s, "\x1b[m", "\x1b[m"+bgOpen)
+	s = strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+bgOpen)
+	s = strings.ReplaceAll(s, "\x1b[49m", "\x1b[49m"+bgOpen)
+	return s
+}
+
+func (b Bubble) renderFrame(inner string, borderColor, _ color.Color, _ int) string {
+	if b.SubStyle == StyleDistinct {
+		if distinctColor := b.resolveDistinctColor(); distinctColor != nil {
+			borderColor = distinctColor
+		}
+	}
+	barStyle := lipgloss.NewStyle()
+	if borderColor != nil {
+		barStyle = barStyle.Foreground(borderColor)
+	}
+	bar := barStyle.Render("▌")
+	if b.Alignment == AlignRight {
+		bar = barStyle.Render("▐")
+	}
+	lines := strings.Split(inner, "\n")
+	framed := make([]string, len(lines))
+	for i, line := range lines {
+		if b.Alignment == AlignRight {
+			framed[i] = line + bar
+		} else {
+			framed[i] = bar + line
+		}
+	}
+	return strings.Join(framed, "\n")
 }
 
 // resolveDistinctColor returns the muted/distinct border color.

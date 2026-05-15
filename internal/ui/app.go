@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"log/slog"
 	"math/rand/v2"
 	"strings"
@@ -173,7 +174,7 @@ func New(opts AppOptions) (*App, error) {
 		spinner:       spinner.New(),
 		width:         80,
 		height:        24,
-		msgColW:       62, // default: bubble inner at 80 cols (int(80*0.80)-2)
+		msgColW:       61, // default: bubble content at 80 cols (int(80*0.80)-3)
 		subagents:     make(map[string]*components.SubagentState),
 		subagentAnims: make(map[string]*anim.Anim),
 		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
@@ -209,9 +210,9 @@ type App struct {
 	height int
 
 	// msgColW is the glamour word-wrap width: the inner content width of
-	// assistant bubbles.  Bubbles are 80% of the left column width and lose
-	// 2 columns to their border frame, so:
-	//   msgColW = int(float64(leftW) * 0.80) - 2
+	// assistant bubbles. Bubbles are 80% of the left column width and lose
+	// 1 column to their side accent bar plus 2 columns to horizontal padding, so:
+	//   msgColW = int(float64(leftW) * 0.80) - 3
 	// Updated alongside a.width in the WindowSizeMsg handler and kept in
 	// sync in View().  Glamour is rendered at this width so markdown lines
 	// never overflow the bubble's inner area.
@@ -251,6 +252,11 @@ type App struct {
 	usedTok     int64
 	maxTok      int64
 	pctUsed     float64
+
+	// Terminal colours reported by Bubble Tea. For the shell theme, Hygge uses
+	// these to derive a subtle surface fill close to the user's real terminal bg.
+	terminalBg color.Color
+	terminalFg color.Color
 
 	// input + send state
 	input *components.Input
@@ -438,6 +444,8 @@ func (a *App) Init() tea.Cmd {
 		a.input.Textarea.Focus(),
 		a.spinner.Tick,
 		a.scheduleModifiedFilesTick(),
+		tea.RequestBackgroundColor,
+		tea.RequestForegroundColor,
 	}
 	// Only start the bus listener when the bridge is running (i.e. a
 	// foreground session is already bound or OpenSessionsModalOnStart
@@ -648,8 +656,8 @@ func (a *App) View() tea.View {
 	leftW := width - sidebarW
 	// Keep msgColW in sync so ensureRenderer uses the correct word-wrap width
 	// even when View() is called before the first WindowSizeMsg.
-	// glamour word-wrap = bubble inner width = 80% of leftW minus 2 border cols.
-	a.msgColW = int(float64(leftW)*0.80) - 2
+	// glamour word-wrap = bubble content width = 80% of leftW minus side bar + padding.
+	a.msgColW = int(float64(leftW)*0.80) - 3
 	if a.msgColW < 1 {
 		a.msgColW = 1
 	}
@@ -672,13 +680,16 @@ func (a *App) View() tea.View {
 		}
 	}
 
+	surfaceBg, useSurfaceBg := a.runtimeSurfaceBackground()
 	mlContent := components.MessageList{
-		Width:     leftW,
-		Theme:     a.opts.Theme,
-		Messages:  visibleMessages,
-		Subagents: a.subagents,
-		AnimFor:   a.subagentAnims,
-		Now:       a.opts.Now(),
+		Width:                leftW,
+		Theme:                a.opts.Theme,
+		SurfaceBackground:    surfaceBg,
+		UseSurfaceBackground: useSurfaceBg,
+		Messages:             visibleMessages,
+		Subagents:            a.subagents,
+		AnimFor:              a.subagentAnims,
+		Now:                  a.opts.Now(),
 	}.View()
 
 	in := a.input.View()
@@ -834,21 +845,23 @@ func (a *App) View() tea.View {
 	var main string
 	if sidebarW > 0 {
 		sb := components.Sidebar{
-			Width:         sidebarW,
-			Height:        height,
-			SessionTitle:  a.sidebarSessionTitle(),
-			UsedTokens:    a.usedTok,
-			MaxTokens:     a.maxTok,
-			PctUsed:       a.pctUsed,
-			CostUSD:       a.costDollars,
-			MCPs:          a.opts.MCPStatuses,
-			ProjectPath:   a.collapsedProjectPath(),
-			GitBranch:     a.gitBranch(),
-			AppName:       "Hygge",
-			Version:       a.opts.Version,
-			Theme:         a.opts.Theme,
-			NerdFonts:     a.opts.NerdFonts,
-			ModifiedFiles: a.modifiedFilesCache,
+			Width:                sidebarW,
+			Height:               height,
+			SessionTitle:         a.sidebarSessionTitle(),
+			UsedTokens:           a.usedTok,
+			MaxTokens:            a.maxTok,
+			PctUsed:              a.pctUsed,
+			CostUSD:              a.costDollars,
+			MCPs:                 a.opts.MCPStatuses,
+			ProjectPath:          a.collapsedProjectPath(),
+			GitBranch:            a.gitBranch(),
+			AppName:              "Hygge",
+			Version:              a.opts.Version,
+			Theme:                a.opts.Theme,
+			SurfaceBackground:    surfaceBg,
+			UseSurfaceBackground: useSurfaceBg,
+			NerdFonts:            a.opts.NerdFonts,
+			ModifiedFiles:        a.modifiedFilesCache,
 		}.View()
 		main = lipgloss.JoinHorizontal(lipgloss.Top, leftCol, sb)
 	} else {
@@ -942,8 +955,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sidebarW = sidebarFixedWidth
 		}
 		leftW := m.Width - sidebarW
-		// glamour word-wrap = bubble inner width = 80% of leftW minus 2 border cols.
-		a.msgColW = int(float64(leftW)*0.80) - 2
+		// glamour word-wrap = bubble content width = 80% of leftW minus side bar + padding.
+		a.msgColW = int(float64(leftW)*0.80) - 3
 		if a.msgColW < 1 {
 			a.msgColW = 1
 		}
@@ -959,10 +972,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.rendererW = 0
 		return a, nil
 
+	case tea.BackgroundColorMsg:
+		a.terminalBg = m.Color
+		return a, nil
+
+	case tea.ForegroundColorMsg:
+		a.terminalFg = m.Color
+		return a, nil
+
 	case tea.EnvMsg, tea.ColorProfileMsg, tea.TerminalVersionMsg, tea.ModeReportMsg, tea.KeyboardEnhancementsMsg:
 		// Bubble Tea emits terminal capability/report messages during startup and
-		// around mode changes. Hygge currently does not need them; consume them at
-		// the root so they never fall through to the textarea component.
+		// around mode changes. Consume them at the root so they never fall through
+		// to the textarea component.
 		return a, nil
 
 	case spinner.TickMsg:
@@ -2574,8 +2595,8 @@ func (a *App) setToolStatusByCurrentStatus(fromStatus, toStatus components.ToolS
 }
 
 // ensureRenderer constructs (or returns the cached) glamour renderer for the
-// current bubble inner width.  msgColW is already the bubble inner width
-// (80% of the left column minus 2 border columns), so glamour word-wrap
+// current bubble content width. msgColW is already the bubble content width
+// (80% of the left column minus side bar + padding), so glamour word-wrap
 // exactly matches the space available inside the bubble and content never
 // overflows.
 func (a *App) ensureRenderer() *glamour.TermRenderer {
@@ -2745,6 +2766,49 @@ func currentThemeName(t *theme.Theme) string {
 		return "shell"
 	}
 	return t.Name
+}
+
+func (a *App) runtimeSurfaceBackground() (color.Color, bool) {
+	if currentThemeName(a.opts.Theme) != "shell" {
+		return nil, false
+	}
+	if a.terminalBg == nil {
+		// Avoid a startup flash from the static fallback before the terminal's
+		// actual background-color report arrives.
+		return nil, true
+	}
+	return blendTerminalSurface(a.terminalBg, a.terminalFg), true
+}
+
+func blendTerminalSurface(bg, fg color.Color) color.Color {
+	if bg == nil {
+		return nil
+	}
+	br, bgc, bb, _ := bg.RGBA()
+	tr, tg, tb := uint32(0xffff), uint32(0xffff), uint32(0xffff)
+	if fg != nil {
+		tr, tg, tb, _ = fg.RGBA()
+	} else if luminance16(br, bgc, bb) > 0x8000 {
+		tr, tg, tb = 0, 0, 0
+	}
+	const bgWeight = uint32(97)
+	const tintWeight = uint32(3)
+	r := colorComponent8((br*bgWeight + tr*tintWeight) / 100)
+	g := colorComponent8((bgc*bgWeight + tg*tintWeight) / 100)
+	b := colorComponent8((bb*bgWeight + tb*tintWeight) / 100)
+	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", r, g, b))
+}
+
+func colorComponent8(v uint32) uint8 {
+	v >>= 8
+	if v > 0xff {
+		return 0xff
+	}
+	return uint8(v)
+}
+
+func luminance16(r, g, b uint32) uint32 {
+	return (r*2126 + g*7152 + b*722) / 10000
 }
 
 func (a *App) switchThemeCmd(name string) tea.Cmd {

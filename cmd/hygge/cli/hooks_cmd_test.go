@@ -36,6 +36,7 @@ func TestHooksList_NoHooks(t *testing.T) {
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             home,
 		ProviderFactory: stubProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 	})
 
 	cmd := NewRootCmd()
@@ -65,6 +66,7 @@ command = "/usr/bin/true"
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             home,
 		ProviderFactory: stubProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 	})
 
 	cmd := NewRootCmd()
@@ -104,6 +106,7 @@ mode = "async"
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             home,
 		ProviderFactory: stubProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 	})
 
 	cmd := NewRootCmd()
@@ -138,6 +141,7 @@ timeout = "3s"
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             home,
 		ProviderFactory: stubProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 	})
 
 	cmd := NewRootCmd()
@@ -167,6 +171,7 @@ func TestHooksShow_NotFound(t *testing.T) {
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             home,
 		ProviderFactory: stubProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 	})
 
 	cmd := NewRootCmd()

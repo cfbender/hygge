@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/provider"
@@ -23,7 +25,7 @@ import (
 )
 
 // TestSmoke_EndToEnd is the v0.1 "does this actually work?" gate.  It
-// boots the full runtime (bootstrap), wires a scripted fake provider
+// boots the full runtime (bootstrap), wires a scripted fake Fantasy model
 // into the agent loop, lets the read tool execute against a real tempdir
 // file, and asserts the conversation lands in the store the way the TUI
 // would have committed it.
@@ -33,8 +35,8 @@ import (
 //   - bootstrap() wires bus, store, permission, tools, catalog, agent
 //   - state.json on-disk write via OnSessionCreated → AddRecentSession
 //   - lazy session creation through store.CreateSession
-//   - agent.Send → provider.Stream (scripted) → tool.Execute → second
-//     provider.Stream → assistant final
+//   - agent.Send → fantasy.LanguageModel.Stream (scripted) → tool.Execute →
+//     second fantasy.LanguageModel.Stream → assistant final
 //   - cost catalog falls through to fallback pricing without panicking
 //     for an unknown model name (live fetch is shorted to a 500-server)
 //   - bus events fire in the documented order
@@ -103,7 +105,8 @@ func TestSmoke_EndToEnd(t *testing.T) {
 		}},
 	}
 
-	prov := newSmokeProvider("anthropic", fakeModel, scripts)
+	prov := newSmokeProvider("anthropic", fakeModel, nil)
+	fantasyModel := newSmokeFantasyModel("anthropic", fakeModel, scripts)
 
 	// ---- bootstrap overrides -------------------------------------------
 
@@ -118,6 +121,7 @@ func TestSmoke_EndToEnd(t *testing.T) {
 		ProviderFactory: func(_ map[string]any) (provider.Provider, error) {
 			return prov, nil
 		},
+		FantasyModel: fantasyModel,
 		SystemPrompt: "smoke-test system prompt",
 	})
 	t.Cleanup(func() { SetTestOverrides(nil) })
@@ -299,10 +303,13 @@ func TestSmoke_EndToEnd(t *testing.T) {
 		t.Errorf("state.RecentSessions = %v; missing %s", stReloaded.RecentSessions, sess.ID)
 	}
 
-	// Sanity: provider was called exactly twice (one tool-use turn,
+	// Sanity: Fantasy was called exactly twice (one tool-use turn,
 	// one final-text turn).
-	if got := prov.calls.Load(); got != 2 {
-		t.Errorf("provider Stream calls = %d, want 2", got)
+	if got := fantasyModel.calls.Load(); got != 2 {
+		t.Errorf("fantasy model Stream calls = %d, want 2", got)
+	}
+	if got := prov.calls.Load(); got != 0 {
+		t.Errorf("legacy provider Stream calls = %d, want 0", got)
 	}
 }
 
@@ -322,6 +329,94 @@ type smokeProvider struct {
 	scripts []smokeScript
 	calls   atomic.Int32
 }
+
+type smokeFantasyModel struct {
+	provider string
+	model    string
+	mu       sync.Mutex
+	scripts  []smokeScript
+	calls    atomic.Int32
+}
+
+func newSmokeFantasyModel(providerName, model string, scripts []smokeScript) *smokeFantasyModel {
+	return &smokeFantasyModel{provider: providerName, model: model, scripts: scripts}
+}
+
+func (m *smokeFantasyModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return nil, fmt.Errorf("smokeFantasyModel: Generate not implemented")
+}
+
+func (m *smokeFantasyModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	m.calls.Add(1)
+	m.mu.Lock()
+	if len(m.scripts) == 0 {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("smokeFantasyModel: out of scripts")
+	}
+	s := m.scripts[0]
+	m.scripts = m.scripts[1:]
+	m.mu.Unlock()
+
+	return func(yield func(fantasy.StreamPart) bool) {
+		textOpen := false
+		finish := fantasy.FinishReasonStop
+		usage := fantasy.Usage{}
+		for _, ev := range s.events {
+			if ctx.Err() != nil {
+				return
+			}
+			switch ev.Type {
+			case provider.EventTextDelta:
+				if !textOpen {
+					textOpen = true
+					if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "text"}) {
+						return
+					}
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "text", Delta: ev.Text}) {
+					return
+				}
+			case provider.EventToolUse:
+				finish = fantasy.FinishReasonToolCalls
+				input := string(ev.ToolInput)
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputStart, ID: ev.ToolID, ToolCallName: ev.ToolName}) {
+					return
+				}
+				if input != "" && !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputDelta, ID: ev.ToolID, Delta: input}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputEnd, ID: ev.ToolID}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolCall, ID: ev.ToolID, ToolCallName: ev.ToolName, ToolCallInput: input}) {
+					return
+				}
+			case provider.EventUsage:
+				usage = fantasy.Usage{InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens, CacheReadTokens: ev.Usage.CacheReadTokens, CacheCreationTokens: ev.Usage.CacheWriteTokens}
+			case provider.EventError:
+				_ = yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: ev.Err})
+				return
+			}
+		}
+		if textOpen {
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "text"}) {
+				return
+			}
+		}
+		_ = yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, Usage: usage, FinishReason: finish})
+	}, nil
+}
+
+func (m *smokeFantasyModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, fmt.Errorf("smokeFantasyModel: GenerateObject not implemented")
+}
+
+func (m *smokeFantasyModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, fmt.Errorf("smokeFantasyModel: StreamObject not implemented")
+}
+
+func (m *smokeFantasyModel) Provider() string { return m.provider }
+func (m *smokeFantasyModel) Model() string    { return m.model }
 
 func newSmokeProvider(name, model string, scripts []smokeScript) *smokeProvider {
 	return &smokeProvider{name: name, model: model, scripts: scripts}
