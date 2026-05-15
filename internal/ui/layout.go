@@ -23,9 +23,9 @@ type uiLayout struct {
 	overlay image.Rectangle
 
 	// Derived state.
-	compact    bool // sidebar hidden (narrow terminal)
-	sidebarW   int
-	leftW      int
+	compact     bool // sidebar hidden (narrow terminal)
+	sidebarW    int
+	leftW       int
 	msgContentW int // word-wrap width for message content
 }
 
@@ -34,9 +34,9 @@ const (
 	sidebarFixedWidth   = 40
 	editorMinHeight     = 3
 	editorMaxHeight     = 15
-	footerHeight      = 1
-	headerHeight      = 1
-	chatBottomPadding = 1 // breathing room between messages and editor
+	footerHeight        = 1
+	headerHeight        = 1
+	chatBottomPadding   = 1 // breathing room between messages and editor
 
 )
 

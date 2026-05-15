@@ -148,7 +148,7 @@ type MessageList struct {
 	Theme         *theme.Theme
 	Styles        *styles.Styles
 	Messages      []UIMessage
-	Subagents            map[string]*SubagentState
+	Subagents     map[string]*SubagentState
 	// AnimFor, when non-nil, maps SubSessionID to the running Anim for
 	// that sub-agent.  Passed through to SubagentBlock so the running
 	// state can display the animated spinner.
