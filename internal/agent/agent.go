@@ -162,7 +162,8 @@ type Options struct {
 type Agent struct {
 	opts Options
 
-	// mu guards closed, locks, pendingLazy, thresholdFired, and pluginInjects.
+	// mu guards closed, locks, pendingLazy, thresholdFired, pluginInjects,
+	// activeRuns, and queues.
 	mu     sync.Mutex
 	closed bool
 	locks  map[string]*sync.Mutex
@@ -182,6 +183,14 @@ type Agent struct {
 	// the current turn.  Reset by ResetPluginInjectCounters at turn start.
 	// Guarded by mu.
 	pluginInjects map[pluginInjectKey]int
+	// activeRuns is the set of session IDs currently executing a Send.
+	// Used to decide whether an incoming Send should be enqueued.
+	// Guarded by mu.
+	activeRuns map[string]struct{}
+	// queues holds per-session queues of pending sends that arrived while
+	// the session was busy.  Drained (one entry at a time) after each
+	// Send completes.  Guarded by mu.
+	queues map[string][]QueuedSend
 }
 
 // New constructs an Agent.  Returns an error if any required option is nil.
@@ -218,6 +227,8 @@ func New(opts Options) (*Agent, error) {
 		locks:          make(map[string]*sync.Mutex),
 		pendingLazy:    make(map[string][]agentsmd.Block),
 		thresholdFired: make(map[string]bool),
+		activeRuns:     make(map[string]struct{}),
+		queues:         make(map[string][]QueuedSend),
 	}, nil
 }
 
@@ -259,6 +270,11 @@ func (a *Agent) isClosed() bool {
 // calls (or hits the iteration limit).  Returns the final committed
 // assistant message.
 //
+// If a Send is already in flight for the session, the new send is
+// enqueued and nil is returned immediately.  The caller can inspect
+// the queue via QueueCount / QueuedPrompts.  The queued send is
+// dispatched automatically once the active run completes.
+//
 // Bus events emitted, in order per iteration:
 //
 //   - bus.MessageAppended (user)              once at start
@@ -271,6 +287,8 @@ func (a *Agent) isClosed() bool {
 //   - bus.ToolCallCompleted                   per tool call
 //   - bus.MessageAppended (tool result)       per tool call
 //   - bus.IterationLimitReached               if the cap is hit
+//   - bus.TurnCompleted                       after a successful turn
+//   - bus.QueueChanged                        when queue depth changes
 //
 // Permission asks and tool progress events come from the tools themselves
 // while their Execute method runs.
@@ -285,12 +303,75 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 		return nil, fmt.Errorf("agent: Send: userParts required")
 	}
 
-	lock := a.sessionLock(sessionID)
-	lock.Lock()
-	defer lock.Unlock()
+	// Check whether the session is already running. If so, enqueue.
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil, ErrClosed
+	}
+	if _, busy := a.activeRuns[sessionID]; busy {
+		// Enqueue and return immediately.
+		a.queues[sessionID] = append(a.queues[sessionID], QueuedSend{
+			Parts: append([]session.Part(nil), userParts...),
+		})
+		count := len(a.queues[sessionID])
+		prompts := queuedPrompts(a.queues[sessionID])
+		a.mu.Unlock()
+		bus.Publish(a.opts.Bus, bus.QueueChanged{
+			SessionID: sessionID,
+			Count:     count,
+			Prompts:   prompts,
+			At:        a.opts.Now(),
+		})
+		return nil, nil
+	}
+	// Mark session as active before releasing mu.
+	a.activeRuns[sessionID] = struct{}{}
+	a.mu.Unlock()
 
-	// Re-check closed under the per-session lock: a Close racing with the
-	// lock acquisition should still bail out cleanly.
+	// Run the send and, when done, pop the next queued entry (if any).
+	msg, err := a.doSend(ctx, sessionID, userParts)
+
+	// After the run, dequeue and dispatch the next entry (if any).
+	a.mu.Lock()
+	delete(a.activeRuns, sessionID)
+	var next *QueuedSend
+	if len(a.queues[sessionID]) > 0 {
+		q := a.queues[sessionID]
+		first := q[0]
+		next = &first
+		a.queues[sessionID] = q[1:]
+		count := len(a.queues[sessionID])
+		prompts := queuedPrompts(a.queues[sessionID])
+		a.mu.Unlock()
+		bus.Publish(a.opts.Bus, bus.QueueChanged{
+			SessionID: sessionID,
+			Count:     count,
+			Prompts:   prompts,
+			At:        a.opts.Now(),
+		})
+	} else {
+		a.mu.Unlock()
+	}
+
+	// Kick off the next queued send.  We use a goroutine so that this
+	// Send's caller gets their result immediately; the next send runs
+	// independently.
+	if next != nil {
+		go func() {
+			_, _ = a.Send(ctx, sessionID, next.Parts)
+		}()
+	}
+
+	return msg, err
+}
+
+// doSend executes the actual send work: hook, persist user message, runLoop.
+// It is called only when the session is not currently busy (the caller has
+// already set activeRuns[sessionID]).
+func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []session.Part) (*session.Message, error) {
+	// Re-check closed under mu (racing Close is safe because activeRuns
+	// was set before we released the lock).
 	if a.isClosed() {
 		return nil, ErrClosed
 	}
@@ -353,7 +434,75 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 		return nil, fmt.Errorf("agent: Send: load session: %w", err)
 	}
 
-	return a.runLoop(ctx, sessionID, sess.Model.Name)
+	result, runErr := a.runLoop(ctx, sessionID, sess.Model.Name)
+
+	// Publish TurnCompleted on clean success.
+	if runErr == nil {
+		bus.Publish(a.opts.Bus, bus.TurnCompleted{
+			SessionID: sessionID,
+			At:        a.opts.Now(),
+		})
+	}
+
+	return result, runErr
+}
+
+// queuedPrompts extracts the first PartText from each QueuedSend.
+// len(result) == len(q).  Callers must hold a.mu.
+func queuedPrompts(q []QueuedSend) []string {
+	prompts := make([]string, len(q))
+	for i, qs := range q {
+		for _, p := range qs.Parts {
+			if p.Kind == session.PartText {
+				prompts[i] = p.Text
+				break
+			}
+		}
+	}
+	return prompts
+}
+
+// QueueCount returns the number of pending queued sends for the session.
+func (a *Agent) QueueCount(sessionID string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.queues[sessionID])
+}
+
+// QueuedPrompts returns the queued prompt texts (first PartText of each)
+// for display in the UI.
+func (a *Agent) QueuedPrompts(sessionID string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return queuedPrompts(a.queues[sessionID])
+}
+
+// ClearQueue drops all pending queued sends for the session.
+// Returns the number of sends that were dropped.
+func (a *Agent) ClearQueue(sessionID string) int {
+	a.mu.Lock()
+	n := len(a.queues[sessionID])
+	if n == 0 {
+		a.mu.Unlock()
+		return 0
+	}
+	delete(a.queues, sessionID)
+	a.mu.Unlock()
+	bus.Publish(a.opts.Bus, bus.QueueChanged{
+		SessionID: sessionID,
+		Count:     0,
+		Prompts:   nil,
+		At:        a.opts.Now(),
+	})
+	return n
+}
+
+// IsSessionBusy reports whether the session has an active run in flight.
+func (a *Agent) IsSessionBusy(sessionID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, busy := a.activeRuns[sessionID]
+	return busy
 }
 
 // appendPendingLazy queues blocks to be injected as a system-prompt
