@@ -474,3 +474,72 @@ func (d *dualGateProvider) CountTokens(_ context.Context, _ provider.Request) (i
 	return 0, nil
 }
 func (d *dualGateProvider) ListModels(_ context.Context) ([]provider.Model, error) { return nil, nil }
+
+// TestQueue_QueuedSendCompletesAfterCallerCtxCancelled verifies that a queued
+// send still executes even if the original caller's context is cancelled before
+// the queued send begins.  This mirrors the UI pattern where defer cancel()
+// fires as soon as Agent.Send returns for a queued message.
+func TestQueue_QueuedSendCompletesAfterCallerCtxCancelled(t *testing.T) {
+	env := newTestEnv(t)
+
+	gate := make(chan struct{})
+	prov := newSlowProvider("fake", gate,
+		scriptText("first reply", provider.Usage{}),
+		scriptText("second reply", provider.Usage{}),
+	)
+	a := env.newAgent(prov)
+
+	// Use a cancellable context that simulates the UI's per-send context.
+	callerCtx, callerCancel := context.WithCancel(context.Background())
+
+	var firstDone sync.WaitGroup
+	firstDone.Add(1)
+	go func() {
+		defer firstDone.Done()
+		// This is goroutine #1 — it owns callerCtx and calls defer cancel()
+		// when Send returns (mirroring the UI's startSend goroutine).
+		defer callerCancel()
+		_, _ = a.Send(callerCtx, env.sessionID, userText("first"))
+	}()
+
+	// Give goroutine #1 time to mark the session active.
+	time.Sleep(30 * time.Millisecond)
+
+	// Enqueue the second message while first is in flight.
+	// This uses a separate context (doesn't matter — it returns nil,nil immediately).
+	_, err := a.Send(context.Background(), env.sessionID, userText("second"))
+	if err != nil {
+		t.Fatalf("enqueue Send returned error: %v", err)
+	}
+	if got := a.QueueCount(env.sessionID); got != 1 {
+		t.Fatalf("QueueCount = %d, want 1", got)
+	}
+
+	// Release the gate so the first send completes.  When the first Send
+	// goroutine returns, defer callerCancel() fires, cancelling callerCtx.
+	// The queue-drain goroutine must use a.ctx (not callerCtx) so the
+	// second send still runs.
+	close(gate)
+	firstDone.Wait()
+
+	// callerCtx is now cancelled.  Give the queued send time to complete.
+	time.Sleep(300 * time.Millisecond)
+
+	if got := a.QueueCount(env.sessionID); got != 0 {
+		t.Fatalf("QueueCount after drain = %d, want 0 (queued send must have run)", got)
+	}
+
+	// Verify both turns actually ran: user, assistant, user, assistant.
+	msgs, err := env.Store.MessagesForSession(context.Background(), env.sessionID)
+	if err != nil {
+		t.Fatalf("MessagesForSession: %v", err)
+	}
+	wantRoles := []string{"user", "assistant", "user", "assistant"}
+	var gotRoles []string
+	for _, m := range msgs {
+		gotRoles = append(gotRoles, string(m.Role))
+	}
+	if !equalStrings(gotRoles, wantRoles) {
+		t.Fatalf("want roles %v, got %v (queued send did not complete)", wantRoles, gotRoles)
+	}
+}

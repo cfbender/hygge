@@ -332,6 +332,19 @@ type QueueChanged struct {
 	At time.Time
 }
 
+// TurnStarted fires at the moment the agent begins executing a turn —
+// after the user message is persisted and hooks have run, just before the
+// provider stream loop starts.  Paired with TurnCompleted.  The UI uses
+// this to flip its busy state without relying on the goroutine that called
+// Agent.Send (whose context may already be cancelled by the time the queued
+// send fires).
+type TurnStarted struct {
+	// SessionID is the session whose turn is starting.
+	SessionID string
+	// At is the wall-clock time the turn began.
+	At time.Time
+}
+
 // TurnCompleted fires after the agent loop finishes a full assistant turn
 // successfully (no error, no iteration-limit hit).  The UI and notification
 // layer use this to optionally alert the user that the assistant is ready.
