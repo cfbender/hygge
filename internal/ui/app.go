@@ -125,6 +125,9 @@ type AppOptions struct {
 	// SwitchModel applies a provider/model selection to the running backend.
 	// When nil, /model remains a session-only UI selection.
 	SwitchModel func(ctx context.Context, providerName, modelName string) error
+	// SaveModel persists a successful provider/model runtime switch.  Save
+	// failures are surfaced to the UI without rolling back the runtime switch.
+	SaveModel func(ctx context.Context, providerName, modelName string) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -1022,7 +1025,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.opts.ModelProvider = m.provider
 		a.opts.ModelName = m.model
-		return a, a.setNotice("model switched for this session: " + m.provider + "/" + m.model + " (not saved)")
+		if m.saveErr != nil {
+			return a, a.setNotice("model switched for this session but save failed: " + m.saveErr.Error())
+		}
+		return a, a.setNotice("model switched and saved: " + m.provider + "/" + m.model)
 
 	case sendStarted:
 		a.busy = true

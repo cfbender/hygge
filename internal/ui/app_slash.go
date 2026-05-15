@@ -211,6 +211,7 @@ type modelSwitchResult struct {
 	provider string
 	model    string
 	err      error
+	saveErr  error
 }
 
 func (a *App) switchModelCmd(providerName, modelName string) tea.Cmd {
@@ -218,6 +219,11 @@ func (a *App) switchModelCmd(providerName, modelName string) tea.Cmd {
 		if a.opts.SwitchModel != nil {
 			if err := a.opts.SwitchModel(a.ctx, providerName, modelName); err != nil {
 				return modelSwitchResult{provider: providerName, model: modelName, err: err}
+			}
+		}
+		if a.opts.SaveModel != nil {
+			if err := a.opts.SaveModel(a.ctx, providerName, modelName); err != nil {
+				return modelSwitchResult{provider: providerName, model: modelName, saveErr: err}
 			}
 		}
 		return modelSwitchResult{provider: providerName, model: modelName}

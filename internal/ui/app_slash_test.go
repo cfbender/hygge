@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,8 +93,13 @@ func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	var switched []string
+	var saved []string
 	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
 		switched = append(switched, providerName+"/"+modelName)
+		return nil
+	}
+	app.opts.SaveModel = func(_ context.Context, providerName, modelName string) error {
+		saved = append(saved, providerName+"/"+modelName)
 		return nil
 	}
 	typeInto(app, "/model")
@@ -196,8 +202,13 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	var switched []string
+	var saved []string
 	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
 		switched = append(switched, providerName+"/"+modelName)
+		return nil
+	}
+	app.opts.SaveModel = func(_ context.Context, providerName, modelName string) error {
+		saved = append(saved, providerName+"/"+modelName)
 		return nil
 	}
 	typeInto(app, "/model openrouter/gpt-5")
@@ -209,11 +220,42 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	if len(switched) != 1 || switched[0] != "openrouter/gpt-5" {
 		t.Fatalf("SwitchModel calls = %v, want [openrouter/gpt-5]", switched)
 	}
+	if len(saved) != 1 || saved[0] != "openrouter/gpt-5" {
+		t.Fatalf("SaveModel calls = %v, want [openrouter/gpt-5]", saved)
+	}
 	if app.opts.ModelProvider != "openrouter" {
 		t.Errorf("ModelProvider = %q, want openrouter", app.opts.ModelProvider)
 	}
 	if app.opts.ModelName != "gpt-5" {
 		t.Errorf("ModelName = %q, want gpt-5", app.opts.ModelName)
+	}
+}
+
+func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	var switched []string
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+		switched = append(switched, providerName+"/"+modelName)
+		return nil
+	}
+	app.opts.SaveModel = func(_ context.Context, _, _ string) error {
+		return errors.New("permission denied")
+	}
+	typeInto(app, "/model openrouter/gpt-5")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected model switch cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	if len(switched) != 1 || switched[0] != "openrouter/gpt-5" {
+		t.Fatalf("SwitchModel calls = %v, want [openrouter/gpt-5]", switched)
+	}
+	if app.opts.ModelProvider != "openrouter" || app.opts.ModelName != "gpt-5" {
+		t.Fatalf("selected model = %s/%s, want openrouter/gpt-5", app.opts.ModelProvider, app.opts.ModelName)
+	}
+	if !strings.Contains(app.notice, "save failed") || !strings.Contains(app.notice, "permission denied") {
+		t.Fatalf("notice = %q, want save failure", app.notice)
 	}
 }
 

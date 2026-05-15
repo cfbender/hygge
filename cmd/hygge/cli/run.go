@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui"
@@ -207,10 +208,20 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 				return err
 			}
 			rt.Provider = prv
-			// TODO(model-persistence): persist providerName/modelName through the
-			// profile/config writer once this package has a narrow, provenance-safe
-			// API for changing only [model] without clobbering layered config.
 			return nil
+		},
+		SaveModel: func(_ context.Context, providerName, modelName string) error {
+			_, err := config.WriteModelSelection(config.WriteModelOptions{
+				HomeDir:       rt.StateOpts.HomeDir,
+				XDGConfigHome: rt.XDGConfigHome,
+				Pwd:           rt.Pwd,
+				Provenance:    rt.Provenance,
+			}, providerName, modelName)
+			if err == nil {
+				rt.Config.Model.Provider = providerName
+				rt.Config.Model.Name = modelName
+			}
+			return err
 		},
 	})
 	if err != nil {
