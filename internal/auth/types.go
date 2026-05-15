@@ -37,8 +37,7 @@ const (
 	CredAPIKey CredentialType = "api_key"
 
 	// CredOAuth selects the OAuth shape: the AccessToken, RefreshToken,
-	// and ExpiresAt fields are populated.  v0.1 does not implement the
-	// OAuth flow itself — see [ErrOAuthUnsupported].
+	// and ExpiresAt fields are populated.
 	CredOAuth CredentialType = "oauth"
 )
 
@@ -54,6 +53,9 @@ type Credential struct {
 	AccessToken  string    `json:"access_token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	// AccountID is the ChatGPT account ID extracted from the JWT.
+	// Used as the ChatGPT-Account-Id header for organization subscriptions.
+	AccountID string `json:"account_id,omitempty"`
 
 	// Common:
 	AddedAt time.Time `json:"added_at"`
@@ -85,7 +87,3 @@ type LoadOptions struct {
 // top-level fields.
 var ErrCorrupt = errors.New("auth: corrupt file")
 
-// ErrOAuthUnsupported is returned by the OAuth stubs in this package.
-// v0.1 only supports API-key credentials end-to-end; OAuth wiring is
-// scaffolded but not yet functional.
-var ErrOAuthUnsupported = errors.New("auth: oauth flow not yet supported")

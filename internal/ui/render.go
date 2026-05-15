@@ -42,7 +42,7 @@ func (a *App) renderHeaderContent() string {
 			Width:   l.leftW,
 			Styles:  a.styles,
 			AppName: "hygge",
-			Model:   a.opts.ModelName,
+			Model:   displayModelName(a.opts.ModelName),
 			Tokens:  formatTokens(a.usedTok),
 			Cost:    formatCost(a.costDollars),
 		}.View()
@@ -149,8 +149,8 @@ func (a *App) renderFooterContent() string {
 		Theme:          a.opts.Theme,
 		Styles:         a.styles,
 		AgentType:      agentType,
-		ModelName:      a.opts.ModelName,
-		Provider:       a.opts.ModelProvider,
+		ModelName:      displayModelName(a.opts.ModelName),
+		Provider:       displayProviderName(a.opts.ModelProvider),
 		ReasoningLevel: a.opts.Reasoning.Effort,
 		ModeIndicator:  a.formatModeIndicator(),
 	}.View()
@@ -295,4 +295,37 @@ func (a *App) renderChromeContent() string {
 	}
 
 	return strings.Join(sections, "\n")
+}
+
+// displayProviderName prettifies a canonical provider ID for display.
+func displayProviderName(name string) string {
+	switch strings.ToLower(name) {
+	case "openai":
+		return "OpenAI"
+	case "openrouter":
+		return "OpenRouter"
+	case "anthropic":
+		return "Anthropic"
+	case "deepseek":
+		return "DeepSeek"
+	case "google", "gemini":
+		return "Google"
+	case "xai":
+		return "xAI"
+	case "groq":
+		return "Groq"
+	case "mistral":
+		return "Mistral"
+	default:
+		return name
+	}
+}
+
+// displayModelName prettifies a canonical model ID for display.
+func displayModelName(name string) string {
+	// GPT models: gpt-5.5 → GPT-5.5, gpt-5-mini → GPT-5-mini
+	if strings.HasPrefix(strings.ToLower(name), "gpt-") {
+		return "GPT-" + name[4:]
+	}
+	return name
 }

@@ -366,14 +366,15 @@ func TestSet_EmptyProviderName(t *testing.T) {
 	}
 }
 
-// --- bonus: OAuth stubs return ErrOAuthUnsupported --------------------------
+// --- bonus: ExtractAccountID ------------------------------------------------
 
-func TestOAuthStubs(t *testing.T) {
-	if _, err := StartOAuth(t.Context(), "anthropic", LoadOptions{}); !errors.Is(err, ErrOAuthUnsupported) {
-		t.Errorf("StartOAuth: got %v, want ErrOAuthUnsupported", err)
+func TestExtractAccountID(t *testing.T) {
+	// Not a real JWT — just verifies empty-string safety.
+	if got := ExtractAccountID("not.a.jwt"); got != "" {
+		t.Errorf("ExtractAccountID(bad): got %q, want empty", got)
 	}
-	if err := CompleteOAuth(t.Context(), "anthropic", "code", LoadOptions{}); !errors.Is(err, ErrOAuthUnsupported) {
-		t.Errorf("CompleteOAuth: got %v, want ErrOAuthUnsupported", err)
+	if got := ExtractAccountID(""); got != "" {
+		t.Errorf("ExtractAccountID(empty): got %q, want empty", got)
 	}
 }
 
