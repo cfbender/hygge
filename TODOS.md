@@ -126,4 +126,5 @@ Migration plan artifact: `7yLWjW`.
 - [x] **Phase 5 — Internal Fantasy agents** — Compaction summaries now use a no-tool Fantasy-backed internal agent when a Fantasy model is configured, preserving existing marker/store/UI contracts and leaving summary usage excluded from session cost totals as before. Hygge has no active model-generated title/slug path today; `agent.Runtime.GenerateTitle` is the narrow no-tool seam for a future session-title slice.
 - [ ] **Phase 6 — UI** — Theme/model-select/API-key dialogs; slash command system update.
   - [x] **Phase 6A — UX foundation** — Queue status pills near the input/footer and input-event filtering for OSC leaks plus 15ms mouse wheel/motion spam throttling.
-  - [ ] **Phase 6B+ follow-ups** — Slash-command completion popover, dialog overlay stack, todo persistence/agent todo tracking, attachments, API key/model/theme dialogs.
+  - [x] **Phase 6B — Slash-command completion popover** — Fuzzy inline completions with descriptions, keyboard navigation, and Hygge styling.
+  - [ ] **Phase 6C+ follow-ups** — Dialog overlay stack, todo persistence/agent todo tracking, attachments, API key/model/theme dialogs.

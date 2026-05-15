@@ -76,6 +76,23 @@ func TestPaletteRendersFilteredBuiltins(t *testing.T) {
 	}
 }
 
+func TestPaletteRendersFuzzyBuiltins(t *testing.T) {
+	t.Parallel()
+	r := newPaletteRegistry(t)
+	matches := r.LookupPrefix("cpct")
+	p := CommandPalette{
+		Width:           60,
+		Theme:           theme.ShellTheme(),
+		Matches:         matches,
+		Highlight:       0,
+		QueryAfterSlash: "cpct",
+	}
+	out := p.View()
+	if !strings.Contains(out, "/compact") {
+		t.Errorf("palette missing fuzzy match /compact in:\n%s", out)
+	}
+}
+
 func TestPaletteHighlightMarker(t *testing.T) {
 	t.Parallel()
 	r := newPaletteRegistry(t)

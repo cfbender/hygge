@@ -130,10 +130,11 @@ func (r *Registry) Len() int {
 	return len(r.byName)
 }
 
-// LookupPrefix returns every command whose Name starts with prefix,
-// sorted by Name.  Used by the command palette for autocomplete.
-// An empty prefix returns the same as [List].  Case-sensitive — the
-// palette feeds the user's typed buffer in verbatim.
+// LookupPrefix returns every command whose Name fuzzily matches prefix,
+// sorted by match quality then Name.  Prefix matches rank first, followed
+// by deterministic subsequence matches.  Used by the command palette for
+// autocomplete. An empty prefix returns the same as [List]. Case-sensitive —
+// the palette feeds the user's typed buffer in verbatim.
 func (r *Registry) LookupPrefix(prefix string) []Command {
 	if r == nil {
 		return nil
@@ -142,13 +143,51 @@ func (r *Registry) LookupPrefix(prefix string) []Command {
 	if prefix == "" {
 		return all
 	}
-	out := make([]Command, 0, len(all))
+	type scored struct {
+		cmd   Command
+		score int
+	}
+	matches := make([]scored, 0, len(all))
 	for _, c := range all {
-		if strings.HasPrefix(c.Name(), prefix) {
-			out = append(out, c)
+		if score, ok := fuzzyCommandScore(c.Name(), prefix); ok {
+			matches = append(matches, scored{cmd: c, score: score})
 		}
 	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score < matches[j].score
+		}
+		return matches[i].cmd.Name() < matches[j].cmd.Name()
+	})
+	out := make([]Command, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m.cmd)
+	}
 	return out
+}
+
+func fuzzyCommandScore(name, query string) (int, bool) {
+	if strings.HasPrefix(name, query) {
+		return 0, true
+	}
+	pos := 0
+	gaps := 0
+	for _, qr := range query {
+		found := false
+		for pos < len(name) {
+			if rune(name[pos]) == qr {
+				found = true
+				pos++
+				break
+			}
+			pos++
+			gaps++
+		}
+		if !found {
+			return 0, false
+		}
+	}
+	return 10 + gaps, true
 }
 
 // Load discovers and registers commands in precedence order:
