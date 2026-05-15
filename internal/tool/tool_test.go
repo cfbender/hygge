@@ -291,6 +291,7 @@ func testEngine(t *testing.T, decide func(asked bus.PermissionAsked) bus.Permiss
 	cfg.Permission.FileWrite = config.PermAsk
 	cfg.Permission.Shell = config.PermAsk
 	cfg.Permission.Network = config.PermDeny
+	cfg.Permission.Subagent = config.PermAsk
 
 	e, err := permission.New(permission.EngineOptions{
 		Bus:    b,

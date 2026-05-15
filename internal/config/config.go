@@ -247,6 +247,9 @@ type PermissionConfig struct {
 	// MCP gates MCP tool invocations.  Defaults to "ask".  Servers
 	// may override per-server via mcp.toml's permission_category.
 	MCP PermissionMode `mapstructure:"mcp"`
+	// Subagent gates subagent dispatch.  Defaults to "allow" because
+	// subagents inherit the session's tool-level permissions.
+	Subagent PermissionMode `mapstructure:"subagent"`
 }
 
 // ThemeConfig holds display-theme selection.

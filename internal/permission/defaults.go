@@ -7,6 +7,12 @@ import (
 // modeToAction converts a config.PermissionMode scalar into the engine Action.
 // An empty or unrecognised mode is treated as "ask" — the safest default.
 func modeToAction(m config.PermissionMode) Action {
+	return modeToActionDefault(m, ActionAsk)
+}
+
+// modeToActionDefault converts a config.PermissionMode into an Action,
+// using fallback when the mode is empty or unrecognised.
+func modeToActionDefault(m config.PermissionMode, fallback Action) Action {
 	switch m {
 	case config.PermAllow:
 		return ActionAllow
@@ -15,7 +21,7 @@ func modeToAction(m config.PermissionMode) Action {
 	case config.PermAsk:
 		return ActionAsk
 	default:
-		return ActionAsk
+		return fallback
 	}
 }
 
@@ -55,7 +61,7 @@ func defaultRules(cfg *config.Config) []Rule {
 			{Category: CategoryShell, Pattern: "**", Action: ActionAsk, Source: "default"},
 			{Category: CategoryNetwork, Pattern: "**", Action: ActionDeny, Source: "default"},
 			{Category: CategoryMCP, Pattern: "**", Action: ActionAsk, Source: "default"},
-			{Category: CategoryAgent, Pattern: "**", Action: ActionAsk, Source: "default"},
+			{Category: CategoryAgent, Pattern: "**", Action: ActionAllow, Source: "default"},
 		}
 	}
 	p := cfg.Permission
@@ -97,15 +103,13 @@ func defaultRules(cfg *config.Config) []Rule {
 			Action:   modeToAction(p.MCP),
 			Source:   "default",
 		},
-		// Sub-agent dispatch is always "ask" by default; we intentionally
-		// do not let cfg.Permission introduce a blanket "allow" because
-		// the user expectation is to confirm at least the first time a
-		// sub-agent is launched on their behalf.  Per-pattern allows can
-		// still come from persisted state.
+		// Sub-agent dispatch defaults to allow. Subagents inherit the
+		// parent session's permission state, so individual tool calls
+		// inside the subagent are still gated normally.
 		{
 			Category: CategoryAgent,
 			Pattern:  "**",
-			Action:   ActionAsk,
+			Action:   modeToActionDefault(p.Subagent, ActionAllow),
 			Source:   "default",
 		},
 		// Plugin tools default to "ask" so the user knows a plugin
