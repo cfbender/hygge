@@ -61,13 +61,14 @@ type Config struct {
 	// set by Load after profile resolution.
 	Profile string `mapstructure:"-"`
 
-	Model      ModelConfig      `mapstructure:"model"`
-	Permission PermissionConfig `mapstructure:"permission"`
-	Theme      ThemeConfig      `mapstructure:"theme"`
-	UI         UIConfig         `mapstructure:"ui"`
-	Compaction CompactionConfig `mapstructure:"compaction"`
-	Session    SessionConfig    `mapstructure:"session"`
-	Catalog    CatalogConfig    `mapstructure:"catalog"`
+	Model         ModelConfig         `mapstructure:"model"`
+	Permission    PermissionConfig    `mapstructure:"permission"`
+	Theme         ThemeConfig         `mapstructure:"theme"`
+	UI            UIConfig            `mapstructure:"ui"`
+	Compaction    CompactionConfig    `mapstructure:"compaction"`
+	Session       SessionConfig       `mapstructure:"session"`
+	Catalog       CatalogConfig       `mapstructure:"catalog"`
+	Notifications NotificationsConfig `mapstructure:"notifications"`
 	// Plugins holds plugin source and per-plugin configuration.
 	// Sources is the list of plugin source URIs declared in [plugins].sources.
 	// PluginSettings maps plugin names to their [plugins.<name>] config tables.
@@ -225,6 +226,23 @@ type UIConfig struct {
 	// render plain ASCII alternatives (e.g. ":main" instead of " main").
 	// Default: true.
 	NerdFonts bool `mapstructure:"nerd_fonts"`
+}
+
+// NotificationsConfig controls desktop notification behaviour.
+type NotificationsConfig struct {
+	// Enabled controls whether any desktop notifications are sent.
+	// When false, all notification types are suppressed regardless of
+	// the other fields.  Default: true.
+	Enabled bool `mapstructure:"enabled"`
+	// PermissionAsk, when true, sends a notification when the agent
+	// requests permission to execute a tool.  Useful when the user
+	// has switched to another window and wants to be alerted.
+	// Default: true.
+	PermissionAsk bool `mapstructure:"permission_ask"`
+	// TurnComplete, when true, sends a notification when the agent
+	// finishes a full turn.  Off by default to avoid notification
+	// fatigue on short interactive sessions.  Default: false.
+	TurnComplete bool `mapstructure:"turn_complete"`
 }
 
 // Source identifies where a config key value originated.
