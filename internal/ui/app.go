@@ -305,6 +305,24 @@ type App struct {
 	// CompactionRequested{Source: "threshold"} event).
 	bannerDismissed bool
 
+	// program is the bubbletea Program that owns this App.  Set by
+	// SetProgram after tea.NewProgram returns.  Used by sendOutOfBand to
+	// inject messages from goroutines that run outside the bubbletea event
+	// loop (e.g. the Agent.Send goroutine launched in startSend).  Nil in
+	// unit tests — sendOutOfBand is a no-op when program is nil.
+	program *tea.Program
+
+	// testAgentSendFn, when non-nil, is called by startSend's goroutine
+	// instead of opts.Agent.Send.  Used exclusively by unit tests to inject
+	// a controllable stub without requiring a concrete *agent.Agent.  Must
+	// not be set in production code.
+	testAgentSendFn func(ctx context.Context, sessionID string, parts []session.Part) (*session.Message, error)
+
+	// testSendFn, when non-nil, is called by sendOutOfBand instead of
+	// program.Send.  Used exclusively by unit tests that cannot wire a
+	// *tea.Program.  Must not be set in production code.
+	testSendFn func(tea.Msg)
+
 	// closed protects against double Close.
 	closeOnce sync.Once
 
@@ -373,6 +391,30 @@ func (a *App) Close() error {
 		a.cancel()
 	})
 	return nil
+}
+
+// SetProgram stores the tea.Program so that goroutines started by startSend
+// can inject messages back into the bubbletea event loop via program.Send.
+// Must be called before the first Update that triggers a send.  The CLI calls
+// it immediately after tea.NewProgram.  Tests leave it unset; sendOutOfBand is
+// a no-op when program is nil, so tests drive sendCompleted manually via
+// app.Update(sendCompleted{...}).
+func (a *App) SetProgram(p *tea.Program) {
+	a.program = p
+}
+
+// sendOutOfBand injects msg into the bubbletea event loop from a goroutine
+// running outside the normal Update path.  Safe to call from any goroutine.
+// Uses testSendFn when set (unit tests); falls back to program.Send in
+// production; no-op when both are nil.
+func (a *App) sendOutOfBand(msg tea.Msg) {
+	if a.testSendFn != nil {
+		a.testSendFn(msg)
+		return
+	}
+	if a.program != nil {
+		a.program.Send(msg)
+	}
 }
 
 // bridge subscribes to every bus event type the App cares about and starts a
@@ -1076,13 +1118,21 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// startSend launches a goroutine that calls Agent.Send and returns the
-// resulting tea.Cmds (sendStarted now, sendCompleted later).
+// startSend launches a goroutine that calls Agent.Send and returns a tea.Cmd
+// that immediately emits sendStarted.  sendCompleted (or sendFailed via
+// sendOutOfBand) arrives later, once the goroutine finishes.
+//
+// The goroutine is the single concurrency boundary for a user turn: it runs
+// ensureSession + Agent.Send outside the bubbletea event loop so the UI
+// remains responsive while the agent is working.  sendOutOfBand(sendCompleted)
+// re-enters the event loop when the turn finishes.
+//
+// In tests that do not wire a *tea.Program, sendOutOfBand is a no-op; tests
+// drive sendCompleted manually via app.Update(sendCompleted{...}).
 func (a *App) startSend(text string) tea.Cmd {
-	if a.opts.Agent == nil {
+	if a.opts.Agent == nil && a.testAgentSendFn == nil {
 		// No agent wired up — useful for tests that just want to verify
-		// input handling.  Just emit sendStarted then sendCompleted so the
-		// busy state cycles for the test.
+		// input handling.  Just emit sendStarted so the busy state flips.
 		return func() tea.Msg {
 			return sendStarted{UserInput: text, StartedAt: a.opts.Now()}
 		}
@@ -1102,19 +1152,31 @@ func (a *App) startSend(text string) tea.Cmd {
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.inflightCancel = cancel
 
-	return tea.Batch(
-		func() tea.Msg { return sendStarted{UserInput: text, StartedAt: a.opts.Now()} },
-		func() tea.Msg {
-			sid, err := a.ensureSession(ctx)
-			if err != nil {
-				return sendCompleted{Err: err}
-			}
-			msg, err := a.opts.Agent.Send(ctx, sid, []session.Part{
-				{Kind: session.PartText, Text: text},
-			})
-			return sendCompleted{Result: msg, Err: err}
-		},
-	)
+	// Resolve which send function to call: real agent or test stub.
+	sendFn := func(ctx context.Context, sid string, parts []session.Part) (*session.Message, error) {
+		return a.opts.Agent.Send(ctx, sid, parts)
+	}
+	if a.testAgentSendFn != nil {
+		sendFn = a.testAgentSendFn
+	}
+
+	startedAt := a.opts.Now()
+	go func() {
+		defer cancel()
+		sid, err := a.ensureSession(ctx)
+		if err != nil {
+			a.sendOutOfBand(sendCompleted{Err: err})
+			return
+		}
+		msg, err := sendFn(ctx, sid, []session.Part{
+			{Kind: session.PartText, Text: text},
+		})
+		a.sendOutOfBand(sendCompleted{Result: msg, Err: err})
+	}()
+
+	return func() tea.Msg {
+		return sendStarted{UserInput: text, StartedAt: startedAt}
+	}
 }
 
 // ensureSession returns a usable session id.  If opts.SessionID is empty,
