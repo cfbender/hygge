@@ -56,7 +56,7 @@ func TestColdStartEmptyState(t *testing.T) {
 	out := app.View().Content
 	// Header bar: app name + version, profile, project path.
 	// Footer: agent identity.
-	for _, want := range []string{"Hygge", "profile: work", "~/proj", "ype a message", "no messages"} {
+	for _, want := range []string{"Hygge", "profile: work", "~/proj", "ype a message", "hygge"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}

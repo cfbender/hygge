@@ -240,6 +240,63 @@ func TestBubble_AutoBubbleWidth(t *testing.T) {
 	}
 }
 
+func TestBubble_ShowTail_RightAligned(t *testing.T) {
+	t.Parallel()
+	b := Bubble{
+		Width:       80,
+		BubbleWidth: 40,
+		Alignment:   AlignRight,
+		Body:        "user message",
+		Theme:       theme.ShellTheme(),
+		ShowTail:    true,
+	}
+	out := b.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "◢") {
+		t.Errorf("right-aligned bubble with ShowTail must contain ◢; got:\n%s", plain)
+	}
+	// The ◣ (left tail) must NOT appear.
+	if strings.Contains(plain, "◣") {
+		t.Errorf("right-aligned bubble must not contain ◣; got:\n%s", plain)
+	}
+}
+
+func TestBubble_ShowTail_LeftAligned(t *testing.T) {
+	t.Parallel()
+	b := Bubble{
+		Width:       80,
+		BubbleWidth: 40,
+		Alignment:   AlignLeft,
+		Body:        "assistant message",
+		Theme:       theme.ShellTheme(),
+		ShowTail:    true,
+	}
+	out := b.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "◣") {
+		t.Errorf("left-aligned bubble with ShowTail must contain ◣; got:\n%s", plain)
+	}
+	// The ◢ (right tail) must NOT appear.
+	if strings.Contains(plain, "◢") {
+		t.Errorf("left-aligned bubble must not contain ◢; got:\n%s", plain)
+	}
+}
+
+func TestBubble_ShowTailFalse_NoTail(t *testing.T) {
+	t.Parallel()
+	b := Bubble{
+		Width:    80,
+		Body:     "no tail",
+		Theme:    theme.ShellTheme(),
+		ShowTail: false,
+	}
+	out := b.View()
+	plain := stripANSI(out)
+	if strings.Contains(plain, "◢") || strings.Contains(plain, "◣") {
+		t.Errorf("bubble with ShowTail=false must not contain tail glyphs; got:\n%s", plain)
+	}
+}
+
 // clamp returns min(a, b).
 func clamp(a, b int) int {
 	if a < b {

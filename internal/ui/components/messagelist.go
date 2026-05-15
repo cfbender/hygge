@@ -129,13 +129,76 @@ type renderChunk struct {
 	group  []UIMessage // valid when kind == chunkToolGroup
 }
 
+// emptyStateMaxWidth is the column width of the empty-state panel used when
+// no actual width is known.
+const emptyStateMaxWidth = 80
+
+// renderEmptyState returns the centered welcome message shown when there are
+// no messages in the list.
+func (m MessageList) renderEmptyState() string {
+	width := m.Width
+	if width <= 0 {
+		width = emptyStateMaxWidth
+	}
+
+	var accentStyle, mutedStyle lipgloss.Style
+	if m.Theme != nil {
+		accentStyle = m.Theme.Style(theme.AtomAccent)
+		mutedStyle = m.Theme.Style(theme.AtomMuted)
+	} else {
+		accentStyle = lipgloss.NewStyle().Faint(true)
+		mutedStyle = lipgloss.NewStyle().Faint(true)
+	}
+
+	glyph := accentStyle.Bold(true).Render("·hygge·")
+	hints := mutedStyle.Render("Type a message to get started.\nctrl+p  commands · ctrl+g  view subagents")
+
+	content := glyph + "\n\n" + hints
+
+	// Center each line horizontally.
+	var centeredLines []string
+	for _, line := range strings.Split(content, "\n") {
+		visW := lipgloss.Width(line)
+		pad := (width - visW) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		centeredLines = append(centeredLines, strings.Repeat(" ", pad)+line)
+	}
+	return strings.Join(centeredLines, "\n")
+}
+
+// thinkingMaxLines is the maximum number of lines to show in the thinking
+// section before appending a truncation indicator.
+const thinkingMaxLines = 8
+
+// truncateThinking caps thinking text to thinkingMaxLines lines.
+// When truncation occurs a faint "… +N more lines (thinking)" indicator is
+// appended.  Returns the original string unchanged when it fits.
+func (m MessageList) truncateThinking(thinking string) string {
+	lines := strings.Split(thinking, "\n")
+	if len(lines) <= thinkingMaxLines {
+		return thinking
+	}
+	visible := lines[:thinkingMaxLines-1]
+	extra := len(lines) - (thinkingMaxLines - 1)
+
+	indicator := "… +" + itoa(extra) + " more lines (thinking)"
+	var indicatorStyle lipgloss.Style
+	if m.Theme != nil {
+		indicatorStyle = m.Theme.Style(theme.AtomBubbleBodyMuted).Faint(true)
+	} else {
+		indicatorStyle = lipgloss.NewStyle().Faint(true)
+	}
+	return strings.Join(visible, "\n") + "\n" + indicatorStyle.Render(indicator)
+}
+
 // View renders all messages joined with a blank line between them.
 // The pre-pass groups consecutive non-task RoleTool entries into a single
 // tool-calls bubble; task tool calls and all other roles render individually.
 func (m MessageList) View() string {
 	if len(m.Messages) == 0 {
-		muted := m.muted()
-		return muted.Render("(no messages yet — type a prompt below)")
+		return m.renderEmptyState()
 	}
 	collapseLimit := m.CollapseLines
 	if collapseLimit <= 0 {
@@ -308,6 +371,7 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		Theme:       m.Theme,
 		AccentColor: accentColor,
 		SubStyle:    bubble.StyleNormal,
+		ShowTail:    true,
 	}
 	return b.View()
 }
@@ -346,6 +410,8 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 	// Compose body: thinking (muted italic) + blank line + response text.
 	var bodyParts []string
 	if thinking != "" {
+		// Apply max-height cap before rendering.
+		thinking = m.truncateThinking(thinking)
 		// Render thinking in muted italic style.
 		var thinkStyle lipgloss.Style
 		if m.Theme != nil {
@@ -407,6 +473,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		Theme:       m.Theme,
 		AccentColor: accentColor,
 		SubStyle:    bubble.StyleNormal,
+		ShowTail:    true,
 	}
 	return b.View()
 }
