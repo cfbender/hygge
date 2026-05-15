@@ -75,11 +75,13 @@ type fakeProvider struct {
 }
 
 type fakeFantasyModel struct {
-	provider string
-	model    string
-	text     string
-	usage    fantasy.Usage
-	calls    atomic.Int32
+	provider  string
+	model     string
+	text      string
+	usage     fantasy.Usage
+	stream    []fantasy.StreamPart
+	streamErr error
+	calls     atomic.Int32
 }
 
 func (f *fakeFantasyModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
@@ -88,7 +90,17 @@ func (f *fakeFantasyModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy
 }
 
 func (f *fakeFantasyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	return nil, fmt.Errorf("fakeFantasyModel: Stream not implemented")
+	f.calls.Add(1)
+	return func(yield func(fantasy.StreamPart) bool) {
+		for _, part := range f.stream {
+			if !yield(part) {
+				return
+			}
+		}
+		if f.streamErr != nil {
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: f.streamErr})
+		}
+	}, nil
 }
 
 func (f *fakeFantasyModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
@@ -704,6 +716,113 @@ func TestSend_StreamErrorMidFlight(t *testing.T) {
 	}
 	if msgs[1].Parts[0].Text != "partial reply..." {
 		t.Fatalf("unexpected partial text: %q", msgs[1].Parts[0].Text)
+	}
+}
+
+func TestSend_FantasyStreamErrorCommitsPartialText(t *testing.T) {
+	env := newTestEnv(t)
+	streamErr := errors.New("upstream blew up")
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamErr: streamErr, stream: []fantasy.StreamPart{
+		{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+		{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "partial reply..."},
+	}}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
+
+	_, err := a.Send(context.Background(), env.sessionID, userText("die"))
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("want wrapped streamErr, got %v", err)
+	}
+
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if len(msgs) != 2 || msgs[1].Role != session.RoleAssistant {
+		t.Fatalf("want partial assistant committed, got roles=%v", roles(msgs))
+	}
+	if len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Text != "partial reply..." {
+		t.Fatalf("unexpected partial parts: %+v", msgs[1].Parts)
+	}
+}
+
+func TestSend_FantasyStreamErrorCommitsPartialThinking(t *testing.T) {
+	env := newTestEnv(t)
+	streamErr := errors.New("reasoning failed")
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamErr: streamErr, stream: []fantasy.StreamPart{
+		{Type: fantasy.StreamPartTypeReasoningStart, ID: "r"},
+		{Type: fantasy.StreamPartTypeReasoningDelta, ID: "r", Delta: "thinking..."},
+	}}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
+
+	_, err := a.Send(context.Background(), env.sessionID, userText("think"))
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("want wrapped streamErr, got %v", err)
+	}
+
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if len(msgs) != 2 || len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Kind != session.PartThinking || msgs[1].Parts[0].Text != "thinking..." {
+		t.Fatalf("unexpected messages: roles=%v parts=%+v", roles(msgs), msgs[len(msgs)-1].Parts)
+	}
+}
+
+func TestSend_FantasyStreamErrorWithoutPartialDoesNotAppendAssistant(t *testing.T) {
+	env := newTestEnv(t)
+	streamErr := errors.New("empty failure")
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamErr: streamErr}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
+
+	_, err := a.Send(context.Background(), env.sessionID, userText("die empty"))
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("want wrapped streamErr, got %v", err)
+	}
+
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if got := roles(msgs); !equalStrings(got, []string{"user"}) {
+		t.Fatalf("want only user message, got roles=%v", got)
+	}
+}
+
+func TestSend_FantasySuccessfulStreamAppendsOnce(t *testing.T) {
+	env := newTestEnv(t)
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", stream: []fantasy.StreamPart{
+		{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+		{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "done"},
+		{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+		{Type: fantasy.StreamPartTypeFinish, Usage: fantasy.Usage{InputTokens: 2, OutputTokens: 3}},
+	}}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
+
+	final, err := a.Send(context.Background(), env.sessionID, userText("ok"))
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if final == nil || len(final.Parts) != 1 || final.Parts[0].Text != "done" {
+		t.Fatalf("unexpected final: %+v", final)
+	}
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if got := roles(msgs); !equalStrings(got, []string{"user", "assistant"}) {
+		t.Fatalf("want single assistant append, got roles=%v", got)
+	}
+}
+
+func TestSend_FantasyStreamErrorCommitsObservedToolCall(t *testing.T) {
+	env := newTestEnv(t)
+	streamErr := errors.New("tool stream failed")
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamErr: streamErr, stream: []fantasy.StreamPart{
+		{Type: fantasy.StreamPartTypeToolInputStart, ID: "tu1", ToolCallName: "read"},
+		{Type: fantasy.StreamPartTypeToolInputDelta, ID: "tu1", Delta: `{"path":"a.txt"}`},
+		{Type: fantasy.StreamPartTypeToolInputEnd, ID: "tu1"},
+	}}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
+
+	_, err := a.Send(context.Background(), env.sessionID, userText("read"))
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("want wrapped streamErr, got %v", err)
+	}
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if len(msgs) != 2 || len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Kind != session.PartToolUse {
+		t.Fatalf("want assistant tool_use only, got roles=%v parts=%+v", roles(msgs), msgs[len(msgs)-1].Parts)
+	}
+	part := msgs[1].Parts[0]
+	if part.ToolID != "tu1" || part.ToolName != "read" || string(part.ToolInput) != `{"path":"a.txt"}` {
+		t.Fatalf("unexpected tool_use: %+v", part)
 	}
 }
 
