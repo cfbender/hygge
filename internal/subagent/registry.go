@@ -110,6 +110,21 @@ func Load(opts LoadOptions) (*Registry, error) {
 		}
 	}
 
+	// If user-defined subagent types were loaded, remove the built-in
+	// "general" type (unless the user explicitly overrode it).
+	hasUserDefined := false
+	for _, t := range byName {
+		if t.Source != "builtin" {
+			hasUserDefined = true
+			break
+		}
+	}
+	if hasUserDefined {
+		if t, ok := byName[builtinGeneral.Name]; ok && t.Source == "builtin" {
+			delete(byName, builtinGeneral.Name)
+		}
+	}
+
 	// Resolve a sorted slice for deterministic iteration.
 	names := make([]string, 0, len(byName))
 	for n := range byName {
