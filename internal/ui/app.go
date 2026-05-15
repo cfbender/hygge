@@ -315,6 +315,13 @@ type App struct {
 	// git diff --numstat on every render frame.
 	modifiedFilesCache     []components.SidebarModifiedFile
 	modifiedFilesCacheTime time.Time
+
+	// sessionTitle is a cached copy of the sidebar session display title
+	// (FirstMessagePreview > Slug > first-12-chars of ID).  Populated at
+	// Init (resume path), ensureSession (new-session path), and on
+	// bus.MessageAppended for the root session so View() never calls
+	// Store.GetSession synchronously on the render goroutine.
+	sessionTitle string
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the
@@ -344,9 +351,12 @@ func (a *App) Init() tea.Cmd {
 	}
 	// When resuming an existing session, pre-populate the message list from
 	// the persisted store so the user sees history before typing anything.
+	// Also seed the session title cache so the sidebar never blocks on
+	// Store.GetSession during View().
 	if a.opts.SessionID != "" {
 		a.foregroundStack = []string{a.opts.SessionID}
 		a.hydrateMessagesFromStore(a.opts.SessionID)
+		a.sessionTitle = a.loadSessionTitle(a.opts.SessionID)
 	}
 	return tea.Batch(cmds...)
 }
@@ -1125,6 +1135,12 @@ func (a *App) ensureSession(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("ui: ensureSession: create: %w", err)
 	}
 	a.opts.SessionID = sess.ID
+	// Seed the title cache for new sessions.  At creation time
+	// FirstMessagePreview and Slug are both empty, so this resolves to
+	// the first-12-chars fallback — but it is populated synchronously
+	// here (on the Cmd goroutine, NOT the render goroutine) so View()
+	// never needs to call Store.GetSession.
+	a.sessionTitle = a.loadSessionTitle(sess.ID)
 	bus.Publish(a.opts.Bus, bus.SessionStart{
 		SessionID: sess.ID,
 		Resumed:   false,
@@ -1182,6 +1198,13 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		if !a.isForeground(e.SessionID) {
 			return nil
+		}
+		// Refresh the sidebar title cache: the first user message sets
+		// FirstMessagePreview in the store.  We call loadSessionTitle here
+		// (on the Update goroutine, not the render goroutine) so
+		// sidebarSessionTitle() stays cheap.
+		if e.SessionID == a.rootSessionID() {
+			a.sessionTitle = a.loadSessionTitle(e.SessionID)
 		}
 		// Finalize any trailing thinking block when the message is committed.
 		a.finalizeTrailingThinking()
@@ -1860,16 +1883,38 @@ func (a *App) collapsedProjectPath() string {
 	return p
 }
 
-// sidebarSessionTitle returns the display title for the current root session.
+// sidebarSessionTitle returns the cached display title for the current root
+// session.  The cache is populated synchronously in ensureSession, Init, and
+// handleBusEvent (bus.MessageAppended) so this method never calls
+// Store.GetSession on the render goroutine.
+//
 // Preference order: FirstMessagePreview → Slug → first 12 chars of session id.
-// Returns "" when no session is bound.
 func (a *App) sidebarSessionTitle() string {
+	if a.sessionTitle != "" {
+		return a.sessionTitle
+	}
+	// Fallback for the brief window before the cache is seeded (e.g.
+	// immediately after Init before the first render with a known session).
 	rootID := a.rootSessionID()
 	if rootID == "" {
 		return ""
 	}
+	if len(rootID) > 12 {
+		return rootID[:12]
+	}
+	return rootID
+}
+
+// loadSessionTitle reads the session title from the store and returns the
+// display string.  Preference order: FirstMessagePreview → Slug → first 12
+// chars of session id.  Used to populate a.sessionTitle synchronously on
+// the Cmd goroutine so View() never blocks on store I/O.
+func (a *App) loadSessionTitle(id string) string {
+	if id == "" {
+		return ""
+	}
 	if a.opts.Store != nil {
-		sess, err := a.opts.Store.GetSession(a.ctx, rootID)
+		sess, err := a.opts.Store.GetSession(a.ctx, id)
 		if err == nil && sess != nil {
 			if sess.FirstMessagePreview != "" {
 				return sess.FirstMessagePreview
@@ -1880,10 +1925,10 @@ func (a *App) sidebarSessionTitle() string {
 		}
 	}
 	// Fallback: first 12 chars of the session id.
-	if len(rootID) > 12 {
-		return rootID[:12]
+	if len(id) > 12 {
+		return id[:12]
 	}
-	return rootID
+	return id
 }
 
 // toggleLatestSubagent flips the Expanded flag on the most recently
@@ -2333,8 +2378,10 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 	if id != "" {
 		a.resetForeground(id)
 		a.hydrateMessagesFromStore(id)
+		a.sessionTitle = a.loadSessionTitle(id)
 	} else {
 		a.foregroundStack = nil
+		a.sessionTitle = ""
 	}
 
 	var cmds []tea.Cmd

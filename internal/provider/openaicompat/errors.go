@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/cfbender/hygge/internal/provider"
@@ -30,6 +31,17 @@ func (a *adapter) readHTTPError(resp *http.Response) error {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return fmt.Errorf("%w: %s: %s", provider.ErrAuth, a.cfg.Name, msg)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusNotFound:
+		// Log the full response body so operators can see the specific
+		// reason (e.g. "Unsupported tool format", "Model X does not
+		// support tools") without having to reproduce the request.
+		// This is the most common failure path for subagent "invalid request"
+		// errors reported by OpenRouter and similar gateways.
+		slog.Error("provider: invalid request",
+			"provider", a.cfg.Name,
+			"status", resp.StatusCode,
+			"message", msg,
+			"body", string(raw),
+		)
 		return fmt.Errorf("%w: %s: %s", provider.ErrInvalidRequest, a.cfg.Name, msg)
 	case http.StatusTooManyRequests:
 		return fmt.Errorf("%w: %s: %s", provider.ErrRateLimited, a.cfg.Name, msg)

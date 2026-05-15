@@ -305,6 +305,21 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 
 	subTools := r.buildToolRegistry(t)
 
+	// Log the resolved run parameters so that on failure (e.g. "invalid
+	// request" from OpenRouter) operators can see exactly what was sent:
+	// provider, model, agent type, and the tool names registered.
+	allSubTools := subTools.All()
+	toolNames := make([]string, 0, len(allSubTools))
+	for _, tt := range allSubTools {
+		toolNames = append(toolNames, tt.Name())
+	}
+	slog.Debug("subagent: run resolved",
+		"type", t.Name,
+		"provider", runProvider.Name(),
+		"model", runModelName,
+		"tools", toolNames,
+	)
+
 	// Create the sub-session up front so it's auditable even when the
 	// run fails partway through.  We do NOT carry a fork_message_id;
 	// sub-agents are not forks of the parent's history -- they branch

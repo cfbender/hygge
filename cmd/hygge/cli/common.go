@@ -225,6 +225,7 @@ func buildLazyTracker(homeDir, pwd string, loaded []agentsmd.Block) *agentsmd.La
 //
 // Callers MUST defer rt.Close().
 func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err error) {
+	bootstrapStart := time.Now()
 	opts = applyTestOverrides(opts)
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -273,6 +274,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 
 	stateOpts := state.LoadOptions{HomeDir: opts.HomeDir, XDGStateHome: xdgState}
 
+	// Phase: config load
+	t0 := time.Now()
 	// Load the config.  This consults state.json for the active profile
 	// when opts.ProfileName is empty, so it must run before we Load the
 	// state ourselves.
@@ -286,14 +289,20 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	if err != nil {
 		return nil, fmt.Errorf("cli: load config: %w", err)
 	}
+	slog.Debug("bootstrap phase", "phase", "config_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
+	// Phase: state load
+	t0 = time.Now()
 	st, err := state.Load(stateOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: load state: %w", err)
 	}
+	slog.Debug("bootstrap phase", "phase", "state_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	b := bus.New()
 
+	// Phase: store open + migrations
+	t0 = time.Now()
 	// Ensure the parent directory exists before SQLite tries to open the
 	// file — store.Open does not create intermediate directories.
 	storePath := filepath.Join(xdgState, "hygge", "sessions.db")
@@ -306,6 +315,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		b.Close()
 		return nil, fmt.Errorf("cli: open store: %w", err)
 	}
+	slog.Debug("bootstrap phase", "phase", "store_open", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Build the provider.  If a factory was injected use it directly;
 	// otherwise look up the registered factory by config name.  Before
@@ -343,6 +353,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		return nil, fmt.Errorf("cli: build permission engine: %w", err)
 	}
 
+	// Phase: catalog load
+	t0 = time.Now()
 	catSrc := buildCatalog(xdgState, opts, cfg)
 	// Wire the shared catalog into each provider package so their
 	// Models() lists come from the live snapshot rather than the
@@ -356,6 +368,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Catalog: catSrc,
 		Now:     opts.Now,
 	})
+	slog.Debug("bootstrap phase", "phase", "catalog_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	thm, err := theme.Load(cfg.Theme.Name, theme.LoadOptions{
 		ConfigHome: xdgConfig,
@@ -371,6 +384,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 
 	contextWindow := lookupContextWindow(ctx, prv, cfg.Model.Name)
 
+	// Phase: skills load
+	t0 = time.Now()
 	// Skill registry and AGENTS.md blocks both feed into the system
 	// prompt.  Failures here are non-fatal — they degrade the prompt
 	// but should not block the CLI from starting.
@@ -383,6 +398,10 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		slog.Warn("cli: failed to load skills", "err", err)
 		skillReg = &skill.Registry{}
 	}
+	slog.Debug("bootstrap phase", "phase", "skills_load", "elapsed_ms", time.Since(t0).Milliseconds())
+
+	// Phase: AGENTS.md / subagents load
+	t0 = time.Now()
 	agentsBlocks, err := agentsmd.Load(agentsmd.LoadOptions{
 		HomeDir:       opts.HomeDir,
 		XDGConfigHome: xdgConfig,
@@ -392,6 +411,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		slog.Warn("cli: failed to load AGENTS.md", "err", err)
 		agentsBlocks = nil
 	}
+	slog.Debug("bootstrap phase", "phase", "agentsmd_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Construct the lazy per-tool-call subdir context tracker.  The
 	// tracker is seeded with every directory we just loaded a block
@@ -399,10 +419,13 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// only degrade lazy loading; the agent still runs without it.
 	lazyTracker := buildLazyTracker(opts.HomeDir, opts.Pwd, agentsBlocks)
 
+	// Phase: tool registry
+	t0 = time.Now()
 	// Build the tool registry now that the skill registry is in hand
 	// so the skill tool is registered when (and only when) skills are
 	// configured.
 	tools := tool.DefaultWith(tool.DefaultOptions{SkillRegistry: skillReg})
+	slog.Debug("bootstrap phase", "phase", "tool_registry", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Sub-agents: the `task` tool dispatches isolated missions to a
 	// fresh agent.  We load the type registry (built-in `general` +
@@ -454,10 +477,13 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		return nil, fmt.Errorf("cli: register task tool: %w", err)
 	}
 
+	// Phase: plugin host init + plugin load
+	t0 = time.Now()
 	// MCP servers contribute additional tools.  Loading is best-
 	// effort: a misconfigured server warns and is skipped.  The agent
 	// still works without any MCP tools.
 	mcpClients, mcpConfigs, mcpStatuses := bootstrapMCP(ctx, opts, xdgConfig, tools)
+	slog.Debug("bootstrap phase", "phase", "mcp_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Slash-command registry: built-in command set plus any
 	// TOML-declared prompt templates.  Failures degrade to the
@@ -497,6 +523,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		hookReg = hook.New()
 	}
 
+	// Phase: plugin load
+	t0 = time.Now()
 	// Plugin registry: load all plugins declared in [plugins].sources.
 	// Failures are non-fatal per-plugin (LoadAll skips bad ones with a warn).
 	var pluginReg *plugin.Registry
@@ -520,7 +548,10 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 			pluginReg.LoadAll(context.Background(), cfg.Plugins.Sources)
 		}
 	}
+	slog.Debug("bootstrap phase", "phase", "plugin_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
+	// Phase: bus init / agent loop wiring
+	t0 = time.Now()
 	ag, err := agent.New(agent.Options{
 		Bus:           b,
 		Store:         stOpen,
@@ -542,6 +573,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		b.Close()
 		return nil, fmt.Errorf("cli: build agent: %w", err)
 	}
+	slog.Debug("bootstrap phase", "phase", "agent_init", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Wire InjectMessage into the plugin registry now that the agent
 	// is available.  The late-bind avoids a circular dependency between
@@ -551,6 +583,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 			return ag.InjectMessage(ctx, "plugin", sessionID, role, content)
 		})
 	}
+
+	slog.Info("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
 
 	return &appRuntime{
 		Config:         cfg,
