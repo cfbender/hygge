@@ -225,6 +225,9 @@ type App struct {
 	toast        *toast
 	toastCounter int
 
+	// lastEscAt records when Esc was last pressed for double-Esc detection.
+	lastEscAt time.Time
+
 	// sel tracks mouse-driven text selection.
 	sel selection
 	// lastCanvas is the most recently rendered screen buffer, kept for
@@ -1089,16 +1092,40 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 	case "esc":
-		// T2.2 — Esc pops the foreground stack when depth > 1.
-		// At depth 1 (root) the existing Esc behaviour applies
-		// (dismiss command palette / clear queue / no-op).
+		// Subagent view: Esc pops the foreground stack.
 		if len(a.foregroundStack) > 1 {
 			a.popForeground()
 			return a, nil
 		}
-		// Two-step Esc pattern: first Esc clears the queue if any,
-		// second Esc cancels the active run (existing behaviour).
-		if a.busy && a.queueCount > 0 {
+		// Dismiss command palette first.
+		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
+			a.paletteHighlight = -1
+			a.slashPaletteDismissed = true
+			return a, nil
+		}
+		// Double-Esc within 500ms: interrupt everything.
+		now := a.opts.Now()
+		if a.busy && now.Sub(a.lastEscAt) < 500*time.Millisecond {
+			// Cancel the active run.
+			if a.inflightCancel != nil {
+				a.inflightCancel()
+			}
+			// Clear the queue.
+			rootID := a.rootSessionID()
+			if a.testAgentClearQueueFn != nil {
+				a.testAgentClearQueueFn(rootID)
+			} else if a.opts.Agent != nil {
+				a.opts.Agent.ClearQueue(rootID)
+			}
+			a.lastEscAt = time.Time{}
+			return a, a.setNotice("interrupted")
+		}
+		a.lastEscAt = now
+		if !a.busy {
+			return a, nil
+		}
+		// First Esc while busy: clear the queue if any.
+		if a.queueCount > 0 {
 			rootID := a.rootSessionID()
 			var dropped int
 			if a.testAgentClearQueueFn != nil {
@@ -1107,15 +1134,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				dropped = a.opts.Agent.ClearQueue(rootID)
 			}
 			if dropped > 0 {
-				return a, a.setNotice(fmt.Sprintf("cleared %d queued message(s)", dropped))
+				return a, a.setNotice(fmt.Sprintf("cleared %d queued message(s) — press Esc again to interrupt", dropped))
 			}
 		}
-		// Existing Esc: dismisses the command palette without changing input.
-		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
-			a.paletteHighlight = -1
-			a.slashPaletteDismissed = true
-			return a, nil
-		}
+		return a, a.setNotice("press Esc again to interrupt")
 	case "up":
 		if a.viewingSubagent() {
 			a.navigateSubagent(-1) // older subagent
