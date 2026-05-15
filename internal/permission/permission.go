@@ -43,8 +43,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
@@ -204,9 +207,8 @@ type Engine struct {
 }
 
 type sessionCacheKey struct {
-	SessionID string
-	Category  Category
-	Target    string
+	Category Category
+	Target   string
 }
 
 // New constructs an Engine.  An error is returned only if the rule set
@@ -379,6 +381,11 @@ func (e *Engine) askUser(ctx context.Context, req Request) (Decision, error) {
 
 // handleReply converts a bus reply into a Decision, persists "always" allows
 // to state, and updates the session cache for "session" allows.
+//
+// For file categories, the target is promoted to a directory glob so that
+// approving one file implicitly covers siblings. This avoids repeated
+// prompts when the model reads/writes multiple files in the same directory
+// tree.
 func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision {
 	decision := Decision{
 		Action: Action(reply.Decision),
@@ -386,41 +393,120 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 		Reason: "user reply",
 	}
 
+	// Promote file targets to a directory glob for broader coverage.
+	pattern := promoteTarget(req.Category, req.Target)
+
 	if decision.Action == ActionAllow && decision.Scope == ScopeAlways {
 		rule := state.AllowRule{
 			Category:  string(req.Category),
-			Pattern:   req.Target,
+			Pattern:   pattern,
 			CreatedAt: e.clock().UnixMilli(),
 		}
 		if err := state.AddAllowRule(rule, e.stateOpts); err != nil {
 			slog.Warn("permission: persist always-allow rule failed",
 				"category", req.Category,
 				"target", req.Target,
+				"pattern", pattern,
 				"err", err,
 			)
 		}
 	}
 
 	if decision.Scope == ScopeSession {
-		e.storeSession(req, decision)
+		// Store the promoted pattern so future lookups match siblings.
+		promoted := req
+		promoted.Target = pattern
+		e.storeSession(promoted, decision)
 	}
 	return decision
 }
 
-// lookupSession returns a cached Decision for the (session, category, target)
-// triple if one exists.
+// promoteTarget widens a specific file path to a directory glob so that
+// approving one file covers all files under the same project/directory.
+// For non-file categories, returns the target unchanged.
+//
+// Examples:
+//
+//	../crush/internal/cli/foo.go → ../crush/**
+//	/Users/me/other/proj/bar.go  → /Users/me/other/proj/**
+//	./src/main.go                → ./src/**  (but inside-PWD files auto-allow anyway)
+func promoteTarget(cat Category, target string) string {
+	if cat != CategoryFileRead && cat != CategoryFileWrite {
+		return target
+	}
+	if target == "" {
+		return target
+	}
+
+	// For relative paths starting with "..", promote to the first
+	// directory component after the ".." prefix.
+	// ../crush/internal/cli/foo.go → ../crush/**
+	if filepath.IsAbs(target) {
+		// Absolute path: use the parent directory.
+		return filepath.Dir(target) + "/**"
+	}
+
+	// Relative path: find a sensible project root.
+	parts := splitPath(target)
+	// Count leading ".." segments.
+	dotdots := 0
+	for _, p := range parts {
+		if p == ".." {
+			dotdots++
+		} else {
+			break
+		}
+	}
+	// Keep dotdots + first real directory component.
+	if dotdots > 0 && dotdots+1 < len(parts) {
+		promoted := filepath.Join(parts[:dotdots+1]...) + "/**"
+		return promoted
+	}
+	// Paths like ./src/foo.go or src/foo.go: use parent dir.
+	return filepath.Dir(target) + "/**"
+}
+
+// splitPath splits a filepath into its components.
+func splitPath(p string) []string {
+	var parts []string
+	for p != "" && p != "." && p != "/" {
+		dir, file := filepath.Split(filepath.Clean(p))
+		if file != "" {
+			parts = append([]string{file}, parts...)
+		}
+		if dir == p {
+			break
+		}
+		p = dir
+	}
+	return parts
+}
+
+// lookupSession returns a cached Decision for the (category, target) pair
+// if one exists. The cache is shared across all sessions (including
+// sub-agent sessions) so subagents inherit the parent's approvals.
 func (e *Engine) lookupSession(req Request) (Decision, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.closed || e.sessionCache == nil {
 		return Decision{}, false
 	}
-	d, ok := e.sessionCache[sessionCacheKey{
-		SessionID: req.SessionID,
-		Category:  req.Category,
-		Target:    req.Target,
-	}]
-	return d, ok
+	// Exact match first.
+	if d, ok := e.sessionCache[sessionCacheKey{Category: req.Category, Target: req.Target}]; ok {
+		return d, true
+	}
+	// Check if any cached directory glob covers this target.
+	if req.Category == CategoryFileRead || req.Category == CategoryFileWrite {
+		for key, d := range e.sessionCache {
+			if key.Category != req.Category {
+				continue
+			}
+			if ok, _ := doublestar.PathMatch(key.Target, req.Target); ok {
+				return d, true
+			}
+		}
+	}
+	return Decision{}, false
 }
 
 // storeSession records a session-scoped decision in the in-memory cache.
@@ -431,9 +517,8 @@ func (e *Engine) storeSession(req Request, d Decision) {
 		return
 	}
 	e.sessionCache[sessionCacheKey{
-		SessionID: req.SessionID,
-		Category:  req.Category,
-		Target:    req.Target,
+		Category: req.Category,
+		Target:   req.Target,
 	}] = d
 }
 

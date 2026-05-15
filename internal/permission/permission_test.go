@@ -270,14 +270,18 @@ func TestAsk_SessionScopeCache(t *testing.T) {
 		t.Errorf("bus asks: got %d, want 1 (cache should have served the second call)", got)
 	}
 
-	// Different SessionID does NOT share the cache.
+	// Session cache is shared across sessions (subagents inherit).
 	other := req
 	other.SessionID = "S2"
-	if _, err := e.Ask(context.Background(), other); err != nil {
+	d3, err := e.Ask(context.Background(), other)
+	if err != nil {
 		t.Fatalf("other Ask: %v", err)
 	}
-	if got := asks.Load(); got != 2 {
-		t.Errorf("after cross-session ask: got %d, want 2", got)
+	if d3.Action != ActionAllow {
+		t.Errorf("cross-session decision: got %+v, want allow (shared cache)", d3)
+	}
+	if got := asks.Load(); got != 1 {
+		t.Errorf("after cross-session ask: got %d, want 1 (cache shared)", got)
 	}
 }
 
@@ -311,8 +315,9 @@ func TestAsk_AlwaysScopePersists(t *testing.T) {
 		t.Fatalf("AllowedRules: got %d, want 1", len(s.AllowedRules))
 	}
 	r := s.AllowedRules[0]
-	if r.Category != "file.write" || r.Pattern != "/repo/src/main.go" {
-		t.Errorf("rule: got %+v, want file.write @ /repo/src/main.go", r)
+	// Pattern is promoted to a directory glob.
+	if r.Category != "file.write" || r.Pattern != "/repo/src/**" {
+		t.Errorf("rule: got %+v, want file.write @ /repo/src/**", r)
 	}
 	if r.CreatedAt == 0 {
 		t.Error("CreatedAt should be populated from engine clock")
