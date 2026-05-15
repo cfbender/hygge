@@ -469,6 +469,241 @@ func TestConcurrent_ReadsAndOneWriter(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Subagent message-isolation regression tests
+// ---------------------------------------------------------------------------
+
+// TestMessagesForSession_SubagentDoesNotInheritParent verifies that a subagent
+// session (ParentID set, ForkMessageID empty) sees ONLY its own messages and
+// NONE of the parent's messages.  This is the regression case for the
+// fork-chain CTE leaking the parent transcript into the subagent, which caused
+// OpenRouter 400 "No tool output found for function call" errors.
+func TestMessagesForSession_SubagentDoesNotInheritParent(t *testing.T) {
+	s := newTestStore(t)
+
+	// Parent: user message, assistant with tool_use, tool result.
+	parent := mustCreateSession(t, s, "/p")
+	appendUserText(t, s, parent.ID, "parent user msg")
+	parentAsst := appendUserText(t, s, parent.ID, "parent assistant with tool_use")
+	appendUserText(t, s, parent.ID, "parent tool result")
+
+	// Subagent spawned from the parent — no ForkMessageID.
+	sub, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: "/p",
+		Model:      sampleModel(),
+		ParentID:   parent.ID,
+		Kind:       session.KindSubagent,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession subagent: %v", err)
+	}
+
+	subMsg1 := appendUserText(t, s, sub.ID, "subagent msg 1")
+	subMsg2 := appendUserText(t, s, sub.ID, "subagent msg 2")
+
+	msgs, err := s.MessagesForSession(t.Context(), sub.ID)
+	if err != nil {
+		t.Fatalf("MessagesForSession subagent: %v", err)
+	}
+
+	want := []string{subMsg1.ID, subMsg2.ID}
+	if len(msgs) != len(want) {
+		t.Fatalf("expected %d messages, got %d (ids=%v); parent msg %q must NOT appear",
+			len(want), len(msgs), msgIDs(msgs), parentAsst.ID)
+	}
+	for i, id := range want {
+		if msgs[i].ID != id {
+			t.Errorf("msgs[%d]: got %q want %q", i, msgs[i].ID, id)
+		}
+	}
+
+	// Sanity: parent still sees all three of its own messages.
+	parentMsgs, err := s.MessagesForSession(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatalf("MessagesForSession parent: %v", err)
+	}
+	if len(parentMsgs) != 3 {
+		t.Errorf("parent should see 3 messages, got %d", len(parentMsgs))
+	}
+}
+
+// TestMessagesForSession_ForkStillInheritsParentHistory verifies the
+// legitimate fork case: a session forked at a specific message inherits
+// parent history up to and including the fork point, then continues with
+// its own messages.
+func TestMessagesForSession_ForkStillInheritsParentHistory(t *testing.T) {
+	s := newTestStore(t)
+
+	parent := mustCreateSession(t, s, "/p")
+	pIDs := []string{
+		appendUserText(t, s, parent.ID, "p1").ID,
+		appendUserText(t, s, parent.ID, "p2").ID,
+		appendUserText(t, s, parent.ID, "p3").ID,
+	}
+
+	fork, err := s.ForkSession(t.Context(), parent.ID, pIDs[1], sampleModel(), "branch")
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	fIDs := []string{
+		appendUserText(t, s, fork.ID, "f1").ID,
+		appendUserText(t, s, fork.ID, "f2").ID,
+	}
+
+	msgs, err := s.MessagesForSession(t.Context(), fork.ID)
+	if err != nil {
+		t.Fatalf("MessagesForSession fork: %v", err)
+	}
+
+	// Expect parent messages up to and including fork point (p1, p2) then fork's own.
+	want := []string{pIDs[0], pIDs[1], fIDs[0], fIDs[1]}
+	if len(msgs) != len(want) {
+		t.Fatalf("len: got %d want %d (got=%v want=%v)", len(msgs), len(want), msgIDs(msgs), want)
+	}
+	for i, id := range want {
+		if msgs[i].ID != id {
+			t.Errorf("msgs[%d]: got %q want %q", i, msgs[i].ID, id)
+		}
+	}
+
+	// p3 must NOT appear in the fork.
+	for _, m := range msgs {
+		if m.ID == pIDs[2] {
+			t.Errorf("fork should not include p3 (%q), which is past the fork point", pIDs[2])
+		}
+	}
+}
+
+// TestMessagesForSession_ThreeLevelForkChain verifies a three-level fork
+// chain (grand-grandparent → grandparent → parent → leaf) walks the full
+// ancestry correctly.
+func TestMessagesForSession_ThreeLevelForkChain(t *testing.T) {
+	s := newTestStore(t)
+
+	root := mustCreateSession(t, s, "/p")
+	r1 := appendUserText(t, s, root.ID, "r1").ID
+	r2 := appendUserText(t, s, root.ID, "r2").ID
+
+	fork1, err := s.ForkSession(t.Context(), root.ID, r2, sampleModel(), "f1")
+	if err != nil {
+		t.Fatalf("ForkSession root->fork1: %v", err)
+	}
+	f1a := appendUserText(t, s, fork1.ID, "f1a").ID
+	f1b := appendUserText(t, s, fork1.ID, "f1b").ID
+
+	fork2, err := s.ForkSession(t.Context(), fork1.ID, f1b, sampleModel(), "f2")
+	if err != nil {
+		t.Fatalf("ForkSession fork1->fork2: %v", err)
+	}
+	f2a := appendUserText(t, s, fork2.ID, "f2a").ID
+	f2b := appendUserText(t, s, fork2.ID, "f2b").ID
+
+	fork3, err := s.ForkSession(t.Context(), fork2.ID, f2b, sampleModel(), "f3")
+	if err != nil {
+		t.Fatalf("ForkSession fork2->fork3: %v", err)
+	}
+	f3a := appendUserText(t, s, fork3.ID, "f3a").ID
+
+	msgs, err := s.MessagesForSession(t.Context(), fork3.ID)
+	if err != nil {
+		t.Fatalf("MessagesForSession fork3: %v", err)
+	}
+
+	want := []string{r1, r2, f1a, f1b, f2a, f2b, f3a}
+	if len(msgs) != len(want) {
+		t.Fatalf("len: got %d want %d (got=%v want=%v)", len(msgs), len(want), msgIDs(msgs), want)
+	}
+	for i, id := range want {
+		if msgs[i].ID != id {
+			t.Errorf("msgs[%d]: got %q want %q", i, msgs[i].ID, id)
+		}
+	}
+}
+
+// TestMessagesForSession_SubagentOfFork verifies that a subagent spawned
+// from a forked session does NOT inherit any messages — not from the fork
+// and not from the fork's ancestors.
+func TestMessagesForSession_SubagentOfFork(t *testing.T) {
+	s := newTestStore(t)
+
+	parent := mustCreateSession(t, s, "/p")
+	pIDs := []string{
+		appendUserText(t, s, parent.ID, "p1").ID,
+		appendUserText(t, s, parent.ID, "p2").ID,
+	}
+
+	fork, err := s.ForkSession(t.Context(), parent.ID, pIDs[1], sampleModel(), "fork")
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	appendUserText(t, s, fork.ID, "fork-msg")
+
+	// Subagent of the fork: ParentID = fork.ID, no ForkMessageID.
+	sub, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: "/p",
+		Model:      sampleModel(),
+		ParentID:   fork.ID,
+		Kind:       session.KindSubagent,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession subagent-of-fork: %v", err)
+	}
+
+	subMsg := appendUserText(t, s, sub.ID, "sub-own-msg")
+
+	msgs, err := s.MessagesForSession(t.Context(), sub.ID)
+	if err != nil {
+		t.Fatalf("MessagesForSession subagent-of-fork: %v", err)
+	}
+
+	if len(msgs) != 1 || msgs[0].ID != subMsg.ID {
+		t.Fatalf("subagent-of-fork should see only its own 1 message; got %v", msgIDs(msgs))
+	}
+}
+
+// TestMessagesSinceLatestMarker_SubagentOnlySeesOwnMessages verifies that
+// MessagesSinceLatestMarker, which shares the same CTE, also does not leak
+// parent messages into a subagent session.
+func TestMessagesSinceLatestMarker_SubagentOnlySeesOwnMessages(t *testing.T) {
+	s := newTestStore(t)
+
+	parent := mustCreateSession(t, s, "/p")
+	appendUserText(t, s, parent.ID, "parent-msg-1")
+	appendUserText(t, s, parent.ID, "parent-msg-2")
+
+	sub, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: "/p",
+		Model:      sampleModel(),
+		ParentID:   parent.ID,
+		Kind:       session.KindSubagent,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession subagent: %v", err)
+	}
+
+	subMsg1 := appendUserText(t, s, sub.ID, "sub-msg-1")
+	subMsg2 := appendUserText(t, s, sub.ID, "sub-msg-2")
+
+	msgs, marker, err := s.MessagesSinceLatestMarker(t.Context(), sub.ID)
+	if err != nil {
+		t.Fatalf("MessagesSinceLatestMarker: %v", err)
+	}
+	if marker != nil {
+		t.Errorf("expected nil marker, got %+v", marker)
+	}
+
+	want := []string{subMsg1.ID, subMsg2.ID}
+	if len(msgs) != len(want) {
+		t.Fatalf("expected %d messages, got %d (%v); parent msgs must not appear",
+			len(want), len(msgs), msgIDs(msgs))
+	}
+	for i, id := range want {
+		if msgs[i].ID != id {
+			t.Errorf("msgs[%d]: got %q want %q", i, msgs[i].ID, id)
+		}
+	}
+}
+
 func msgIDs(msgs []*session.Message) []string {
 	out := make([]string, len(msgs))
 	for i, m := range msgs {

@@ -232,7 +232,7 @@ ancestry(session_id, cutoff_message_id, parent_id, fork_message_id, depth) AS (
 	UNION ALL
 	SELECT s.id, a.fork_message_id, s.parent_id, s.fork_message_id, a.depth + 1
 	  FROM sessions s, ancestry a
-	  WHERE s.id = a.parent_id AND a.depth < ?
+	  WHERE s.id = a.parent_id AND a.depth < ? AND a.fork_message_id IS NOT NULL
 )`
 
 // MessagesForSession returns the full conversation visible to sessionID,
