@@ -11,26 +11,20 @@ import (
 	"github.com/cfbender/hygge/internal/config"
 )
 
-// ActiveMode returns the currently active mode config, or nil if no modes
-// are configured.
+// ActiveMode returns the currently active mode config. Always returns
+// non-nil because Modes is guaranteed to have at least one entry after
+// config loading.
 func (a *App) ActiveMode() *config.ModeConfig {
-	if len(a.opts.Modes) == 0 || a.modeIndex < 0 {
-		return nil
-	}
 	return &a.opts.Modes[a.modeIndex]
 }
 
-// ActiveModeName returns the display name of the current mode, or "" if
-// no modes are configured.
+// ActiveModeName returns the display name of the current mode.
 func (a *App) ActiveModeName() string {
-	if m := a.ActiveMode(); m != nil {
-		return m.Name
-	}
-	return ""
+	return a.ActiveMode().Name
 }
 
 // cycleMode advances to the next mode and switches the model. Returns a
-// tea.Cmd that performs the async model switch, or nil if no modes exist.
+// tea.Cmd that performs the async model switch, or nil if only one mode.
 func (a *App) cycleMode() tea.Cmd {
 	if len(a.opts.Modes) < 2 {
 		return nil
@@ -39,24 +33,14 @@ func (a *App) cycleMode() tea.Cmd {
 	a.modeIndex = (a.modeIndex + 1) % len(a.opts.Modes)
 	mode := a.opts.Modes[a.modeIndex]
 
-	// Resolve provider and model — empty inherits from base config.
-	providerName := mode.Provider
-	if providerName == "" {
-		providerName = a.opts.ModelProvider
-	}
-	modelName := mode.Model
-	if modelName == "" {
-		modelName = a.opts.ModelName
-	}
-
 	// Update reasoning display.
 	if mode.Reasoning != "" {
 		a.opts.Reasoning.Effort = mode.Reasoning
 	}
 
 	// Update the displayed model/provider.
-	a.opts.ModelName = modelName
-	a.opts.ModelProvider = providerName
+	a.opts.ModelName = mode.Model
+	a.opts.ModelProvider = mode.Provider
 
 	// Invalidate the message cache so the footer updates.
 	a.invalidateMsgCache()
@@ -64,7 +48,7 @@ func (a *App) cycleMode() tea.Cmd {
 	// Show toast and switch model.
 	toastCmd := a.showToast("Mode Switched", "Switched to "+mode.Name)
 	if a.opts.SwitchModel != nil {
-		return tea.Batch(toastCmd, a.switchModeCmd(providerName, modelName, mode.Name))
+		return tea.Batch(toastCmd, a.switchModeCmd(mode.Provider, mode.Model, mode.Name))
 	}
 	return toastCmd
 }
@@ -84,21 +68,22 @@ func (a *App) switchModeCmd(providerName, modelName, modeName string) tea.Cmd {
 }
 
 // initModes sets up the initial mode index. Called from New().
+// If Modes is empty (e.g. in tests that bypass config.Load), a default
+// mode is synthesized from ModelProvider/ModelName.
 func (a *App) initModes() {
 	if len(a.opts.Modes) == 0 {
-		a.modeIndex = -1
-		return
+		a.opts.Modes = []config.ModeConfig{{
+			Name:     "General",
+			Provider: a.opts.ModelProvider,
+			Model:    a.opts.ModelName,
+		}}
 	}
 	a.modeIndex = 0
 
-	// Apply the first mode's overrides so the initial state is correct.
+	// Ensure display fields match the first mode.
 	mode := a.opts.Modes[0]
-	if mode.Provider != "" {
-		a.opts.ModelProvider = mode.Provider
-	}
-	if mode.Model != "" {
-		a.opts.ModelName = mode.Model
-	}
+	a.opts.ModelProvider = mode.Provider
+	a.opts.ModelName = mode.Model
 	if mode.Reasoning != "" {
 		a.opts.Reasoning.Effort = mode.Reasoning
 	}
@@ -107,7 +92,7 @@ func (a *App) initModes() {
 // activeModeColor returns the accent color for the active mode, or nil.
 func (a *App) activeModeColor() color.Color {
 	m := a.ActiveMode()
-	if m == nil || m.Color == "" {
+	if m.Color == "" {
 		return nil
 	}
 	return lipgloss.Color(m.Color)
