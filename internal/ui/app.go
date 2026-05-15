@@ -129,6 +129,9 @@ type AppOptions struct {
 	// failures are surfaced to the UI without rolling back the runtime switch.
 	SaveModel  func(ctx context.Context, providerName, modelName string) error
 	SaveAPIKey func(ctx context.Context, providerName, apiKey string) error
+	ThemeNames []string
+	LoadTheme  func(ctx context.Context, name string) (*theme.Theme, error)
+	SaveTheme  func(ctx context.Context, name string) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -280,6 +283,7 @@ type App struct {
 	sessionsModal components.SessionsModal
 	modelModal    components.ModelModal
 	apiKeyModal   components.APIKeyModal
+	themeModal    components.ThemeModal
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -896,6 +900,13 @@ func (a *App) View() tea.View {
 			v.AltScreen = true
 			v.MouseMode = tea.MouseModeCellMotion
 			return v
+		case overlayTheme:
+			a.themeModal.Width = width
+			a.themeModal.Height = height
+			v := tea.NewView(a.themeModal.View())
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
 		}
 	}
 
@@ -1046,6 +1057,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.setNotice("API key saved for " + m.provider)
 
+	case themeSwitchResult:
+		if m.err != nil {
+			return a, a.setNotice("theme switch failed: " + m.err.Error())
+		}
+		if m.theme != nil {
+			a.opts.Theme = m.theme
+			a.input.Theme = m.theme
+			a.renderer = nil
+			a.rendererW = 0
+		}
+		if m.saveErr != nil {
+			return a, a.setNotice("theme applied for this session but save failed: " + m.saveErr.Error())
+		}
+		return a, a.setNotice("theme switched and saved: " + m.name)
+
 	case sendStarted:
 		a.busy = true
 		// Pick a random working placeholder so the user sees immediate feedback
@@ -1136,6 +1162,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleModelModalKey(k)
 		case overlayAPIKey:
 			return a.handleAPIKeyModalKey(k)
+		case overlayTheme:
+			return a.handleThemeModalKey(k)
 		}
 	}
 
@@ -2657,7 +2685,7 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayCompactConfirm, overlayModel, overlayAPIKey:
+		case overlayHelp, overlaySessions, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
@@ -2667,6 +2695,76 @@ func (a *App) syncActiveModal() {
 type apiKeySaveResult struct {
 	provider string
 	err      error
+}
+
+type themeSwitchResult struct {
+	name    string
+	theme   *theme.Theme
+	err     error
+	saveErr error
+}
+
+func (a *App) themeNames() []string {
+	if len(a.opts.ThemeNames) > 0 {
+		out := make([]string, len(a.opts.ThemeNames))
+		copy(out, a.opts.ThemeNames)
+		return out
+	}
+	return []string{"shell"}
+}
+
+func currentThemeName(t *theme.Theme) string {
+	if t == nil || t.Name == "" {
+		return "shell"
+	}
+	return t.Name
+}
+
+func (a *App) switchThemeCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		var th *theme.Theme
+		if a.opts.LoadTheme != nil {
+			loaded, err := a.opts.LoadTheme(a.ctx, name)
+			if err != nil {
+				return themeSwitchResult{name: name, err: err}
+			}
+			th = loaded
+		} else if name == currentThemeName(a.opts.Theme) || name == "shell" {
+			th = theme.ShellTheme()
+		} else {
+			return themeSwitchResult{name: name, err: fmt.Errorf("unknown theme %q", name)}
+		}
+		if a.opts.SaveTheme != nil {
+			if err := a.opts.SaveTheme(a.ctx, name); err != nil {
+				return themeSwitchResult{name: name, theme: th, saveErr: err}
+			}
+		}
+		return themeSwitchResult{name: name, theme: th}
+	}
+}
+
+func (a *App) handleThemeModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.ThemeKey{Name: k.String(), Runes: []rune(k.Text)}
+	switch k.String() {
+	case "up", "down", "enter", "esc", "ctrl+n", "ctrl+p":
+		sk.Name = k.String()
+	case "backspace", "delete":
+		sk.Name = "backspace"
+	default:
+		if len(k.Text) == 1 {
+			sk.Name = k.Text
+		}
+	}
+	updated, msg := a.themeModal.HandleKey(sk)
+	a.themeModal = updated
+	switch m := msg.(type) {
+	case components.CloseThemeModal:
+		a.closeOverlay(overlayTheme)
+	case components.SelectThemeAction:
+		a.closeOverlay(overlayTheme)
+		return a, a.switchThemeCmd(m.Name)
+	}
+	return a, nil
 }
 
 func (a *App) handleAPIKeyModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

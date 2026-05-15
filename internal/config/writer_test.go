@@ -123,3 +123,36 @@ func TestWriteModelSelectionCreatesUserConfigWhenNoRealModelProvenance(t *testin
 		t.Fatalf("model = %#v", model)
 	}
 }
+
+func TestWriteThemeSelectionPreservesUnrelatedFields(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	input := `[theme]
+name = "shell"
+
+[model]
+provider = "openai"
+name = "gpt-5"
+`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrote, err := WriteThemeSelection(WriteThemeSelectionOptions{Provenance: Provenance{"theme.name": {{File: path}}}}, "midnight")
+	if err != nil {
+		t.Fatalf("WriteThemeSelection: %v", err)
+	}
+	if wrote != path {
+		t.Fatalf("wrote %q, want %q", wrote, path)
+	}
+	m, err := loadTOMLFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["theme"].(map[string]any)["name"] != "midnight" {
+		t.Fatalf("theme not updated: %#v", m["theme"])
+	}
+	if m["model"].(map[string]any)["provider"] != "openai" {
+		t.Fatalf("model dropped: %#v", m)
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui"
+	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 // supportsProgressBar reports whether the current terminal can render an
@@ -235,6 +236,23 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 					rt.Config.Model.Options = map[string]any{}
 				}
 				rt.Config.Model.Options["api_key"] = apiKey
+			}
+			return err
+		},
+		ThemeNames: theme.KnownNames(theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir}),
+		LoadTheme: func(_ context.Context, name string) (*theme.Theme, error) {
+			return theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+		},
+		SaveTheme: func(_ context.Context, name string) error {
+			_, err := config.WriteThemeSelection(config.WriteThemeSelectionOptions{
+				HomeDir:       rt.StateOpts.HomeDir,
+				XDGConfigHome: rt.XDGConfigHome,
+				Pwd:           rt.Pwd,
+				Provenance:    rt.Provenance,
+			}, name)
+			if err == nil {
+				rt.Config.Theme.Name = name
+				rt.Theme, _ = theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
 			}
 			return err
 		},

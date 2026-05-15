@@ -33,6 +33,26 @@ func TestMessageListRendersRoles(t *testing.T) {
 	}
 }
 
+func TestThemeModalFilterNavigateApplyCancel(t *testing.T) {
+	t.Parallel()
+	m := ThemeModal{Current: "shell", Themes: []string{"shell", "midnight", "solarized"}}
+	updated, msg := m.HandleKey(ThemeKey{Name: "m", Runes: []rune("m")})
+	if msg != nil {
+		t.Fatalf("typing emitted message: %#v", msg)
+	}
+	if got := updated.Filtered(); len(got) != 1 || got[0] != "midnight" {
+		t.Fatalf("filtered = %#v", got)
+	}
+	_, msg = updated.HandleKey(ThemeKey{Name: "enter"})
+	if sel, ok := msg.(SelectThemeAction); !ok || sel.Name != "midnight" {
+		t.Fatalf("enter msg = %#v", msg)
+	}
+	_, msg = m.HandleKey(ThemeKey{Name: "esc"})
+	if _, ok := msg.(CloseThemeModal); !ok {
+		t.Fatalf("esc msg = %#v", msg)
+	}
+}
+
 func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	t.Parallel()
 	var lines []string
