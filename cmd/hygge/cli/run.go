@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui"
 )
@@ -189,6 +190,28 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}
 		},
 		OpenSessionsModalOnStart: openSessionsModalOnStart,
+		SwitchModel: func(ctx context.Context, providerName, modelName string) error {
+			modelOpts, err := resolveProviderOptionsFor(providerName, rt.Config, rt.StateOpts)
+			if err != nil {
+				return err
+			}
+			prv, err := buildProviderForName(providerName, rt.ProviderFactory, modelOpts)
+			if err != nil {
+				return err
+			}
+			resolved, err := llm.ResolveProviderModel(ctx, providerName, modelName, modelOpts, rt.catalogSrc)
+			if err != nil {
+				return err
+			}
+			if err := rt.Agent.SetModel(providerName, modelName, prv, resolved.Model); err != nil {
+				return err
+			}
+			rt.Provider = prv
+			// TODO(model-persistence): persist providerName/modelName through the
+			// profile/config writer once this package has a narrow, provenance-safe
+			// API for changing only [model] without clobbering layered config.
+			return nil
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("cli: build ui app: %w", err)

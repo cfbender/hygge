@@ -35,6 +35,17 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 	return &Runtime{model: opts.Model, tools: opts.Tools, maxIterations: opts.MaxIterations}
 }
 
+// SetModel replaces the Fantasy language model used to create future agents.
+// Existing fantasy.Agent instances are per-turn and are not reused, so assigning
+// here is enough to invalidate the old model for subsequent sends and internal
+// compaction/title calls.
+func (r *Runtime) SetModel(model fantasy.LanguageModel) {
+	if r == nil {
+		return
+	}
+	r.model = model
+}
+
 func (r *Runtime) hasFantasyModel() bool {
 	return r != nil && r.model != nil
 }

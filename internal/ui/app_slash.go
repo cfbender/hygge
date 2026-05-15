@@ -112,7 +112,9 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 	}
 
 	for k, v := range out.Updates {
-		a.applyUpdate(k, v)
+		if cmd := a.applyUpdate(k, v); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	if out.Compact && a.opts.Agent != nil && a.opts.SessionID != "" {
@@ -152,21 +154,14 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// applyUpdate dispatches a single Outcome.Updates entry.  v0.3
-// recognises Model and Reasoning; unknown keys are logged and
-// ignored.  Real switching is wired in subsequent slices (model
-// hot-swap lands with provider routing; reasoning is local).
-func (a *App) applyUpdate(key, value string) {
+// applyUpdate dispatches a single Outcome.Updates entry. Unknown keys are
+// logged and ignored. Model changes return a command so provider/model rebuilds
+// happen off the render loop; reasoning remains local UI state.
+func (a *App) applyUpdate(key, value string) tea.Cmd {
 	switch key {
 	case command.UpdateModel:
-		// Local cosmetic update so the status bar reflects the
-		// change immediately.  A full hot-swap (provider rebuild,
-		// agent re-wire) lands in a later slice — for v0.3 we
-		// surface the request and let the user re-launch hygge
-		// with the new model in config.
 		if provName, modelName, ok := splitModelRef(value); ok {
-			a.opts.ModelProvider = provName
-			a.opts.ModelName = modelName
+			return a.switchModelCmd(provName, modelName)
 		}
 	case command.UpdateReasoning:
 		switch value {
@@ -208,6 +203,24 @@ func (a *App) applyUpdate(key, value string) {
 		}
 	default:
 		slogWarnUnknownUpdate(key, value)
+	}
+	return nil
+}
+
+type modelSwitchResult struct {
+	provider string
+	model    string
+	err      error
+}
+
+func (a *App) switchModelCmd(providerName, modelName string) tea.Cmd {
+	return func() tea.Msg {
+		if a.opts.SwitchModel != nil {
+			if err := a.opts.SwitchModel(a.ctx, providerName, modelName); err != nil {
+				return modelSwitchResult{provider: providerName, model: modelName, err: err}
+			}
+		}
+		return modelSwitchResult{provider: providerName, model: modelName}
 	}
 }
 

@@ -121,6 +121,10 @@ type AppOptions struct {
 	// whether and when to send notifications.  A nil Config disables
 	// notifications (equivalent to Config.Notifications.Enabled == false).
 	Config *config.Config
+
+	// SwitchModel applies a provider/model selection to the running backend.
+	// When nil, /model remains a session-only UI selection.
+	SwitchModel func(ctx context.Context, providerName, modelName string) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -1011,6 +1015,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case switchSessionMsg:
 		return a, a.applySwitchSession(m.ID)
+
+	case modelSwitchResult:
+		if m.err != nil {
+			return a, a.setNotice("model switch failed: " + m.err.Error())
+		}
+		a.opts.ModelProvider = m.provider
+		a.opts.ModelName = m.model
+		return a, a.setNotice("model switched for this session: " + m.provider + "/" + m.model + " (not saved)")
 
 	case sendStarted:
 		a.busy = true
@@ -2665,10 +2677,8 @@ func (a *App) handleModelModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.closeOverlay(overlayModel)
 		return a, nil
 	case components.SelectModelAction:
-		a.opts.ModelProvider = m.Provider
-		a.opts.ModelName = m.Model
 		a.closeOverlay(overlayModel)
-		return a, a.setNotice("model switched for this session: " + m.Provider + "/" + m.Model)
+		return a, a.switchModelCmd(m.Provider, m.Model)
 	}
 	return a, nil
 }
