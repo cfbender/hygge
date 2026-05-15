@@ -8,22 +8,11 @@ import (
 	"sync"
 
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/session"
 )
 
-type todoStatus string
-
-const (
-	todoPending    todoStatus = "pending"
-	todoInProgress todoStatus = "in_progress"
-	todoCompleted  todoStatus = "completed"
-	todoCancelled  todoStatus = "cancelled"
-)
-
-type todoItem struct {
-	Content  string     `json:"content"`
-	Status   todoStatus `json:"status"`
-	Priority string     `json:"priority,omitempty"`
-}
+type todoItem = session.TodoItem
+type todoSummary = session.TodoSummary
 
 type todoStore struct {
 	mu    sync.RWMutex
@@ -40,12 +29,9 @@ func (s *todoStore) set(sessionID string, items []todoItem) todoSummary {
 	return summarizeTodos(copyItems)
 }
 
-type todoSummary struct {
-	Total      int `json:"total"`
-	Incomplete int `json:"incomplete"`
-	InProgress int `json:"in_progress"`
-	Completed  int `json:"completed"`
-	Cancelled  int `json:"cancelled"`
+type todoPersister interface {
+	GetSessionTodos(ctx context.Context, sessionID string) ([]session.TodoItem, session.TodoSummary, error)
+	ReplaceSessionTodos(ctx context.Context, sessionID string, items []session.TodoItem) (session.TodoSummary, error)
 }
 
 func summarizeTodos(items []todoItem) todoSummary {
@@ -53,11 +39,11 @@ func summarizeTodos(items []todoItem) todoSummary {
 	out.Total = len(items)
 	for _, item := range items {
 		switch item.Status {
-		case todoCompleted:
+		case session.TodoCompleted:
 			out.Completed++
-		case todoCancelled:
+		case session.TodoCancelled:
 			out.Cancelled++
-		case todoInProgress:
+		case session.TodoInProgress:
 			out.InProgress++
 			out.Incomplete++
 		default:
@@ -67,9 +53,14 @@ func summarizeTodos(items []todoItem) todoSummary {
 	return out
 }
 
-type todoTool struct{ store *todoStore }
+type todoTool struct {
+	store     *todoStore
+	persister todoPersister
+}
 
-func newTodoTool(store *todoStore) *todoTool { return &todoTool{store: store} }
+func newTodoTool(store *todoStore, persister todoPersister) *todoTool {
+	return &todoTool{store: store, persister: persister}
+}
 
 func (t *todoTool) Name() string { return "todo" }
 
@@ -100,7 +91,7 @@ func (t *todoTool) InputSchema() map[string]any {
 	}
 }
 
-func (t *todoTool) Execute(_ context.Context, args json.RawMessage, ec ExecContext) (Result, error) {
+func (t *todoTool) Execute(ctx context.Context, args json.RawMessage, ec ExecContext) (Result, error) {
 	var in struct {
 		Items []todoItem `json:"items"`
 	}
@@ -113,12 +104,26 @@ func (t *todoTool) Execute(_ context.Context, args json.RawMessage, ec ExecConte
 			return Result{}, newInvalidArgs(fmt.Sprintf("items[%d].content is required", i), nil)
 		}
 		switch in.Items[i].Status {
-		case todoPending, todoInProgress, todoCompleted, todoCancelled:
+		case session.TodoPending, session.TodoInProgress, session.TodoCompleted, session.TodoCancelled:
 		default:
 			return Result{}, newInvalidArgs(fmt.Sprintf("items[%d].status must be pending, in_progress, completed, or cancelled", i), nil)
 		}
 	}
+	if t.persister != nil {
+		stored, _, err := t.persister.GetSessionTodos(ctx, ec.SessionID)
+		if err != nil {
+			return Result{}, newExecutionFailed("todo: load persisted todos", err)
+		}
+		t.store.set(ec.SessionID, stored)
+	}
 	summary := t.store.set(ec.SessionID, in.Items)
+	if t.persister != nil {
+		var err error
+		summary, err = t.persister.ReplaceSessionTodos(ctx, ec.SessionID, in.Items)
+		if err != nil {
+			return Result{}, newExecutionFailed("todo: persist todos", err)
+		}
+	}
 	bus.Publish(ec.Bus, bus.TodoChanged{SessionID: ec.SessionID, Total: summary.Total, Incomplete: summary.Incomplete, InProgress: summary.InProgress, Completed: summary.Completed, Cancelled: summary.Cancelled, At: ec.nowFn()()})
 	content := fmt.Sprintf("todo list updated: %d incomplete", summary.Incomplete)
 	return Result{Content: content, Metadata: map[string]any{"total": summary.Total, "incomplete": summary.Incomplete, "in_progress": summary.InProgress, "completed": summary.Completed, "cancelled": summary.Cancelled}}, nil

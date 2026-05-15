@@ -150,6 +150,36 @@ type Marker struct {
 	CreatedAt        time.Time
 }
 
+// TodoStatus is the persisted status for a lightweight session todo item.
+type TodoStatus string
+
+const (
+	// TodoPending means the todo has not started yet.
+	TodoPending TodoStatus = "pending"
+	// TodoInProgress means the todo is currently being worked.
+	TodoInProgress TodoStatus = "in_progress"
+	// TodoCompleted means the todo finished successfully.
+	TodoCompleted TodoStatus = "completed"
+	// TodoCancelled means the todo is no longer planned.
+	TodoCancelled TodoStatus = "cancelled"
+)
+
+// TodoItem is one lightweight agent todo item scoped to a session.
+type TodoItem struct {
+	Content  string     `json:"content"`
+	Status   TodoStatus `json:"status"`
+	Priority string     `json:"priority,omitempty"`
+}
+
+// TodoSummary is the aggregate state the UI needs for the status pill.
+type TodoSummary struct {
+	Total      int `json:"total"`
+	Incomplete int `json:"incomplete"`
+	InProgress int `json:"in_progress"`
+	Completed  int `json:"completed"`
+	Cancelled  int `json:"cancelled"`
+}
+
 // NewSession is the input to Store.CreateSession.  ID, CreatedAt, UpdatedAt
 // are assigned by the Store.
 type NewSession struct {
@@ -295,6 +325,12 @@ type Store interface {
 	// in chronological order (oldest first).  Returns an empty slice (not
 	// an error) when no markers exist.
 	ListMarkersForSession(ctx context.Context, sessionID string) ([]*Marker, error)
+
+	// ReplaceSessionTodos stores the full current todo list for a session.
+	ReplaceSessionTodos(ctx context.Context, sessionID string, items []TodoItem) (TodoSummary, error)
+
+	// GetSessionTodos returns the persisted todo list and summary for a session.
+	GetSessionTodos(ctx context.Context, sessionID string) ([]TodoItem, TodoSummary, error)
 
 	// Close releases backing resources.  Safe to call multiple times.
 	Close() error

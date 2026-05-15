@@ -464,6 +464,7 @@ func (a *App) Init() tea.Cmd {
 		a.foregroundStack = []string{a.opts.SessionID}
 		a.hydrateMessagesFromStore(a.opts.SessionID)
 		a.sessionTitle = a.loadSessionTitle(a.opts.SessionID)
+		a.hydrateTodoSummary(a.opts.SessionID)
 	}
 	return tea.Batch(cmds...)
 }
@@ -3097,9 +3098,12 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 		a.resetForeground(id)
 		a.hydrateMessagesFromStore(id)
 		a.sessionTitle = a.loadSessionTitle(id)
+		a.hydrateTodoSummary(id)
 	} else {
 		a.foregroundStack = nil
 		a.sessionTitle = ""
+		a.todoIncomplete = 0
+		a.todoInProgress = 0
 	}
 
 	var cmds []tea.Cmd
@@ -3201,6 +3205,21 @@ func (a *App) hydrateMessagesFromStore(sid string) {
 	visited := make(map[string]struct{})
 	msgs := a.hydrateSessionMessages(sid, visited)
 	a.messages = msgs
+}
+
+func (a *App) hydrateTodoSummary(sid string) {
+	a.todoIncomplete = 0
+	a.todoInProgress = 0
+	if a.opts.Store == nil || sid == "" {
+		return
+	}
+	_, summary, err := a.opts.Store.GetSessionTodos(a.ctx, sid)
+	if err != nil {
+		slog.Warn("ui: hydrateTodoSummary: failed to load todos", "session_id", sid, "err", err)
+		return
+	}
+	a.todoIncomplete = summary.Incomplete
+	a.todoInProgress = summary.InProgress
 }
 
 // hydrateSessionMessages is the recursive implementation shared by
