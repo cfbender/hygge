@@ -12,11 +12,33 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui"
 )
+
+// supportsProgressBar reports whether the current terminal can render an
+// indeterminate progress bar via the OSC 9;4 escape sequence.  Only a
+// known-good subset of terminal emulators support the sequence; on others
+// the escape is silently ignored or rendered as garbage.
+func supportsProgressBar() bool {
+	if !term.IsTerminal(int(os.Stderr.Fd())) {
+		return false
+	}
+	termProg := os.Getenv("TERM_PROGRAM")
+	_, isWindowsTerminal := os.LookupEnv("WT_SESSION")
+	return isWindowsTerminal ||
+		strings.Contains(strings.ToLower(termProg), "ghostty") ||
+		strings.Contains(strings.ToLower(termProg), "iterm2") ||
+		strings.Contains(strings.ToLower(termProg), "rio") ||
+		strings.Contains(strings.ToLower(termProg), "wezterm") ||
+		strings.Contains(strings.ToLower(termProg), "kitty")
+	// Note: Zellij forwards TERM_PROGRAM from its host; if the user runs
+	// hygge under Zellij in Ghostty/iTerm2, this still works.
+}
 
 // resumeFlag is the value bound to the root command's --resume flag.
 // We use a package var (rather than a closure) so NewRootCmd can wire it
@@ -54,6 +76,16 @@ func runRun(cmd *cobra.Command, _ []string) error {
 
 	if continueFlag && newFlag {
 		return die(cmd, "conflicting flags: --continue and --new")
+	}
+
+	// Show an indeterminate progress bar in the terminal dock/taskbar while
+	// bootstrap runs (workspace init + lipgloss probe).  This gives immediate
+	// visual feedback that hygge is working even before the TUI starts.
+	// The bar is reset before tea.NewProgram takes over the screen; if bootstrap
+	// fails the defer fires before we return the error.
+	if supportsProgressBar() {
+		_, _ = fmt.Fprint(os.Stderr, ansi.SetIndeterminateProgressBar)
+		defer fmt.Fprint(os.Stderr, ansi.ResetProgressBar) //nolint:errcheck
 	}
 
 	rt, err := bootstrap(ctx, bootstrapOptions{
@@ -180,6 +212,11 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 	}
 
 	prog := tea.NewProgram(app,
+		// Pass the exact environment so bubbletea uses our env for terminal
+		// capability detection rather than re-reading os.Environ() internally.
+		// Fixes subtle terminal-detection quirks when the environment is
+		// manipulated before this point.
+		tea.WithEnvironment(os.Environ()),
 		tea.WithContext(ctx),
 		// Force TrueColor profile so lipgloss/v2 never sends an OSC 11
 		// background-color query to the terminal.  Without this, the

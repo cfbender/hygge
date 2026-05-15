@@ -25,6 +25,8 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 - [ ] Subagent view doesn't show initial message on first render, but does later on resume and re-view
 
+- [ ] Permissions per session does not work
+
 ## Architecture
 
 - [ ] **Unify modal state**
@@ -66,6 +68,10 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 ## Animation / polish
 
+- [x] **Boot-phase progress bar** — `supportsProgressBar()` in `run.go` emits OSC 9;4;3 (indeterminate) to stderr before bootstrap and resets via defer. Visible in Ghostty/iTerm2/WezTerm/Kitty/Windows Terminal/Rio. *(this slice)*
+
+- [x] **Working placeholder rotation in textarea** — `Input.SetBusy(bool)` switches between `WorkingPlaceholder` and `ReadyPlaceholder`. `App.Update` draws a random entry from `workingPlaceholders` on `sendStarted` and restores on `sendCompleted`. *(this slice)*
+
 - [ ] **Status-bar busy-spinner pre-rendered frames** *(low priority — status-bar location changed since the spinner audit; verify it still exists in its old form, or close out)*
 
 ## Testing / hermeticity
@@ -98,6 +104,7 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - ✅ **Subagent dispatch `invalid_request` (OpenRouter 400)** — fork-chain CTE leaked parent transcript into subagent sessions because the recursive step had no guard on `fork_message_id IS NOT NULL`; a dangling `tool_use` with no matching output caused the provider to reject the request. Fixed by adding `AND a.fork_message_id IS NOT NULL` to the CTE's recursive arm in `internal/store/messages.go`. `PropagateTotals` recursive CTE is intentionally left alone — it correctly rolls subagent costs up to ancestor sessions.
 - ✅ **OSC response filter** — `dropOSCResponses` filter via `tea.WithFilter` drops leaked terminal color-query responses before they reach the textarea. (`cmd/hygge/cli/osc_filter.go`)
 - ✅ **Decouple `startSend`** — `Agent.Send` now runs in a goroutine; `sendCompleted` arrives via `program.Send` (`tea.go:1183`). UI event loop is responsive during agent turns.
+- ✅ **Boot progress bar + working placeholder + env/ctx options** — `supportsProgressBar()` emits OSC 9;4;3 around bootstrap; `Input.SetBusy` rotates placeholder on send; `tea.WithEnvironment` added to `NewProgram` call.
 ---
 
-_Last updated after the OSC filter + startSend goroutine decoupling slice._
+_Last updated after the boot progress bar + working placeholder slice._

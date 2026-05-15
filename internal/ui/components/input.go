@@ -21,6 +21,10 @@ type Input struct {
 	Theme    *theme.Theme
 	// Focused controls the border color: accent when true, muted when false.
 	Focused bool
+	// ReadyPlaceholder is shown when the agent is idle.
+	ReadyPlaceholder string
+	// WorkingPlaceholder is shown while the agent is processing a turn.
+	WorkingPlaceholder string
 }
 
 // NewInput builds a configured textarea wrapped in Input.
@@ -39,7 +43,27 @@ func NewInput(t *theme.Theme) *Input {
 		ta.SetStyles(styles)
 	}
 	ta.Focus()
-	return &Input{Textarea: ta, Theme: t, Focused: true}
+	return &Input{
+		Textarea:         ta,
+		Theme:            t,
+		Focused:          true,
+		ReadyPlaceholder: "Type a message…",
+	}
+}
+
+// SetBusy switches the textarea placeholder based on whether the agent is
+// currently processing a turn.  When busy is true, WorkingPlaceholder is
+// used (if non-empty); when false the placeholder reverts to ReadyPlaceholder.
+// The placeholder is only visible when the textarea is empty, so this has no
+// visual effect while the user is typing.
+func (i *Input) SetBusy(busy bool) {
+	if busy {
+		if i.WorkingPlaceholder != "" {
+			i.Textarea.Placeholder = i.WorkingPlaceholder
+		}
+	} else {
+		i.Textarea.Placeholder = i.ReadyPlaceholder
+	}
 }
 
 // SetWidth resizes the underlying textarea.  The outer border adds 2 columns
