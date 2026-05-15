@@ -165,6 +165,38 @@ func scriptText(text string, usage provider.Usage) fakeScript {
 	return fakeScript{events: evs}
 }
 
+func TestSetModelChangesSubsequentSendProviderAndModel(t *testing.T) {
+	env := newTestEnv(t)
+	first := newFakeProvider("first", scriptText("one", provider.Usage{}))
+	a := env.newAgent(first)
+	sess, err := env.Store.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: env.pwd,
+		Model:      session.ModelRef{Provider: "first", Name: "first-model"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	var gotProvider, gotModel string
+	second := newFakeProvider("second", scriptText("two", provider.Usage{}))
+	second.onStream = func(req provider.Request) {
+		gotProvider = second.Name()
+		gotModel = req.ModelName
+	}
+	if err := a.SetModel("second", "second-model", second, nil); err != nil {
+		t.Fatalf("SetModel: %v", err)
+	}
+	if _, err := a.Send(t.Context(), sess.ID, userText("hello")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if gotProvider != "second" || gotModel != "second-model" {
+		t.Fatalf("stream target = %s/%s, want second/second-model", gotProvider, gotModel)
+	}
+	if first.calls.Load() != 0 {
+		t.Fatalf("old provider calls = %d, want 0", first.calls.Load())
+	}
+}
+
 // scriptToolUse builds a script that emits text + N tool_use blocks + done.
 func scriptToolUse(text string, calls ...provider.Event) fakeScript {
 	evs := []provider.Event{}

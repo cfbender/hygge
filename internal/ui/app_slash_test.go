@@ -91,6 +91,11 @@ func TestModelDialogFilterNarrowsList(t *testing.T) {
 func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
+	var switched []string
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+		switched = append(switched, providerName+"/"+modelName)
+		return nil
+	}
 	typeInto(app, "/model")
 	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	typeInto(app, "gpt-5")
@@ -100,9 +105,16 @@ func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
 	}
 	app.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
 	app.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
-	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected model switch cmd")
+	}
+	runSlashTestCmd(app, cmd)
 	if app.anyOverlayOpen() {
 		t.Fatal("model dialog should close after selection")
+	}
+	if len(switched) != 1 || switched[0] != filtered[0].Provider+"/"+filtered[0].Entry.ID {
+		t.Fatalf("SwitchModel calls = %v, want %s/%s", switched, filtered[0].Provider, filtered[0].Entry.ID)
 	}
 	if app.opts.ModelProvider != filtered[0].Provider || app.opts.ModelName != filtered[0].Entry.ID {
 		t.Fatalf("selected model = %s/%s, want %s/%s", app.opts.ModelProvider, app.opts.ModelName, filtered[0].Provider, filtered[0].Entry.ID)
@@ -183,14 +195,39 @@ func TestSlashCommandUnknownShowsHint(t *testing.T) {
 func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
+	var switched []string
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+		switched = append(switched, providerName+"/"+modelName)
+		return nil
+	}
 	typeInto(app, "/model openrouter/gpt-5")
-	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected model switch cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	if len(switched) != 1 || switched[0] != "openrouter/gpt-5" {
+		t.Fatalf("SwitchModel calls = %v, want [openrouter/gpt-5]", switched)
+	}
 	if app.opts.ModelProvider != "openrouter" {
 		t.Errorf("ModelProvider = %q, want openrouter", app.opts.ModelProvider)
 	}
 	if app.opts.ModelName != "gpt-5" {
 		t.Errorf("ModelName = %q, want gpt-5", app.opts.ModelName)
 	}
+}
+
+func runSlashTestCmd(app *App, cmd tea.Cmd) {
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, nested := range batch {
+			if nested != nil {
+				app.Update(nested())
+			}
+		}
+		return
+	}
+	app.Update(msg)
 }
 
 func TestSlashCommandReasonUpdatesOpts(t *testing.T) {

@@ -169,6 +169,7 @@ type Agent struct {
 	opts    Options
 	runtime *Runtime
 	session *SessionAgent
+	model   session.ModelRef
 
 	// mu guards closed, ctx, cancel, locks, pendingLazy, thresholdFired,
 	// pluginInjects, activeRuns, and queues.
@@ -241,6 +242,7 @@ func New(opts Options) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Agent{
 		opts:           opts,
+		model:          session.ModelRef{Provider: opts.Provider.Name(), Name: modelName(opts.FantasyModel)},
 		ctx:            ctx,
 		cancel:         cancel,
 		locks:          make(map[string]*sync.Mutex),
@@ -256,6 +258,43 @@ func New(opts Options) (*Agent, error) {
 	})
 	a.session = NewSessionAgent(a, a.runtime)
 	return a, nil
+}
+
+// SetModel hot-swaps the active provider and Fantasy model used by subsequent
+// sends. It does not mutate existing session rows; callers own any UX or config
+// persistence around the session-only runtime switch.
+func (a *Agent) SetModel(providerName, modelName string, prv provider.Provider, fm fantasy.LanguageModel) error {
+	if providerName == "" || modelName == "" {
+		return fmt.Errorf("agent: SetModel: provider and model are required")
+	}
+	if prv == nil {
+		return fmt.Errorf("agent: SetModel: Provider is required")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return ErrClosed
+	}
+	a.opts.Provider = prv
+	a.opts.FantasyModel = fm
+	a.model = session.ModelRef{Provider: providerName, Name: modelName}
+	if a.runtime != nil {
+		a.runtime.SetModel(fm)
+	}
+	return nil
+}
+
+func modelName(m fantasy.LanguageModel) string {
+	if m == nil {
+		return ""
+	}
+	return m.Model()
+}
+
+func (a *Agent) activeModel() session.ModelRef {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.model
 }
 
 // Close releases the agent.  After Close, Send and Compact return
@@ -466,6 +505,10 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	if err != nil {
 		return nil, fmt.Errorf("agent: Send: load session: %w", err)
 	}
+	active := a.activeModel()
+	if active.Name == "" {
+		active = sess.Model
+	}
 
 	// Publish TurnStarted so the UI can flip to busy before the first token
 	// arrives.  This fires regardless of outcome — even if runLoop returns an
@@ -475,7 +518,7 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 		At:        a.opts.Now(),
 	})
 
-	result, runErr := a.runLoop(ctx, sessionID, sess.Model.Name)
+	result, runErr := a.runLoop(ctx, sessionID, active.Name)
 
 	// Publish TurnCompleted on clean success.
 	if runErr == nil {

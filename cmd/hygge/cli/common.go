@@ -54,29 +54,30 @@ import (
 // from bootstrap.  Callers must defer Close to release the SQLite handle
 // and unblock the agent's per-session locks.
 type appRuntime struct {
-	Config         *config.Config
-	Provenance     config.Provenance
-	State          *state.State
-	StateOpts      state.LoadOptions
-	Bus            *bus.Bus
-	Store          *store.Store
-	Provider       provider.Provider
-	Permission     *permission.Engine
-	Tools          *tool.Registry
-	Catalog        *cost.Catalog
-	Agent          *agent.Agent
-	Theme          *theme.Theme
-	Skills         *skill.Registry
-	Subagents      *subagent.Registry
-	SubagentRunner *subagent.Runner
-	Commands       *command.Registry
-	Hooks          *hook.Registry
-	AgentsBlocks   []agentsmd.Block
-	MCPClients     []*mcp.Client
-	MCPConfigs     []mcp.ServerConfig
-	MCPStatuses    []MCPServerStatus
-	SystemPrompt   string
-	Pwd            string
+	Config          *config.Config
+	Provenance      config.Provenance
+	State           *state.State
+	StateOpts       state.LoadOptions
+	Bus             *bus.Bus
+	Store           *store.Store
+	Provider        provider.Provider
+	ProviderFactory func(opts map[string]any) (provider.Provider, error)
+	Permission      *permission.Engine
+	Tools           *tool.Registry
+	Catalog         *cost.Catalog
+	Agent           *agent.Agent
+	Theme           *theme.Theme
+	Skills          *skill.Registry
+	Subagents       *subagent.Registry
+	SubagentRunner  *subagent.Runner
+	Commands        *command.Registry
+	Hooks           *hook.Registry
+	AgentsBlocks    []agentsmd.Block
+	MCPClients      []*mcp.Client
+	MCPConfigs      []mcp.ServerConfig
+	MCPStatuses     []MCPServerStatus
+	SystemPrompt    string
+	Pwd             string
 	// Plugins is the plugin registry (nil when no plugins are configured).
 	Plugins *plugin.Registry
 	// PluginPM is the package manager used by the plugins registry.
@@ -602,32 +603,33 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	slog.Info("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
 
 	return &appRuntime{
-		Config:         cfg,
-		Provenance:     prov,
-		State:          st,
-		StateOpts:      stateOpts,
-		Bus:            b,
-		Store:          stOpen,
-		Provider:       prv,
-		Permission:     permEngine,
-		Tools:          tools,
-		Catalog:        catalog,
-		Agent:          ag,
-		Theme:          thm,
-		Skills:         skillReg,
-		Subagents:      subagentReg,
-		SubagentRunner: subRunner,
-		Commands:       cmdReg,
-		Hooks:          hookReg,
-		AgentsBlocks:   agentsBlocks,
-		MCPClients:     mcpClients,
-		MCPConfigs:     mcpConfigs,
-		MCPStatuses:    mcpStatuses,
-		SystemPrompt:   sysPrompt,
-		Pwd:            opts.Pwd,
-		Plugins:        pluginReg,
-		PluginPM:       pluginPM,
-		catalogSrc:     catSrc,
+		Config:          cfg,
+		Provenance:      prov,
+		State:           st,
+		StateOpts:       stateOpts,
+		Bus:             b,
+		Store:           stOpen,
+		Provider:        prv,
+		ProviderFactory: opts.ProviderFactory,
+		Permission:      permEngine,
+		Tools:           tools,
+		Catalog:         catalog,
+		Agent:           ag,
+		Theme:           thm,
+		Skills:          skillReg,
+		Subagents:       subagentReg,
+		SubagentRunner:  subRunner,
+		Commands:        cmdReg,
+		Hooks:           hookReg,
+		AgentsBlocks:    agentsBlocks,
+		MCPClients:      mcpClients,
+		MCPConfigs:      mcpConfigs,
+		MCPStatuses:     mcpStatuses,
+		SystemPrompt:    sysPrompt,
+		Pwd:             opts.Pwd,
+		Plugins:         pluginReg,
+		PluginPM:        pluginPM,
+		catalogSrc:      catSrc,
 	}, nil
 }
 
@@ -819,6 +821,25 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 	prv, err := f(modelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
+	}
+	return prv, nil
+}
+
+func buildProviderForName(providerName string, factory func(opts map[string]any) (provider.Provider, error), modelOpts map[string]any) (provider.Provider, error) {
+	if factory != nil {
+		prv, err := factory(modelOpts)
+		if err != nil {
+			return nil, fmt.Errorf("cli: build provider (injected): %w", err)
+		}
+		return prv, nil
+	}
+	f, err := provider.Get(providerName)
+	if err != nil {
+		return nil, fmt.Errorf("cli: lookup provider %q: %w", providerName, err)
+	}
+	prv, err := f(modelOpts)
+	if err != nil {
+		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
 	return prv, nil
 }
