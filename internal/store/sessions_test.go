@@ -901,3 +901,162 @@ func TestPropagateTotals_NotFound(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+// --- OwnTotals vs rolled-up Totals tests (own-cost feature) ------------------
+
+// mustAppendMessage is a helper that appends a message with cost data.
+func mustAppendMessage(t *testing.T, s *store.Store, sessionID string, cost session.Totals) {
+	t.Helper()
+	_, err := s.AppendMessage(t.Context(), sessionID, session.NewMessage{
+		Role:             session.RoleAssistant,
+		Parts:            []session.Part{{Kind: session.PartText, Text: "reply"}},
+		InputTokens:      cost.InputTokens,
+		OutputTokens:     cost.OutputTokens,
+		CacheReadTokens:  cost.CacheReadTokens,
+		CacheWriteTokens: cost.CacheWriteTokens,
+		CostUSD:          cost.CostUSD,
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+}
+
+func TestOwnTotals_NoSubagents(t *testing.T) {
+	// When a session has no subagents, OwnTotals and Totals should match.
+	s := newTestStore(t)
+	sess := mustCreateSession(t, s, "/p")
+
+	delta := session.Totals{InputTokens: 10, OutputTokens: 5, CostUSD: 0.04}
+	_, err := s.PropagateTotals(t.Context(), sess.ID, delta)
+	if err != nil {
+		t.Fatalf("PropagateTotals: %v", err)
+	}
+	mustAppendMessage(t, s, sess.ID, delta)
+
+	got, err := s.GetSession(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.Totals.CostUSD < 0.039 || got.Totals.CostUSD > 0.041 {
+		t.Errorf("Totals.CostUSD = %v, want ~0.04", got.Totals.CostUSD)
+	}
+	if got.OwnTotals.CostUSD < 0.039 || got.OwnTotals.CostUSD > 0.041 {
+		t.Errorf("OwnTotals.CostUSD = %v, want ~0.04 (should match Totals when no subagents)", got.OwnTotals.CostUSD)
+	}
+}
+
+func TestOwnTotals_WithSubagent(t *testing.T) {
+	// Parent session has own messages ($0.04) plus a subagent ($0.14).
+	// Totals (rolled-up) should be $0.18; OwnTotals should be $0.04.
+	s := newTestStore(t)
+	parent := mustCreateSession(t, s, "/p")
+	child := mustCreateSubagent(t, s, parent.ID)
+
+	parentDelta := session.Totals{InputTokens: 10, OutputTokens: 5, CostUSD: 0.04}
+	childDelta := session.Totals{InputTokens: 50, OutputTokens: 30, CostUSD: 0.14}
+
+	// Propagate parent's own cost (no ancestor — just the parent row).
+	_, err := s.PropagateTotals(t.Context(), parent.ID, parentDelta)
+	if err != nil {
+		t.Fatalf("PropagateTotals parent: %v", err)
+	}
+	mustAppendMessage(t, s, parent.ID, parentDelta)
+
+	// Propagate child's cost up the chain: both child and parent get +0.14.
+	_, err = s.PropagateTotals(t.Context(), child.ID, childDelta)
+	if err != nil {
+		t.Fatalf("PropagateTotals child: %v", err)
+	}
+	mustAppendMessage(t, s, child.ID, childDelta)
+
+	// Check parent: rolled-up = 0.04 + 0.14 = 0.18, own = 0.04.
+	gotParent, err := s.GetSession(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatalf("GetSession parent: %v", err)
+	}
+	const wantRolledUp = 0.18
+	const wantOwn = 0.04
+	if gotParent.Totals.CostUSD < wantRolledUp-0.001 || gotParent.Totals.CostUSD > wantRolledUp+0.001 {
+		t.Errorf("parent Totals.CostUSD = %v, want ~%v (rolled-up)", gotParent.Totals.CostUSD, wantRolledUp)
+	}
+	if gotParent.OwnTotals.CostUSD < wantOwn-0.001 || gotParent.OwnTotals.CostUSD > wantOwn+0.001 {
+		t.Errorf("parent OwnTotals.CostUSD = %v, want ~%v (own messages only)", gotParent.OwnTotals.CostUSD, wantOwn)
+	}
+
+	// Check child: rolled-up and own should both be 0.14 (no further descendants).
+	gotChild, err := s.GetSession(t.Context(), child.ID)
+	if err != nil {
+		t.Fatalf("GetSession child: %v", err)
+	}
+	if gotChild.Totals.CostUSD < 0.139 || gotChild.Totals.CostUSD > 0.141 {
+		t.Errorf("child Totals.CostUSD = %v, want ~0.14", gotChild.Totals.CostUSD)
+	}
+	if gotChild.OwnTotals.CostUSD < 0.139 || gotChild.OwnTotals.CostUSD > 0.141 {
+		t.Errorf("child OwnTotals.CostUSD = %v, want ~0.14 (should match Totals when no subagents)", gotChild.OwnTotals.CostUSD)
+	}
+}
+
+func TestOwnTotals_ListSessions(t *testing.T) {
+	// ListSessions must batch-populate OwnTotals for all returned sessions.
+	s := newTestStore(t)
+	parent := mustCreateSession(t, s, "/p")
+	child := mustCreateSubagent(t, s, parent.ID)
+
+	parentDelta := session.Totals{InputTokens: 5, OutputTokens: 3, CostUSD: 0.02}
+	childDelta := session.Totals{InputTokens: 20, OutputTokens: 10, CostUSD: 0.10}
+
+	_, _ = s.PropagateTotals(t.Context(), parent.ID, parentDelta)
+	mustAppendMessage(t, s, parent.ID, parentDelta)
+	_, _ = s.PropagateTotals(t.Context(), child.ID, childDelta)
+	mustAppendMessage(t, s, child.ID, childDelta)
+
+	sessions, err := s.ListSessions(t.Context(), session.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(sessions))
+	}
+
+	byID := make(map[string]*session.Session, len(sessions))
+	for _, sess := range sessions {
+		byID[sess.ID] = sess
+	}
+
+	p := byID[parent.ID]
+	if p == nil {
+		t.Fatal("parent session not found in list")
+	}
+	// Parent rolled-up = 0.12, own = 0.02.
+	if p.Totals.CostUSD < 0.119 || p.Totals.CostUSD > 0.121 {
+		t.Errorf("parent Totals.CostUSD = %v, want ~0.12", p.Totals.CostUSD)
+	}
+	if p.OwnTotals.CostUSD < 0.019 || p.OwnTotals.CostUSD > 0.021 {
+		t.Errorf("parent OwnTotals.CostUSD = %v, want ~0.02", p.OwnTotals.CostUSD)
+	}
+
+	c := byID[child.ID]
+	if c == nil {
+		t.Fatal("child session not found in list")
+	}
+	if c.OwnTotals.CostUSD < 0.099 || c.OwnTotals.CostUSD > 0.101 {
+		t.Errorf("child OwnTotals.CostUSD = %v, want ~0.10", c.OwnTotals.CostUSD)
+	}
+}
+
+func TestOwnTotals_NoMessages(t *testing.T) {
+	// A freshly created session with no messages should have zero OwnTotals.
+	s := newTestStore(t)
+	sess := mustCreateSession(t, s, "/p")
+
+	got, err := s.GetSession(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.OwnTotals.CostUSD != 0 {
+		t.Errorf("OwnTotals.CostUSD = %v, want 0 for session with no messages", got.OwnTotals.CostUSD)
+	}
+	if got.OwnTotals.InputTokens != 0 {
+		t.Errorf("OwnTotals.InputTokens = %v, want 0", got.OwnTotals.InputTokens)
+	}
+}

@@ -457,3 +457,69 @@ func TestHumanAgo(t *testing.T) {
 		}
 	}
 }
+
+// --- cost display tests -----------------------------------------------------
+
+func TestSessionsModal_CostShowsOwnWhenNoSubagents(t *testing.T) {
+	t.Parallel()
+	// When Totals == OwnTotals (no subagents), the view shows only own cost.
+	sess := makeSession("sess-a", "solo", "/p", session.KindPrimary)
+	sess.Totals = session.Totals{CostUSD: 0.04}
+	sess.OwnTotals = session.Totals{CostUSD: 0.04}
+
+	m := defaultModal([]*session.Session{sess})
+	v := m.View()
+	if !strings.Contains(v, "$0.0400") {
+		t.Errorf("view should contain own cost $0.0400; got:\n%s", v)
+	}
+	// No parenthetical should appear when own == rolled-up.
+	if strings.Contains(v, "($0.0400)") {
+		t.Errorf("view should not contain parenthetical when own == rolled-up; got:\n%s", v)
+	}
+}
+
+func TestSessionsModal_CostShowsRolledUpInParens(t *testing.T) {
+	t.Parallel()
+	// When Totals > OwnTotals (parent has subagents), show own first, rolled-up in parens.
+	sess := makeSession("sess-a", "parent", "/p", session.KindPrimary)
+	sess.Totals = session.Totals{CostUSD: 0.18}
+	sess.OwnTotals = session.Totals{CostUSD: 0.04}
+
+	m := defaultModal([]*session.Session{sess})
+	v := m.View()
+	if !strings.Contains(v, "$0.0400") {
+		t.Errorf("view should contain own cost $0.0400; got:\n%s", v)
+	}
+	if !strings.Contains(v, "($0.1800)") {
+		t.Errorf("view should contain rolled-up cost ($0.1800) in parens; got:\n%s", v)
+	}
+}
+
+func TestSessionsModal_CostZeroShowsDash(t *testing.T) {
+	t.Parallel()
+	// A session with zero cost (no messages) should show "—".
+	sess := makeSession("sess-a", "empty", "/p", session.KindPrimary)
+	// Totals and OwnTotals default to zero value.
+
+	m := defaultModal([]*session.Session{sess})
+	v := m.View()
+	if !strings.Contains(v, "—") {
+		t.Errorf("view should contain '—' for zero-cost session; got:\n%s", v)
+	}
+}
+
+func TestSessionsModal_CostEpsilonNoDifference(t *testing.T) {
+	t.Parallel()
+	// Tiny floating-point noise below epsilon should NOT trigger the parenthetical.
+	sess := makeSession("sess-a", "epsilon", "/p", session.KindPrimary)
+	sess.Totals = session.Totals{CostUSD: 0.040000001} // barely above own
+	sess.OwnTotals = session.Totals{CostUSD: 0.04}
+
+	m := defaultModal([]*session.Session{sess})
+	v := m.View()
+	// The difference is within epsilon so no rolled-up parenthetical should appear.
+	// We check that no "($..." pattern appears in the view.
+	if strings.Contains(v, "($") {
+		t.Errorf("view should not show rolled-up parens for epsilon difference; got:\n%s", v)
+	}
+}

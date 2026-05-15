@@ -93,7 +93,18 @@ func (s *Store) GetSession(ctx context.Context, id string) (*session.Session, er
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: GetSession %q: %w", id, ErrNotFound)
 	}
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	// Populate own totals from messages directly owned by this session.
+	own, err := s.fetchOwnTotals(ctx, []string{id})
+	if err != nil {
+		return nil, fmt.Errorf("store: GetSession own totals: %w", err)
+	}
+	if t, ok := own[id]; ok {
+		out.OwnTotals = t
+	}
+	return out, nil
 }
 
 // sessionSelectColumns is the canonical column list, used by every read path
@@ -211,6 +222,23 @@ func (s *Store) ListSessions(ctx context.Context, opts session.ListOpts) ([]*ses
 	// Case-insensitive; empty query passes all rows through.
 	if opts.Query != "" {
 		out = filterSessionsByQuery(out, opts.Query)
+	}
+
+	// Batch-fetch own totals for all returned sessions in a single query.
+	if len(out) > 0 {
+		ids := make([]string, len(out))
+		for i, sess := range out {
+			ids[i] = sess.ID
+		}
+		ownMap, err := s.fetchOwnTotals(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListSessions own totals: %w", err)
+		}
+		for _, sess := range out {
+			if t, ok := ownMap[sess.ID]; ok {
+				sess.OwnTotals = t
+			}
+		}
 	}
 
 	return out, nil
@@ -461,6 +489,54 @@ func filterSessionsByQuery(sessions []*session.Session, query string) []*session
 		}
 	}
 	return out
+}
+
+// fetchOwnTotals returns a map of session_id → Totals computed from the
+// messages table for only the sessions in ids (no subagent descendants).
+// A single aggregation query with GROUP BY is used to avoid N+1 round-trips.
+// Sessions with no messages will not appear in the returned map (OwnTotals
+// stays as the zero value on the caller's Session struct).
+func (s *Store) fetchOwnTotals(ctx context.Context, ids []string) (map[string]session.Totals, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	// Build the IN-list placeholders.
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1] // trim trailing comma
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	//nolint:gosec // G202: placeholders are "?,?,?" — no user input interpolated
+	q := `SELECT session_id,
+	             COALESCE(SUM(input_tokens), 0),
+	             COALESCE(SUM(output_tokens), 0),
+	             COALESCE(SUM(cache_read_tokens), 0),
+	             COALESCE(SUM(cache_write_tokens), 0),
+	             COALESCE(SUM(cost_usd), 0)
+	        FROM messages
+	       WHERE session_id IN (` + placeholders + `)
+	         AND deleted_at IS NULL
+	       GROUP BY session_id`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetchOwnTotals: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]session.Totals, len(ids))
+	for rows.Next() {
+		var id string
+		var t session.Totals
+		if err := rows.Scan(&id, &t.InputTokens, &t.OutputTokens, &t.CacheReadTokens, &t.CacheWriteTokens, &t.CostUSD); err != nil {
+			return nil, fmt.Errorf("fetchOwnTotals scan: %w", err)
+		}
+		out[id] = t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fetchOwnTotals iterate: %w", err)
+	}
+	return out, nil
 }
 
 // latestUserMessageID returns the id of the most recent non-deleted user
