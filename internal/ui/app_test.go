@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/config"
+	"github.com/cfbender/hygge/internal/notify"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
@@ -1138,4 +1140,202 @@ func TestToolStatus_ErrorOnFailure(t *testing.T) {
 	if !app.messages[0].IsError {
 		t.Error("expected IsError=true on errored tool")
 	}
+}
+
+// --- Queue + notification tests ---
+
+// newTestAppWithConfig builds an App with a real bus and an injected config
+// for testing notifications.
+func newTestAppWithConfig(t *testing.T, cfg *config.Config) (*App, *bus.Bus) {
+	t.Helper()
+	b := bus.New()
+	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
+	app, err := New(AppOptions{
+		Bus:           b,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    "~/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "claude-sonnet-4-5",
+		Now:           now,
+		Config:        cfg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	return app, b
+}
+
+// TestQueueChanged_UpdatesPlaceholder verifies that a QueueChanged event
+// with Count > 0 updates the placeholder to include the queue count.
+func TestQueueChanged_UpdatesPlaceholder(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	// Simulate busy state and then receive a QueueChanged event.
+	app.Update(sendStarted{UserInput: "first"})
+	app.Handle(bus.QueueChanged{SessionID: "", Count: 2, Prompts: []string{"p1", "p2"}})
+
+	// The working placeholder should now include "(2 queued)".
+	ph := app.input.Textarea.Placeholder
+	if !strings.Contains(ph, "2 queued") {
+		t.Errorf("placeholder %q should contain '2 queued'", ph)
+	}
+}
+
+// TestQueueChanged_ClearQueue verifies that a QueueChanged event with
+// Count=0 clears the queued indicator.
+func TestQueueChanged_ClearQueue(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Update(sendStarted{UserInput: "first"})
+	app.Handle(bus.QueueChanged{SessionID: "", Count: 2, Prompts: []string{"p1", "p2"}})
+	app.Handle(bus.QueueChanged{SessionID: "", Count: 0, Prompts: nil})
+
+	if app.queueCount != 0 {
+		t.Errorf("queueCount = %d, want 0 after clear", app.queueCount)
+	}
+}
+
+// TestEscWhileQueued_CallsClearQueue verifies that pressing Esc while busy
+// with items in the queue calls Agent.ClearQueue and does NOT cancel the
+// active run.
+func TestEscWhileQueued_CallsClearQueue(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	// Wire a mock clear queue function.
+	clearCalled := make(chan string, 1)
+	app.testAgentClearQueueFn = func(sid string) int {
+		clearCalled <- sid
+		return 1
+	}
+
+	// Set busy + queued state.
+	app.busy = true
+	app.queueCount = 1
+
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	select {
+	case <-clearCalled:
+		// Good.
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("ClearQueue not called within timeout")
+	}
+}
+
+// TestEscWhileNotQueued_CancelsActiveRun verifies that pressing Esc while busy
+// but with an empty queue invokes the inflight cancel.
+func TestEscWhileNotQueued_CancelsActiveRun(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	cancelled := false
+	app.inflightCancel = func() { cancelled = true }
+	app.busy = true
+	app.queueCount = 0
+
+	// Ctrl+C cancels the active run (existing path).
+	app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+
+	if !cancelled {
+		t.Error("expected inflightCancel to be called on Ctrl+C while busy")
+	}
+}
+
+// TestMaybeNotify_NoopWhenFocused verifies that maybeNotify does nothing when
+// the terminal is focused.
+func TestMaybeNotify_NoopWhenFocused(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Notifications.Enabled = true
+	cfg.Notifications.PermissionAsk = true
+	app, _ := newTestAppWithConfig(t, cfg)
+
+	var sent []notify.Notification
+	app.notifyBackend = &collectingBackend{received: &sent}
+	app.focused = true // focused → no notification
+
+	app.maybeNotify(notify.Notification{Title: "t", Message: "m"}, "permission_ask")
+	if len(sent) != 0 {
+		t.Errorf("expected no notification when focused, got %d", len(sent))
+	}
+}
+
+// TestMaybeNotify_SendsWhenUnfocused verifies that maybeNotify sends when
+// unfocused and enabled.
+func TestMaybeNotify_SendsWhenUnfocused(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Notifications.Enabled = true
+	cfg.Notifications.PermissionAsk = true
+	app, _ := newTestAppWithConfig(t, cfg)
+
+	var sent []notify.Notification
+	app.notifyBackend = &collectingBackend{received: &sent}
+	app.focused = false
+
+	app.maybeNotify(notify.Notification{Title: "Hygge is waiting…", Message: "perm"}, "permission_ask")
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(sent))
+	}
+	if sent[0].Title != "Hygge is waiting…" {
+		t.Errorf("title = %q, want 'Hygge is waiting…'", sent[0].Title)
+	}
+}
+
+// TestMaybeNotify_DisabledConfig verifies that maybeNotify is a no-op when
+// config.Notifications.Enabled is false.
+func TestMaybeNotify_DisabledConfig(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Notifications.Enabled = false
+	app, _ := newTestAppWithConfig(t, cfg)
+
+	var sent []notify.Notification
+	app.notifyBackend = &collectingBackend{received: &sent}
+	app.focused = false
+
+	app.maybeNotify(notify.Notification{Title: "t", Message: "m"}, "permission_ask")
+	if len(sent) != 0 {
+		t.Errorf("expected no notification when disabled, got %d", len(sent))
+	}
+}
+
+// TestMaybeNotify_TurnCompleteGated verifies that maybeNotify skips turn_complete
+// when that kind is not enabled in config.
+func TestMaybeNotify_TurnCompleteGated(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Notifications.Enabled = true
+	cfg.Notifications.TurnComplete = false
+	app, _ := newTestAppWithConfig(t, cfg)
+
+	var sent []notify.Notification
+	app.notifyBackend = &collectingBackend{received: &sent}
+	app.focused = false
+
+	app.maybeNotify(notify.Notification{Title: "t", Message: "m"}, "turn_complete")
+	if len(sent) != 0 {
+		t.Errorf("expected no turn_complete notification, got %d", len(sent))
+	}
+}
+
+// collectingBackend records sent notifications for assertions.
+type collectingBackend struct {
+	received *[]notify.Notification
+	mu       sync.Mutex
+}
+
+func (c *collectingBackend) Send(n notify.Notification) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	*c.received = append(*c.received, n)
+	return nil
 }

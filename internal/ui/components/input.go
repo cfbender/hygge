@@ -53,13 +53,14 @@ func NewInput(t *theme.Theme) *Input {
 
 // SetBusy switches the textarea placeholder based on whether the agent is
 // currently processing a turn.  When busy is true, WorkingPlaceholder is
-// used (if non-empty); when false the placeholder reverts to ReadyPlaceholder.
+// used (if non-empty), with suffix appended (e.g. " (2 queued)"); when false
+// the placeholder reverts to ReadyPlaceholder.
 // The placeholder is only visible when the textarea is empty, so this has no
 // visual effect while the user is typing.
-func (i *Input) SetBusy(busy bool) {
+func (i *Input) SetBusy(busy bool, suffix string) {
 	if busy {
 		if i.WorkingPlaceholder != "" {
-			i.Textarea.Placeholder = i.WorkingPlaceholder
+			i.Textarea.Placeholder = i.WorkingPlaceholder + suffix
 		}
 	} else {
 		i.Textarea.Placeholder = i.ReadyPlaceholder

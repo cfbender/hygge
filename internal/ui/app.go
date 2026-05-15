@@ -44,7 +44,9 @@ import (
 	"github.com/cfbender/hygge/internal/agent"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
+	"github.com/cfbender/hygge/internal/notify"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	appstate "github.com/cfbender/hygge/internal/state"
@@ -113,6 +115,12 @@ type AppOptions struct {
 	// picker is opened this way and the user presses Esc without selecting
 	// a session — and no foreground session is bound — the App exits.
 	OpenSessionsModalOnStart bool
+
+	// Config is the resolved application configuration.  When non-nil,
+	// the notifications subsystem reads Config.Notifications to decide
+	// whether and when to send notifications.  A nil Config disables
+	// notifications (equivalent to Config.Notifications.Enabled == false).
+	Config *config.Config
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -138,6 +146,12 @@ func New(opts AppOptions) (*App, error) {
 		opts.Now = time.Now
 	}
 
+	// Select the notification backend based on config.
+	var nb notify.Backend = notify.NoopBackend{}
+	if opts.Config != nil && opts.Config.Notifications.Enabled {
+		nb = notify.NativeBackend{}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
 		opts:          opts,
@@ -153,6 +167,8 @@ func New(opts AppOptions) (*App, error) {
 		subagentAnims: make(map[string]*anim.Anim),
 		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		touched:       appstate.NewTouchedFiles(),
+		focused:       true, // assume focused until told otherwise
+		notifyBackend: nb,
 	}
 	a.msgViewport.MouseWheelEnabled = true
 	a.spinner.Spinner = spinner.Dot
@@ -330,6 +346,11 @@ type App struct {
 	// not be set in production code.
 	testAgentSendFn func(ctx context.Context, sessionID string, parts []session.Part) (*session.Message, error)
 
+	// testAgentClearQueueFn, when non-nil, is called by the Esc handler
+	// instead of opts.Agent.ClearQueue.  Used exclusively by unit tests.
+	// Must not be set in production code.
+	testAgentClearQueueFn func(sessionID string) int
+
 	// testSendFn, when non-nil, is called by sendOutOfBand instead of
 	// program.Send.  Used exclusively by unit tests that cannot wire a
 	// *tea.Program.  Must not be set in production code.
@@ -354,6 +375,25 @@ type App struct {
 	// bus.MessageAppended for the root session so View() never calls
 	// Store.GetSession synchronously on the render goroutine.
 	sessionTitle string
+
+	// focused tracks terminal focus state.  true means the terminal window
+	// is focused (user is looking at it); false means it is blurred.
+	// Defaults to true (assume focused until told otherwise — we'd rather
+	// suppress a notification the user sees than miss one while they're away).
+	focused bool
+
+	// notifyBackend is the active notification backend.  Selected at New
+	// time based on config.Notifications.Enabled: NativeBackend when
+	// enabled, NoopBackend otherwise.
+	notifyBackend notify.Backend
+
+	// queueCount is the number of pending sends in the agent queue for the
+	// foreground session.  Updated on bus.QueueChanged.
+	queueCount int
+
+	// queuedPrompts holds the prompt texts for queued sends (for display).
+	// Updated on bus.QueueChanged.
+	queuedPrompts []string
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the
@@ -467,6 +507,8 @@ func (a *App) bridge() {
 	subCmpStart := bus.Subscribe[bus.CompactionStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subCmpDone := bus.Subscribe[bus.CompactionCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subCmpFail := bus.Subscribe[bus.CompactionFailed](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
+	subQueueChanged := bus.Subscribe[bus.QueueChanged](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
+	subTurnDone := bus.Subscribe[bus.TurnCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 
 	stop := a.ctx.Done()
 
@@ -490,6 +532,8 @@ func (a *App) bridge() {
 	go forward(subCmpStart.C(), a.busCh, stop, subCmpStart.Unsubscribe)
 	go forward(subCmpDone.C(), a.busCh, stop, subCmpDone.Unsubscribe)
 	go forward(subCmpFail.C(), a.busCh, stop, subCmpFail.Unsubscribe)
+	go forward(subQueueChanged.C(), a.busCh, stop, subQueueChanged.Unsubscribe)
+	go forward(subTurnDone.C(), a.busCh, stop, subTurnDone.Unsubscribe)
 }
 
 // forward pumps a single typed subscription channel into the shared any
@@ -794,6 +838,14 @@ func (a *App) View() tea.View {
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 
+	case tea.FocusMsg:
+		a.focused = true
+		return a, nil
+
+	case tea.BlurMsg:
+		a.focused = false
+		return a, nil
+
 	case tea.WindowSizeMsg:
 		a.width = m.Width
 		a.height = m.Height
@@ -911,13 +963,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// that their message is being processed, even before the first token
 		// arrives from the provider.
 		a.input.WorkingPlaceholder = workingPlaceholders[rand.IntN(len(workingPlaceholders))] //nolint:gosec
-		a.input.SetBusy(true)
+		suffix := ""
+		if a.queueCount > 0 {
+			suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
+		}
+		a.input.SetBusy(true, suffix)
 		return a, nil
 
 	case sendCompleted:
 		a.busy = false
 		a.inflightCancel = nil
-		a.input.SetBusy(false)
+		a.input.SetBusy(false, "")
 		if m.Err != nil && !errors.Is(m.Err, context.Canceled) {
 			// Surface the failure so the user has something to react to;
 			// silently dropping errors leaves the UI looking dead.
@@ -1008,11 +1064,12 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k.Mod.Contains(tea.ModAlt) {
 			break // fall through to textarea.Update so it inserts a newline
 		}
-		if a.busy {
-			return a, nil // input blocked
-		}
 		text := strings.TrimSpace(a.input.Value())
 		if text == "" {
+			return a, nil
+		}
+		// Slash commands cannot be queued — block them while busy.
+		if a.busy && strings.HasPrefix(text, "/") {
 			return a, nil
 		}
 		if strings.HasPrefix(text, "/") {
@@ -1054,10 +1111,24 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		// T2.2 — Esc pops the foreground stack when depth > 1.
 		// At depth 1 (root) the existing Esc behaviour applies
-		// (dismiss command palette / no-op).
+		// (dismiss command palette / clear queue / no-op).
 		if len(a.foregroundStack) > 1 {
 			a.popForeground()
 			return a, a.setNotice("back to parent session")
+		}
+		// Two-step Esc pattern: first Esc clears the queue if any,
+		// second Esc cancels the active run (existing behaviour).
+		if a.busy && a.queueCount > 0 {
+			rootID := a.rootSessionID()
+			var dropped int
+			if a.testAgentClearQueueFn != nil {
+				dropped = a.testAgentClearQueueFn(rootID)
+			} else if a.opts.Agent != nil {
+				dropped = a.opts.Agent.ClearQueue(rootID)
+			}
+			if dropped > 0 {
+				return a, a.setNotice(fmt.Sprintf("cleared %d queued message(s)", dropped))
+			}
 		}
 		// Existing Esc: dismisses the command palette without changing input.
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
@@ -1385,6 +1456,12 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// by ToolName (most recent streaming row with that name) because
 		// PermissionAsked does not carry a ToolUseID.
 		a.setToolStatus(e.ToolName, components.ToolStatusAwaitingPermission)
+		// Send a notification when the terminal is unfocused so the user
+		// knows action is needed even when they've switched away.
+		a.maybeNotify(notify.Notification{
+			Title:   "Hygge is waiting…",
+			Message: fmt.Sprintf("Permission required to execute %q", e.ToolName),
+		}, "permission_ask")
 
 	case bus.PermissionReplied:
 		// Transition the awaiting-permission tool row based on the decision.
@@ -1478,6 +1555,33 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// compactionCompleteMsg will carry the error for toast display.
 		// Nothing extra to do here — the in-flight notice is cleared by
 		// compactionCompleteMsg handling.
+
+	case bus.QueueChanged:
+		// Only update the queue state for the root (active send) session.
+		rootID := a.rootSessionID()
+		if rootID != "" && e.SessionID != rootID {
+			return nil
+		}
+		a.queueCount = e.Count
+		a.queuedPrompts = e.Prompts
+		// Update the busy placeholder to reflect the queued count.
+		if a.busy {
+			suffix := ""
+			if a.queueCount > 0 {
+				suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
+			}
+			a.input.SetBusy(true, suffix)
+		}
+
+	case bus.TurnCompleted:
+		// Gate on foreground session and send turn-complete notification.
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		a.maybeNotify(notify.Notification{
+			Title:   "Hygge is waiting…",
+			Message: fmt.Sprintf("Turn completed in %q", a.sessionTitle),
+		}, "turn_complete")
 	}
 	return nil
 }
@@ -2399,6 +2503,42 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:12] + "…"
+}
+
+// maybeNotify sends a desktop notification if:
+//   - notifications are enabled in config (Config != nil && Enabled == true),
+//   - the terminal is not currently focused,
+//   - the notification kind is enabled.
+//
+// kind must be "permission_ask" or "turn_complete".
+// The send is best-effort: errors are logged at debug level only.
+func (a *App) maybeNotify(n notify.Notification, kind string) {
+	if a.opts.Config == nil {
+		return
+	}
+	cfg := a.opts.Config.Notifications
+	if !cfg.Enabled {
+		return
+	}
+	// Only send when the terminal is not in focus.
+	if a.focused {
+		return
+	}
+	switch kind {
+	case "permission_ask":
+		if !cfg.PermissionAsk {
+			return
+		}
+	case "turn_complete":
+		if !cfg.TurnComplete {
+			return
+		}
+	default:
+		return
+	}
+	if err := a.notifyBackend.Send(n); err != nil {
+		slog.Debug("ui: notification send failed", "kind", kind, "err", err)
+	}
 }
 
 // --- Sessions modal integration --------------------------------------------
