@@ -650,6 +650,12 @@ func (a *App) View() tea.View {
 	}.View()
 
 	in := a.input.View()
+	statusPills := components.StatusPills{
+		Width:         leftW,
+		Theme:         a.opts.Theme,
+		QueueCount:    a.queueCount,
+		QueuedPrompts: a.queuedPrompts,
+	}.View()
 
 	// Inline command palette: shown immediately above the input when
 	// the buffer starts with "/" and a registry is configured.
@@ -718,6 +724,9 @@ func (a *App) View() tea.View {
 	// Calculate the available height for the message list viewport.
 	// chrome = all rows except the scrollable message list.
 	chrome := lipgloss.Height(in) + lipgloss.Height(fr)
+	if statusPills != "" {
+		chrome += lipgloss.Height(statusPills)
+	}
 	if breadcrumb != "" {
 		chrome += lipgloss.Height(breadcrumb)
 	}
@@ -765,6 +774,9 @@ func (a *App) View() tea.View {
 		sections = append(sections, palette)
 	}
 	sections = append(sections, in)
+	if statusPills != "" {
+		sections = append(sections, statusPills)
+	}
 	if compactingNotice != "" {
 		sections = append(sections, compactingNotice)
 	}

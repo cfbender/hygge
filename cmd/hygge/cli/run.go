@@ -233,7 +233,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		// emit responses to probes fired before the profile override takes
 		// effect.  Remove when upstream fixes OSC response parsing.
 		// See docs/agents/ui-v2-gotchas.md.
-		tea.WithFilter(dropOSCResponses),
+		tea.WithFilter(newInputEventFilter()),
 	)
 	app.SetProgram(prog)
 

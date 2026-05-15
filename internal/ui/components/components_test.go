@@ -254,6 +254,23 @@ func TestInputBorder_BlurredAccepted(t *testing.T) {
 	}
 }
 
+func TestStatusPillsRendersQueueCount(t *testing.T) {
+	t.Parallel()
+	out := StatusPills{Width: 60, Theme: theme.ShellTheme(), QueueCount: 2}.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "2 queued") {
+		t.Errorf("status pills missing queue count; got:\n%s", plain)
+	}
+}
+
+func TestStatusPillsNoQueueEmpty(t *testing.T) {
+	t.Parallel()
+	out := StatusPills{Width: 60, Theme: theme.ShellTheme()}.View()
+	if out != "" {
+		t.Errorf("status pills should be empty without queue/todo state; got %q", out)
+	}
+}
+
 // TestSubagentBlock_NoGutter verifies the │ gutter is absent from subagent block output.
 func TestSubagentBlock_NoGutter(t *testing.T) {
 	t.Parallel()

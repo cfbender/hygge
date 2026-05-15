@@ -2,6 +2,7 @@ package cli
 
 import (
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -68,5 +69,34 @@ func TestDropOSCResponses_PassesWindowSizeMsg(t *testing.T) {
 	msg := dropOSCResponses(nil, in)
 	if msg != in {
 		t.Errorf("expected WindowSizeMsg to pass through, got %T(%v)", msg, msg)
+	}
+}
+
+func TestInputEventFilter_DropsOSCResponse(t *testing.T) {
+	t.Parallel()
+	filter := inputEventFilter(func() time.Time { return time.Unix(0, 0) })
+	msg := filter(nil, tea.KeyPressMsg{Text: "11;rgb:1818/0808/1010"})
+	if msg != nil {
+		t.Errorf("expected nil for OSC response, got %T(%v)", msg, msg)
+	}
+}
+
+func TestInputEventFilter_ThrottlesMouseWheelSpam(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(100, 0)
+	filter := inputEventFilter(func() time.Time { return now })
+	first := tea.MouseWheelMsg(tea.Mouse{X: 1, Y: 2, Button: tea.MouseWheelDown})
+	if got := filter(nil, first); got != first {
+		t.Fatalf("first mouse wheel msg should pass, got %T(%v)", got, got)
+	}
+	now = now.Add(10 * time.Millisecond)
+	second := tea.MouseWheelMsg(tea.Mouse{X: 1, Y: 3, Button: tea.MouseWheelDown})
+	if got := filter(nil, second); got != nil {
+		t.Fatalf("second mouse wheel msg inside throttle should drop, got %T(%v)", got, got)
+	}
+	now = now.Add(15 * time.Millisecond)
+	third := tea.MouseMotionMsg(tea.Mouse{X: 1, Y: 4})
+	if got := filter(nil, third); got != third {
+		t.Fatalf("mouse motion after throttle window should pass, got %T(%v)", got, got)
 	}
 }
