@@ -161,6 +161,10 @@ type MessageList struct {
 	// HoverSubagentID is the subagent currently under the mouse cursor.
 	// When set, that subagent's bubble renders with highlight styling.
 	HoverSubagentID string
+
+	// ExpandedTools is the set of ToolUseIDs whose output is fully expanded
+	// (not truncated). Nil means all tools are collapsed.
+	ExpandedTools map[string]bool
 }
 
 // now returns the reference time for relative timestamps.
@@ -437,7 +441,12 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	// Tool result truncation: only applies when the message is a tool with
 	// non-streaming, plain content (no markdown).
 	if msg.Role == RoleTool {
-		body = m.collapseToolBody(body, collapseLimit)
+		expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
+		if !expanded {
+			body = m.collapseToolBody(body, collapseLimit)
+		} else {
+			body = m.muted().Render(body)
+		}
 	}
 
 	rendered := gutter + "\n" + body
@@ -969,7 +978,7 @@ func (m MessageList) collapseToolBody(body string, limit int) string {
 	}
 	head := strings.Join(lines[:limit], "\n")
 	hint := muted.Italic(true).Render(
-		"[+" + itoa(len(lines)-limit) + " more lines, press space to expand]",
+		"[+" + itoa(len(lines)-limit) + " more lines — Ctrl+E to expand]",
 	)
 	return muted.Render(head) + "\n" + hint
 }
