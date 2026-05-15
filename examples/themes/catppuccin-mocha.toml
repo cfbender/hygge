@@ -1,0 +1,34 @@
+# Catppuccin Mocha theme for Hygge
+# Place in ~/.config/hygge/themes/catppuccin-mocha.toml
+# Then set theme.name = "catppuccin-mocha" in your hygge config.
+
+[colors]
+primary        = "#cba6f7"  # mauve
+secondary      = "#f5c2e7"  # pink
+accent         = "#94e2d5"  # teal
+
+fg_base        = "#cdd6f4"  # text
+fg_subtle      = "#bac2de"  # subtext1
+fg_more_subtle = "#a6adc8"  # subtext0
+fg_most_subtle = "#6c7086"  # overlay0
+
+on_primary     = "#1e1e2e"  # base
+
+bg_base          = "#1e1e2e"  # base
+bg_least_visible = "#181825"  # mantle
+bg_less_visible  = "#313244"  # surface0
+bg_most_visible  = "#45475a"  # surface1
+
+separator      = "#313244"  # surface0
+
+destructive        = "#f38ba8"  # red
+error              = "#f38ba8"  # red
+warning            = "#f9e2af"  # yellow
+warning_subtle     = "#f9e2af"  # yellow
+busy               = "#f9e2af"  # yellow
+info               = "#89b4fa"  # blue
+info_more_subtle   = "#74c7ec"  # sapphire
+info_most_subtle   = "#89dceb"  # sky
+success            = "#a6e3a1"  # green
+success_more_subtle = "#94e2d5" # teal
+success_most_subtle = "#94e2d5" # teal

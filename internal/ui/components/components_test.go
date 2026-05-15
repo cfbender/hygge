@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -245,9 +246,9 @@ func TestBubbleTail_ToolGroupNoTail(t *testing.T) {
 	}
 }
 
-// TestInputBorder_FocusedUsesAccent verifies that the bordered input view
-// renders and contains the typed text.
-func TestInputBorder_FocusedUsesAccent(t *testing.T) {
+// TestInput_FocusedRendersText verifies that the input view renders and
+// contains the typed text.
+func TestInput_FocusedRendersText(t *testing.T) {
 	t.Parallel()
 	in := NewInput(theme.ShellTheme())
 	in.Focused = true
@@ -256,11 +257,6 @@ func TestInputBorder_FocusedUsesAccent(t *testing.T) {
 	view := in.View()
 	if !strings.Contains(view, "test input") {
 		t.Errorf("focused input view should contain typed text; got:\n%s", view)
-	}
-	// The view should contain rounded border characters.
-	plain := stripANSI(view)
-	if !strings.ContainsAny(plain, "╭╰╮╯") {
-		t.Errorf("input view should contain rounded border characters; got:\n%s", plain)
 	}
 }
 
@@ -669,12 +665,9 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 			t.Errorf("sidebar missing MCP %q; got:\n%s", want, plain)
 		}
 	}
-	// Modified Files stub.
-	if !strings.Contains(plain, "Modified Files") {
-		t.Errorf("sidebar missing 'Modified Files' header; got:\n%s", plain)
-	}
-	if !strings.Contains(plain, "—") {
-		t.Errorf("sidebar missing '—' stub; got:\n%s", plain)
+	// Todos section.
+	if !strings.Contains(plain, "Todos") {
+		t.Errorf("sidebar missing 'Todos' header; got:\n%s", plain)
 	}
 	// Bottom block.
 	for _, want := range []string{"~/code/hygge", ":main", "Hygge", "v0.1.0-dev"} {
@@ -801,7 +794,7 @@ func TestFormatTokens(t *testing.T) {
 	}
 }
 
-func TestSidebarModifiedFiles_Empty(t *testing.T) {
+func TestSidebarTodos_Empty(t *testing.T) {
 	t.Parallel()
 	sb := Sidebar{
 		Width:  32,
@@ -809,109 +802,71 @@ func TestSidebarModifiedFiles_Empty(t *testing.T) {
 		Theme:  theme.ShellTheme(),
 	}
 	out := stripANSI(sb.View())
-	if !strings.Contains(out, "Modified Files") {
-		t.Errorf("sidebar missing 'Modified Files' section header; got:\n%s", out)
+	if !strings.Contains(out, "Todos") {
+		t.Errorf("sidebar missing 'Todos' section header; got:\n%s", out)
 	}
 	if !strings.Contains(out, "—") {
-		t.Errorf("sidebar should show '—' when no files; got:\n%s", out)
+		t.Errorf("sidebar should show '—' when no todos; got:\n%s", out)
+	}
+	// Old Modified Files header must be gone.
+	if strings.Contains(out, "Modified Files") {
+		t.Errorf("sidebar still shows old 'Modified Files' header; got:\n%s", out)
 	}
 }
 
-func TestSidebarModifiedFiles_WithFiles(t *testing.T) {
+func TestSidebarTodos_WithItems(t *testing.T) {
 	t.Parallel()
 	sb := Sidebar{
 		Width:  40,
 		Height: 35,
 		Theme:  theme.ShellTheme(),
-		ModifiedFiles: []SidebarModifiedFile{
-			{RelPath: "internal/ui/sidebar.go", Added: 12, Deleted: 3},
-			{RelPath: "docs/agents/gotchas.md", Added: 120, Deleted: 0},
-			{RelPath: "TODOS.md", Added: 8, Deleted: 2},
+		Todos: []SidebarTodo{
+			{Title: "Investigate config merge warning", Status: SidebarTodoCompleted},
+			{Title: "Replace sidebar with todos", Status: SidebarTodoInProgress},
+			{Title: "Write tests", Status: SidebarTodoPending},
+			{Title: "Drop modified files plumbing", Status: SidebarTodoCancelled},
 		},
 	}
 	out := stripANSI(sb.View())
 	for _, want := range []string{
-		"Modified Files",
-		"sidebar.go",
-		"+12",
-		"-3",
-		"+120",
-		"TODOS.md",
+		"Todos",
+		"✓", "→", "○", "✕",
+		"Investigate config merge warning",
+		"Write tests",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("sidebar missing %q in modified-files section; got:\n%s", want, out)
+			t.Errorf("sidebar missing %q in todos section; got:\n%s", want, out)
 		}
 	}
-	// Should NOT show "—" when files are present.
-	// (The dash appears in diff numbers like "-3" but "—" is the em-dash fallback.)
-	// We check the em-dash specifically.
 	if strings.Contains(out, "—") {
-		t.Errorf("sidebar should not show '—' fallback when files are present; got:\n%s", out)
+		t.Errorf("sidebar should not show '—' fallback when todos are present; got:\n%s", out)
 	}
 }
 
-func TestSidebarModifiedFiles_TruncatesAt6(t *testing.T) {
+func TestSidebarTodos_TruncatesAt6(t *testing.T) {
 	t.Parallel()
-	var files []SidebarModifiedFile
+	var items []SidebarTodo
 	for i := range 9 {
-		files = append(files, SidebarModifiedFile{
-			RelPath: strings.Repeat("x", 3) + string(rune('a'+i)) + ".go",
-			Added:   i + 1,
-			Deleted: 0,
+		items = append(items, SidebarTodo{
+			Title:  fmt.Sprintf("item %d", i+1),
+			Status: SidebarTodoPending,
 		})
 	}
 	sb := Sidebar{
-		Width:         40,
-		Height:        40,
-		Theme:         theme.ShellTheme(),
-		ModifiedFiles: files,
+		Width:  40,
+		Height: 40,
+		Theme:  theme.ShellTheme(),
+		Todos:  items,
 	}
 	out := stripANSI(sb.View())
-	// Should show "… +3 more" for the 3 extra files.
 	if !strings.Contains(out, "+3 more") {
 		t.Errorf("sidebar should show '+3 more' overflow; got:\n%s", out)
 	}
-	// Files 1–6 (index 0–5) should appear; files 7–9 should not.
-	// Check by line count: the overflow line has "+3 more".
-}
-
-func TestTruncatePathLeft(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		path   string
-		budget int
-		want   string
-	}{
-		{"short.go", 20, "short.go"},
-		{"a/b/c/toolong.go", 12, "…/toolong.go"},
-		{"a/b/c/toolong.go", 15, "…/c/toolong.go"},
-		{"a.go", 0, "…"},
-		{"a.go", 5, "a.go"},
+	if !strings.Contains(out, "item 1") {
+		t.Errorf("sidebar should show first item; got:\n%s", out)
 	}
-	for _, tc := range cases {
-		got := truncatePathLeft(tc.path, tc.budget)
-		if got != tc.want {
-			t.Errorf("truncatePathLeft(%q, %d) = %q, want %q", tc.path, tc.budget, got, tc.want)
-		}
-	}
-}
-
-// TestSidebarModifiedFiles_NoStaleDash verifies the "—" stub is gone after migration.
-func TestSidebarModifiedFiles_StubReplaced(t *testing.T) {
-	t.Parallel()
-	// Files present → no em-dash.
-	sb := Sidebar{
-		Width:  32,
-		Height: 30,
-		Theme:  theme.ShellTheme(),
-		ModifiedFiles: []SidebarModifiedFile{
-			{RelPath: "main.go", Added: 1, Deleted: 0},
-		},
-	}
-	out := stripANSI(sb.View())
-	// The old TODO comment rendered "—"; confirm it's not present alongside a file.
-	if strings.Contains(out, "—") {
-		t.Errorf("sidebar should not show em-dash stub when files are present; got:\n%s", out)
+	if strings.Contains(out, "item 9") {
+		t.Errorf("sidebar should not show overflow item 9; got:\n%s", out)
 	}
 }
 

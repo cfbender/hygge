@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"errors"
-	"image/color"
 	"strings"
 	"sync"
 	"testing"
@@ -19,31 +18,6 @@ import (
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
-
-// newTestApp builds an App with a real bus but no agent/store.  Tests drive
-// the model directly via Update and Handle; no goroutine on the bus channel
-// is needed because the bridge goroutines started by New also work for tests
-// (they subscribe to a real bus).  Close is called in t.Cleanup.
-func TestBlendTerminalSurfaceUsesDimHoverBlend(t *testing.T) {
-	t.Parallel()
-	got := blendTerminalSurface(color.RGBA{R: 10, G: 20, B: 30, A: 255}, color.RGBA{R: 110, G: 120, B: 130, A: 255})
-	r, g, b, _ := got.RGBA()
-	if uint8(r>>8) != 13 || uint8(g>>8) != 23 || uint8(b>>8) != 33 {
-		t.Fatalf("blendTerminalSurface = #%02X%02X%02X, want #0D1721", uint8(r>>8), uint8(g>>8), uint8(b>>8))
-	}
-}
-
-func TestRuntimeSurfaceBackground_ShellPendingForcesTransparentOverride(t *testing.T) {
-	t.Parallel()
-	app := &App{opts: AppOptions{Theme: theme.ShellTheme()}}
-	bg, use := app.runtimeSurfaceBackground()
-	if !use {
-		t.Fatal("shell theme should force runtime surface override while terminal color is pending")
-	}
-	if bg != nil {
-		t.Fatalf("pending terminal background should use transparent surface, got %v", bg)
-	}
-}
 
 func newTestApp(t *testing.T) (*App, *bus.Bus) {
 	t.Helper()

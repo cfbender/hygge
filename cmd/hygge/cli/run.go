@@ -174,6 +174,8 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		Store:         rt.Store,
 		Catalog:       rt.Catalog,
 		Theme:         rt.Theme,
+		StyleTheme:    rt.Config.Theme.Name,
+		Modes:         rt.Config.Modes,
 		SessionID:     sessionID,
 		ProjectDir:    rt.Pwd,
 		ModelProvider: rt.Config.Model.Provider,
