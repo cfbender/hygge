@@ -77,6 +77,11 @@ type appRuntime struct {
 	MCPClients      []*mcp.Client
 	MCPConfigs      []mcp.ServerConfig
 	MCPStatuses     []MCPServerStatus
+	mcpMu           sync.Mutex
+	mcpWG           sync.WaitGroup
+	mcpCancel       context.CancelFunc
+	mcpAsyncConfigs []mcp.ServerConfig
+	mcpAsyncStarted bool
 	SystemPrompt    string
 	Pwd             string
 	// Plugins is the plugin registry (nil when no plugins are configured).
@@ -105,6 +110,17 @@ type MCPServerStatus struct {
 	Source string
 	// CommandLabel is the command + first arg for display.
 	CommandLabel string
+}
+
+// mcpBootstrapTimeout caps best-effort MCP discovery during startup. MCP tools
+// should never be able to hold the first UI frame hostage; a slow or wedged
+// server can still be diagnosed via `hygge mcp list` and fixed independently.
+const mcpBootstrapTimeout = 2 * time.Second
+
+type mcpInitResult struct {
+	client *mcp.Client
+	defs   []mcp.MCPToolDef
+	status MCPServerStatus
 }
 
 // bootstrapOptions feeds bootstrap.  Most fields are populated from
@@ -140,6 +156,10 @@ type bootstrapOptions struct {
 	// silently ignored — bootstrap warns and falls back to the
 	// config value.  Populated from the --reasoning CLI flag.
 	ReasoningOverride string
+	// AsyncMCP loads configured MCP servers after the TUI has started. This is
+	// used by interactive commands so slow external MCP processes never delay the
+	// first UI frame; inspection commands leave it false for synchronous status.
+	AsyncMCP bool
 }
 
 // defaultSystemPrompt is the v0.1 hardcoded system prompt.  Two sentences.
@@ -163,7 +183,14 @@ func (r *appRuntime) Close() error {
 			firstErr = err
 		}
 	}
-	for _, c := range r.MCPClients {
+	if r.mcpCancel != nil {
+		r.mcpCancel()
+	}
+	r.mcpWG.Wait()
+	r.mcpMu.Lock()
+	mcpClients := append([]*mcp.Client(nil), r.MCPClients...)
+	r.mcpMu.Unlock()
+	for _, c := range mcpClients {
 		if err := c.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -495,10 +522,18 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 
 	// Phase: plugin host init + plugin load
 	t0 = time.Now()
-	// MCP servers contribute additional tools.  Loading is best-
-	// effort: a misconfigured server warns and is skipped.  The agent
-	// still works without any MCP tools.
-	mcpClients, mcpConfigs, mcpStatuses := bootstrapMCP(ctx, opts, xdgConfig, tools)
+	// MCP servers contribute additional tools.  Interactive TUI startup prepares
+	// sidebar rows now and defers network/process initialization until after the
+	// first frame can render; non-interactive inspection commands keep the old
+	// synchronous behaviour so their status output is complete.
+	var mcpClients []*mcp.Client
+	var mcpConfigs []mcp.ServerConfig
+	var mcpStatuses []MCPServerStatus
+	if opts.AsyncMCP {
+		mcpConfigs, mcpStatuses = prepareAsyncMCP(opts, xdgConfig)
+	} else {
+		mcpClients, mcpConfigs, mcpStatuses = bootstrapMCP(ctx, opts, xdgConfig, tools)
+	}
 	slog.Debug("bootstrap phase", "phase", "mcp_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Slash-command registry: built-in command set plus any
@@ -603,7 +638,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 
 	slog.Info("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
 
-	return &appRuntime{
+	rt = &appRuntime{
 		Config:          cfg,
 		Provenance:      prov,
 		State:           st,
@@ -627,12 +662,14 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		MCPClients:      mcpClients,
 		MCPConfigs:      mcpConfigs,
 		MCPStatuses:     mcpStatuses,
+		mcpAsyncConfigs: mcpConfigs,
 		SystemPrompt:    sysPrompt,
 		Pwd:             opts.Pwd,
 		Plugins:         pluginReg,
 		PluginPM:        pluginPM,
 		catalogSrc:      catSrc,
-	}, nil
+	}
+	return rt, nil
 }
 
 // bootstrapMCP loads mcp.toml files, spawns each enabled server, and
@@ -657,9 +694,11 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 		return nil, nil, nil
 	}
 
-	var clients []*mcp.Client
+	results := make([]mcpInitResult, len(configs))
+	var wg sync.WaitGroup
+
 	statuses := make([]MCPServerStatus, 0, len(configs))
-	for _, cfg := range configs {
+	for i, cfg := range configs {
 		status := MCPServerStatus{
 			Name:      cfg.Name,
 			Transport: cfg.Transport,
@@ -667,74 +706,217 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 			Source:    cfg.Source.String(),
 		}
 		if !cfg.Enabled {
-			statuses = append(statuses, status)
+			results[i] = mcpInitResult{status: status}
 			continue
 		}
 
-		var transport mcp.Transport
-		switch cfg.Transport {
-		case "sse":
-			transport = mcp.NewSSE(mcp.SSEOptions{
-				ServerURL:  cfg.URL,
-				Headers:    cfg.Headers,
-				ServerName: cfg.Name,
-			})
-			status.CommandLabel = transport.ServerLabel()
-		case "http":
-			transport = mcp.NewStreamable(mcp.StreamableOptions{
-				ServerURL:               cfg.URL,
-				Headers:                 cfg.Headers,
-				ServerName:              cfg.Name,
-				OpenNotificationsStream: true,
-			})
-			status.CommandLabel = transport.ServerLabel()
-		default: // "stdio"
-			transport = mcp.NewStdio(mcp.StdioOptions{
-				Command: cfg.Command,
-				Args:    cfg.Args,
-				Env:     cfg.Env,
-				Dir:     cfg.Dir,
-			})
-			status.CommandLabel = transport.ServerLabel()
-		}
-		client := mcp.New(mcp.ClientOptions{
-			Transport:     transport,
-			Name:          cfg.Name,
-			ClientName:    "hygge",
-			ClientVersion: Version,
-			Now:           opts.Now,
-		})
-		if _, err := client.Initialize(ctx); err != nil {
-			slog.Warn("cli: MCP server failed to initialize", "name", cfg.Name, "err", err)
-			status.Error = err.Error()
-			_ = client.Close()
-			statuses = append(statuses, status)
-			continue
-		}
-		defs, err := client.ListTools(ctx)
-		if err != nil {
-			slog.Warn("cli: MCP tools/list failed", "name", cfg.Name, "err", err)
-			status.Error = err.Error()
-			_ = client.Close()
-			statuses = append(statuses, status)
-			continue
-		}
-		registered := 0
-		for _, def := range defs {
-			t := mcp.NewMCPTool(client, def, permission.Category(cfg.PermissionCategory))
-			if err := tools.Register(t); err != nil {
-				slog.Warn("cli: MCP tool name collision; skipping",
-					"server", cfg.Name, "tool", def.Name, "err", err)
-				continue
+		wg.Add(1)
+		go func(i int, cfg mcp.ServerConfig, status MCPServerStatus) {
+			defer wg.Done()
+			results[i] = bootstrapMCPServer(ctx, cfg, status, opts)
+		}(i, cfg, status)
+	}
+	wg.Wait()
+
+	var clients []*mcp.Client
+	for i, result := range results {
+		status := result.status
+		if result.client != nil && status.Error == "" {
+			registered := 0
+			for _, def := range result.defs {
+				t := mcp.NewMCPTool(result.client, def, permission.Category(configs[i].PermissionCategory))
+				if err := tools.Register(t); err != nil {
+					slog.Warn("cli: MCP tool name collision; skipping",
+						"server", configs[i].Name, "tool", def.Name, "err", err)
+					continue
+				}
+				registered++
 			}
-			registered++
+			status.Ready = true
+			status.ToolCount = registered
+			clients = append(clients, result.client)
 		}
-		status.Ready = true
-		status.ToolCount = registered
 		statuses = append(statuses, status)
-		clients = append(clients, client)
 	}
 	return clients, configs, statuses
+}
+
+// prepareAsyncMCP does only cheap config parsing and status-row construction.
+// Actual server startup is kicked off by appRuntime.StartAsyncMCP after the TUI
+// has subscribed to bus events, so no slow MCP process can delay first paint.
+func prepareAsyncMCP(opts bootstrapOptions, xdgConfig string) ([]mcp.ServerConfig, []MCPServerStatus) {
+	configs, err := mcp.LoadConfigs(mcp.LoadOptions{
+		HomeDir:       opts.HomeDir,
+		XDGConfigHome: xdgConfig,
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to load mcp.toml; MCP support disabled for this run", "err", err)
+		return nil, nil
+	}
+	statuses := make([]MCPServerStatus, 0, len(configs))
+	for _, cfg := range configs {
+		status := MCPServerStatus{
+			Name:         cfg.Name,
+			Transport:    cfg.Transport,
+			Enabled:      cfg.Enabled,
+			Source:       cfg.Source.String(),
+			CommandLabel: mcpCommandLabel(cfg),
+		}
+		statuses = append(statuses, status)
+	}
+	return configs, statuses
+}
+
+// StartAsyncMCP launches one best-effort initializer per enabled MCP server.
+// It is safe to call more than once; only the first call starts work.
+func (r *appRuntime) StartAsyncMCP(ctx context.Context) {
+	if r == nil || len(r.mcpAsyncConfigs) == 0 || r.Tools == nil {
+		return
+	}
+	r.mcpMu.Lock()
+	if r.mcpAsyncStarted {
+		r.mcpMu.Unlock()
+		return
+	}
+	r.mcpAsyncStarted = true
+	mcpCtx, cancel := context.WithCancel(ctx)
+	r.mcpCancel = cancel
+	configs := append([]mcp.ServerConfig(nil), r.mcpAsyncConfigs...)
+	r.mcpMu.Unlock()
+
+	for _, cfg := range configs {
+		if !cfg.Enabled {
+			continue
+		}
+		status := MCPServerStatus{
+			Name:         cfg.Name,
+			Transport:    cfg.Transport,
+			Enabled:      cfg.Enabled,
+			Source:       cfg.Source.String(),
+			CommandLabel: mcpCommandLabel(cfg),
+		}
+		r.mcpWG.Add(1)
+		go func(cfg mcp.ServerConfig, status MCPServerStatus) {
+			defer r.mcpWG.Done()
+			result := bootstrapMCPServer(mcpCtx, cfg, status, bootstrapOptions{})
+			status = result.status
+			if result.client != nil && status.Error == "" {
+				status.Ready = true
+				status.ToolCount = registerMCPTools(r.Tools, result.client, result.defs, permission.Category(cfg.PermissionCategory), cfg.Name)
+				r.addMCPClient(result.client)
+			}
+			r.publishMCPStatus(status)
+		}(cfg, status)
+	}
+}
+
+func (r *appRuntime) addMCPClient(client *mcp.Client) {
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	r.MCPClients = append(r.MCPClients, client)
+}
+
+func (r *appRuntime) publishMCPStatus(status MCPServerStatus) {
+	r.mcpMu.Lock()
+	for i := range r.MCPStatuses {
+		if r.MCPStatuses[i].Name == status.Name {
+			r.MCPStatuses[i] = status
+			r.mcpMu.Unlock()
+			publishMCPStatus(r.Bus, status)
+			return
+		}
+	}
+	r.MCPStatuses = append(r.MCPStatuses, status)
+	r.mcpMu.Unlock()
+	publishMCPStatus(r.Bus, status)
+}
+
+func publishMCPStatus(b *bus.Bus, status MCPServerStatus) {
+	if b == nil {
+		return
+	}
+	bus.Publish(b, bus.MCPStatusUpdated{
+		Name:      status.Name,
+		Transport: status.Transport,
+		Enabled:   status.Enabled,
+		Ready:     status.Ready,
+		Error:     status.Error,
+		ToolCount: status.ToolCount,
+		Source:    status.Source,
+		At:        time.Now(),
+	})
+}
+
+func registerMCPTools(tools *tool.Registry, client *mcp.Client, defs []mcp.MCPToolDef, category permission.Category, serverName string) int {
+	registered := 0
+	for _, def := range defs {
+		t := mcp.NewMCPTool(client, def, category)
+		if err := tools.Register(t); err != nil {
+			slog.Warn("cli: MCP tool name collision; skipping",
+				"server", serverName, "tool", def.Name, "err", err)
+			continue
+		}
+		registered++
+	}
+	return registered
+}
+
+func bootstrapMCPServer(ctx context.Context, cfg mcp.ServerConfig, status MCPServerStatus, opts bootstrapOptions) mcpInitResult {
+	transport := newMCPTransport(cfg)
+	status.CommandLabel = transport.ServerLabel()
+	client := mcp.New(mcp.ClientOptions{
+		Transport:     transport,
+		Name:          cfg.Name,
+		ClientName:    "hygge",
+		ClientVersion: Version,
+		Now:           opts.Now,
+	})
+	serverCtx, cancel := context.WithTimeout(ctx, mcpBootstrapTimeout)
+	defer cancel()
+	if _, err := client.Initialize(serverCtx); err != nil {
+		slog.Warn("cli: MCP server failed to initialize", "name", cfg.Name, "err", err)
+		status.Error = err.Error()
+		_ = client.Close()
+		return mcpInitResult{status: status}
+	}
+	defs, err := client.ListTools(serverCtx)
+	if err != nil {
+		slog.Warn("cli: MCP tools/list failed", "name", cfg.Name, "err", err)
+		status.Error = err.Error()
+		_ = client.Close()
+		return mcpInitResult{status: status}
+	}
+	return mcpInitResult{client: client, defs: defs, status: status}
+}
+
+func mcpCommandLabel(cfg mcp.ServerConfig) string {
+	return newMCPTransport(cfg).ServerLabel()
+}
+
+func newMCPTransport(cfg mcp.ServerConfig) mcp.Transport {
+	switch cfg.Transport {
+	case "sse":
+		return mcp.NewSSE(mcp.SSEOptions{
+			ServerURL:  cfg.URL,
+			Headers:    cfg.Headers,
+			ServerName: cfg.Name,
+		})
+	case "http":
+		return mcp.NewStreamable(mcp.StreamableOptions{
+			ServerURL:               cfg.URL,
+			Headers:                 cfg.Headers,
+			ServerName:              cfg.Name,
+			OpenNotificationsStream: true,
+		})
+	default: // "stdio"
+		return mcp.NewStdio(mcp.StdioOptions{
+			Command: cfg.Command,
+			Args:    cfg.Args,
+			Env:     cfg.Env,
+			Dir:     cfg.Dir,
+		})
+	}
 }
 
 // buildProviderResolver returns a [subagent.ProviderResolver] closure

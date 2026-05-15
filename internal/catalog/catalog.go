@@ -310,6 +310,8 @@ type Catalog struct {
 
 	// ticker fields for periodic refresh.  All three are nil/zero
 	// when RefreshInterval was not set.
+	bgCancel     context.CancelFunc
+	bgDone       chan struct{}
 	tickerCancel context.CancelFunc
 	tickerDone   chan struct{}
 }
@@ -384,7 +386,10 @@ func Load(opts LoadOptions) (*Catalog, error) {
 
 	// 3. Schedule background refresh when stale.
 	if bgRefresh && c.shouldBackgroundRefresh() {
-		go c.backgroundRefresh()
+		ctx, cancel := context.WithCancel(context.Background())
+		c.bgCancel = cancel
+		c.bgDone = make(chan struct{})
+		go c.backgroundRefresh(ctx)
 	}
 
 	// 4. Start periodic ticker when configured.
@@ -414,8 +419,9 @@ func (c *Catalog) shouldBackgroundRefresh() bool {
 // backgroundRefresh runs in a goroutine to refresh the snapshot when
 // stale.  Never blocks startup, never panics.  Failures log a Warn and
 // leave the existing snapshot in place.
-func (c *Catalog) backgroundRefresh() {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultHTTPTimeout+5*time.Second)
+func (c *Catalog) backgroundRefresh(ctx context.Context) {
+	defer close(c.bgDone)
+	ctx, cancel := context.WithTimeout(ctx, DefaultHTTPTimeout+5*time.Second)
 	defer cancel()
 	result, err := c.Refresh(ctx)
 	if err != nil {
@@ -452,6 +458,10 @@ func (c *Catalog) tickerLoop(ctx context.Context, d time.Duration) {
 // Callers that hold a long-lived Catalog (e.g. the CLI runtime) should
 // defer Close so the ticker goroutine is not leaked after shutdown.
 func (c *Catalog) Close() error {
+	if c.bgCancel != nil {
+		c.bgCancel()
+		<-c.bgDone
+	}
 	if c.tickerCancel != nil {
 		c.tickerCancel()
 		<-c.tickerDone

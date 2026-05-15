@@ -45,6 +45,7 @@ starts with that prefix.
 				ProfileName:       rootFlags.Profile,
 				Pwd:               rootFlags.Pwd,
 				ReasoningOverride: reasoningFlag,
+				AsyncMCP:          true,
 			})
 			if err != nil {
 				return err

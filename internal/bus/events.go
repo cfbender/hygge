@@ -135,6 +135,20 @@ type PermissionReplied struct {
 	At time.Time
 }
 
+// MCPStatusUpdated fires when async MCP startup changes one configured server's
+// status. The UI uses this to let MCP sidebar rows move from starting to ready
+// or failed without delaying the first frame.
+type MCPStatusUpdated struct {
+	Name      string
+	Transport string
+	Enabled   bool
+	Ready     bool
+	Error     string
+	ToolCount int
+	Source    string
+	At        time.Time
+}
+
 // CostUpdated fires when the running cost or token total for a session changes.
 type CostUpdated struct {
 	// SessionID is the session whose cost was updated.
