@@ -13,6 +13,7 @@ import (
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
+	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -1024,4 +1025,117 @@ func TestStartSend_InflightCancelStopsGoroutine(t *testing.T) {
 		t.Errorf("expected context.Canceled, got %v", sc.Err)
 	}
 	_ = sendCtx // suppress unused-variable warning
+}
+
+// ── Tool status tests ─────────────────────────────────────────────────────────
+
+// TestToolStatus_PendingOnRequest verifies that after ToolCallRequested the tool
+// row has Status == ToolStatusPending.
+func TestToolStatus_PendingOnRequest(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		ToolName:  "read",
+		ToolUseID: "tu-1",
+		Args:      []byte(`{"path":"/tmp/x"}`),
+	})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	if app.messages[0].Status != components.ToolStatusPending {
+		t.Errorf("Status = %v, want ToolStatusPending", app.messages[0].Status)
+	}
+}
+
+// TestToolStatus_AwaitingOnPermissionAsked verifies that after PermissionAsked
+// the tool row has Status == ToolStatusAwaitingPermission AND the modal opens.
+func TestToolStatus_AwaitingOnPermissionAsked(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		ToolName:  "write",
+		ToolUseID: "tu-2",
+		Args:      []byte(`{"path":"/etc/hosts"}`),
+	})
+	app.Handle(bus.PermissionAsked{
+		RequestID: "req-1",
+		ToolName:  "write",
+		Category:  "file.write",
+		Target:    "/etc/hosts",
+	})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	if app.messages[0].Status != components.ToolStatusAwaitingPermission {
+		t.Errorf("Status = %v, want ToolStatusAwaitingPermission", app.messages[0].Status)
+	}
+	// Modal must also be open.
+	if len(app.pendingPerms) == 0 {
+		t.Error("expected permission modal to be open after PermissionAsked")
+	}
+}
+
+// TestToolStatus_RunningOnPermissionGranted verifies that after PermissionReplied
+// with Decision=allow the tool row transitions to Status == ToolStatusRunning.
+func TestToolStatus_RunningOnPermissionGranted(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{ToolName: "bash", ToolUseID: "tu-3", Args: []byte(`{}`)})
+	app.Handle(bus.PermissionAsked{RequestID: "req-2", ToolName: "bash", Category: "shell", Target: "ls"})
+	app.Handle(bus.PermissionReplied{RequestID: "req-2", Decision: "allow", Scope: "once"})
+
+	if app.messages[0].Status != components.ToolStatusRunning {
+		t.Errorf("Status = %v, want ToolStatusRunning after allow", app.messages[0].Status)
+	}
+}
+
+// TestToolStatus_CancelledOnPermissionDenied verifies that after PermissionReplied
+// with Decision=deny the tool row transitions to Status == ToolStatusCancelled.
+func TestToolStatus_CancelledOnPermissionDenied(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{ToolName: "bash", ToolUseID: "tu-4", Args: []byte(`{}`)})
+	app.Handle(bus.PermissionAsked{RequestID: "req-3", ToolName: "bash", Category: "shell", Target: "rm -rf /"})
+	app.Handle(bus.PermissionReplied{RequestID: "req-3", Decision: "deny", Scope: "once"})
+
+	if app.messages[0].Status != components.ToolStatusCancelled {
+		t.Errorf("Status = %v, want ToolStatusCancelled after deny", app.messages[0].Status)
+	}
+}
+
+// TestToolStatus_CompletedOnSuccess verifies that after ToolCallCompleted with no
+// error the tool row transitions to Status == ToolStatusCompleted.
+func TestToolStatus_CompletedOnSuccess(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{ToolName: "read", ToolUseID: "tu-5", Args: []byte(`{"path":"/tmp/ok"}`)})
+	app.Handle(bus.ToolCallCompleted{ToolName: "read", ToolUseID: "tu-5", Result: []byte("file contents")})
+
+	if app.messages[0].Status != components.ToolStatusCompleted {
+		t.Errorf("Status = %v, want ToolStatusCompleted", app.messages[0].Status)
+	}
+}
+
+// TestToolStatus_ErrorOnFailure verifies that after ToolCallCompleted with Err set
+// the tool row transitions to Status == ToolStatusError.
+func TestToolStatus_ErrorOnFailure(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{ToolName: "edit", ToolUseID: "tu-6", Args: []byte(`{"path":"/bad"}`)})
+	app.Handle(bus.ToolCallCompleted{ToolName: "edit", ToolUseID: "tu-6", Err: "permission denied"})
+
+	if app.messages[0].Status != components.ToolStatusError {
+		t.Errorf("Status = %v, want ToolStatusError", app.messages[0].Status)
+	}
+	if !app.messages[0].IsError {
+		t.Error("expected IsError=true on errored tool")
+	}
 }
