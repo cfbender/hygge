@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// UI icon and border constants.
 const (
 	CheckIcon  = "✓"
 	ErrorIcon  = "×"
@@ -69,12 +70,12 @@ type Styles struct {
 
 	// Editor/input styles.
 	Editor struct {
-		Textarea            textarea.Styles
-		PromptFocused       lipgloss.Style
-		PromptBlurred       lipgloss.Style
-		AttachmentIcon      lipgloss.Style
-		AttachmentName      lipgloss.Style
-		AttachmentDeleting  lipgloss.Style
+		Textarea           textarea.Styles
+		PromptFocused      lipgloss.Style
+		PromptBlurred      lipgloss.Style
+		AttachmentIcon     lipgloss.Style
+		AttachmentName     lipgloss.Style
+		AttachmentDeleting lipgloss.Style
 	}
 
 	TextInput textinput.Styles
@@ -172,15 +173,15 @@ type Styles struct {
 
 	// Pills styles (queue/todo indicators).
 	Pills struct {
-		Base      lipgloss.Style
-		Focused   lipgloss.Style
-		Blurred   lipgloss.Style
-		Label     lipgloss.Style
-		Progress  lipgloss.Style
-		Muted     lipgloss.Style
-		HelpKey   lipgloss.Style
-		HelpText  lipgloss.Style
-		Area      lipgloss.Style
+		Base          lipgloss.Style
+		Focused       lipgloss.Style
+		Blurred       lipgloss.Style
+		Label         lipgloss.Style
+		Progress      lipgloss.Style
+		Muted         lipgloss.Style
+		HelpKey       lipgloss.Style
+		HelpText      lipgloss.Style
+		Area          lipgloss.Style
 		QueueGradFrom color.Color
 		QueueGradTo   color.Color
 	}

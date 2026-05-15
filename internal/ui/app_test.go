@@ -36,7 +36,7 @@ func newTestApp(t *testing.T) (*App, *bus.Bus) {
 		t.Fatalf("New: %v", err)
 	}
 	// Set a known window size so layout is deterministic.
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()
@@ -669,7 +669,7 @@ func newTestAppWithPicker(t *testing.T, st session.Store) (*App, *bus.Bus) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()
@@ -862,7 +862,7 @@ func newTestAppWithSendFn(
 		collected = append(collected, msg)
 	}
 
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	return app, &collected, &mu
 }
 
@@ -942,7 +942,7 @@ func TestStartSend_AgentRunsInGoroutine(t *testing.T) {
 	// A subsequent Update call should return immediately without blocking.
 	updateDone := make(chan struct{})
 	go func() {
-		app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 		close(updateDone)
 	}()
 
@@ -1181,7 +1181,7 @@ func newTestAppWithConfig(t *testing.T, cfg *config.Config) (*App, *bus.Bus) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()

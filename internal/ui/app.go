@@ -254,7 +254,7 @@ type App struct {
 	// msgCache holds the pre-rendered message list content. Invalidated when
 	// messages change (append, stream delta, resize). This avoids re-rendering
 	// all messages on every frame — only the viewport scroll position changes.
-	msgCache      string
+	msgCache         string
 	msgCacheValid    bool
 	msgCacheW        int       // width at which cache was rendered
 	msgCacheLen      int       // message count at which cache was rendered
@@ -1819,8 +1819,7 @@ func (a *App) foregroundSubagent() *components.SubagentState {
 	if !a.viewingSubagent() {
 		return nil
 	}
-	st, _ := a.subagents[a.foregroundID()]
-	return st
+	return a.subagents[a.foregroundID()]
 }
 
 // rootSessionID returns the session id at the bottom of the foreground

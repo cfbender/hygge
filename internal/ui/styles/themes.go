@@ -46,7 +46,7 @@ func DefaultTheme() Styles {
 
 // ThemeByName returns a Styles for the given theme name.
 // Falls back to the default theme for unknown names.
-func ThemeByName(name string) Styles {
+func ThemeByName(_ string) Styles {
 	// The default theme is built-in. Additional themes can be added as
 	// TOML config files — see examples/themes/ for a Catppuccin Mocha example.
 	return DefaultTheme()

@@ -44,7 +44,7 @@ func newSlashApp(t *testing.T) (*App, *bus.Bus, *command.Registry) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()

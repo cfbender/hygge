@@ -86,4 +86,3 @@ type LoadOptions struct {
 // covers empty files, malformed JSON, and files containing unknown
 // top-level fields.
 var ErrCorrupt = errors.New("auth: corrupt file")
-

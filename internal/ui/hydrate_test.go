@@ -62,7 +62,7 @@ func newTestAppWithStore(
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()
@@ -241,7 +241,7 @@ func TestHydrate_SwitchSessionPopulatesMessages(t *testing.T) {
 		_ = app.Close()
 		b.Close()
 	})
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 
 	// Inject stale messages to confirm they get replaced.
 	app.messages = []uiMessage{
@@ -713,7 +713,7 @@ func TestHydrate_CompactionMarkerInjectsRoleMarkerEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()
@@ -838,7 +838,7 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()
@@ -971,7 +971,7 @@ func TestHydrate_SubagentRecursiveTwoLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()
@@ -1391,7 +1391,7 @@ func TestHydrate_SplitRowSubagentTaskRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	t.Cleanup(func() {
 		_ = app.Close()
 		b.Close()

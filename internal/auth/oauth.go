@@ -52,7 +52,7 @@ func StartDeviceAuth(ctx context.Context) (*DeviceCodeResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth: device code request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -121,7 +121,7 @@ func pollOnce(ctx context.Context, deviceAuthID, userCode string) (tokens *OAuth
 	if err != nil {
 		return nil, false, fmt.Errorf("auth: poll request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
 		return nil, false, nil
@@ -165,7 +165,7 @@ func exchangeCodeForTokens(ctx context.Context, code, codeVerifier string) (*OAu
 	if err != nil {
 		return nil, fmt.Errorf("auth: token exchange request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -196,7 +196,7 @@ func RefreshAccessToken(ctx context.Context, refreshToken string) (*OAuthTokens,
 	if err != nil {
 		return nil, fmt.Errorf("auth: refresh request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
