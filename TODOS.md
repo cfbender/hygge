@@ -120,7 +120,7 @@ Migration plan artifact: `7yLWjW`.
 
 - [x] **Phase 0 — Preparation** — `charm.land/catwalk v0.40.0` and `charm.land/fantasy v0.23.2` added as direct deps. `internal/llm/probe_test.go` confirms packages compile. Architecture doc written. *(this commit)*
 - [x] **Phase 1 — LLM layer** — Replace `internal/catalog/` with catwalk client wrapper in `internal/llm/`; embedded snapshot + ETag refresh. *(this commit)*
-- [ ] **Phase 2 — Provider adapters** — Replace `internal/provider/*` with `fantasy.LanguageModel` implementations; keep `Provider` interface as shim during transition.
+- [x] **Phase 2 — Provider adapters** — Added `internal/llm` fantasy provider/model construction bridge with metadata mapping (`ResolveProviderModel`) and hermetic coverage. Existing `internal/provider.Provider` concrete stream adapters remain in place for now; Phase 3 will swap the turn loop to fantasy stream primitives and retire legacy adapter internals incrementally.
 - [ ] **Phase 3 — Tools** — Convert `internal/tool/*` to `fantasy.AgentTool`; rewire MCP bridge + plugin `pluginToolAdapter`; add plain `fetch` tool.
 - [ ] **Phase 4 — Agent loop + coordinator** — Replace `internal/agent/loop.go` with `fantasy.Agent`; extract `internal/coordinator`; adapt `internal/subagent/runtime.go` impl.
 - [ ] **Phase 5 — UI** — Theme/model-select/API-key dialogs; slash command system update.
