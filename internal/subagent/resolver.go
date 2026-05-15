@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/provider"
 )
 
@@ -22,6 +24,10 @@ import (
 // bootstrap supplies a resolver that caches a single instance per
 // provider name; tests may supply trivial closures.
 type ProviderResolver func(ctx context.Context, modelRef string) (provider.Provider, string, error)
+
+// FantasyModelResolver returns the Fantasy language model for a resolved
+// provider/model pair. Implementations MUST be safe for concurrent calls.
+type FantasyModelResolver func(ctx context.Context, providerName, modelID string) (fantasy.LanguageModel, error)
 
 // modelRefRe is the validation pattern for model overrides parsed
 // from subagents.toml.  We deliberately keep it loose on the
