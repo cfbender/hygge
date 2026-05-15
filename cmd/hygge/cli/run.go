@@ -131,6 +131,9 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		ProfileName:   rt.Config.Profile,
 		Reasoning:     resolveReasoning(rt.Config, reasoningFlag),
 		Commands:      rt.Commands,
+		Version:       Version,
+		HomeDir:       homeDir(),
+		NerdFonts:     rt.Config.UI.NerdFonts,
 		OnSessionCreated: func(id string) {
 			if err := state.AddRecentSession(id, rt.StateOpts); err != nil {
 				// State write failure is non-fatal for the running
@@ -218,4 +221,15 @@ func setupTUILog(rt *appRuntime) func() {
 		slog.SetDefault(prev)
 		_ = f.Close()
 	}
+}
+
+// homeDir returns the user's home directory or "" if it cannot be
+// determined.  Used by the UI for tilde-collapsing the project path
+// in the header bar.
+func homeDir() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return h
 }
