@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
@@ -127,7 +128,9 @@ func New(opts AppOptions) (*App, error) {
 		height:        24,
 		subagents:     make(map[string]*components.SubagentState),
 		subagentAnims: make(map[string]*anim.Anim),
+		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 	}
+	a.msgViewport.MouseWheelEnabled = true
 	a.spinner.Spinner = spinner.Dot
 	// Only subscribe to bus events when there's a concrete foreground
 	// session.  When OpenSessionsModalOnStart is true and no SessionID is
@@ -160,6 +163,18 @@ type App struct {
 
 	// messages is the conversation buffer.
 	messages []uiMessage
+
+	// msgViewport is the fixed-height scrollable container for the message list.
+	// Its Height is recomputed on every WindowSizeMsg and View() call so it
+	// adapts as chrome elements (banner, notice, etc.) appear and disappear.
+	msgViewport viewport.Model
+
+	// userScrolled tracks whether the user has manually scrolled up from the
+	// bottom of the message list.  When true, new incoming messages do NOT
+	// auto-scroll to the bottom; the user's position is preserved.  It is
+	// reset to false when the user presses Enter (sends a message) or when
+	// the viewport is programmatically scrolled to the bottom.
+	userScrolled bool
 
 	// permission state
 	pendingPerms []components.PermissionRequest // FIFO queue
@@ -468,7 +483,7 @@ func (a *App) View() tea.View {
 		}
 	}
 
-	ml := components.MessageList{
+	mlContent := components.MessageList{
 		Width:     width,
 		Theme:     a.opts.Theme,
 		Messages:  visibleMessages,
@@ -543,10 +558,8 @@ func (a *App) View() tea.View {
 		ReasoningLevel: a.opts.Reasoning.Effort,
 	}.View()
 
-	// Reserve a small fixed budget for chrome and let the message list take
-	// the remainder.  No hard scrolling in v0.1 — the message list just
-	// renders the full buffer and the bottom of the terminal shows whatever
-	// fits.  Task 13's CLI will wrap us in `tea.WithAltScreen` if desired.
+	// Calculate the available height for the message list viewport.
+	// chrome = all rows except the scrollable message list.
 	chrome := lipgloss.Height(hb) + lipgloss.Height(in) + lipgloss.Height(fr)
 	if breadcrumb != "" {
 		chrome += lipgloss.Height(breadcrumb)
@@ -566,12 +579,22 @@ func (a *App) View() tea.View {
 	if bannerView != "" {
 		chrome += lipgloss.Height(bannerView)
 	}
-	bodyHeight := height - chrome
-	if bodyHeight < 1 {
-		bodyHeight = 1
+	msgListHeight := height - chrome
+	if msgListHeight < 1 {
+		msgListHeight = 1
 	}
-	bodyStyle := lipgloss.NewStyle().Height(bodyHeight)
-	body := bodyStyle.Render(ml)
+
+	// Update viewport dimensions and content for this render pass.
+	a.msgViewport.SetWidth(width)
+	a.msgViewport.SetHeight(msgListHeight)
+	a.msgViewport.SetContent(mlContent)
+
+	// Auto-scroll to bottom when the user has not manually scrolled up.
+	if !a.userScrolled {
+		a.msgViewport.GotoBottom()
+	}
+
+	body := a.msgViewport.View()
 
 	sections := []string{hb}
 	if breadcrumb != "" {
@@ -647,6 +670,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = m.Width
 		a.height = m.Height
 		a.input.SetWidth(m.Width - 2) // border padding
+		a.msgViewport.SetWidth(m.Width)
+		// Height is recomputed per-frame in View(); set a sane default here
+		// so the viewport is usable before the first full render.
+		if m.Height > 6 {
+			a.msgViewport.SetHeight(m.Height - 6)
+		}
 		// Glamour renderer is sized to the body width; rebuild lazily.
 		a.renderer = nil
 		a.rendererW = 0
@@ -752,6 +781,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return a.handleKey(m)
 
+	case tea.MouseWheelMsg:
+		// Route mouse wheel to the viewport when no modal is open.
+		// Track userScrolled when the user scrolls up.
+		if len(a.pendingPerms) == 0 && a.activeModal == "" {
+			prevOffset := a.msgViewport.YOffset()
+			a.msgViewport, _ = a.msgViewport.Update(m)
+			if a.msgViewport.YOffset() < prevOffset {
+				// Scrolled up — pause auto-scroll.
+				a.userScrolled = true
+			} else if a.msgViewport.AtBottom() {
+				// Scrolled back to bottom — resume auto-scroll.
+				a.userScrolled = false
+			}
+		}
+		return a, nil
+
 	case busDelivery:
 		cmd := a.handleBusEvent(m.Event)
 		// Re-issue the listener so the next event is read.
@@ -824,7 +869,23 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, a.runSlashCommand(text)
 		}
 		a.input.Reset()
+		// Resume auto-scroll when the user sends a message.
+		a.userScrolled = false
 		return a, a.startSend(text)
+	case "pgup":
+		// Scroll message list up one page; pause auto-scroll.
+		if !a.msgViewport.AtTop() {
+			a.msgViewport.PageUp()
+			a.userScrolled = true
+		}
+		return a, nil
+	case "pgdown":
+		// Scroll message list down one page.
+		a.msgViewport.PageDown()
+		if a.msgViewport.AtBottom() {
+			a.userScrolled = false
+		}
+		return a, nil
 	case "tab":
 		// Tab completes the currently-highlighted command palette
 		// entry when the input is in slash mode.  Outside slash

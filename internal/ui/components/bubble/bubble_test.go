@@ -297,6 +297,42 @@ func TestBubble_ShowTailFalse_NoTail(t *testing.T) {
 	}
 }
 
+func TestBubble_BackgroundColor_Applied(t *testing.T) {
+	t.Parallel()
+	// Verify that a BackgroundColor is accepted and the bubble renders without
+	// panic.  We can't easily assert the ANSI escape sequence in a unit test,
+	// but we verify body text still appears and the output is non-empty.
+	b := Bubble{
+		Width:           80,
+		BubbleWidth:     40,
+		Body:            "bg tinted",
+		Theme:           theme.ShellTheme(),
+		AccentColor:     lipgloss.Color("5"),
+		BackgroundColor: lipgloss.Color("53"),
+	}
+	out := b.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "bg tinted") {
+		t.Errorf("bubble body must be visible with BackgroundColor set; got:\n%s", plain)
+	}
+}
+
+func TestBubble_BackgroundColorNil_NoBackground(t *testing.T) {
+	t.Parallel()
+	// When BackgroundColor is nil, rendering must succeed normally.
+	b := Bubble{
+		Width:       80,
+		BubbleWidth: 40,
+		Body:        "no bg",
+		Theme:       theme.ShellTheme(),
+	}
+	out := b.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "no bg") {
+		t.Errorf("bubble body missing when BackgroundColor is nil; got:\n%s", plain)
+	}
+}
+
 // clamp returns min(a, b).
 func clamp(a, b int) int {
 	if a < b {

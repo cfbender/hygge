@@ -44,6 +44,10 @@ func ShellTheme() *Theme {
 			AtomBubbleHeader:         {kind: colorKindANSI, raw: "5"}, // magenta
 			AtomBubbleHeaderMuted:    {kind: colorKindANSI, raw: "8"}, // grey
 			AtomBubbleBodyMuted:      {kind: colorKindANSI, raw: "8"}, // grey
+
+			// Phase 5: distinct user vs agent bubble border colors.
+			AtomBubbleUserBorder:  {kind: colorKindANSI, raw: "4"}, // blue  — user bubble
+			AtomBubbleAgentBorder: {kind: colorKindANSI, raw: "5"}, // magenta — agent bubble
 		},
 	}
 }

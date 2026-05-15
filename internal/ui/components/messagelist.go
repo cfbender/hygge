@@ -331,13 +331,15 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		width = 80
 	}
 
-	// BubbleWidth: ~70% of available width, capped at 100, minimum 40.
-	bubbleW := int(float64(width) * 0.70)
-	if bubbleW < 40 {
-		bubbleW = 40
+	// BubbleWidth: 80% of available width.  No min/max cap — the caller
+	// provides a sensible width (≥30).  Edge-case fallback for very narrow
+	// terminals: leave at least 4 cells of gutter.
+	bubbleW := int(float64(width) * 0.80)
+	if width < 30 {
+		bubbleW = width - 4
 	}
-	if bubbleW > 100 {
-		bubbleW = 100
+	if bubbleW < 1 {
+		bubbleW = 1
 	}
 
 	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
@@ -355,23 +357,24 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 
 	var accentColor color.Color
 	if m.Theme != nil {
-		fg := m.Theme.Style(theme.AtomAccent).GetForeground()
+		fg := m.Theme.Style(theme.AtomBubbleUserBorder).GetForeground()
 		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
 			accentColor = fg
 		}
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignRight,
-		HeaderLeft:  "",
-		HeaderRight: headerRight,
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleNormal,
-		ShowTail:    true,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignRight,
+		HeaderLeft:      "",
+		HeaderRight:     headerRight,
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: dimBubbleBg(theme.AtomBubbleUserBorder),
+		SubStyle:        bubble.StyleNormal,
+		ShowTail:        true,
 	}
 	return b.View()
 }
@@ -385,13 +388,14 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		width = 80
 	}
 
-	// BubbleWidth: ~85% of available width, capped at 120, minimum 50.
-	bubbleW := int(float64(width) * 0.85)
-	if bubbleW < 50 {
-		bubbleW = 50
+	// BubbleWidth: 80% of available width.  No min/max cap — same logic as
+	// renderUserBubble.
+	bubbleW := int(float64(width) * 0.80)
+	if width < 30 {
+		bubbleW = width - 4
 	}
-	if bubbleW > 120 {
-		bubbleW = 120
+	if bubbleW < 1 {
+		bubbleW = 1
 	}
 
 	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
@@ -457,23 +461,24 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 
 	var accentColor color.Color
 	if m.Theme != nil {
-		fg := m.Theme.Style(theme.AtomAccent).GetForeground()
+		fg := m.Theme.Style(theme.AtomBubbleAgentBorder).GetForeground()
 		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
 			accentColor = fg
 		}
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignLeft,
-		HeaderLeft:  agentType,
-		HeaderRight: headerRight,
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleNormal,
-		ShowTail:    true,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignLeft,
+		HeaderLeft:      agentType,
+		HeaderRight:     headerRight,
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: dimBubbleBg(theme.AtomBubbleAgentBorder),
+		SubStyle:        bubble.StyleNormal,
+		ShowTail:        true,
 	}
 	return b.View()
 }
@@ -597,15 +602,16 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignLeft,
-		HeaderLeft:  "",
-		HeaderRight: "",
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleDistinct,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignLeft,
+		HeaderLeft:      "",
+		HeaderRight:     "",
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: dimBubbleBg(theme.AtomBubbleBorderDistinct),
+		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
 }
@@ -627,28 +633,29 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignLeft,
-		HeaderLeft:  "",
-		HeaderRight: "",
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleDistinct,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignLeft,
+		HeaderLeft:      "",
+		HeaderRight:     "",
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: dimBubbleBg(theme.AtomBubbleBorderDistinct),
+		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
 }
 
 // toolBubbleWidth returns the bubble width for tool-group and subagent bubbles:
-// ~70% of available width, capped at 100, minimum 40.
+// 80% of available width.  Edge-case fallback: width-4 when terminal is very narrow.
 func (m MessageList) toolBubbleWidth(width int) int {
-	w := int(float64(width) * 0.70)
-	if w < 40 {
-		w = 40
+	w := int(float64(width) * 0.80)
+	if width < 30 {
+		w = width - 4
 	}
-	if w > 100 {
-		w = 100
+	if w < 1 {
+		w = 1
 	}
 	return w
 }
@@ -744,6 +751,26 @@ func (m MessageList) collapseToolBody(body string, limit int) string {
 		"[+" + itoa(len(lines)-limit) + " more lines, press space to expand]",
 	)
 	return muted.Render(head) + "\n" + hint
+}
+
+// dimBubbleBg returns the dim 256-color background tint that matches the
+// given bubble border atom.  The mapping follows the shell theme defaults:
+//
+//	AtomBubbleUserBorder  (ANSI 4 / blue)     → 17  (dark blue)
+//	AtomBubbleAgentBorder (ANSI 5 / magenta)  → 53  (dark magenta)
+//	AtomBubbleBorderDistinct (ANSI 8 / grey)  → 236 (dark grey)
+//
+// This is a static mapping that works for the shell theme's ANSI palette.
+// Custom themes with different accent colors will get the nearest preset.
+func dimBubbleBg(atom theme.Atom) color.Color {
+	switch atom {
+	case theme.AtomBubbleUserBorder:
+		return lipgloss.Color("17") // dark blue
+	case theme.AtomBubbleAgentBorder:
+		return lipgloss.Color("53") // dark magenta
+	default:
+		return lipgloss.Color("236") // dark grey
+	}
 }
 
 // itoa is a tiny strconv.Itoa shim to avoid an extra import.
