@@ -296,10 +296,9 @@ func TestBuiltinOutcomes(t *testing.T) {
 		{
 			name:    "model-no-arg",
 			cmdName: "model",
-			appCfg:  &fakeAppCfg{model: "anthropic/claude-sonnet-4-5"},
 			check: func(t *testing.T, o Outcome) {
-				if !strings.Contains(o.Notice, "anthropic/claude-sonnet-4-5") {
-					t.Errorf("notice missing model: %q", o.Notice)
+				if o.OpenModal != ModalModel {
+					t.Errorf("OpenModal=%q, want %q", o.OpenModal, ModalModel)
 				}
 				if len(o.Updates) != 0 {
 					t.Errorf("expected no updates, got %v", o.Updates)

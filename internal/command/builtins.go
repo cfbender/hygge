@@ -321,14 +321,10 @@ func (*modelCmd) Source() string      { return "builtin" }
 func (*modelCmd) Args() []ArgSpec {
 	return []ArgSpec{{Name: "ref", Description: `"<provider>/<model-id>"`, Required: false}}
 }
-func (*modelCmd) Execute(_ context.Context, app App, input string) (Outcome, error) {
+func (*modelCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
 	ref := strings.TrimSpace(input)
 	if ref == "" {
-		current := "(unknown)"
-		if app != nil {
-			current = app.Model()
-		}
-		return Outcome{Notice: fmt.Sprintf("current model: %s", current)}, nil
+		return Outcome{OpenModal: ModalModel}, nil
 	}
 	if !strings.Contains(ref, "/") {
 		return Outcome{Notice: `/model: expected "<provider>/<model-id>"`}, nil

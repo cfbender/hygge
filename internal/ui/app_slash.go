@@ -98,6 +98,14 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			}
 			a.openOverlay(overlayCompactConfirm)
 			a.updateInputFocus()
+		case command.ModalModel:
+			a.modelModal = components.ModelModal{
+				Theme:   a.opts.Theme,
+				Current: a.opts.ModelProvider + "/" + a.opts.ModelName,
+				Models:  a.catalogModelOptions(),
+			}
+			a.openOverlay(overlayModel)
+			a.updateInputFocus()
 		default:
 			slogWarnUnknownModal(out.OpenModal)
 		}

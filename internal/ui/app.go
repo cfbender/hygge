@@ -270,6 +270,7 @@ type App struct {
 	// sessionsModal holds the live state of the sessions picker
 	// when activeModal == "sessions".
 	sessionsModal components.SessionsModal
+	modelModal    components.ModelModal
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -872,6 +873,13 @@ func (a *App) View() tea.View {
 			v.AltScreen = true
 			v.MouseMode = tea.MouseModeCellMotion
 			return v
+		case overlayModel:
+			a.modelModal.Width = width
+			a.modelModal.Height = height
+			v := tea.NewView(a.modelModal.View())
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
 		}
 	}
 
@@ -1090,6 +1098,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				a.closeOverlay(overlayHelp)
 			}
 			return a, nil
+		case overlayModel:
+			return a.handleModelModalKey(k)
 		}
 	}
 
@@ -2611,11 +2621,56 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayCompactConfirm:
+		case overlayHelp, overlaySessions, overlayCompactConfirm, overlayModel:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
 	}
+}
+
+func (a *App) catalogModelOptions() []components.ModelOption {
+	if a.opts.Catalog == nil || a.opts.Catalog.Source() == nil {
+		return nil
+	}
+	src := a.opts.Catalog.Source()
+	providers := src.Providers()
+	out := make([]components.ModelOption, 0)
+	for _, providerID := range providers {
+		for _, entry := range src.Models(providerID) {
+			out = append(out, components.ModelOption{Provider: providerID, Entry: entry})
+		}
+	}
+	return out
+}
+
+func (a *App) handleModelModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.ModelKey{Name: k.String(), Runes: []rune(k.Text)}
+	switch k.String() {
+	case "up", "down", "enter", "esc", "ctrl+n", "ctrl+p":
+		sk.Name = k.String()
+	case "backspace", "delete":
+		sk.Name = "backspace"
+	default:
+		if len(k.Text) == 1 {
+			sk.Name = k.Text
+		}
+	}
+	updated, msg := a.modelModal.HandleKey(sk)
+	a.modelModal = updated
+	if msg == nil {
+		return a, nil
+	}
+	switch m := msg.(type) {
+	case components.CloseModelModal:
+		a.closeOverlay(overlayModel)
+		return a, nil
+	case components.SelectModelAction:
+		a.opts.ModelProvider = m.Provider
+		a.opts.ModelName = m.Model
+		a.closeOverlay(overlayModel)
+		return a, a.setNotice("model switched for this session: " + m.Provider + "/" + m.Model)
+	}
+	return a, nil
 }
 
 func (a *App) renderHelpOverlay(width, height int) string {

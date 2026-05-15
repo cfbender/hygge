@@ -12,6 +12,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
@@ -30,6 +31,7 @@ func newSlashApp(t *testing.T) (*App, *bus.Bus, *command.Registry) {
 	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
 	app, err := New(AppOptions{
 		Bus:           b,
+		Catalog:       cost.NewCatalog(cost.CatalogOptions{Now: now}),
 		Theme:         theme.ShellTheme(),
 		ProjectDir:    "~/proj",
 		ModelProvider: "anthropic",
@@ -53,6 +55,72 @@ func newSlashApp(t *testing.T) (*App, *bus.Bus, *command.Registry) {
 func typeInto(app *App, s string) {
 	for _, r := range s {
 		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+}
+
+func TestSlashCommandModelOpensDialog(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if top, ok := app.overlays.Top(); !ok || top != overlayModel {
+		t.Fatalf("top overlay = %q, %v; want model", top, ok)
+	}
+	view := app.View().Content
+	if !strings.Contains(view, "Select model") || !strings.Contains(view, "Search:") {
+		t.Fatalf("model dialog not rendered:\n%s", view)
+	}
+}
+
+func TestModelDialogFilterNarrowsList(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	before := len(app.modelModal.Filtered())
+	typeInto(app, "sonnet")
+	after := len(app.modelModal.Filtered())
+	if before == 0 {
+		t.Fatal("expected embedded catalog models")
+	}
+	if after == 0 || after >= before {
+		t.Fatalf("filtered count = %d, want >0 and <%d", after, before)
+	}
+}
+
+func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeInto(app, "gpt-5")
+	filtered := app.modelModal.Filtered()
+	if len(filtered) == 0 {
+		t.Fatal("expected gpt-5 model in embedded catalog")
+	}
+	app.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	app.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if app.anyOverlayOpen() {
+		t.Fatal("model dialog should close after selection")
+	}
+	if app.opts.ModelProvider != filtered[0].Provider || app.opts.ModelName != filtered[0].Entry.ID {
+		t.Fatalf("selected model = %s/%s, want %s/%s", app.opts.ModelProvider, app.opts.ModelName, filtered[0].Provider, filtered[0].Entry.ID)
+	}
+}
+
+func TestModelDialogEscClosesWithoutChange(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeInto(app, "gpt")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if app.anyOverlayOpen() {
+		t.Fatal("model dialog should close on Esc")
+	}
+	if app.opts.ModelProvider != "anthropic" || app.opts.ModelName != "claude-sonnet-4-5" {
+		t.Fatalf("model changed on Esc to %s/%s", app.opts.ModelProvider, app.opts.ModelName)
 	}
 }
 
