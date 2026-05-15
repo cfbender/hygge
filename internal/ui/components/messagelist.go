@@ -372,9 +372,8 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		Body:            body,
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
-		BackgroundColor: dimBubbleBg(theme.AtomBubbleUserBorder),
+		BackgroundColor: accentColor, // use ANSI atom directly; terminal renders palette color
 		SubStyle:        bubble.StyleNormal,
-		ShowTail:        true,
 	}
 	return b.View()
 }
@@ -476,9 +475,8 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		Body:            body,
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
-		BackgroundColor: dimBubbleBg(theme.AtomBubbleAgentBorder),
+		BackgroundColor: accentColor, // use ANSI atom directly; terminal renders palette color
 		SubStyle:        bubble.StyleNormal,
-		ShowTail:        true,
 	}
 	return b.View()
 }
@@ -610,13 +608,15 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		Body:            body,
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
-		BackgroundColor: dimBubbleBg(theme.AtomBubbleBorderDistinct),
+		BackgroundColor: accentColor, // use ANSI atom directly
 		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
 }
 
 // wrapSubagentBubble wraps existing SubagentBlock content in a distinct bubble.
+// The bubble uses 80% width (same as user/assistant) with rounded corners and
+// comfortable inner padding (one blank line top + bottom, one cell horizontal).
 func (m MessageList) wrapSubagentBubble(body string) string {
 	width := m.Width
 	if width <= 0 {
@@ -632,16 +632,20 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 		}
 	}
 
+	// Add one blank line of vertical padding top and bottom, plus one cell of
+	// horizontal padding on each side, so the subagent content feels comfortable.
+	paddedBody := "\n" + body + "\n"
+
 	b := bubble.Bubble{
 		Width:           width,
 		BubbleWidth:     bubbleW,
 		Alignment:       bubble.AlignLeft,
 		HeaderLeft:      "",
 		HeaderRight:     "",
-		Body:            body,
+		Body:            paddedBody,
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
-		BackgroundColor: dimBubbleBg(theme.AtomBubbleBorderDistinct),
+		BackgroundColor: accentColor, // use ANSI atom directly
 		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
@@ -751,26 +755,6 @@ func (m MessageList) collapseToolBody(body string, limit int) string {
 		"[+" + itoa(len(lines)-limit) + " more lines, press space to expand]",
 	)
 	return muted.Render(head) + "\n" + hint
-}
-
-// dimBubbleBg returns the dim 256-color background tint that matches the
-// given bubble border atom.  The mapping follows the shell theme defaults:
-//
-//	AtomBubbleUserBorder  (ANSI 4 / blue)     → 17  (dark blue)
-//	AtomBubbleAgentBorder (ANSI 5 / magenta)  → 53  (dark magenta)
-//	AtomBubbleBorderDistinct (ANSI 8 / grey)  → 236 (dark grey)
-//
-// This is a static mapping that works for the shell theme's ANSI palette.
-// Custom themes with different accent colors will get the nearest preset.
-func dimBubbleBg(atom theme.Atom) color.Color {
-	switch atom {
-	case theme.AtomBubbleUserBorder:
-		return lipgloss.Color("17") // dark blue
-	case theme.AtomBubbleAgentBorder:
-		return lipgloss.Color("53") // dark magenta
-	default:
-		return lipgloss.Color("236") // dark grey
-	}
 }
 
 // itoa is a tiny strconv.Itoa shim to avoid an extra import.

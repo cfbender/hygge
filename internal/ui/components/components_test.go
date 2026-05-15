@@ -205,7 +205,8 @@ func TestThinkingTruncation_ExactlyAtMaxNoIndicator(t *testing.T) {
 	}
 }
 
-// TestBubbleTail_UserBubble verifies user (right-aligned) bubbles have the ◢ tail.
+// TestBubbleTail_UserBubble verifies user bubbles do NOT emit tail glyphs.
+// Tails were dropped in the Phase 5 fix: they never rendered cleanly.
 func TestBubbleTail_UserBubble(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
@@ -217,12 +218,13 @@ func TestBubbleTail_UserBubble(t *testing.T) {
 	}
 	out := ml.View()
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "◢") {
-		t.Errorf("user bubble must contain ◢ tail; got:\n%s", plain)
+	if strings.Contains(plain, "◢") || strings.Contains(plain, "◣") {
+		t.Errorf("user bubble must NOT contain tail glyphs after Phase 5 fix; got:\n%s", plain)
 	}
 }
 
-// TestBubbleTail_AssistantBubble verifies assistant (left-aligned) bubbles have the ◣ tail.
+// TestBubbleTail_AssistantBubble verifies assistant bubbles do NOT emit tail glyphs.
+// Tails were dropped in the Phase 5 fix: they never rendered cleanly.
 func TestBubbleTail_AssistantBubble(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
@@ -234,8 +236,8 @@ func TestBubbleTail_AssistantBubble(t *testing.T) {
 	}
 	out := ml.View()
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "◣") {
-		t.Errorf("assistant bubble must contain ◣ tail; got:\n%s", plain)
+	if strings.Contains(plain, "◢") || strings.Contains(plain, "◣") {
+		t.Errorf("assistant bubble must NOT contain tail glyphs after Phase 5 fix; got:\n%s", plain)
 	}
 }
 

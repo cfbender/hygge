@@ -12,9 +12,10 @@
 //   - Header row with left and right labels.
 //   - Optional body-height cap with truncation indicator.
 //   - Left or right alignment within a parent width budget.
-//   - Phase 4: speech-bubble tail decorations (ShowTail).
-//   - AgentColor seam: pass AccentColor directly; per-agent theming is a
-//     later slice.  Nil value falls back to theme.AtomBubbleBorder.
+//   - ShowTail field retained for forward-compatibility but never set to true.
+//   - BackgroundColor: caller passes the ANSI accent atom directly; the
+//     terminal renders the user's actual palette color.  Border uses a
+//     saturation-boosted variant (bright ANSI 8–15 for base ANSI 0–7).
 package bubble
 
 import (
@@ -98,18 +99,16 @@ type Bubble struct {
 	// replaced by a "… +K more" indicator in muted color.
 	MaxBodyHeight int
 
-	// ShowTail, when true, appends a single decorative tail glyph below the
-	// bubble on its own line.  The tail is aligned to match the bubble's
-	// Alignment: bottom-right (◢) for AlignRight, bottom-left (◣) for AlignLeft.
-	// Only user and assistant bubbles set this to true; tool/subagent bubbles
-	// leave it false.
+	// ShowTail is retained for forward-compatibility but is not wired to true
+	// anywhere.  Leaving it false means no tail glyphs are emitted.
 	ShowTail bool
 
-	// BackgroundColor is the optional dim background tint for the bubble
-	// interior (header + separator + body).  When nil the terminal's default
-	// background is used.  The caller (messagelist) sets this to a dim
-	// 256-color shade that matches the bubble's accent color.
-	// The border lines are NOT tinted — only the inner content is filled.
+	// BackgroundColor is the background tint for the bubble interior.
+	// The caller passes the ANSI accent atom directly (e.g. lipgloss.Color("4"))
+	// so the terminal renders the user's actual palette color.  When nil the
+	// terminal's default background is used.
+	// Each inner line is padded to innerWidth and filled with this color so the
+	// bubble is a uniform rectangle.
 	BackgroundColor color.Color
 }
 
@@ -135,14 +134,15 @@ func (b Bubble) View() string {
 		bubbleW = width
 	}
 
-	accentColor := b.resolveAccentColor()
-	borderStyle := b.buildBorderStyle(accentColor, bubbleW)
-
 	// Inner content width = bubble width minus 2 border columns.
 	innerW := bubbleW - 2
 	if innerW < 1 {
 		innerW = 1
 	}
+
+	accentColor := b.resolveAccentColor()
+	borderColor := theme.SaturationBoost(accentColor)
+	borderStyle := b.buildBorderStyle(borderColor, bubbleW)
 
 	// Build header line if either side is non-empty.
 	header := ""
@@ -150,44 +150,43 @@ func (b Bubble) View() string {
 		header = b.renderHeader(innerW, accentColor)
 	}
 
-	// Build body, applying optional height cap.
+	// Build body with optional height cap.
 	body := b.renderBody()
 
-	// Compose inner content.
-	var inner string
-	if header != "" {
-		sep := b.renderSeparator(innerW, accentColor)
-		inner = header + "\n" + sep + "\n" + body
-	} else {
-		inner = body
-	}
+	// Compose inner lines, applying per-line width padding and bg fill.
+	// This ensures every line of the bubble is exactly innerW cells wide
+	// so the rendered rectangle is uniform.
+	bg := b.BackgroundColor
+	inner := b.composeInner(header, body, innerW, bg, accentColor)
 
-	// Apply dim background tint to the inner content only (not the border).
-	if bg := b.dimBackground(); bg != nil {
-		bgStyle := lipgloss.NewStyle().Background(bg)
-		inner = bgStyle.Render(inner)
-	}
-
-	// Apply the border.
+	// Apply the border — do NOT set Width on the border style; the inner
+	// content is already padded to innerW per-line, so the border wraps it
+	// without reflowing.
 	composed := borderStyle.Render(inner)
 
-	// Pad to align within Width.
-	composedW := lipgloss.Width(composed)
+	// The actual rendered bubble width (should equal bubbleW after border).
+	composedW := lipgloss.Width(strings.SplitN(composed, "\n", 2)[0])
 	pad := width - composedW
 	if pad < 0 {
 		pad = 0
 	}
 
-	var result string
-	if b.Alignment == AlignRight {
-		// Right-align: leading whitespace on the left.
-		result = strings.Repeat(" ", pad) + composed
-	} else {
-		// Left-align: trailing whitespace on the right.
-		result = composed + strings.Repeat(" ", pad)
+	// Pad EACH LINE so that every row of the output occupies exactly `width`
+	// terminal columns.  Appending spaces to the whole multi-line string only
+	// pads the last line, leaving interior lines shorter than `width`.
+	composedLines := strings.Split(composed, "\n")
+	paddedLines := make([]string, len(composedLines))
+	for i, line := range composedLines {
+		if b.Alignment == AlignRight {
+			paddedLines[i] = strings.Repeat(" ", pad) + line
+		} else {
+			paddedLines[i] = line + strings.Repeat(" ", pad)
+		}
 	}
+	result := strings.Join(paddedLines, "\n")
 
-	// Append tail line when requested.
+	// ShowTail is never set to true; this branch is dead code but kept so the
+	// struct field is exercised and its test still compiles.
 	if b.ShowTail {
 		tail := b.renderTail(accentColor, pad, composedW, width)
 		result = result + "\n" + tail
@@ -196,19 +195,45 @@ func (b Bubble) View() string {
 	return result
 }
 
+// composeInner builds the full inner content string with each line padded to
+// innerW and filled with bg.  This is the fix for the alignment bug: applying
+// background to a multi-line string without per-line width padding caused
+// different lines to have different horizontal extents.
+func (b Bubble) composeInner(header, body string, innerW int, bg color.Color, accentColor color.Color) string {
+	// Collect logical segments.
+	var segments []string
+	if header != "" {
+		segments = append(segments, header)
+		sep := b.renderSeparator(innerW, accentColor)
+		segments = append(segments, sep)
+	}
+	if body != "" {
+		segments = append(segments, body)
+	}
+
+	// Flatten into lines.
+	var allLines []string
+	for _, seg := range segments {
+		allLines = append(allLines, strings.Split(seg, "\n")...)
+	}
+
+	// Per-line: apply Width(innerW) and optional Background so every line
+	// occupies exactly innerW cells.
+	lineStyle := lipgloss.NewStyle().Width(innerW)
+	if bg != nil {
+		lineStyle = lineStyle.Background(bg)
+	}
+
+	padded := make([]string, len(allLines))
+	for i, line := range allLines {
+		padded[i] = lineStyle.Render(line)
+	}
+	return strings.Join(padded, "\n")
+}
+
 // renderTail builds the decorative single-character tail line.
-//
-// Glyph choice (Phase 4):
-//
-//	◣ (U+25E3) — solid black lower-left triangle, used for left-aligned
-//	             (assistant) bubbles.  Points toward the bottom-left corner.
-//	◢ (U+25E2) — solid black lower-right triangle, used for right-aligned
-//	             (user) bubbles.  Points toward the bottom-right corner.
-//
-// These filled triangles look like natural speech-bubble pointer cusps when
-// placed directly below the rounded border corner.  They were chosen over
-// alternatives (╲/╱, └/┘, ◤/◥) because the filled shape is visually
-// heavier and easier to spot as a "tail" at terminal font sizes.
+// This function is retained so ShowTail=true still works in tests, but no
+// production call site sets ShowTail=true.
 func (b Bubble) renderTail(accentColor color.Color, pad, composedW, width int) string {
 	style := lipgloss.NewStyle()
 	if accentColor != nil {
@@ -218,7 +243,6 @@ func (b Bubble) renderTail(accentColor color.Color, pad, composedW, width int) s
 	}
 
 	if b.Alignment == AlignRight {
-		// ◢ at the bottom-right corner: leading spaces + glyph flush with bubble's right edge.
 		glyph := style.Render("◢")
 		glyphW := lipgloss.Width(glyph)
 		lineW := pad + composedW - glyphW
@@ -227,7 +251,6 @@ func (b Bubble) renderTail(accentColor color.Color, pad, composedW, width int) s
 		}
 		return strings.Repeat(" ", lineW) + glyph
 	}
-	// Left-aligned: ◣ at the bottom-left corner, then trailing pad to full width.
 	glyph := style.Render("◣")
 	glyphW := lipgloss.Width(glyph)
 	trailing := width - glyphW
@@ -253,22 +276,23 @@ func (b Bubble) resolveAccentColor() color.Color {
 	return nil
 }
 
-// buildBorderStyle returns a lipgloss.Style with the correct border type,
-// color, and width for this bubble.
-func (b Bubble) buildBorderStyle(accentColor color.Color, _ int) lipgloss.Style {
+// buildBorderStyle returns a lipgloss.Style with the correct border type and
+// color for this bubble.  The width argument is reserved for future use.
+func (b Bubble) buildBorderStyle(borderColor color.Color, _ int) lipgloss.Style {
 	style := lipgloss.NewStyle()
 	if b.SubStyle == StyleDistinct {
-		style = style.Border(lipgloss.NormalBorder())
-		if accentColor != nil {
-			distinctColor := b.resolveDistinctColor()
-			if distinctColor != nil {
-				style = style.BorderForeground(distinctColor)
-			}
+		style = style.Border(lipgloss.RoundedBorder())
+		distinctColor := b.resolveDistinctColor()
+		if distinctColor != nil {
+			boosted := theme.SaturationBoost(distinctColor)
+			style = style.BorderForeground(boosted)
+		} else if borderColor != nil {
+			style = style.BorderForeground(borderColor)
 		}
 	} else {
 		style = style.Border(lipgloss.RoundedBorder())
-		if accentColor != nil {
-			style = style.BorderForeground(accentColor)
+		if borderColor != nil {
+			style = style.BorderForeground(borderColor)
 		}
 	}
 	return style
@@ -353,13 +377,6 @@ func (b Bubble) renderMoreIndicator(overflow int) string {
 		style = b.Theme.Style(theme.AtomBubbleBodyMuted)
 	}
 	return style.Render(text)
-}
-
-// dimBackground returns the background color for the bubble interior.
-// When BackgroundColor is set, it is returned directly.
-// Otherwise nil is returned (no background override — terminal default).
-func (b Bubble) dimBackground() color.Color {
-	return b.BackgroundColor
 }
 
 // itoa converts a non-negative int to its decimal string representation.
