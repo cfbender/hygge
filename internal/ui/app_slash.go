@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
@@ -71,6 +72,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 		a.rendererW = 0
 	}
 
+	apiKeyProvider := strings.TrimSpace(out.Updates["apikey_provider"])
 	if out.OpenModal != "" {
 		switch out.OpenModal {
 		case command.ModalHelp:
@@ -105,6 +107,19 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 				Models:  a.catalogModelOptions(),
 			}
 			a.openOverlay(overlayModel)
+			a.updateInputFocus()
+		case command.ModalAPIKey:
+			if apiKeyProvider == "" {
+				apiKeyProvider = a.opts.ModelProvider
+			}
+			if apiKeyProvider == "" {
+				return a.setNotice("/apikey: no current provider")
+			}
+			if !a.knownProvider(apiKeyProvider) {
+				return a.setNotice("/apikey: unknown provider " + apiKeyProvider)
+			}
+			a.apiKeyModal = components.APIKeyModal{Theme: a.opts.Theme, Provider: apiKeyProvider, HasExisting: providerHasAPIKey(a.opts.Config, apiKeyProvider, a.opts.ModelProvider)}
+			a.openOverlay(overlayAPIKey)
 			a.updateInputFocus()
 		default:
 			slogWarnUnknownModal(out.OpenModal)
@@ -202,6 +217,9 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 			a.notice = fmt.Sprintf("cleared %d attachment(s)", n)
 		}
 	default:
+		if key == "apikey_provider" {
+			return nil
+		}
 		slogWarnUnknownUpdate(key, value)
 	}
 	return nil
@@ -239,6 +257,29 @@ func splitModelRef(ref string) (string, string, bool) {
 		return "", "", false
 	}
 	return ref[:idx], ref[idx+1:], true
+}
+
+func (a *App) knownProvider(providerName string) bool {
+	if providerName == a.opts.ModelProvider {
+		return true
+	}
+	if a.opts.Catalog == nil || a.opts.Catalog.Source() == nil {
+		return true
+	}
+	for _, p := range a.opts.Catalog.Source().Providers() {
+		if p == providerName {
+			return true
+		}
+	}
+	return false
+}
+
+func providerHasAPIKey(cfg *config.Config, providerName, currentProvider string) bool {
+	if cfg == nil || providerName != currentProvider {
+		return false
+	}
+	v, ok := cfg.Model.Options["api_key"].(string)
+	return ok && strings.TrimSpace(v) != ""
 }
 
 // setNotice raises a new ephemeral status line and schedules its

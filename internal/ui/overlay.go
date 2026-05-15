@@ -9,6 +9,7 @@ const (
 	overlaySessions       overlayKind = command.ModalSessions
 	overlayCompactConfirm overlayKind = command.ModalCompactConfirm
 	overlayModel          overlayKind = command.ModalModel
+	overlayAPIKey         overlayKind = command.ModalAPIKey
 	overlayPermission     overlayKind = "permission"
 )
 

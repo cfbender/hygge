@@ -127,7 +127,8 @@ type AppOptions struct {
 	SwitchModel func(ctx context.Context, providerName, modelName string) error
 	// SaveModel persists a successful provider/model runtime switch.  Save
 	// failures are surfaced to the UI without rolling back the runtime switch.
-	SaveModel func(ctx context.Context, providerName, modelName string) error
+	SaveModel  func(ctx context.Context, providerName, modelName string) error
+	SaveAPIKey func(ctx context.Context, providerName, apiKey string) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -278,6 +279,7 @@ type App struct {
 	// when activeModal == "sessions".
 	sessionsModal components.SessionsModal
 	modelModal    components.ModelModal
+	apiKeyModal   components.APIKeyModal
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -887,6 +889,13 @@ func (a *App) View() tea.View {
 			v.AltScreen = true
 			v.MouseMode = tea.MouseModeCellMotion
 			return v
+		case overlayAPIKey:
+			a.apiKeyModal.Width = width
+			a.apiKeyModal.Height = height
+			v := tea.NewView(a.apiKeyModal.View())
+			v.AltScreen = true
+			v.MouseMode = tea.MouseModeCellMotion
+			return v
 		}
 	}
 
@@ -1030,6 +1039,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.setNotice("model switched and saved: " + m.provider + "/" + m.model)
 
+	case apiKeySaveResult:
+		if m.err != nil {
+			a.openOverlay(overlayAPIKey)
+			return a, a.setNotice("API key save failed for " + m.provider + ": " + m.err.Error())
+		}
+		return a, a.setNotice("API key saved for " + m.provider)
+
 	case sendStarted:
 		a.busy = true
 		// Pick a random working placeholder so the user sees immediate feedback
@@ -1118,6 +1134,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case overlayModel:
 			return a.handleModelModalKey(k)
+		case overlayAPIKey:
+			return a.handleAPIKeyModalKey(k)
 		}
 	}
 
@@ -2639,10 +2657,48 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayCompactConfirm, overlayModel:
+		case overlayHelp, overlaySessions, overlayCompactConfirm, overlayModel, overlayAPIKey:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
+	}
+}
+
+type apiKeySaveResult struct {
+	provider string
+	err      error
+}
+
+func (a *App) handleAPIKeyModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.APIKeyKey{Name: k.String(), Runes: []rune(k.Text)}
+	if k.String() == "backspace" || k.String() == "delete" {
+		sk.Name = "backspace"
+	}
+	updated, msg := a.apiKeyModal.HandleKey(sk)
+	a.apiKeyModal = updated
+	switch m := msg.(type) {
+	case components.CloseAPIKeyModal:
+		a.closeOverlay(overlayAPIKey)
+	case components.SaveAPIKeyAction:
+		a.closeOverlay(overlayAPIKey)
+		return a, a.saveAPIKeyCmd(m.Provider, m.APIKey)
+	}
+	return a, nil
+}
+
+func (a *App) saveAPIKeyCmd(providerName, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		if a.opts.SaveAPIKey != nil {
+			if err := a.opts.SaveAPIKey(a.ctx, providerName, apiKey); err != nil {
+				return apiKeySaveResult{provider: providerName, err: err}
+			}
+		}
+		if a.opts.SwitchModel != nil && providerName == a.opts.ModelProvider && a.opts.ModelName != "" {
+			if err := a.opts.SwitchModel(a.ctx, a.opts.ModelProvider, a.opts.ModelName); err != nil {
+				return apiKeySaveResult{provider: providerName, err: err}
+			}
+		}
+		return apiKeySaveResult{provider: providerName}
 	}
 }
 

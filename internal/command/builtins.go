@@ -38,6 +38,7 @@ func builtinCommands() []Command {
 		&sessionsCmd{},
 		&forkCmd{},
 		&modelCmd{},
+		&apiKeyCmd{},
 		&reasonCmd{},
 		&versionCmd{},
 	}
@@ -333,6 +334,21 @@ func (*modelCmd) Execute(_ context.Context, _ App, input string) (Outcome, error
 		Updates: map[string]string{UpdateModel: ref},
 		Notice:  fmt.Sprintf("switching model to %s", ref),
 	}, nil
+}
+
+// --- /apikey --------------------------------------------------------------
+
+type apiKeyCmd struct{}
+
+func (*apiKeyCmd) Name() string        { return "apikey" }
+func (*apiKeyCmd) Description() string { return "Set the API key for a provider" }
+func (*apiKeyCmd) Source() string      { return "builtin" }
+func (*apiKeyCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "provider", Description: "provider id (defaults to current provider)", Required: false}}
+}
+func (*apiKeyCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	provider := strings.TrimSpace(input)
+	return Outcome{OpenModal: ModalAPIKey, Updates: map[string]string{"apikey_provider": provider}}, nil
 }
 
 // --- /reason --------------------------------------------------------------

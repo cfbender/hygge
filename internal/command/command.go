@@ -87,6 +87,7 @@ const (
 	ModalSessions       = "sessions"
 	ModalCompactConfirm = "compact-confirm"
 	ModalModel          = "model"
+	ModalAPIKey         = "apikey"
 )
 
 // App is the read-only handle commands use to inspect live TUI state.
