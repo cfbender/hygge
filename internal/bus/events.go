@@ -317,6 +317,31 @@ type CompactionFailed struct {
 	At time.Time
 }
 
+// QueueChanged fires when a session's prompt queue size changes —
+// on enqueue, dequeue, or clear.  Consumers (e.g. the UI) use this
+// to update placeholder text or queue-depth indicators.
+type QueueChanged struct {
+	// SessionID is the session whose queue changed.
+	SessionID string
+	// Count is the new queue depth (0 = queue is now empty).
+	Count int
+	// Prompts contains the first PartText of each queued send (len == Count).
+	// Truncated for display; may be empty strings when a send has no text part.
+	Prompts []string
+	// At is the wall-clock time the event was created.
+	At time.Time
+}
+
+// TurnCompleted fires after the agent loop finishes a full assistant turn
+// successfully (no error, no iteration-limit hit).  The UI and notification
+// layer use this to optionally alert the user that the assistant is ready.
+type TurnCompleted struct {
+	// SessionID is the session whose turn completed.
+	SessionID string
+	// At is the wall-clock time the turn finished.
+	At time.Time
+}
+
 // SubagentCompleted fires when a sub-agent finishes -- success,
 // iteration-limit abort, or hard failure.  Pairs 1:1 with
 // [SubagentStarted].
