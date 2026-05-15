@@ -23,6 +23,9 @@ import (
 // the iteration cap is hit.  The user message has already been appended
 // by the caller (Send).  modelName is sourced from the session row.
 func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*session.Message, error) {
+	if a.opts.FantasyModel != nil {
+		return a.runFantasyLoop(ctx, sessionID, modelName)
+	}
 	// Resolve a stable working directory once per loop.  The agent's
 	// configured Pwd wins; if absent we fall back to os.Getwd so the
 	// lazy tracker can still resolve relative paths.  The fallback

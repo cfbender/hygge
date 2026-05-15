@@ -71,6 +71,8 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/fantasy"
+
 	"github.com/cfbender/hygge/internal/agentsmd"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
@@ -106,6 +108,10 @@ type Options struct {
 	Store session.Store
 	// Provider is the model adapter.  Required.
 	Provider provider.Provider
+	// FantasyModel, when non-nil, is used by the active turn loop via
+	// fantasy.Agent.Stream. Provider remains required for name/model metadata
+	// and legacy test seams.
+	FantasyModel fantasy.LanguageModel
 	// Permission is the permission engine the tools call into.  Required.
 	Permission *permission.Engine
 	// Tools is the registry of callable tools.  Required.
