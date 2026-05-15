@@ -142,10 +142,7 @@ func (a *App) renderChatContent() string {
 
 // renderFooterContent produces the string content for the footer bar.
 func (a *App) renderFooterContent() string {
-	agentType := "General"
-	if name := a.ActiveModeName(); name != "" {
-		agentType = name
-	}
+	agentType := a.ActiveModeName()
 
 	return components.Footer{
 		Width:          a.layout.leftW,

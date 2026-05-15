@@ -68,8 +68,8 @@ type AppOptions struct {
 	StyleTheme string
 
 	// Modes is the ordered list of agent modes the user can cycle through
-	// with Tab. Each mode can override the base model, reasoning, and prompt.
-	// Empty means a single implicit mode using the base [model] config.
+	// with Tab. Each mode specifies a provider, model, and optional
+	// reasoning/prompt. Guaranteed non-empty after config loading.
 	Modes         []config.ModeConfig
 	SessionID     string // existing session to resume, or "" to create on first input
 	ProjectDir    string
@@ -218,7 +218,7 @@ type App struct {
 	styles *styles.Styles
 
 	// modeIndex is the index into opts.Modes for the currently active mode.
-	// -1 means no modes configured (single implicit mode).
+	// Always >= 0; Modes is guaranteed non-empty after config loading.
 	modeIndex int
 
 	// toast is the active notification shown in the top-left corner.
