@@ -25,6 +25,10 @@ type Footer struct {
 	// ModeIndicator is the pre-rendered mode selector string (e.g. "smart · rush · deep")
 	// with the active mode highlighted. Empty when only one mode exists.
 	ModeIndicator string
+	// Busy shows a spinner indicator on the left side of the footer.
+	Busy bool
+	// SpinnerView is the pre-rendered spinner frame (e.g. "⣾").
+	SpinnerView string
 }
 
 // View renders the footer.
@@ -43,8 +47,11 @@ func (f Footer) View() string {
 
 	muted := f.muted()
 
-	// Left side: mode indicator or agent type + model info.
+	// Left side: [spinner] + mode indicator or agent type.
 	var left []string
+	if f.Busy && f.SpinnerView != "" {
+		left = append(left, f.SpinnerView)
+	}
 	if f.ModeIndicator != "" {
 		left = append(left, f.ModeIndicator)
 	} else {

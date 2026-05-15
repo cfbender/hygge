@@ -173,6 +173,8 @@ func (a *App) renderFooterContent() string {
 		Provider:       displayProviderName(a.opts.ModelProvider),
 		ReasoningLevel: a.opts.Reasoning.Effort,
 		ModeIndicator:  a.formatModeIndicator(),
+		Busy:           a.busy,
+		SpinnerView:    a.spinner.View(),
 	}.View()
 }
 
