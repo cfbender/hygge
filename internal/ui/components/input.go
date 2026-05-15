@@ -154,5 +154,5 @@ func (i *Input) Value() string { return i.Textarea.Value() }
 func (i *Input) Reset() { i.Textarea.Reset() }
 
 func randomPlaceholder(pool []string) string {
-	return pool[rand.IntN(len(pool))]
+	return pool[rand.IntN(len(pool))] //nolint:gosec // cosmetic placeholder, not security-sensitive
 }

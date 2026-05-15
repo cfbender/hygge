@@ -97,15 +97,6 @@ func (a *App) activeModeColor() color.Color {
 	return lipgloss.Color(m.Color)
 }
 
-// modeNames returns all mode names for display.
-func (a *App) modeNames() []string {
-	names := make([]string, len(a.opts.Modes))
-	for i, m := range a.opts.Modes {
-		names[i] = m.Name
-	}
-	return names
-}
-
 // formatModeIndicator returns a string like "smart · rush · deep" with the
 // active mode highlighted.
 func (a *App) formatModeIndicator() string {

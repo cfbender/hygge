@@ -912,11 +912,11 @@ func ColorForSubagentType(typeName string) color.Color {
 		"#7EC8E3", // light blue
 		"#C991E1", // lavender
 	}
-	h := uint32(0)
+	var h uint32
 	for _, c := range typeName {
-		h = h*31 + uint32(c)
+		h = h*31 + uint32(c) //nolint:gosec // overflow is intentional for hash distribution
 	}
-	return lipgloss.Color(palette[h%uint32(len(palette))])
+	return lipgloss.Color(palette[h%uint32(len(palette))]) //nolint:gosec // len(palette) is a small constant
 }
 
 func (m MessageList) bubbleBackgroundColor() color.Color {

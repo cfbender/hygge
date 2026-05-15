@@ -44,6 +44,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cfbender/hygge/internal/session"
 
@@ -72,6 +73,10 @@ type Store struct {
 // Compile-time check: *Store satisfies session.Store.
 var _ session.Store = (*Store)(nil)
 
+// memDBCounter ensures each in-memory DB gets a unique name so
+// parallel tests don't share schema state.
+var memDBCounter atomic.Int64
+
 // Open opens (or creates) a SQLite database at path, applies the connection
 // PRAGMAs, and runs any pending migrations.  Pass ":memory:" for an
 // in-memory database.
@@ -85,10 +90,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	dsn := path
 	// For in-memory DBs, force a single shared connection so all
 	// statements see the same schema.  Without this, sql.DB's pool can
-	// spin up separate :memory: databases per connection.
+	// spin up separate :memory: databases per connection.  Each call
+	// gets a unique name so parallel tests don't collide.
 	isMemory := path == ":memory:"
 	if isMemory {
-		dsn = "file::memory:?cache=shared"
+		dsn = fmt.Sprintf("file:memdb_%d?mode=memory&cache=shared", memDBCounter.Add(1))
 	}
 
 	db, err := sql.Open("sqlite", dsn)

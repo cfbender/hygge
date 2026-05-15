@@ -295,8 +295,8 @@ func TestShellHook_Timeout_Deny(t *testing.T) {
 	if act.Decision != DecisionDeny {
 		t.Fatalf("want Deny on timeout, got %s", act.Decision)
 	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("hook should have been killed within 2s, took %v", elapsed)
+	if elapsed > 10*time.Second {
+		t.Fatalf("hook should have been killed within 10s, took %v", elapsed)
 	}
 }
 

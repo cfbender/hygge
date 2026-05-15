@@ -218,7 +218,7 @@ func (c *codexRewriter) Do(req *http.Request) (*http.Response, error) {
 		// array. Extract it and promote to instructions.
 		if req.Body != nil {
 			bodyBytes, err := io.ReadAll(req.Body)
-			req.Body.Close()
+			_ = req.Body.Close()
 			if err == nil {
 				bodyBytes = codexPromoteInstructions(bodyBytes)
 				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -226,7 +226,7 @@ func (c *codexRewriter) Do(req *http.Request) (*http.Response, error) {
 			}
 		}
 	}
-	return c.inner.Do(req)
+	return c.inner.Do(req) //nolint:gosec // URL is rewritten to a known constant (codexAPIEndpoint)
 }
 
 // codexPromoteInstructions extracts system/developer messages from the input

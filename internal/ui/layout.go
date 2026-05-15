@@ -14,9 +14,7 @@ type uiLayout struct {
 	area image.Rectangle
 
 	// Main content regions.
-	header  image.Rectangle
 	chat    image.Rectangle
-	pills   image.Rectangle
 	editor  image.Rectangle
 	footer  image.Rectangle
 	sidebar image.Rectangle
