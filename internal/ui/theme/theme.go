@@ -64,6 +64,14 @@ const (
 	AtomBubbleHeader         Atom = "bubble.header"          // bubble header accent (matches accent)
 	AtomBubbleHeaderMuted    Atom = "bubble.header.muted"    // bubble right-side header muted text
 	AtomBubbleBodyMuted      Atom = "bubble.body.muted"      // muted body text (thinking in Phase 2)
+
+	// Phase 5: distinct border colors for user vs agent bubbles.
+	// AtomBubbleUserBorder is the border/accent for user (right-aligned) bubbles.
+	// AtomBubbleAgentBorder is the border/accent for assistant (left-aligned) bubbles.
+	// Both are seams for per-agent-mode customisation; AtomBubbleAgentBorder
+	// will be overridden per agent session once per-agent theming lands.
+	AtomBubbleUserBorder  Atom = "bubble.user.border"  // user bubble border (default: blue / ANSI 4)
+	AtomBubbleAgentBorder Atom = "bubble.agent.border" // agent bubble border (default: magenta / ANSI 5)
 )
 
 // allAtoms is the stable, ordered list of style atoms.
@@ -88,6 +96,9 @@ var allAtoms = []Atom{
 	AtomBubbleHeader,
 	AtomBubbleHeaderMuted,
 	AtomBubbleBodyMuted,
+	// Phase 5: distinct user vs agent border colors.
+	AtomBubbleUserBorder,
+	AtomBubbleAgentBorder,
 }
 
 // AllAtoms returns the locked list of v0.1 style atoms in stable order.

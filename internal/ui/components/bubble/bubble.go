@@ -104,6 +104,13 @@ type Bubble struct {
 	// Only user and assistant bubbles set this to true; tool/subagent bubbles
 	// leave it false.
 	ShowTail bool
+
+	// BackgroundColor is the optional dim background tint for the bubble
+	// interior (header + separator + body).  When nil the terminal's default
+	// background is used.  The caller (messagelist) sets this to a dim
+	// 256-color shade that matches the bubble's accent color.
+	// The border lines are NOT tinted — only the inner content is filled.
+	BackgroundColor color.Color
 }
 
 // View renders the bubble and returns the composed string.
@@ -153,6 +160,12 @@ func (b Bubble) View() string {
 		inner = header + "\n" + sep + "\n" + body
 	} else {
 		inner = body
+	}
+
+	// Apply dim background tint to the inner content only (not the border).
+	if bg := b.dimBackground(); bg != nil {
+		bgStyle := lipgloss.NewStyle().Background(bg)
+		inner = bgStyle.Render(inner)
 	}
 
 	// Apply the border.
@@ -340,6 +353,13 @@ func (b Bubble) renderMoreIndicator(overflow int) string {
 		style = b.Theme.Style(theme.AtomBubbleBodyMuted)
 	}
 	return style.Render(text)
+}
+
+// dimBackground returns the background color for the bubble interior.
+// When BackgroundColor is set, it is returned directly.
+// Otherwise nil is returned (no background override — terminal default).
+func (b Bubble) dimBackground() color.Color {
+	return b.BackgroundColor
 }
 
 // itoa converts a non-negative int to its decimal string representation.
