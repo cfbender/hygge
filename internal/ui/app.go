@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,17 @@ import (
 	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
+
+// workingPlaceholders is the pool from which a random placeholder is drawn
+// while the agent is processing a turn.  Shown in the empty textarea so the
+// user sees immediate feedback that input is blocked.
+var workingPlaceholders = []string{
+	"Thinking…",
+	"Working…",
+	"Processing…",
+	"Computing…",
+	"Reasoning…",
+}
 
 // AppOptions configures the App.
 type AppOptions struct {
@@ -893,11 +905,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendStarted:
 		a.busy = true
+		// Pick a random working placeholder so the user sees immediate feedback
+		// that their message is being processed, even before the first token
+		// arrives from the provider.
+		a.input.WorkingPlaceholder = workingPlaceholders[rand.IntN(len(workingPlaceholders))] //nolint:gosec
+		a.input.SetBusy(true)
 		return a, nil
 
 	case sendCompleted:
 		a.busy = false
 		a.inflightCancel = nil
+		a.input.SetBusy(false)
 		if m.Err != nil && !errors.Is(m.Err, context.Canceled) {
 			// Surface the failure so the user has something to react to;
 			// silently dropping errors leaves the UI looking dead.
