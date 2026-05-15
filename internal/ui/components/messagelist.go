@@ -157,6 +157,10 @@ type MessageList struct {
 	// nested SubagentBlocks.  Zero means time.Now (production
 	// path); tests override it for deterministic output.
 	Now time.Time
+
+	// HoverSubagentID is the subagent currently under the mouse cursor.
+	// When set, that subagent's bubble renders with highlight styling.
+	HoverSubagentID string
 }
 
 // now returns the reference time for relative timestamps.
@@ -277,36 +281,86 @@ func (m MessageList) truncateThinking(thinking string) string {
 	return strings.Join(visible, "\n") + "\n" + indicatorStyle.Render(indicator)
 }
 
+// SubagentHitZone maps a range of content lines to a subagent session ID.
+type SubagentHitZone struct {
+	StartLine    int // inclusive, relative to message list content
+	EndLine      int // exclusive
+	SubSessionID string
+	partIndex    int // internal: index into parts array during construction
+}
+
 // View renders all messages joined with a blank line between them.
 // The pre-pass groups consecutive non-task RoleTool entries into a single
 // tool-calls bubble; task tool calls and all other roles render individually.
 func (m MessageList) View() string {
+	content, _ := m.ViewWithHitZones()
+	return content
+}
+
+// ViewWithHitZones renders all messages and returns both the rendered content
+// and the line ranges of clickable subagent bubbles.
+func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
 	if len(m.Messages) == 0 {
-		return m.renderEmptyState()
+		return m.renderEmptyState(), nil
 	}
 	collapseLimit := m.CollapseLines
 	if collapseLimit <= 0 {
 		collapseLimit = 8
 	}
 
-	// Pre-pass: build chunks.
 	chunks := m.buildChunks()
 
 	var parts []string
+	var zones []SubagentHitZone
+
 	for _, chunk := range chunks {
-		var rendered string
+		var text string
+		var subID string
 		switch chunk.kind {
 		case chunkToolGroup:
-			rendered = m.renderToolGroup(chunk.group)
+			text = m.renderToolGroup(chunk.group)
 		default:
-			rendered = m.renderOne(chunk.single, collapseLimit)
+			text = m.renderOne(chunk.single, collapseLimit)
+			if chunk.single.Role == RoleTool && chunk.single.ToolName == "subagent" && chunk.single.SubagentID != "" {
+				subID = chunk.single.SubagentID
+			}
 		}
-		if rendered == "" {
+		if text == "" {
 			continue
 		}
-		parts = append(parts, rendered)
+		parts = append(parts, text)
+		if subID != "" {
+			zones = append(zones, SubagentHitZone{
+				SubSessionID: subID,
+				// partIndex is filled below after joining
+				partIndex: len(parts) - 1,
+			})
+		}
 	}
-	return strings.Join(parts, "\n\n")
+
+	joined := strings.Join(parts, "\n\n")
+
+	// Walk the joined string to compute actual line offsets for each zone.
+	// Split into lines and find each part boundary.
+	if len(zones) > 0 {
+		// Build a cumulative line offset table for each part.
+		line := 0
+		for i, part := range parts {
+			partLines := strings.Count(part, "\n") + 1
+			for zi := range zones {
+				if zones[zi].partIndex == i {
+					zones[zi].StartLine = line
+					zones[zi].EndLine = line + partLines
+				}
+			}
+			line += partLines
+			if i < len(parts)-1 {
+				line++ // "\n\n" separator = one blank line
+			}
+		}
+	}
+
+	return joined, zones
 }
 
 // buildChunks walks m.Messages and produces a slice of renderChunks.
@@ -367,7 +421,7 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	// distinct bubble container.  No "▌tool: subagent" gutter row.
 	if msg.Role == RoleTool && msg.ToolName == "subagent" && msg.SubagentID != "" {
 		if nested := m.nestedFor(msg); nested != "" {
-			return m.wrapSubagentBubble(nested)
+			return m.wrapSubagentBubble(nested, msg.SubagentID == m.HoverSubagentID)
 		}
 		// SubagentID set but no matching state yet (edge case during hydration):
 		// fall through to the normal gutter render so nothing is lost.
@@ -719,9 +773,8 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 }
 
 // wrapSubagentBubble wraps existing SubagentBlock content in a distinct side-bar bubble.
-// The bubble uses 80% width (same as user/assistant) with comfortable inner
-// padding (one blank line top + bottom, one cell horizontal).
-func (m MessageList) wrapSubagentBubble(body string) string {
+// When hovered is true, the accent bar brightens to indicate clickability.
+func (m MessageList) wrapSubagentBubble(body string, hovered bool) string {
 	width := m.Width
 	if width <= 0 {
 		width = 80
@@ -736,6 +789,16 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 		}
 	}
 
+	subStyle := bubble.StyleDistinct
+	if hovered {
+		// Switch from faint/distinct to normal style on hover and use
+		// a brighter accent to signal clickability.
+		subStyle = bubble.StyleNormal
+		if m.Styles != nil {
+			accentColor = m.Styles.WorkingLabelColor
+		}
+	}
+
 	b := bubble.Bubble{
 		Width:           width,
 		BubbleWidth:     bubbleW,
@@ -746,7 +809,7 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
 		BackgroundColor: m.bubbleBackgroundColor(),
-		SubStyle:        bubble.StyleDistinct,
+		SubStyle:        subStyle,
 	}
 	return b.View()
 }
@@ -789,11 +852,12 @@ func (m MessageList) nestedFor(msg UIMessage) string {
 		an = m.AnimFor[msg.SubagentID]
 	}
 	block := SubagentBlock{
-		State: state,
-		Width: m.Width,
-		Theme: m.Theme,
-		Now:   m.Now,
-		Anim:  an,
+		State:   state,
+		Width:   m.Width,
+		Theme:   m.Theme,
+		Now:     m.Now,
+		Anim:    an,
+		Hovered: msg.SubagentID == m.HoverSubagentID,
 	}
 	return block.View()
 }

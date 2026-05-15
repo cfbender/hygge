@@ -255,10 +255,14 @@ type App struct {
 	// messages change (append, stream delta, resize). This avoids re-rendering
 	// all messages on every frame — only the viewport scroll position changes.
 	msgCache      string
-	msgCacheValid bool
-	msgCacheW     int       // width at which cache was rendered
-	msgCacheLen   int       // message count at which cache was rendered
-	msgCacheTime  time.Time // time at which cache was rendered (for relative timestamps)
+	msgCacheValid    bool
+	msgCacheW        int       // width at which cache was rendered
+	msgCacheLen      int       // message count at which cache was rendered
+	msgCacheTime     time.Time // time at which cache was rendered (for relative timestamps)
+	subagentHitZones []components.SubagentHitZone
+
+	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
+	hoverSubagentID string
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -688,7 +692,7 @@ func (a *App) View() tea.View {
 
 	v := tea.NewView(canvas.Render())
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	v.MouseMode = tea.MouseModeAllMotion
 	if a.styles != nil {
 		v.BackgroundColor = a.styles.Background
 	}
@@ -915,13 +919,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if !a.anyOverlayOpen() && m.Button == tea.MouseLeft {
+			// Check for subagent bubble click before selection.
+			if id := a.subagentAtScreen(m.X, m.Y); id != "" {
+				a.clearSelection()
+				a.pushForeground(id)
+				return a, nil
+			}
 			a.handleMouseDown(m.X, m.Y)
 		}
 		return a, nil
 
 	case tea.MouseMotionMsg:
 		if !a.anyOverlayOpen() {
-			a.handleMouseMotion(m.X, m.Y)
+			// Track hover over subagent bubbles.
+			prev := a.hoverSubagentID
+			a.hoverSubagentID = a.subagentAtScreen(m.X, m.Y)
+			if a.hoverSubagentID != prev {
+				a.invalidateMsgCache()
+			}
+			// Skip text selection when hovering a subagent bubble.
+			if a.hoverSubagentID == "" {
+				a.handleMouseMotion(m.X, m.Y)
+			}
 		}
 		return a, nil
 
@@ -1678,6 +1697,58 @@ func (a *App) foregroundID() string {
 		return a.foregroundStack[n-1]
 	}
 	return a.opts.SessionID
+}
+
+// subagentAtScreen returns the subagent ID at the given screen coordinates,
+// accounting for the viewport offset, chat region position, and bubble width.
+// Returns "" if no subagent bubble is at that position.
+func (a *App) subagentAtScreen(screenX, screenY int) string {
+	if len(a.subagentHitZones) == 0 {
+		return ""
+	}
+
+	// Only register clicks within the left column's bubble area.
+	bubbleW := int(float64(a.layout.leftW) * 0.80)
+	if screenX > bubbleW {
+		return ""
+	}
+
+	// The left column content flow is:
+	//   header (headerHeight=1 row)
+	//   [breadcrumb + "\n" if present]  <- outside viewport
+	//   viewport content (chatH rows)
+	//   ...rest...
+	//
+	// The viewport content starts at screen row = headerHeight + breadcrumb rows.
+	// The breadcrumb is rendered above the viewport View() output in renderChatContent.
+	viewportTop := headerHeight
+	breadcrumbLines := 0
+	if !a.viewingSubagent() {
+		if segs := a.breadcrumbSegments(); len(segs) > 0 {
+			// Breadcrumb is one rendered line + "\n" separator = 2 screen rows.
+			breadcrumbLines = 2
+			viewportTop += breadcrumbLines
+		}
+	}
+
+	chatH := a.layout.chat.Dy()
+	viewportBottom := viewportTop + chatH - breadcrumbLines
+	if screenY < viewportTop || screenY >= viewportBottom {
+		return ""
+	}
+
+	// Content line = position within viewport + scroll offset.
+	contentLine := (screenY - viewportTop) + a.msgViewport.YOffset()
+	if contentLine < 0 {
+		return ""
+	}
+
+	for _, zone := range a.subagentHitZones {
+		if contentLine >= zone.StartLine && contentLine < zone.EndLine {
+			return zone.SubSessionID
+		}
+	}
+	return ""
 }
 
 // viewingSubagent reports whether the user is viewing a subagent's

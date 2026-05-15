@@ -100,11 +100,12 @@ func (s *SubagentState) IsRunning() bool {
 // while the state is still running.  Anim is the optional animation
 // component for the running state (nil renders a static placeholder).
 type SubagentBlock struct {
-	State *SubagentState
-	Width int
-	Theme *theme.Theme
-	Now   time.Time
-	Anim  *anim.Anim
+	State   *SubagentState
+	Width   int
+	Theme   *theme.Theme
+	Now     time.Time
+	Anim    *anim.Anim
+	Hovered bool
 }
 
 // View renders the compact block.  Returns the empty string when State is nil.
@@ -283,9 +284,16 @@ func (b SubagentBlock) headingStyle() lipgloss.Style {
 }
 
 // muted returns the muted style for gutter lines and subtitles.
+// When hovered, uses a brighter style to indicate clickability.
 func (b SubagentBlock) muted() lipgloss.Style {
 	if b.Theme == nil {
+		if b.Hovered {
+			return lipgloss.NewStyle()
+		}
 		return lipgloss.NewStyle().Faint(true)
+	}
+	if b.Hovered {
+		return b.Theme.Style(theme.AtomPrimary)
 	}
 	return b.Theme.Style(theme.AtomMuted)
 }
@@ -302,6 +310,9 @@ func (b SubagentBlock) errorStyle() lipgloss.Style {
 func (b SubagentBlock) keyStyle() lipgloss.Style {
 	if b.Theme == nil {
 		return lipgloss.NewStyle().Bold(true)
+	}
+	if b.Hovered {
+		return b.Theme.Style(theme.AtomPrimary).Bold(true)
 	}
 	return b.Theme.Style(theme.AtomMuted).Bold(true)
 }
