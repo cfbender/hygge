@@ -16,9 +16,9 @@
 //     directly; this wrapper is for new code that wants a narrower
 //     surface.
 //
-// Phase 2 will extend this package with a NewLanguageModel factory
-// (producing fantasy.LanguageModel values for each provider type) once
-// the provider adapters are migrated.
+// Phase 2 adds ResolveProviderModel in provider_factory.go, which constructs
+// fantasy.LanguageModel values while the existing provider stream adapters stay
+// in place for the Phase 3 turn-loop migration.
 //
 // # Boundaries
 //
