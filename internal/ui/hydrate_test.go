@@ -110,6 +110,21 @@ func TestHydrate_ResumePopulatesMessages(t *testing.T) {
 	}
 }
 
+func TestHydrate_ResumePopulatesTodoSummary(t *testing.T) {
+	t.Parallel()
+	app, st, _ := newTestAppWithStore(t, nil)
+	if _, err := st.ReplaceSessionTodos(t.Context(), app.opts.SessionID, []session.TodoItem{{Content: "running", Status: session.TodoInProgress}, {Content: "done", Status: session.TodoCompleted}}); err != nil {
+		t.Fatalf("ReplaceSessionTodos: %v", err)
+	}
+
+	app.todoIncomplete = 0
+	app.todoInProgress = 0
+	app.Init()
+	if app.todoIncomplete != 1 || app.todoInProgress != 1 {
+		t.Fatalf("todo state = incomplete %d in_progress %d, want 1 1", app.todoIncomplete, app.todoInProgress)
+	}
+}
+
 // TestHydrate_ResumeEmptySession verifies that an App resumed with a session
 // that has no messages is handled gracefully (empty message list, not error).
 func TestHydrate_ResumeEmptySession(t *testing.T) {
@@ -247,6 +262,36 @@ func TestHydrate_SwitchSessionPopulatesMessages(t *testing.T) {
 	}
 	if app.opts.SessionID != sess.ID {
 		t.Errorf("opts.SessionID = %q, want %q", app.opts.SessionID, sess.ID)
+	}
+}
+
+func TestHydrate_SwitchSessionPopulatesTodoSummary(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "hygge_test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sess, err := st.CreateSession(ctx, session.NewSession{ProjectDir: "/tmp/proj", Model: session.ModelRef{Provider: "anthropic", Name: "test-model"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := st.ReplaceSessionTodos(ctx, sess.ID, []session.TodoItem{{Content: "pending", Status: session.TodoPending}, {Content: "running", Status: session.TodoInProgress}, {Content: "cancelled", Status: session.TodoCancelled}}); err != nil {
+		t.Fatalf("ReplaceSessionTodos: %v", err)
+	}
+	b := bus.New()
+	app, err := New(AppOptions{Bus: b, Store: st, Theme: theme.ShellTheme(), ProjectDir: "/tmp/proj", ModelProvider: "anthropic", ModelName: "test-model", Now: func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close(); b.Close() })
+	app.todoIncomplete = 9
+	app.todoInProgress = 9
+
+	_ = app.applySwitchSession(sess.ID)
+	if app.todoIncomplete != 2 || app.todoInProgress != 1 {
+		t.Fatalf("todo state = incomplete %d in_progress %d, want 2 1", app.todoIncomplete, app.todoInProgress)
 	}
 }
 

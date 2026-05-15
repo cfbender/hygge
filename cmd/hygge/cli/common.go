@@ -439,7 +439,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// Build the tool registry now that the skill registry is in hand
 	// so the skill tool is registered when (and only when) skills are
 	// configured.
-	tools := tool.DefaultWith(tool.DefaultOptions{SkillRegistry: skillReg})
+	tools := tool.DefaultWith(tool.DefaultOptions{SkillRegistry: skillReg, TodoStore: stOpen})
 	slog.Debug("bootstrap phase", "phase", "tool_registry", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Sub-agents: the `task` tool dispatches isolated missions to a

@@ -1,11 +1,13 @@
 package tool
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
 
 	"github.com/cfbender/hygge/internal/provider"
+	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/skill"
 )
 
@@ -114,6 +116,10 @@ type DefaultOptions struct {
 	// include the "skill" tool wired to it.  When nil the skill tool is
 	// omitted; the model never sees it in the tool list.
 	SkillRegistry *skill.Registry
+	TodoStore     interface {
+		GetSessionTodos(ctx context.Context, sessionID string) ([]session.TodoItem, session.TodoSummary, error)
+		ReplaceSessionTodos(ctx context.Context, sessionID string, items []session.TodoItem) (session.TodoSummary, error)
+	}
 }
 
 // DefaultWith returns a Registry preloaded with the built-in tools, plus any
@@ -127,7 +133,7 @@ func DefaultWith(opts DefaultOptions) *Registry {
 	mustRegister(r, newBashTool())
 	mustRegister(r, newGrepTool())
 	mustRegister(r, newGlobTool())
-	mustRegister(r, newTodoTool(r.todos))
+	mustRegister(r, newTodoTool(r.todos, opts.TodoStore))
 	if opts.SkillRegistry != nil {
 		mustRegister(r, NewSkillTool(opts.SkillRegistry))
 	}
