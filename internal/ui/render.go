@@ -106,15 +106,17 @@ func (a *App) renderChatContent() string {
 	}
 
 	if needsRebuild {
-		a.msgCache = components.MessageList{
-			Width:     l.leftW,
-			Theme:     a.opts.Theme,
-			Styles:    a.styles,
-			Messages:  visibleMessages,
-			Subagents: a.subagents,
-			AnimFor:   a.subagentAnims,
-			Now:       now,
-		}.View()
+		ml := components.MessageList{
+			Width:           l.leftW,
+			Theme:           a.opts.Theme,
+			Styles:          a.styles,
+			Messages:        visibleMessages,
+			Subagents:       a.subagents,
+			AnimFor:         a.subagentAnims,
+			Now:             now,
+			HoverSubagentID: a.hoverSubagentID,
+		}
+		a.msgCache, a.subagentHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
 		a.msgCacheW = l.leftW
 		a.msgCacheLen = len(visibleMessages)
