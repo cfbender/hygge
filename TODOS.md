@@ -56,8 +56,11 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [ ] **Modified files: respect `.gitignore` and binary skips**
   `git diff --numstat` reports binaries as `-` (treated as 0/0); fine. But staged-only / ignored files might still surface if a tool writes them. Verify against `.gitignore`. Also: if running outside a git repo, the section silently empties — consider a fallback like raw mtime tracking.
 
-- [ ] **Sidebar session-title caching**
-  Today every `App.View()` calls `Store.GetSession` to resolve the session preview/slug. Same pattern as the breadcrumb. Cache on the App and invalidate on `bus.MessageAppended` / `SessionRenamed`.
+- [x] **Sidebar session-title caching** *(commit `b684fbb+1`)*
+  Cached on `App.sessionTitle`; populated in `Init`, `ensureSession`, `applySwitchSession`, and `bus.MessageAppended`. `View()` no longer calls `Store.GetSession`.
+
+- [ ] **Breadcrumb `Store.GetSession` call in `breadcrumbSegments()`**
+  `breadcrumbSegments()` still calls `Store.GetSession` synchronously per-segment on the render goroutine (same pattern as the old `sidebarSessionTitle`). Visible only at depth > 1 (sub-agent foreground). Cache it the same way — a `breadcrumbLabels map[string]string` field updated on SubagentStarted / SubagentCompleted events. Deferred to a follow-up slice.
 
 ## Animation / polish
 

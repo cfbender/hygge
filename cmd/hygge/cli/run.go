@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 
 	"github.com/cfbender/hygge/internal/state"
@@ -177,7 +178,18 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		defer logCloser()
 	}
 
-	prog := tea.NewProgram(app, tea.WithContext(ctx))
+	prog := tea.NewProgram(app,
+		tea.WithContext(ctx),
+		// Force TrueColor profile so lipgloss/v2 never sends an OSC 11
+		// background-color query to the terminal.  Without this, the
+		// auto-detect probe (\e]11;?\a) fires at startup and the response
+		// (\e]11;rgb:…\a) leaks into stdin, appearing as garbage text in
+		// the textarea.  TrueColor is the safest default for a modern
+		// terminal; users on older terminals will see colours downsampled
+		// by the renderer rather than by us.
+		// See: https://github.com/charmbracelet/lipgloss/issues/XXX (upstream v2 tracking issue)
+		tea.WithColorProfile(colorprofile.TrueColor),
+	)
 
 	// Translate SIGINT/SIGTERM into a clean Quit so deferred Close runs.
 	sigCh := make(chan os.Signal, 1)
