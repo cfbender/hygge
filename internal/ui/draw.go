@@ -36,8 +36,20 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	leftArea.Max.X = l.leftW
 	uv.NewStyledString(leftContent).Draw(scr, leftArea)
 
-	// Draw sidebar into the right column.
+	// Draw sidebar into the right column with its own background.
 	if l.sidebarW > 0 {
+		if a.styles != nil && a.styles.SidebarBg != nil {
+			bgCell := &uv.Cell{
+				Content: " ",
+				Style:   uv.Style{Bg: a.styles.SidebarBg},
+				Width:   1,
+			}
+			for y := l.sidebar.Min.Y; y < l.sidebar.Max.Y; y++ {
+				for x := l.sidebar.Min.X; x < l.sidebar.Max.X; x++ {
+					scr.SetCell(x, y, bgCell)
+				}
+			}
+		}
 		a.drawSidebar(scr, l.sidebar)
 	}
 
