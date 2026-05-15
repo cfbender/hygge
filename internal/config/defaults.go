@@ -41,5 +41,10 @@ func defaultConfig() map[string]any {
 		"session": map[string]any{
 			"resume_default": "new",
 		},
+		"notifications": map[string]any{
+			"enabled":        true,
+			"permission_ask": true,
+			"turn_complete":  false,
+		},
 	}
 }
