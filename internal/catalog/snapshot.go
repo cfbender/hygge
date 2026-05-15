@@ -1,26 +1,27 @@
 package catalog
 
 import (
-	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
-)
 
-//go:embed snapshot.json
-var embeddedSnapshot []byte
+	"charm.land/catwalk/pkg/embedded"
+)
 
 // Snapshot is the parsed, normalised in-memory and on-disk representation
 // of the catalog.  Providers maps provider id to model id to [Entry].
 //
 // FetchedAt is the time the snapshot was produced (network fetch time
-// for live data; build time for the embedded snapshot, which lands as
-// the zero time since we don't bake a timestamp into the file).
+// for live data; zero for the embedded snapshot).
+//
+// ETag is the HTTP ETag received from the catwalk server, forwarded as
+// If-None-Match on the next conditional refresh.  Empty for the embedded
+// snapshot and for disk snapshots written before ETag support was added.
 type Snapshot struct {
 	FetchedAt time.Time                   `json:"fetched_at"`
+	ETag      string                      `json:"etag,omitempty"`
 	Providers map[string]map[string]Entry `json:"providers"`
 }
 
@@ -31,25 +32,33 @@ type Snapshot struct {
 type snapshotFileFormat struct {
 	Version   int                         `json:"version"`
 	FetchedAt time.Time                   `json:"fetched_at"`
+	ETag      string                      `json:"etag,omitempty"`
 	Providers map[string]map[string]Entry `json:"providers"`
 }
 
-const snapshotFileVersion = 1
-
-// loadEmbeddedSnapshot parses the snapshot.json compiled into the
-// binary.  The embedded file uses the live models.dev wire format
-// (top-level provider keys, nested models map) — the same format the
-// HTTPFetcher consumes — so we parse it through the same path.
+// snapshotFileVersion is the current on-disk format version.
 //
-// Returns an error only if the embedded file itself is malformed,
-// which would be a build-time bug.
+// Version history:
+//
+//	1 — original format backed by models.dev JSON
+//	2 — catwalk-backed; incompatible field set (ETag added,
+//	    reasoning_levels / default_reasoning_effort added to Entry)
+const snapshotFileVersion = 2
+
+// loadEmbeddedSnapshot loads the catalog from the catwalk module's
+// built-in provider configs.  These are the same JSON files the catwalk
+// binary ships with, accessed via charm.land/catwalk/pkg/embedded.GetAll().
+//
+// Returns an error only if the embedded data itself is malformed, which
+// would be a build-time bug.
 func loadEmbeddedSnapshot() (*Snapshot, error) {
-	if len(embeddedSnapshot) == 0 {
-		return nil, errors.New("catalog: embedded snapshot is empty")
+	providers := embedded.GetAll()
+	if len(providers) == 0 {
+		return nil, errors.New("catalog: embedded provider list is empty")
 	}
-	snap, err := parseRawJSON(embeddedSnapshot)
-	if err != nil {
-		return nil, fmt.Errorf("catalog: parse embedded snapshot: %w", err)
+	snap := snapshotFromCatwalkProviders(providers, "")
+	if snap == nil || len(snap.Providers) == 0 {
+		return nil, errors.New("catalog: embedded snapshot produced no providers")
 	}
 	// FetchedAt stays zero so Loaded.Age reflects "ancient" and the
 	// background refresh fires on first run with network.
@@ -60,6 +69,9 @@ func loadEmbeddedSnapshot() (*Snapshot, error) {
 // os.ErrNotExist (wrapped) for missing files so callers can branch on
 // errors.Is; other errors signal corruption that the caller logs and
 // falls back from.
+//
+// Version-1 snapshots (models.dev format) are rejected; the caller
+// falls back to the embedded snapshot and a fresh network fetch.
 func readSnapshotFile(path string) (*Snapshot, error) {
 	if path == "" {
 		return nil, os.ErrNotExist
@@ -72,7 +84,7 @@ func readSnapshotFile(path string) (*Snapshot, error) {
 		return nil, errors.New("catalog: disk snapshot is empty")
 	}
 	var f snapshotFileFormat
-	if err := json.Unmarshal(data, &f); err != nil {
+	if err := decodeJSON(data, &f); err != nil {
 		return nil, fmt.Errorf("catalog: parse disk snapshot: %w", err)
 	}
 	if f.Version != snapshotFileVersion {
@@ -81,7 +93,7 @@ func readSnapshotFile(path string) (*Snapshot, error) {
 	if f.Providers == nil {
 		f.Providers = map[string]map[string]Entry{}
 	}
-	return &Snapshot{FetchedAt: f.FetchedAt, Providers: f.Providers}, nil
+	return &Snapshot{FetchedAt: f.FetchedAt, ETag: f.ETag, Providers: f.Providers}, nil
 }
 
 // writeSnapshotFile atomically writes the snapshot to disk using a
@@ -101,9 +113,10 @@ func writeSnapshotFile(path string, snap *Snapshot) error {
 	f := snapshotFileFormat{
 		Version:   snapshotFileVersion,
 		FetchedAt: snap.FetchedAt,
+		ETag:      snap.ETag,
 		Providers: snap.Providers,
 	}
-	data, err := json.MarshalIndent(f, "", "  ")
+	data, err := encodeJSONIndent(f)
 	if err != nil {
 		return fmt.Errorf("marshal snapshot: %w", err)
 	}

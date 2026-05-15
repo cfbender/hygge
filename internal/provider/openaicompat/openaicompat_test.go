@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
+
 	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -1017,14 +1019,17 @@ func TestAdapter_IsReasoningModel_CatalogHit(t *testing.T) {
 	// Build a catalog that says model "future-reason-1" is a
 	// reasoning model and "future-plain-1" is not.  Confirm both
 	// answers come from the catalog rather than the prefix matcher.
-	cat := buildFixtureCatalog(t, `{
-      "openai": {
-        "models": {
-          "future-reason-1": {"id": "future-reason-1", "reasoning": true},
-          "future-plain-1":  {"id": "future-plain-1"}
-        }
-      }
-    }`)
+	cat := buildFixtureCatalog(t, []catwalk.Provider{
+		{
+			ID:   "openai",
+			Name: "OpenAI",
+			Type: catwalk.TypeOpenAI,
+			Models: []catwalk.Model{
+				{ID: "future-reason-1", Name: "Future Reason 1", CanReason: true},
+				{ID: "future-plain-1", Name: "Future Plain 1", CanReason: false},
+			},
+		},
+	})
 
 	p := newCompat(t, Config{
 		Name:    "openai",
@@ -1044,9 +1049,16 @@ func TestAdapter_IsReasoningModel_CatalogHit(t *testing.T) {
 
 func TestAdapter_IsReasoningModel_CatalogMissFallsBackToPrefix(t *testing.T) {
 	t.Parallel()
-	// Empty catalog: no entries match.  The legacy prefix matcher
+	// Empty openai provider: no model entries match.  The legacy prefix matcher
 	// must still answer correctly for o-series ids.
-	cat := buildFixtureCatalog(t, `{"openai": {"models": {}}}`)
+	cat := buildFixtureCatalog(t, []catwalk.Provider{
+		{
+			ID:     "openai",
+			Name:   "OpenAI",
+			Type:   catwalk.TypeOpenAI,
+			Models: []catwalk.Model{},
+		},
+	})
 	p := newCompat(t, Config{
 		Name:    "openai",
 		BaseURL: "http://unused",
@@ -1082,14 +1094,24 @@ func TestAdapter_IsReasoningModel_NoCatalog_PrefixMatcher(t *testing.T) {
 	}
 }
 
-// buildFixtureCatalog spins up an httptest server that serves body, then
-// constructs a *catalog.Catalog refreshed against it.  Returned catalog
-// has the BackgroundRefresh disabled and is fully populated by the time
-// this helper returns.
-func buildFixtureCatalog(t *testing.T, body string) *catalog.Catalog {
+// buildFixtureCatalog spins up an httptest server that serves the given
+// catwalk.Provider slice as JSON at /v2/providers, then constructs a
+// *catalog.Catalog refreshed against it.  Returned catalog has
+// BackgroundRefresh disabled and is fully populated by the time this
+// helper returns.
+func buildFixtureCatalog(t *testing.T, providers []catwalk.Provider) *catalog.Catalog {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(body))
+	body, err := json.Marshal(providers) //nolint:gosec // G117: test fixture; no real credentials
+	if err != nil {
+		t.Fatalf("buildFixtureCatalog: marshal: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/providers" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
 	bg := false

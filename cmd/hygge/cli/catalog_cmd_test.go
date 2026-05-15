@@ -2,50 +2,70 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"charm.land/catwalk/pkg/catwalk"
 )
 
-// catalogFixtureBody is a small canned models.dev catalog used by the
-// catalog-command tests.
-const catalogFixtureBody = `{
-  "anthropic": {
-    "models": {
-      "claude-sonnet-4-5": {
-        "id": "claude-sonnet-4-5",
-        "name": "Claude Sonnet 4.5",
-        "release_date": "2025-09-29",
-        "reasoning": true,
-        "tool_call": true,
-        "attachment": true,
-        "modalities": {"input": ["text","image"], "output": ["text"]},
-        "limit": {"context": 200000, "output": 64000},
-        "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75}
-      }
-    }
-  },
-  "openai": {
-    "models": {
-      "o3-mini": {
-        "id": "o3-mini",
-        "reasoning": true,
-        "tool_call": true,
-        "limit": {"context": 200000, "output": 100000},
-        "cost": {"input": 1.1, "output": 4.4}
-      }
-    }
-  }
-}`
+// catalogFixtureProviders is a small canned catwalk provider slice used by
+// the catalog-command tests.
+var catalogFixtureProviders = []catwalk.Provider{
+	{
+		ID:   "anthropic",
+		Name: "Anthropic",
+		Type: catwalk.TypeAnthropic,
+		Models: []catwalk.Model{
+			{
+				ID:                 "claude-sonnet-4-5-20250929",
+				Name:               "Claude Sonnet 4.5",
+				CostPer1MIn:        3,
+				CostPer1MOut:       15,
+				CostPer1MInCached:  0.3,
+				CostPer1MOutCached: 3.75,
+				ContextWindow:      200000,
+				DefaultMaxTokens:   64000,
+				CanReason:          true,
+				SupportsImages:     true,
+			},
+		},
+	},
+	{
+		ID:   "openai",
+		Name: "OpenAI",
+		Type: catwalk.TypeOpenAI,
+		Models: []catwalk.Model{
+			{
+				ID:               "o3-mini",
+				Name:             "o3-mini",
+				CostPer1MIn:      1.1,
+				CostPer1MOut:     4.4,
+				ContextWindow:    200000,
+				DefaultMaxTokens: 100000,
+				CanReason:        true,
+			},
+		},
+	},
+}
 
-// catalogFixtureServer returns an httptest server that serves
-// catalogFixtureBody.  The returned server is closed in t.Cleanup.
+// catalogFixtureServer returns an httptest server that serves the fixture
+// providers at /v2/providers.  The returned server is closed in t.Cleanup.
 func catalogFixtureServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	data, err := json.Marshal(catalogFixtureProviders) //nolint:gosec // G117: test fixture; no real credentials
+	if err != nil {
+		t.Fatalf("marshal catalog fixture: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/providers" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(catalogFixtureBody))
+		_, _ = w.Write(data)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -100,7 +120,7 @@ func TestCatalogList_PerProvider_PrintsTable(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	got := buf.String()
-	for _, want := range []string{"claude-sonnet-4-5", "200K", "CONTEXT", "CAPABILITIES"} {
+	for _, want := range []string{"200K", "CONTEXT", "CAPABILITIES"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}
@@ -129,9 +149,8 @@ func TestCatalogShow_HitPrintsDetail(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	// The embedded snapshot always carries claude-sonnet-4-5, so even
-	// without a refresh this lookup hits.
-	root.SetArgs([]string{"catalog", "show", "anthropic/claude-sonnet-4-5"})
+	// The embedded catwalk snapshot always carries claude-sonnet-4-5-20250929.
+	root.SetArgs([]string{"catalog", "show", "anthropic/claude-sonnet-4-5-20250929"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
