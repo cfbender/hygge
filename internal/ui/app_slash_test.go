@@ -73,6 +73,82 @@ func TestSlashCommandModelOpensDialog(t *testing.T) {
 	}
 }
 
+func TestSlashCommandAPIKeyOpensDialogForCurrentProvider(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/apikey")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if top, ok := app.overlays.Top(); !ok || top != overlayAPIKey {
+		t.Fatalf("top overlay = %q, %v; want apikey", top, ok)
+	}
+	view := app.View().Content
+	if !strings.Contains(view, "Set API key") || !strings.Contains(view, "Provider: anthropic") {
+		t.Fatalf("api key dialog not rendered:\n%s", view)
+	}
+}
+
+func TestAPIKeyDialogMasksSavesAndRefreshesCurrentProvider(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	var saved, switched []string
+	app.opts.SaveAPIKey = func(_ context.Context, providerName, apiKey string) error {
+		saved = append(saved, providerName+":"+apiKey)
+		return nil
+	}
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+		switched = append(switched, providerName+"/"+modelName)
+		return nil
+	}
+	typeInto(app, "/apikey")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeInto(app, "sk-fake-dialog")
+	view := app.View().Content
+	if strings.Contains(view, "sk-fake-dialog") || !strings.Contains(view, "••••") {
+		t.Fatalf("api key input not masked:\n%s", view)
+	}
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected save cmd")
+	}
+	app.Update(cmd())
+	if got := strings.Join(saved, ","); got != "anthropic:sk-fake-dialog" {
+		t.Fatalf("saved = %q", got)
+	}
+	if got := strings.Join(switched, ","); got != "anthropic/claude-sonnet-4-5" {
+		t.Fatalf("switched = %q", got)
+	}
+	if strings.Contains(app.notice, "sk-fake-dialog") || app.notice != "API key saved for anthropic" {
+		t.Fatalf("notice = %q", app.notice)
+	}
+}
+
+func TestAPIKeyDialogCancelAndSaveFailure(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	app.opts.SaveAPIKey = func(_ context.Context, _, _ string) error { return errors.New("permission denied") }
+	typeInto(app, "/apikey openai")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if app.apiKeyModal.Provider != "openai" {
+		t.Fatalf("provider = %q", app.apiKeyModal.Provider)
+	}
+	typeInto(app, "sk-fake-dialog")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if app.overlays.Has(overlayAPIKey) {
+		t.Fatal("api key dialog should close on Esc")
+	}
+	typeInto(app, "/apikey openai")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeInto(app, "sk-fake-dialog")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected save cmd")
+	}
+	app.Update(cmd())
+	if !app.overlays.Has(overlayAPIKey) {
+		t.Fatal("api key dialog should reopen after save failure")
+	}
+	if strings.Contains(app.notice, "sk-fake-dialog") || !strings.Contains(app.notice, "permission denied") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+}
+
 func TestModelDialogFilterNarrowsList(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

@@ -7,6 +7,7 @@ import "testing"
 func TestBuiltinSetIsLocked(t *testing.T) {
 	t.Parallel()
 	want := []string{
+		"apikey",
 		"attach",
 		"attachments",
 		"clear",

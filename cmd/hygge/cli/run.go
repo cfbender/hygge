@@ -223,6 +223,21 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}
 			return err
 		},
+		SaveAPIKey: func(_ context.Context, providerName, apiKey string) error {
+			_, err := config.WriteProviderAPIKey(config.WriteProviderAPIKeyOptions{
+				HomeDir:       rt.StateOpts.HomeDir,
+				XDGConfigHome: rt.XDGConfigHome,
+				Pwd:           rt.Pwd,
+				Provenance:    rt.Provenance,
+			}, providerName, apiKey)
+			if err == nil && providerName == rt.Config.Model.Provider {
+				if rt.Config.Model.Options == nil {
+					rt.Config.Model.Options = map[string]any{}
+				}
+				rt.Config.Model.Options["api_key"] = apiKey
+			}
+			return err
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("cli: build ui app: %w", err)

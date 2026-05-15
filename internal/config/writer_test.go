@@ -58,6 +58,44 @@ command = "server"
 	}
 }
 
+func TestWriteProviderAPIKeyPreservesModelOptions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	input := `[model]
+provider = "openai"
+name = "gpt-5"
+
+[model.options]
+base_url = "https://example.invalid/v1"
+headers = { X-Test = "yes" }
+`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrote, err := WriteProviderAPIKey(WriteProviderAPIKeyOptions{Provenance: Provenance{"model.provider": {{File: path}}}}, "openai", "sk-fake-dialog")
+	if err != nil {
+		t.Fatalf("WriteProviderAPIKey: %v", err)
+	}
+	if wrote != path {
+		t.Fatalf("wrote %q, want %q", wrote, path)
+	}
+	m, err := loadTOMLFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := m["model"].(map[string]any)["options"].(map[string]any)
+	if options["api_key"] != "sk-fake-dialog" {
+		t.Fatalf("api_key = %#v", options["api_key"])
+	}
+	if options["base_url"] != "https://example.invalid/v1" {
+		t.Fatalf("base_url dropped: %#v", options)
+	}
+	if options["headers"].(map[string]any)["X-Test"] != "yes" {
+		t.Fatalf("headers dropped: %#v", options)
+	}
+}
+
 func TestWriteModelSelectionCreatesUserConfigWhenNoRealModelProvenance(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
