@@ -56,6 +56,9 @@ func applyTestOverrides(o bootstrapOptions) bootstrapOptions {
 	if o.ProviderFactory == nil {
 		o.ProviderFactory = testOverrides.ProviderFactory
 	}
+	if o.FantasyModel == nil {
+		o.FantasyModel = testOverrides.FantasyModel
+	}
 	if o.Now == nil {
 		o.Now = testOverrides.Now
 	}

@@ -136,8 +136,13 @@ type MessageList struct {
 	Width         int
 	CollapseLines int // 0 → 8 (tool result collapse threshold)
 	Theme         *theme.Theme
-	Messages      []UIMessage
-	Subagents     map[string]*SubagentState
+	// SurfaceBackground optionally overrides theme.AtomBubbleBg for runtime-
+	// detected shell surfaces. Set UseSurfaceBackground to force the override,
+	// including a nil/transparent value while terminal colors are still unknown.
+	SurfaceBackground    color.Color
+	UseSurfaceBackground bool
+	Messages             []UIMessage
+	Subagents            map[string]*SubagentState
 	// AnimFor, when non-nil, maps SubSessionID to the running Anim for
 	// that sub-agent.  Passed through to SubagentBlock so the running
 	// state can display the animated spinner.
@@ -385,15 +390,16 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignRight,
-		HeaderLeft:  "",
-		HeaderRight: headerRight,
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleNormal,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignRight,
+		HeaderLeft:      "",
+		HeaderRight:     headerRight,
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: m.bubbleBackgroundColor(),
+		SubStyle:        bubble.StyleNormal,
 	}
 	return b.View()
 }
@@ -487,15 +493,16 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignLeft,
-		HeaderLeft:  agentType,
-		HeaderRight: headerRight,
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleNormal,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignLeft,
+		HeaderLeft:      agentType,
+		HeaderRight:     headerRight,
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: m.bubbleBackgroundColor(),
+		SubStyle:        bubble.StyleNormal,
 	}
 	return b.View()
 }
@@ -568,7 +575,7 @@ func toolStatusText(s ToolStatus, t *theme.Theme) string {
 }
 
 // renderToolGroup renders a group of consecutive non-task tool calls as a
-// single distinct bordered bubble.  Each tool call occupies one body row:
+// single distinct side-bar bubble. Each tool call occupies one body row:
 //
 //	· {ToolName} {Target}   [status text]
 func (m MessageList) renderToolGroup(items []UIMessage) string {
@@ -582,8 +589,8 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 	bubbleW := m.toolBubbleWidth(width)
 
-	// Inner width = bubble width minus 2 border columns.
-	innerW := bubbleW - 2
+	// Content width = bubble width minus the side bar and horizontal padding.
+	innerW := bubbleW - 3
 	if innerW < 1 {
 		innerW = 1
 	}
@@ -655,22 +662,23 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignLeft,
-		HeaderLeft:  "",
-		HeaderRight: "",
-		Body:        body,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleDistinct,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignLeft,
+		HeaderLeft:      "",
+		HeaderRight:     "",
+		Body:            body,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: m.bubbleBackgroundColor(),
+		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
 }
 
-// wrapSubagentBubble wraps existing SubagentBlock content in a distinct bubble.
-// The bubble uses 80% width (same as user/assistant) with rounded corners and
-// comfortable inner padding (one blank line top + bottom, one cell horizontal).
+// wrapSubagentBubble wraps existing SubagentBlock content in a distinct side-bar bubble.
+// The bubble uses 80% width (same as user/assistant) with comfortable inner
+// padding (one blank line top + bottom, one cell horizontal).
 func (m MessageList) wrapSubagentBubble(body string) string {
 	width := m.Width
 	if width <= 0 {
@@ -691,15 +699,16 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 	paddedBody := "\n" + body + "\n"
 
 	b := bubble.Bubble{
-		Width:       width,
-		BubbleWidth: bubbleW,
-		Alignment:   bubble.AlignLeft,
-		HeaderLeft:  "",
-		HeaderRight: "",
-		Body:        paddedBody,
-		Theme:       m.Theme,
-		AccentColor: accentColor,
-		SubStyle:    bubble.StyleDistinct,
+		Width:           width,
+		BubbleWidth:     bubbleW,
+		Alignment:       bubble.AlignLeft,
+		HeaderLeft:      "",
+		HeaderRight:     "",
+		Body:            paddedBody,
+		Theme:           m.Theme,
+		AccentColor:     accentColor,
+		BackgroundColor: m.bubbleBackgroundColor(),
+		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
 }
@@ -765,6 +774,20 @@ func (m MessageList) gutter(msg UIMessage) string {
 	}
 	style := m.roleStyle(msg.Role)
 	return style.Render(label)
+}
+
+func (m MessageList) bubbleBackgroundColor() color.Color {
+	if m.UseSurfaceBackground {
+		return m.SurfaceBackground
+	}
+	if m.Theme == nil {
+		return nil
+	}
+	bg := m.Theme.Style(theme.AtomBubbleBg).GetBackground()
+	if _, isNoColor := bg.(lipgloss.NoColor); bg == nil || isNoColor {
+		return nil
+	}
+	return bg
 }
 
 // roleStyle returns the lipgloss style for a role gutter.

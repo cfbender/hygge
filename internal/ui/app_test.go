@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"image/color"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,27 @@ import (
 // the model directly via Update and Handle; no goroutine on the bus channel
 // is needed because the bridge goroutines started by New also work for tests
 // (they subscribe to a real bus).  Close is called in t.Cleanup.
+func TestBlendTerminalSurfaceUsesDimHoverBlend(t *testing.T) {
+	t.Parallel()
+	got := blendTerminalSurface(color.RGBA{R: 10, G: 20, B: 30, A: 255}, color.RGBA{R: 110, G: 120, B: 130, A: 255})
+	r, g, b, _ := got.RGBA()
+	if uint8(r>>8) != 13 || uint8(g>>8) != 23 || uint8(b>>8) != 33 {
+		t.Fatalf("blendTerminalSurface = #%02X%02X%02X, want #0D1721", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+	}
+}
+
+func TestRuntimeSurfaceBackground_ShellPendingForcesTransparentOverride(t *testing.T) {
+	t.Parallel()
+	app := &App{opts: AppOptions{Theme: theme.ShellTheme()}}
+	bg, use := app.runtimeSurfaceBackground()
+	if !use {
+		t.Fatal("shell theme should force runtime surface override while terminal color is pending")
+	}
+	if bg != nil {
+		t.Fatalf("pending terminal background should use transparent surface, got %v", bg)
+	}
+}
+
 func newTestApp(t *testing.T) (*App, *bus.Bus) {
 	t.Helper()
 	b := bus.New()
@@ -418,15 +440,15 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	if app.renderer == r1 {
 		t.Errorf("expected new renderer instance after resize")
 	}
-	if app.rendererW != 46 {
-		t.Errorf("renderer width = %d, want 46 (bubble inner: int(60*0.80)-2)", app.rendererW)
+	if app.rendererW != 45 {
+		t.Errorf("renderer width = %d, want 45 (bubble content: int(60*0.80)-3)", app.rendererW)
 	}
 }
 
 // TestRendererWidthRespectsSidebar verifies that the glamour renderer is built
 // at the bubble inner width, not the full terminal or left-column width.
 // On a 250-column terminal with a 32-column sidebar, leftW = 218, and the
-// bubble inner width = int(218*0.80)-2 = 172.  This regression test covers
+// bubble content width = int(218*0.80)-3 = 171.  This regression test covers
 // the bug where ensureRenderer used a.width (or leftW) instead of the bubble
 // inner width, causing markdown lines to overflow the bubble and expand it
 // to ~97% of the left column.
@@ -435,11 +457,11 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 	app, _ := newTestApp(t)
 
 	// Wide terminal: sidebar is 32 cols, leftW = 250 - 32 = 218.
-	// Bubble inner = int(218*0.80)-2 = 172.
+	// Bubble content = int(218*0.80)-3 = 171.
 	const termW = 250
 	const sidebarW = 32
 	leftW := termW - sidebarW                     // 218
-	wantRendererW := int(float64(leftW)*0.80) - 2 // 172
+	wantRendererW := int(float64(leftW)*0.80) - 3 // 171
 	app.Update(tea.WindowSizeMsg{Width: termW, Height: 40})
 
 	// Trigger a renderer build via a stream-complete event.
@@ -450,7 +472,7 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 		t.Fatal("expected renderer to be built after MessageAppended")
 	}
 	if app.rendererW != wantRendererW {
-		t.Errorf("renderer width = %d, want %d (bubble inner: int(%d*0.80)-2); "+
+		t.Errorf("renderer width = %d, want %d (bubble content: int(%d*0.80)-3); "+
 			"ensureRenderer must use bubble inner width, not leftW or a.width",
 			app.rendererW, wantRendererW, leftW)
 	}
@@ -462,20 +484,20 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 
 // TestRendererWidthNarrowTerminalNoSidebar verifies that on a narrow terminal
 // (< 100 cols) where the sidebar is hidden, the renderer is built at the
-// bubble inner width for the full terminal width (int(termW*0.80)-2).
+// bubble content width for the full terminal width (int(termW*0.80)-3).
 func TestRendererWidthNarrowTerminalNoSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
 	termW := 80
-	wantRendererW := int(float64(termW)*0.80) - 2 // 62
+	wantRendererW := int(float64(termW)*0.80) - 3 // 61
 	app.Update(tea.WindowSizeMsg{Width: termW, Height: 24})
 
 	app.Handle(bus.AssistantTextDelta{Text: "hello"})
 	app.Handle(bus.MessageAppended{Role: "assistant"})
 
 	if app.rendererW != wantRendererW {
-		t.Errorf("renderer width = %d, want %d (bubble inner: int(%d*0.80)-2)",
+		t.Errorf("renderer width = %d, want %d (bubble content: int(%d*0.80)-3)",
 			app.rendererW, wantRendererW, termW)
 	}
 	if app.msgColW != wantRendererW {

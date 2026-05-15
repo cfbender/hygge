@@ -23,9 +23,11 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - [x] **`ModalHelp` close handler + render path**
   Phase 6C added a typed overlay stack and a Hygge-styled help overlay with Esc/q close handling.
 
-- [ ] Subagent view doesn't show initial message on first render, but does later on resume and re-view
+- [x] Subagent view doesn't show initial message on first render, but does later on resume and re-view
 
-- [ ] Permissions per session does not work
+- [ ] Permissions per session should be at the folder level so you don't have to keep approving
+
+- [ ] Queued messages insert into chat immediately, but should stay visually at the bottom until actually sent to the agent
 
 ## Architecture
 
@@ -86,7 +88,7 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 ## Known issues — follow-up slices
 
-- [ ] **OSC probe leak** — The TUI emits OSC probes that are not fully reclaimed on exit. Needs investigation into bubbletea v2 internals (alt-screen teardown sequence). Separate slice.
+- [x] **OSC probe leak** — The TUI emits OSC probes that are not fully reclaimed on exit. Needs investigation into bubbletea v2 internals (alt-screen teardown sequence). Separate slice.
 
 - [x] **OSC response leak → garbage in textarea** — bubbletea v2.0.6's OSC parser doesn't fully consume the terminal color-query response; inner content (`11;rgb:...`) leaks as `tea.KeyPressMsg.Text`. Fixed with a `tea.WithFilter` hook (`dropOSCResponses`) in `cmd/hygge/cli/osc_filter.go`. Secondary defence on top of `WithColorProfile(TrueColor)`. Remove filter if upstream fixes parsing. See `docs/agents/ui-v2-gotchas.md`. *(commit: see fix(ui) decouple send pipeline)*
 

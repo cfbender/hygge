@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -440,7 +442,7 @@ func TestInputBuildsAndReports(t *testing.T) {
 // ── Phase 3: tool-call grouping and subagent bubble wrap ────────────────────
 
 // TestToolGroupBubble_ThreeCallGroup verifies three consecutive non-task tool
-// calls render as a single bordered bubble with one row each.
+// calls render as a single side-bar bubble with one row each.
 func TestToolGroupBubble_ThreeCallGroup(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
@@ -570,7 +572,7 @@ func TestToolGroupBubble_InterleavedWithTask(t *testing.T) {
 }
 
 // TestSubagentBubbleWrap verifies that a task tool call with a bound SubagentID
-// renders the compact subagent block content wrapped in a bordered bubble
+// renders the compact subagent block content wrapped in a side-bar bubble
 // (no bare "▌tool: task" gutter line).
 func TestSubagentBubbleWrap(t *testing.T) {
 	t.Parallel()
@@ -679,6 +681,25 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Errorf("sidebar missing bottom %q; got:\n%s", want, plain)
 		}
+	}
+}
+
+func TestSidebar_BackgroundFill_ReassertedAfterStyledFragments(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:        32,
+		Height:       12,
+		SessionTitle: "styled title",
+		MCPs:         []SidebarMCPStatus{{Name: "server-a", Ready: true, ToolCount: 3}},
+		Theme:        theme.ShellTheme(),
+	}
+	out := sb.View()
+	bgOpen := sidebarBackgroundOpenSequence(lipgloss.Color("235"))
+	if !strings.Contains(out, bgOpen) {
+		t.Fatalf("sidebar should emit themed background fill.\nOutput: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[m"+bgOpen) {
+		t.Errorf("sidebar background should be reasserted after nested ANSI resets.\nOutput: %q", out)
 	}
 }
 

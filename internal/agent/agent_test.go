@@ -48,6 +48,34 @@ func TestRuntimeBuildsFantasyToolsFromRegistry(t *testing.T) {
 	}
 }
 
+func TestRuntimeConvertsFullJSONSchemaForFantasyTools(t *testing.T) {
+	reg := tool.Default()
+	rt := NewRuntime(RuntimeOptions{Tools: reg, MaxIterations: 3})
+	var bashInfo fantasy.ToolInfo
+	for _, ft := range rt.buildFantasyTools(fantasyToolOptions{}) {
+		if ft.Info().Name == "bash" {
+			bashInfo = ft.Info()
+			break
+		}
+	}
+	if bashInfo.Name == "" {
+		t.Fatal("bash fantasy tool not found")
+	}
+	if _, hasNestedProperties := bashInfo.Parameters["properties"]; hasNestedProperties {
+		t.Fatalf("fantasy parameters should be the properties map, got nested schema: %+v", bashInfo.Parameters)
+	}
+	desc, ok := bashInfo.Parameters["description"].(map[string]any)
+	if !ok {
+		t.Fatalf("description property = %T, want map[string]any", bashInfo.Parameters["description"])
+	}
+	if desc["type"] != "string" {
+		t.Fatalf("description property type = %v, want string", desc["type"])
+	}
+	if !slices.Contains(bashInfo.Required, "command") {
+		t.Fatalf("bash required = %+v, want command", bashInfo.Required)
+	}
+}
+
 func TestSessionAgentSelectsLegacyLoopWithoutFantasyModel(t *testing.T) {
 	var model fantasy.LanguageModel
 	rt := NewRuntime(RuntimeOptions{Model: model, Tools: tool.NewRegistry(), MaxIterations: 1})
@@ -75,13 +103,15 @@ type fakeProvider struct {
 }
 
 type fakeFantasyModel struct {
-	provider  string
-	model     string
-	text      string
-	usage     fantasy.Usage
-	stream    []fantasy.StreamPart
-	streamErr error
-	calls     atomic.Int32
+	provider      string
+	model         string
+	text          string
+	usage         fantasy.Usage
+	stream        []fantasy.StreamPart
+	streamBatches [][]fantasy.StreamPart
+	streamErr     error
+	calls         atomic.Int32
+	mu            sync.Mutex
 }
 
 func (f *fakeFantasyModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
@@ -91,8 +121,15 @@ func (f *fakeFantasyModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy
 
 func (f *fakeFantasyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
 	f.calls.Add(1)
+	f.mu.Lock()
+	stream := f.stream
+	if len(f.streamBatches) > 0 {
+		stream = f.streamBatches[0]
+		f.streamBatches = f.streamBatches[1:]
+	}
+	f.mu.Unlock()
 	return func(yield func(fantasy.StreamPart) bool) {
-		for _, part := range f.stream {
+		for _, part := range stream {
 			if !yield(part) {
 				return
 			}
@@ -746,8 +783,8 @@ func TestSend_FantasyStreamErrorCommitsPartialThinking(t *testing.T) {
 	env := newTestEnv(t)
 	streamErr := errors.New("reasoning failed")
 	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamErr: streamErr, stream: []fantasy.StreamPart{
-		{Type: fantasy.StreamPartTypeReasoningStart, ID: "r"},
-		{Type: fantasy.StreamPartTypeReasoningDelta, ID: "r", Delta: "thinking..."},
+		{Type: fantasy.StreamPartTypeReasoningStart, ID: "r", Delta: "I "},
+		{Type: fantasy.StreamPartTypeReasoningDelta, ID: "r", Delta: "am thinking..."},
 	}}
 	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
 
@@ -757,7 +794,7 @@ func TestSend_FantasyStreamErrorCommitsPartialThinking(t *testing.T) {
 	}
 
 	msgs := readMessages(t, env.Store, env.sessionID)
-	if len(msgs) != 2 || len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Kind != session.PartThinking || msgs[1].Parts[0].Text != "thinking..." {
+	if len(msgs) != 2 || len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Kind != session.PartThinking || msgs[1].Parts[0].Text != "I am thinking..." {
 		t.Fatalf("unexpected messages: roles=%v parts=%+v", roles(msgs), msgs[len(msgs)-1].Parts)
 	}
 }
@@ -802,7 +839,77 @@ func TestSend_FantasySuccessfulStreamAppendsOnce(t *testing.T) {
 	}
 }
 
-func TestSend_FantasyStreamErrorCommitsObservedToolCall(t *testing.T) {
+func TestSend_FantasyParallelToolsAppendAssistantOnce(t *testing.T) {
+	env := newTestEnv(t)
+	tools := tool.NewRegistry()
+	if err := tools.Register(&parallelNoopTool{name: "alpha"}); err != nil {
+		t.Fatalf("register alpha: %v", err)
+	}
+	if err := tools.Register(&parallelNoopTool{name: "beta"}); err != nil {
+		t.Fatalf("register beta: %v", err)
+	}
+	wrappedStore := &assistantAppendCountingStore{Store: env.Store}
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeToolCall, ID: "tu-alpha", ToolCallName: "alpha", ToolCallInput: `{}`},
+			{Type: fantasy.StreamPartTypeToolCall, ID: "tu-beta", ToolCallName: "beta", ToolCallInput: `{}`},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "done"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	a, err := New(Options{Bus: env.Bus, Store: wrappedStore, Provider: newFakeProvider("fake"), FantasyModel: model, Permission: env.Perm, Tools: tools, Catalog: env.Catalog, Pwd: env.pwd, Now: env.Now})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("run tools")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if got := wrappedStore.toolUseAssistantAppends.Load(); got != 1 {
+		t.Fatalf("tool-use assistant appends = %d, want 1", got)
+	}
+}
+
+func TestSend_FantasyIgnoresLegacyMaxIterations(t *testing.T) {
+	env := newTestEnv(t)
+	tools := tool.NewRegistry()
+	if err := tools.Register(&parallelNoopTool{name: "alpha"}); err != nil {
+		t.Fatalf("register alpha: %v", err)
+	}
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeToolCall, ID: "tu-alpha", ToolCallName: "alpha", ToolCallInput: `{}`},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "done"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) {
+		o.FantasyModel = model
+		o.Tools = tools
+		o.MaxIterations = 1
+	})
+
+	final, err := a.Send(context.Background(), env.sessionID, userText("run tools"))
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if final == nil || len(final.Parts) != 1 || final.Parts[0].Text != "done" {
+		t.Fatalf("unexpected final: %+v", final)
+	}
+}
+
+func TestSend_FantasyStreamErrorCommitsObservedToolCallWithSyntheticResult(t *testing.T) {
 	env := newTestEnv(t)
 	streamErr := errors.New("tool stream failed")
 	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamErr: streamErr, stream: []fantasy.StreamPart{
@@ -817,12 +924,58 @@ func TestSend_FantasyStreamErrorCommitsObservedToolCall(t *testing.T) {
 		t.Fatalf("want wrapped streamErr, got %v", err)
 	}
 	msgs := readMessages(t, env.Store, env.sessionID)
-	if len(msgs) != 2 || len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Kind != session.PartToolUse {
-		t.Fatalf("want assistant tool_use only, got roles=%v parts=%+v", roles(msgs), msgs[len(msgs)-1].Parts)
+	if len(msgs) != 3 || len(msgs[1].Parts) != 1 || msgs[1].Parts[0].Kind != session.PartToolUse || msgs[2].Role != session.RoleTool {
+		t.Fatalf("want assistant tool_use followed by synthetic tool result, got roles=%v parts=%+v", roles(msgs), msgs[len(msgs)-1].Parts)
 	}
 	part := msgs[1].Parts[0]
 	if part.ToolID != "tu1" || part.ToolName != "read" || string(part.ToolInput) != `{"path":"a.txt"}` {
 		t.Fatalf("unexpected tool_use: %+v", part)
+	}
+	result := msgs[2].Parts[0]
+	if result.Kind != session.PartToolResult || result.ToolUseID != "tu1" || !result.IsError || !strings.Contains(result.Content, "interrupted") {
+		t.Fatalf("unexpected synthetic result: %+v", result)
+	}
+}
+
+func TestToFantasyMessagesSynthesizesMissingToolResults(t *testing.T) {
+	msgs := []*session.Message{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "use a tool"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartToolUse, ToolID: "call_missing", ToolName: "read", ToolInput: []byte(`{"path":"a.txt"}`)}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "try again"}}},
+	}
+
+	fmsgs := toFantasyMessages(msgs, nil, "", nil)
+	if len(fmsgs) != 4 {
+		t.Fatalf("fantasy messages len = %d, want 4: %+v", len(fmsgs), fmsgs)
+	}
+	synthetic := fmsgs[2]
+	if synthetic.Role != fantasy.MessageRoleTool || len(synthetic.Content) != 1 {
+		t.Fatalf("want synthetic tool message at index 2, got %+v", synthetic)
+	}
+	part, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](synthetic.Content[0])
+	if !ok {
+		t.Fatalf("synthetic content = %T, want ToolResultPart", synthetic.Content[0])
+	}
+	if part.ToolCallID != "call_missing" {
+		t.Fatalf("tool call id = %q, want call_missing", part.ToolCallID)
+	}
+	if _, ok := part.Output.(fantasy.ToolResultOutputContentError); !ok {
+		t.Fatalf("synthetic output = %T, want error output", part.Output)
+	}
+}
+
+func TestWrapFantasyStreamErrorIncludesNestedProviderDetail(t *testing.T) {
+	inner := `{"error":{"message":"No tool output found for function call call_123.","type":"invalid_request_error"}}`
+	body := fmt.Sprintf(`{"error":{"message":"Provider returned error","metadata":{"raw":%q,"provider_name":"Azure"}}}`, inner)
+	providerErr := &fantasy.ProviderError{StatusCode: 400, Message: "Provider returned error", ResponseBody: []byte(body)}
+
+	err := wrapFantasyStreamError(providerErr)
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("wrapped error should preserve cause, got %v", err)
+	}
+	got := err.Error()
+	if !strings.Contains(got, "Azure") || !strings.Contains(got, "No tool output found") {
+		t.Fatalf("wrapped error missing provider detail: %q", got)
 	}
 }
 
@@ -1372,6 +1525,37 @@ func (c *countingTool) Parallelizable() bool { return false }
 func (c *countingTool) Execute(_ context.Context, _ json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
 	c.counter.Add(1)
 	return tool.Result{Content: "ok"}, nil
+}
+
+type parallelNoopTool struct{ name string }
+
+func (p *parallelNoopTool) Name() string        { return p.name }
+func (p *parallelNoopTool) Description() string { return "parallel noop" }
+func (p *parallelNoopTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (p *parallelNoopTool) Parallelizable() bool { return true }
+func (p *parallelNoopTool) Execute(_ context.Context, _ json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
+	return tool.Result{Content: "ok"}, nil
+}
+
+type assistantAppendCountingStore struct {
+	session.Store
+	toolUseAssistantAppends atomic.Int32
+}
+
+func (s *assistantAppendCountingStore) AppendMessage(ctx context.Context, sessionID string, in session.NewMessage) (*session.Message, error) {
+	if in.Role == session.RoleAssistant {
+		for _, p := range in.Parts {
+			if p.Kind == session.PartToolUse {
+				if s.toolUseAssistantAppends.Add(1) == 1 {
+					time.Sleep(50 * time.Millisecond)
+				}
+				break
+			}
+		}
+	}
+	return s.Store.AppendMessage(ctx, sessionID, in)
 }
 
 // capturingTool stores the raw input bytes of its last Execute call.

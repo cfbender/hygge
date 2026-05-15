@@ -11,17 +11,10 @@
 //
 // # The Send loop in one paragraph
 //
-// Send appends the user message, then enters a loop bounded by
-// Options.MaxIterations.  Each iteration: build a [provider.Request] from
-// session history (compaction summary folded in as part of the system
-// prompt), Stream the response, fan out streaming deltas to the bus,
-// assemble an assistant message, persist it, charge cost.  If the
-// assistant emitted any tool_use blocks, execute them SEQUENTIALLY,
-// persisting each tool_result message, then loop again.  If no tool_use
-// blocks appear, the loop terminates and Send returns the assistant
-// message.  Hitting MaxIterations publishes [bus.IterationLimitReached]
-// and returns [ErrIterationLimit] alongside an "iteration limit reached"
-// assistant message.
+// Send appends the user message, then delegates the active turn to Fantasy
+// when a Fantasy model is configured. Fantasy owns model/tool iteration and is
+// intentionally uncapped: cancellation is context-driven. The legacy provider
+// loop still honors Options.MaxIterations for nil-Fantasy test/fallback seams.
 //
 // # Sequential tool execution
 //
@@ -83,13 +76,13 @@ import (
 	"github.com/cfbender/hygge/internal/tool"
 )
 
-// defaultMaxIterations is used when [Options.MaxIterations] is zero.
+// defaultMaxIterations is used by the legacy nil-Fantasy provider loop when
+// [Options.MaxIterations] is zero. Fantasy active turns are uncapped.
 const defaultMaxIterations = 25
 
-// ErrIterationLimit is returned by Send when the agent loop hits its
-// configured iteration cap without converging.  An assistant message
-// noting the limit is appended to the session before the error is
-// returned.
+// ErrIterationLimit is returned by the legacy nil-Fantasy provider loop when
+// it hits its configured iteration cap without converging. Fantasy active turns
+// are uncapped.
 var ErrIterationLimit = errors.New("agent: iteration limit reached")
 
 // ErrNothingToCompact is returned by Compact when the session contains
@@ -120,7 +113,8 @@ type Options struct {
 	Catalog *cost.Catalog
 	// SystemPrompt is the optional system prompt sent on every turn.
 	SystemPrompt string
-	// MaxIterations bounds the tool-use loop.  Zero means defaultMaxIterations (25).
+	// MaxIterations bounds only the legacy nil-Fantasy provider loop. Fantasy
+	// active turns are uncapped. Zero means defaultMaxIterations (25) for legacy.
 	MaxIterations int
 	// Pwd is the working directory passed to tools via ExecContext.  Empty
 	// means the tool helpers fall back to os.Getwd.
@@ -335,9 +329,9 @@ func (a *Agent) isClosed() bool {
 }
 
 // Send appends a user message to the session and runs the agent loop
-// until the assistant produces a final response with no further tool
-// calls (or hits the iteration limit).  Returns the final committed
-// assistant message.
+// until the assistant produces a final response with no further tool calls.
+// Fantasy-backed turns are uncapped; the legacy nil-Fantasy loop can still hit
+// ErrIterationLimit. Returns the final committed assistant message.
 //
 // If a Send is already in flight for the session, the new send is
 // enqueued and nil is returned immediately.  The caller can inspect
@@ -355,7 +349,7 @@ func (a *Agent) isClosed() bool {
 //   - bus.ToolCallRequested                   per tool call
 //   - bus.ToolCallCompleted                   per tool call
 //   - bus.MessageAppended (tool result)       per tool call
-//   - bus.IterationLimitReached               if the cap is hit
+//   - bus.IterationLimitReached               if the legacy loop cap is hit
 //   - bus.TurnCompleted                       after a successful turn
 //   - bus.QueueChanged                        when queue depth changes
 //

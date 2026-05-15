@@ -176,6 +176,7 @@ func TestContextList_MultipleRootFiles(t *testing.T) {
 		XDGStateHome:    filepath.Join(home, ".local", "state"),
 		Pwd:             pwd,
 		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:         true,
 	})

@@ -67,6 +67,7 @@ const (
 	AtomBubbleHeader         Atom = "bubble.header"          // bubble header accent (matches accent)
 	AtomBubbleHeaderMuted    Atom = "bubble.header.muted"    // bubble right-side header muted text
 	AtomBubbleBodyMuted      Atom = "bubble.body.muted"      // muted body text (thinking in Phase 2)
+	AtomBubbleBg             Atom = "bubble.bg"              // subtle hover-like fill behind every bubble
 
 	// Phase 5: distinct border colors for user vs agent bubbles.
 	// AtomBubbleUserBorder is the border/accent for user (right-aligned) bubbles.
@@ -82,11 +83,13 @@ const (
 	// AtomSidebarValue    — value text (default: terminal fg).
 	// AtomSidebarAccent   — accent dot and version glyph.
 	// AtomSidebarMuted    — muted text such as "None" or "—".
+	// AtomSidebarBg       — subtle hover-like fill behind the whole sidebar column.
 	AtomSidebarBorder  Atom = "sidebar.border"  // left-border divider color (default: ANSI 8)
-	AtomSidebarSection Atom = "sidebar.section" // section header label (default: ANSI 8)
+	AtomSidebarSection Atom = "sidebar.section" // section header label (default: ANSI 7)
 	AtomSidebarValue   Atom = "sidebar.value"   // value text (default: terminal fg)
 	AtomSidebarAccent  Atom = "sidebar.accent"  // accent dot/glyph (default: same as AtomAccent)
-	AtomSidebarMuted   Atom = "sidebar.muted"   // muted/empty state text (default: ANSI 8)
+	AtomSidebarMuted   Atom = "sidebar.muted"   // muted/empty state text (default: ANSI 7)
+	AtomSidebarBg      Atom = "sidebar.bg"      // sidebar fill background (default: ANSI 235)
 )
 
 // allAtoms is the stable, ordered list of style atoms.
@@ -111,6 +114,7 @@ var allAtoms = []Atom{
 	AtomBubbleHeader,
 	AtomBubbleHeaderMuted,
 	AtomBubbleBodyMuted,
+	AtomBubbleBg,
 	// Phase 5: distinct user vs agent border colors.
 	AtomBubbleUserBorder,
 	AtomBubbleAgentBorder,
@@ -120,6 +124,7 @@ var allAtoms = []Atom{
 	AtomSidebarValue,
 	AtomSidebarAccent,
 	AtomSidebarMuted,
+	AtomSidebarBg,
 }
 
 // KnownNames returns builtin and user theme names available to Load.

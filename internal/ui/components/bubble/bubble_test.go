@@ -30,6 +30,35 @@ func stripANSI(s string) string {
 	return out.String()
 }
 
+func containsBackgroundSGR(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\x1b' || i+1 >= len(s) || s[i+1] != '[' {
+			continue
+		}
+		j := i + 2
+		for j < len(s) && s[j] != 'm' {
+			j++
+		}
+		if j >= len(s) {
+			return false
+		}
+		seq := s[i+2 : j]
+		if strings.Contains(seq, "48;") || strings.Contains(seq, "48:") || strings.Contains(seq, "49") {
+			return true
+		}
+		for _, part := range strings.Split(seq, ";") {
+			if len(part) == 2 && part[0] == '4' && part[1] >= '0' && part[1] <= '7' {
+				return true
+			}
+			if len(part) == 3 && part[:2] == "10" && part[2] >= '0' && part[2] <= '7' {
+				return true
+			}
+		}
+		i = j
+	}
+	return false
+}
+
 func TestBubble_RendersWithHeader(t *testing.T) {
 	t.Parallel()
 	b := Bubble{
@@ -299,42 +328,59 @@ func TestBubble_ShowTailFalse_NoTail(t *testing.T) {
 
 func TestBubble_BackgroundColor_Applied(t *testing.T) {
 	t.Parallel()
-	// BackgroundColor is accepted without panic but is currently unused —
-	// View() does not emit any background ANSI sequence.  The bubble interior
-	// remains transparent (terminal default background).
 	b := Bubble{
 		Width:           80,
 		BubbleWidth:     40,
 		Body:            "bg tinted",
 		Theme:           theme.ShellTheme(),
 		AccentColor:     lipgloss.Color("5"),
-		BackgroundColor: lipgloss.Color("5"), // accepted but not applied
+		BackgroundColor: lipgloss.Color("5"),
 	}
 	out := b.View()
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "bg tinted") {
 		t.Errorf("bubble body must be visible with BackgroundColor set; got:\n%s", plain)
 	}
-	// No background ANSI escape sequence (ESC[4Xm or ESC[10Xm) must appear.
-	// Background sequences use codes 40-47, 100-107 (basic), or 48;5;N (256-color).
-	if strings.Contains(out, "\x1b[4") && strings.Contains(out, "m") {
-		// Narrow check: look for background-color-specific patterns.
-		// A background set would appear as ESC[4Nm or ESC[48;5;Nm.
-		// We scan for ESC[ followed by 4[0-9] (which covers 40-49 including 48).
-		for i := 0; i+3 < len(out); i++ {
-			if out[i] == '\x1b' && out[i+1] == '[' && out[i+2] == '4' && out[i+3] >= '0' && out[i+3] <= '9' {
-				// Verify it ends with 'm' (is an SGR sequence).
-				for j := i + 2; j < len(out) && j < i+20; j++ {
-					if out[j] == 'm' {
-						t.Errorf("View() emitted a background ANSI sequence at offset %d; want no background fill.\nOutput: %q", i, out)
-						return
-					}
-					if out[j] == '\x1b' {
-						break
-					}
-				}
-			}
-		}
+	if !containsBackgroundSGR(out) {
+		t.Errorf("View() must emit a background ANSI sequence when BackgroundColor is set.\nOutput: %q", out)
+	}
+}
+
+func TestBubble_BackgroundColor_FillsContentBesideSideBar(t *testing.T) {
+	t.Parallel()
+	b := Bubble{
+		Width:           80,
+		BubbleWidth:     40,
+		Body:            "bg tinted",
+		AccentColor:     lipgloss.Color("5"),
+		BackgroundColor: lipgloss.Color("5"),
+	}
+	out := b.View()
+	plain := stripANSI(out)
+	if strings.ContainsAny(plain, "╭╮╰╯│") {
+		t.Fatalf("side-bar bubble should not render rounded border glyphs, got %q", plain)
+	}
+	if !strings.Contains(plain, "▌") || !strings.Contains(plain, "bg tinted") {
+		t.Fatalf("side-bar bubble missing bar/content, got %q", plain)
+	}
+	if !containsBackgroundSGR(out) {
+		t.Errorf("content block should emit background fill.\nOutput: %q", out)
+	}
+}
+
+func TestBubble_BackgroundColor_ReassertedAfterNestedANSIReset(t *testing.T) {
+	t.Parallel()
+	bg := lipgloss.Color("5")
+	bgOpen := backgroundOpenSequence(bg)
+	b := Bubble{
+		Width:           80,
+		BubbleWidth:     40,
+		Body:            "before " + lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("red") + " after",
+		BackgroundColor: bg,
+	}
+	out := b.View()
+	if !strings.Contains(out, "\x1b[m"+bgOpen) {
+		t.Errorf("background should be reasserted after nested ANSI reset.\nOutput: %q", out)
 	}
 }
 
@@ -374,19 +420,21 @@ func TestBubble_AllLinesEqualWidth(t *testing.T) {
 	}
 }
 
-func TestBubble_BackgroundColorNil_NoBackground(t *testing.T) {
+func TestBubble_NoThemeAndNilBackground_NoBackground(t *testing.T) {
 	t.Parallel()
-	// When BackgroundColor is nil, rendering must succeed normally.
+	// When no theme or explicit BackgroundColor is available, rendering stays transparent.
 	b := Bubble{
 		Width:       80,
 		BubbleWidth: 40,
 		Body:        "no bg",
-		Theme:       theme.ShellTheme(),
 	}
 	out := b.View()
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "no bg") {
 		t.Errorf("bubble body missing when BackgroundColor is nil; got:\n%s", plain)
+	}
+	if containsBackgroundSGR(out) {
+		t.Errorf("View() emitted a background ANSI sequence with nil BackgroundColor; want no background fill.\nOutput: %q", out)
 	}
 }
 

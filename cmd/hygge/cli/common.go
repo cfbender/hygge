@@ -13,7 +13,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -160,6 +159,9 @@ type bootstrapOptions struct {
 	// used by interactive commands so slow external MCP processes never delay the
 	// first UI frame; inspection commands leave it false for synchronous status.
 	AsyncMCP bool
+	// FantasyModel injects a no-network language model for bootstrap tests. When
+	// nil, production resolves the configured provider/model through Fantasy.
+	FantasyModel fantasy.LanguageModel
 }
 
 // defaultSystemPrompt is the v0.1 hardcoded system prompt.  Two sentences.
@@ -395,15 +397,17 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	anthropicShim.SetCatalog(catSrc)
 	openaiShim.SetCatalog(catSrc)
 	openrouterShim.SetCatalog(catSrc)
-	fantasyResolved, err := llm.ResolveProviderModel(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc)
-	if err != nil {
-		if !errors.Is(err, provider.ErrAuth) {
+	var fantasyResolved llm.ProviderResolution
+	if opts.FantasyModel != nil {
+		fantasyResolved.Model = opts.FantasyModel
+	} else {
+		fantasyResolved, err = llm.ResolveProviderModel(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc)
+		if err != nil {
 			permEngine.Close()
 			_ = stOpen.Close()
 			b.Close()
 			return nil, fmt.Errorf("cli: build fantasy model: %w", err)
 		}
-		slog.Debug("cli: fantasy model unavailable; legacy provider remains for non-turn commands", "err", err)
 	}
 
 	catalog := cost.NewCatalog(cost.CatalogOptions{
