@@ -19,4 +19,4 @@ theme: shell
   bubble.header.muted = ansi:8
   bubble.body.muted = ansi:8
   bubble.user.border = ansi:4
-  bubble.agent.border = ansi:5
+  bubble.agent.border = ansi:1
