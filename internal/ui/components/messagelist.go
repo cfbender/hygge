@@ -126,6 +126,11 @@ type UIMessage struct {
 	// ModeColor is the per-mode accent color for the bubble border/header.
 	// When non-nil, overrides the theme's default agent border color.
 	ModeColor color.Color
+
+	// SubagentColor is a deterministic accent color for subagent bubbles.
+	// Derived from the subagent type name. When non-nil, used for both
+	// the sidebar bar and header text.
+	SubagentColor color.Color
 }
 
 // MessageList renders the conversation history.
@@ -422,7 +427,9 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	}
 
 	var accentColor color.Color
-	if m.Theme != nil {
+	if m.Styles != nil && m.Styles.UserAccent != nil {
+		accentColor = m.Styles.UserAccent
+	} else if m.Theme != nil {
 		fg := m.Theme.Style(theme.AtomBubbleUserBorder).GetForeground()
 		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
 			accentColor = fg
@@ -537,6 +544,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		AccentColor:     accentColor,
 		BackgroundColor: m.bubbleBackgroundColor(),
 		SubStyle:        bubble.StyleNormal,
+		HeaderLeftColor: accentColor,
 	}
 	return b.View()
 }
@@ -728,17 +736,13 @@ func (m MessageList) wrapSubagentBubble(body string) string {
 		}
 	}
 
-	// Add one blank line of vertical padding top and bottom, plus one cell of
-	// horizontal padding on each side, so the subagent content feels comfortable.
-	paddedBody := "\n" + body + "\n"
-
 	b := bubble.Bubble{
 		Width:           width,
 		BubbleWidth:     bubbleW,
 		Alignment:       bubble.AlignLeft,
 		HeaderLeft:      "",
 		HeaderRight:     "",
-		Body:            paddedBody,
+		Body:            "\n" + body, // top padding (bottom handled by composeInner)
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
 		BackgroundColor: m.bubbleBackgroundColor(),
@@ -811,10 +815,13 @@ func (m MessageList) gutter(msg UIMessage) string {
 }
 
 // agentAccentColor returns the accent color for an assistant bubble.
-// Per-mode color takes priority, then falls back to the theme atom.
+// Per-mode color takes priority, then subagent color, then theme atom.
 func (m MessageList) agentAccentColor(msg UIMessage) color.Color {
 	if msg.ModeColor != nil {
 		return msg.ModeColor
+	}
+	if msg.SubagentColor != nil {
+		return msg.SubagentColor
 	}
 	if m.Theme != nil {
 		fg := m.Theme.Style(theme.AtomBubbleAgentBorder).GetForeground()
@@ -823,6 +830,30 @@ func (m MessageList) agentAccentColor(msg UIMessage) color.Color {
 		}
 	}
 	return nil
+}
+
+// ColorForSubagentType returns a deterministic color derived from a
+// subagent type name. Uses a curated palette of distinct ANSI-256 colors
+// that are visible on both dark and light backgrounds.
+func ColorForSubagentType(typeName string) color.Color {
+	// Curated palette of visually distinct colors (ANSI 256).
+	palette := []string{
+		"#E06C75", // red
+		"#61AFEF", // blue
+		"#C678DD", // purple
+		"#56B6C2", // cyan
+		"#E5C07B", // yellow
+		"#98C379", // green
+		"#D19A66", // orange
+		"#BE5046", // dark red
+		"#7EC8E3", // light blue
+		"#C991E1", // lavender
+	}
+	h := uint32(0)
+	for _, c := range typeName {
+		h = h*31 + uint32(c)
+	}
+	return lipgloss.Color(palette[h%uint32(len(palette))])
 }
 
 func (m MessageList) bubbleBackgroundColor() color.Color {

@@ -43,6 +43,9 @@ type Styles struct {
 	// InputBg is the fill color behind the text input area.
 	InputBg color.Color
 
+	// UserAccent is the accent color for user (right-aligned) chat bubbles.
+	UserAccent color.Color
+
 	// Working indicator gradient colors for animated spinners.
 	WorkingGradFromColor color.Color
 	WorkingGradToColor   color.Color

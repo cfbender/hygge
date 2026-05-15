@@ -84,8 +84,10 @@ func (a *App) renderLeftColumn() string {
 		sections = append(sections, chrome)
 	}
 
-	// Editor input.
-	sections = append(sections, a.input.View())
+	// Editor input (hidden when viewing a subagent transcript).
+	if !a.viewingSubagent() {
+		sections = append(sections, a.input.View())
+	}
 
 	// Footer.
 	sections = append(sections, a.renderFooterContent())

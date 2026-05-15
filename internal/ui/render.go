@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
@@ -68,12 +69,15 @@ func (a *App) invalidateMsgCache() {
 func (a *App) renderChatContent() string {
 	l := a.layout
 
-	// Breadcrumb: shown above the message list when depth > 1.
-	breadcrumb := components.Breadcrumb{
-		Segments: a.breadcrumbSegments(),
-		Width:    l.leftW,
-		Theme:    a.opts.Theme,
-	}.View()
+	// Breadcrumb: moved to footer in subagent view, not shown at top.
+	breadcrumb := ""
+	if !a.viewingSubagent() {
+		breadcrumb = components.Breadcrumb{
+			Segments: a.breadcrumbSegments(),
+			Width:    l.leftW,
+			Theme:    a.opts.Theme,
+		}.View()
+	}
 
 	// Select visible messages based on foreground stack.
 	visibleMessages := a.messages
@@ -85,10 +89,13 @@ func (a *App) renderChatContent() string {
 		}
 	}
 
-	// Check if the cache is still valid.
+	// Check if the cache is still valid. Invalidate every 30 seconds
+	// so relative timestamps stay fresh.
+	now := a.opts.Now()
 	needsRebuild := !a.msgCacheValid ||
 		a.msgCacheW != l.leftW ||
-		a.msgCacheLen != len(visibleMessages)
+		a.msgCacheLen != len(visibleMessages) ||
+		now.Sub(a.msgCacheTime) > 30*time.Second
 
 	// Always rebuild when streaming (content changes intra-message).
 	if !needsRebuild && len(visibleMessages) > 0 {
@@ -106,11 +113,12 @@ func (a *App) renderChatContent() string {
 			Messages:  visibleMessages,
 			Subagents: a.subagents,
 			AnimFor:   a.subagentAnims,
-			Now:       a.opts.Now(),
+			Now:       now,
 		}.View()
 		a.msgCacheValid = true
 		a.msgCacheW = l.leftW
 		a.msgCacheLen = len(visibleMessages)
+		a.msgCacheTime = now
 	}
 
 	// Update viewport dimensions.
@@ -142,6 +150,15 @@ func (a *App) renderChatContent() string {
 
 // renderFooterContent produces the string content for the footer bar.
 func (a *App) renderFooterContent() string {
+	if a.viewingSubagent() {
+		// Subagent view: show nav hints instead of mode/model info.
+		return components.Breadcrumb{
+			Segments: a.breadcrumbSegments(),
+			Width:    a.layout.leftW,
+			Theme:    a.opts.Theme,
+		}.View()
+	}
+
 	agentType := a.ActiveModeName()
 
 	return components.Footer{

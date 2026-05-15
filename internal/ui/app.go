@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -255,8 +256,9 @@ type App struct {
 	// all messages on every frame — only the viewport scroll position changes.
 	msgCache      string
 	msgCacheValid bool
-	msgCacheW     int // width at which cache was rendered
-	msgCacheLen   int // message count at which cache was rendered
+	msgCacheW     int       // width at which cache was rendered
+	msgCacheLen   int       // message count at which cache was rendered
+	msgCacheTime  time.Time // time at which cache was rendered (for relative timestamps)
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -1007,10 +1009,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.toggleLatestSubagent()
 		return a, nil
 	case "ctrl+g":
-		// T2.2 — Ctrl+G: follow into the most-recently-started sub-agent.
-		// No-op with a notice when no sub-agents have been tracked.
 		return a, a.followIntoLatestSubagent()
 	case "enter":
+		if a.viewingSubagent() {
+			return a, nil
+		}
 		// Alt+Enter inserts a newline; we differentiate by Alt flag below.
 		if k.Mod.Contains(tea.ModAlt) {
 			break // fall through to textarea.Update so it inserts a newline
@@ -1072,7 +1075,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// (dismiss command palette / clear queue / no-op).
 		if len(a.foregroundStack) > 1 {
 			a.popForeground()
-			return a, a.setNotice("back to parent session")
+			return a, nil
 		}
 		// Two-step Esc pattern: first Esc clears the queue if any,
 		// second Esc cancels the active run (existing behaviour).
@@ -1095,6 +1098,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 	case "up":
+		if a.viewingSubagent() {
+			a.navigateSubagent(-1) // older subagent
+			return a, nil
+		}
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(-1)
 			return a, nil
@@ -1111,6 +1118,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 	case "down":
+		if a.viewingSubagent() {
+			a.navigateSubagent(+1) // newer subagent
+			return a, nil
+		}
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(+1)
 			return a, nil
@@ -1669,6 +1680,78 @@ func (a *App) foregroundID() string {
 	return a.opts.SessionID
 }
 
+// viewingSubagent reports whether the user is viewing a subagent's
+// transcript (foreground stack depth > 1).
+func (a *App) viewingSubagent() bool {
+	return len(a.foregroundStack) > 1
+}
+
+// navigateSubagent switches to the next (+1) or previous (-1) subagent
+// in the current session.
+func (a *App) navigateSubagent(delta int) {
+	ids := a.sortedSubagentIDs()
+	if len(ids) < 2 {
+		return
+	}
+	cur := a.foregroundID()
+	idx := -1
+	for i, id := range ids {
+		if id == cur {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	next := (idx + delta + len(ids)) % len(ids)
+	if next == idx {
+		return
+	}
+	// Replace the top of the foreground stack.
+	a.foregroundStack[len(a.foregroundStack)-1] = ids[next]
+	a.refreshMessagesForForeground()
+}
+
+// sortedSubagentIDs returns subagent IDs belonging to the parent session
+// of the current foreground, sorted by start time.
+func (a *App) sortedSubagentIDs() []string {
+	// Find the parent session (one level below top of stack).
+	parentID := a.rootSessionID()
+	if len(a.foregroundStack) >= 2 {
+		parentID = a.foregroundStack[len(a.foregroundStack)-2]
+	}
+
+	type entry struct {
+		id string
+		at time.Time
+	}
+	var entries []entry
+	for id, st := range a.subagents {
+		if st != nil && st.ParentSessionID == parentID {
+			entries = append(entries, entry{id, st.StartedAt})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].at.Before(entries[j].at)
+	})
+	ids := make([]string, len(entries))
+	for i, e := range entries {
+		ids[i] = e.id
+	}
+	return ids
+}
+
+// foregroundSubagent returns the SubagentState for the currently viewed
+// subagent, or nil if viewing the root session.
+func (a *App) foregroundSubagent() *components.SubagentState {
+	if !a.viewingSubagent() {
+		return nil
+	}
+	st, _ := a.subagents[a.foregroundID()]
+	return st
+}
+
 // rootSessionID returns the session id at the bottom of the foreground
 // stack — the original primary session.  Used by the TUI footer and the
 // cost event handler so the rolled-up total is always visible regardless
@@ -1727,12 +1810,13 @@ func (a *App) resetForeground(id string) {
 // NOTE: A future version will reload from the store so previously-stored
 // messages are visible when following into a completed subagent.
 func (a *App) refreshMessagesForForeground() {
+	a.invalidateMsgCache()
+	a.userScrolled = false
+
 	id := a.foregroundID()
 	if id == a.rootSessionID() {
-		// Returning to the root — keep the primary message buffer.
 		return
 	}
-	// Following into a sub-session: show that session's transcript.
 	st, ok := a.subagents[id]
 	if !ok {
 		return
@@ -1748,24 +1832,27 @@ func (a *App) refreshMessagesForForeground() {
 }
 
 // breadcrumbSegments builds the label slice for the Breadcrumb component.
-// It reads session labels from opts.Store if available, otherwise uses
-// short ids.
+// When viewing a subagent, shows the subagent type/description and nav hints.
 func (a *App) breadcrumbSegments() []string {
 	if len(a.foregroundStack) <= 1 {
 		return nil
 	}
-	segs := make([]string, 0, len(a.foregroundStack))
-	for _, id := range a.foregroundStack {
-		label := id
-		if a.opts.Store != nil {
-			sess, err := a.opts.Store.GetSession(a.ctx, id)
-			if err == nil {
-				label = components.SessionLabel(sess.Slug, sess.FirstMessagePreview, id)
-			}
-		}
-		segs = append(segs, label)
+	st := a.foregroundSubagent()
+	if st == nil {
+		return []string{"subagent", "esc to go back"}
 	}
-	return segs
+
+	label := st.Type
+	if st.Description != "" {
+		label += " — " + st.Description
+	}
+
+	ids := a.sortedSubagentIDs()
+	nav := "esc to go back"
+	if len(ids) > 1 {
+		nav = "↑ ↓ navigate · esc to go back"
+	}
+	return []string{label, nav}
 }
 
 // latestSubagentID returns the sub-session id of the most recently started
@@ -1795,15 +1882,8 @@ func (a *App) followIntoLatestSubagent() tea.Cmd {
 	if id == "" {
 		return a.setNotice("no subagent to follow (Ctrl+G)")
 	}
-	// Reject push onto deleted sessions — the subagent map only contains
-	// sessions created in this process lifetime, so they are never deleted
-	// in practice; the check is defensive.
 	a.pushForeground(id)
-	shortID := id
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	return a.setNotice(fmt.Sprintf("following sub-session %s (Esc to go back)", shortID))
+	return nil
 }
 
 // isForeground reports whether sessionID is the App's active foreground
@@ -2009,9 +2089,11 @@ func (a *App) appendSubagentDelta(subSessionID, text string) {
 		}
 	}
 	st.Messages = append(st.Messages, uiMessage{
-		Role:        components.RoleAssistant,
-		Raw:         text,
-		IsStreaming: true,
+		Role:          components.RoleAssistant,
+		Raw:           text,
+		IsStreaming:   true,
+		AgentType:     st.Type,
+		SubagentColor: components.ColorForSubagentType(st.Type),
 	})
 }
 
@@ -3308,6 +3390,18 @@ func (a *App) buildSubagentStateFromSession(cs *session.Session, msgs []uiMessag
 	}
 	// Parse type/description from slug: "<type>: <description> [toolID]"
 	agentType, description := parseTypeDescFromSlug(cs.Slug)
+
+	// Patch assistant messages to use the subagent's type name and color
+	// instead of the parent session's active mode (which the generic
+	// hydration path stamps).
+	subColor := components.ColorForSubagentType(agentType)
+	for i := range msgs {
+		if msgs[i].Role == components.RoleAssistant {
+			msgs[i].AgentType = agentType
+			msgs[i].ModeColor = nil
+			msgs[i].SubagentColor = subColor
+		}
+	}
 
 	state := &components.SubagentState{
 		SubSessionID:    cs.ID,
