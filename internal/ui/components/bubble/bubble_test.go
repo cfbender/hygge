@@ -300,20 +300,56 @@ func TestBubble_ShowTailFalse_NoTail(t *testing.T) {
 func TestBubble_BackgroundColor_Applied(t *testing.T) {
 	t.Parallel()
 	// Verify that a BackgroundColor is accepted and the bubble renders without
-	// panic.  We can't easily assert the ANSI escape sequence in a unit test,
-	// but we verify body text still appears and the output is non-empty.
+	// panic.  BackgroundColor is now the same ANSI atom as AccentColor (the
+	// terminal renders the user's palette color directly).
 	b := Bubble{
 		Width:           80,
 		BubbleWidth:     40,
 		Body:            "bg tinted",
 		Theme:           theme.ShellTheme(),
 		AccentColor:     lipgloss.Color("5"),
-		BackgroundColor: lipgloss.Color("53"),
+		BackgroundColor: lipgloss.Color("5"), // same atom as accent — no 256-mapping
 	}
 	out := b.View()
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "bg tinted") {
 		t.Errorf("bubble body must be visible with BackgroundColor set; got:\n%s", plain)
+	}
+}
+
+func TestBubble_AllLinesEqualWidth(t *testing.T) {
+	t.Parallel()
+	// Every line of the rendered bubble (including header, separator, body)
+	// must occupy exactly BubbleWidth terminal columns.  This test is the
+	// regression guard for the alignment bug where bg-fill and border
+	// extended past the intended width on some lines.
+	b := Bubble{
+		Width:           80,
+		BubbleWidth:     40,
+		HeaderLeft:      "Agent",
+		HeaderRight:     "model",
+		Body:            "short\na much longer line that is still within inner width\nend",
+		Theme:           theme.ShellTheme(),
+		AccentColor:     lipgloss.Color("5"),
+		BackgroundColor: lipgloss.Color("5"),
+	}
+	out := b.View()
+	lines := strings.Split(out, "\n")
+	// Remove empty trailing line if present.
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		t.Fatal("bubble rendered no lines")
+	}
+	// The first non-empty line is the top border row; its width sets the
+	// expected width for all rows.
+	expected := lipgloss.Width(lines[0])
+	for i, line := range lines {
+		got := lipgloss.Width(line)
+		if got != expected {
+			t.Errorf("line %d width = %d, want %d\n  line: %q", i, got, expected, line)
+		}
 	}
 }
 
