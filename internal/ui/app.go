@@ -90,6 +90,11 @@ type AppOptions struct {
 	// swallowed internally.
 	OnSessionCreated func(id string)
 
+	// MCPStatuses is the list of MCP server statuses populated at bootstrap.
+	// Displayed in the sidebar.  The UI-side type is SidebarMCPStatus (defined
+	// in components/sidebar.go) so the UI package has no dependency on cmd/.
+	MCPStatuses []components.SidebarMCPStatus
+
 	// OpenSessionsModalOnStart, when true, causes the sessions picker to
 	// open immediately after the first render.  Used by `hygge resume`
 	// (multiple sessions in cwd) and resume_default="ask".  When the
@@ -102,6 +107,11 @@ type AppOptions struct {
 // model.  Kept here so appmsg.go and tests can refer to it without importing
 // the components package.
 type uiMessage = components.UIMessage
+
+// SidebarMCPStatus is a re-export of components.SidebarMCPStatus so that
+// cmd/hygge/cli/run.go can reference the type without importing the
+// internal/ui/components package directly.  See AppOptions.MCPStatuses.
+type SidebarMCPStatus = components.SidebarMCPStatus
 
 // New constructs the App.  Validates required fields and starts the bus
 // bridge goroutine.
@@ -451,24 +461,21 @@ func (a *App) View() tea.View {
 		height = 24
 	}
 
-	hb := components.HeaderBar{
-		Width:       width,
-		AppName:     "Hygge",
-		Version:     a.opts.Version,
-		Profile:     a.opts.ProfileName,
-		ProjectPath: a.opts.ProjectDir,
-		GitBranch:   a.gitBranch(),
-		CtxPercent:  a.pctUsed,
-		CostUSD:     a.costDollars,
-		Theme:       a.opts.Theme,
-		NerdFonts:   a.opts.NerdFonts,
-		HomeDir:     a.opts.HomeDir,
-	}.View()
+	// ── Sidebar / left-column split ───────────────────────────────────────
+	// The sidebar is hidden on narrow terminals (< 100 columns) so the
+	// message viewport doesn't get squeezed.
+	const sidebarMinWidth = 100
+	const sidebarFixedWidth = 32
+	sidebarW := 0
+	if width >= sidebarMinWidth {
+		sidebarW = sidebarFixedWidth
+	}
+	leftW := width - sidebarW
 
 	// T2.2 — breadcrumb: shown above the message list when depth > 1.
 	breadcrumb := components.Breadcrumb{
 		Segments: a.breadcrumbSegments(),
-		Width:    width,
+		Width:    leftW,
 		Theme:    a.opts.Theme,
 	}.View()
 
@@ -484,7 +491,7 @@ func (a *App) View() tea.View {
 	}
 
 	mlContent := components.MessageList{
-		Width:     width,
+		Width:     leftW,
 		Theme:     a.opts.Theme,
 		Messages:  visibleMessages,
 		Subagents: a.subagents,
@@ -501,7 +508,7 @@ func (a *App) View() tea.View {
 		matches := a.paletteMatches()
 		head, _ := splitSlash(a.input.Value())
 		p := components.CommandPalette{
-			Width:           width - 2,
+			Width:           leftW - 2,
 			Theme:           a.opts.Theme,
 			Matches:         matches,
 			Highlight:       a.clampedPaletteHighlight(matches),
@@ -543,14 +550,14 @@ func (a *App) View() tea.View {
 
 	// Threshold-suggestion banner.
 	bannerView := components.CompactionBanner{
-		Width:   width,
+		Width:   leftW,
 		Theme:   a.opts.Theme,
 		Visible: a.bannerVisible && !a.bannerDismissed,
 		Pct:     a.bannerPct,
 	}.View()
 
 	fr := components.Footer{
-		Width:          width,
+		Width:          leftW,
 		Theme:          a.opts.Theme,
 		AgentType:      "General", // Phase 1 placeholder; per-agent-mode type will replace this
 		ModelName:      a.opts.ModelName,
@@ -560,7 +567,7 @@ func (a *App) View() tea.View {
 
 	// Calculate the available height for the message list viewport.
 	// chrome = all rows except the scrollable message list.
-	chrome := lipgloss.Height(hb) + lipgloss.Height(in) + lipgloss.Height(fr)
+	chrome := lipgloss.Height(in) + lipgloss.Height(fr)
 	if breadcrumb != "" {
 		chrome += lipgloss.Height(breadcrumb)
 	}
@@ -585,7 +592,7 @@ func (a *App) View() tea.View {
 	}
 
 	// Update viewport dimensions and content for this render pass.
-	a.msgViewport.SetWidth(width)
+	a.msgViewport.SetWidth(leftW)
 	a.msgViewport.SetHeight(msgListHeight)
 	a.msgViewport.SetContent(mlContent)
 
@@ -596,7 +603,7 @@ func (a *App) View() tea.View {
 
 	body := a.msgViewport.View()
 
-	sections := []string{hb}
+	var sections []string
 	if breadcrumb != "" {
 		sections = append(sections, breadcrumb)
 	}
@@ -618,7 +625,31 @@ func (a *App) View() tea.View {
 		sections = append(sections, notice)
 	}
 	sections = append(sections, fr)
-	main := strings.Join(sections, "\n")
+	leftCol := strings.Join(sections, "\n")
+
+	// ── Right column: sidebar ──────────────────────────────────────────────
+	var main string
+	if sidebarW > 0 {
+		sb := components.Sidebar{
+			Width:        sidebarW,
+			Height:       height,
+			SessionTitle: a.sidebarSessionTitle(),
+			UsedTokens:   a.usedTok,
+			MaxTokens:    a.maxTok,
+			PctUsed:      a.pctUsed,
+			CostUSD:      a.costDollars,
+			MCPs:         a.opts.MCPStatuses,
+			ProjectPath:  a.collapsedProjectPath(),
+			GitBranch:    a.gitBranch(),
+			AppName:      "Hygge",
+			Version:      a.opts.Version,
+			Theme:        a.opts.Theme,
+			NerdFonts:    a.opts.NerdFonts,
+		}.View()
+		main = lipgloss.JoinHorizontal(lipgloss.Top, leftCol, sb)
+	} else {
+		main = leftCol
+	}
 
 	// Modal overlays the entire screen when there's a pending permission.
 	if len(a.pendingPerms) > 0 {
@@ -669,8 +700,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = m.Width
 		a.height = m.Height
-		a.input.SetWidth(m.Width - 2) // border padding
-		a.msgViewport.SetWidth(m.Width)
+		// Compute the left column width accounting for the sidebar.
+		const sidebarMinWidth = 100
+		const sidebarFixedWidth = 32
+		sidebarW := 0
+		if m.Width >= sidebarMinWidth {
+			sidebarW = sidebarFixedWidth
+		}
+		leftW := m.Width - sidebarW
+		a.input.SetWidth(leftW - 2) // border padding
+		a.msgViewport.SetWidth(leftW)
 		// Height is recomputed per-frame in View(); set a sane default here
 		// so the viewport is usable before the first full render.
 		if m.Height > 6 {
@@ -1710,6 +1749,47 @@ func (a *App) gitBranch() string {
 		return ""
 	}
 	return appstate.GitBranch(a.opts.ProjectDir)
+}
+
+// collapsedProjectPath returns opts.ProjectDir with the home directory
+// prefix replaced by "~", mirroring the logic from the old HeaderBar.
+func (a *App) collapsedProjectPath() string {
+	p := a.opts.ProjectDir
+	h := a.opts.HomeDir
+	if h != "" && strings.HasPrefix(p, h) {
+		rest := strings.TrimPrefix(p, h)
+		if rest == "" {
+			return "~"
+		}
+		return "~" + rest
+	}
+	return p
+}
+
+// sidebarSessionTitle returns the display title for the current root session.
+// Preference order: FirstMessagePreview → Slug → first 12 chars of session id.
+// Returns "" when no session is bound.
+func (a *App) sidebarSessionTitle() string {
+	rootID := a.rootSessionID()
+	if rootID == "" {
+		return ""
+	}
+	if a.opts.Store != nil {
+		sess, err := a.opts.Store.GetSession(a.ctx, rootID)
+		if err == nil && sess != nil {
+			if sess.FirstMessagePreview != "" {
+				return sess.FirstMessagePreview
+			}
+			if sess.Slug != "" {
+				return sess.Slug
+			}
+		}
+	}
+	// Fallback: first 12 chars of the session id.
+	if len(rootID) > 12 {
+		return rootID[:12]
+	}
+	return rootID
 }
 
 // toggleLatestSubagent flips the Expanded flag on the most recently
