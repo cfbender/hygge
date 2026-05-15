@@ -91,7 +91,8 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 - ✅ `RoleThinking` dead-branch cleanup (commit `55a0f2d`)
 - ✅ Delete unused `StatusBar` component (commit `55a0f2d`)
 - ✅ Sessions modal: show own cost + rolled-up in parens (subagents)
+- ✅ **Subagent dispatch `invalid_request` (OpenRouter 400)** — fork-chain CTE leaked parent transcript into subagent sessions because the recursive step had no guard on `fork_message_id IS NOT NULL`; a dangling `tool_use` with no matching output caused the provider to reject the request. Fixed by adding `AND a.fork_message_id IS NOT NULL` to the CTE's recursive arm in `internal/store/messages.go`. `PropagateTotals` recursive CTE is intentionally left alone — it correctly rolls subagent costs up to ancestor sessions.
 
 ---
 
-_Last updated after the cleanup bundle (commit `55a0f2d`)._
+_Last updated after the subagent CTE fix (commit pending)._
