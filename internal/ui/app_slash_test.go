@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +12,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -245,6 +249,114 @@ func TestNonSlashInputStillRoutesToSend(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(sendStarted); !ok {
 		t.Errorf("expected sendStarted msg, got %T", msg)
+	}
+}
+
+func TestAttachTextFileShowsChipAndSendIncludesContentThenClears(t *testing.T) {
+	app, _, reg := newSlashApp(t)
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(path, []byte("alpha bravo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gotCh := make(chan []session.Part, 1)
+	app.opts.SessionID = "session-1"
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		gotCh <- append([]session.Part(nil), parts...)
+		return nil, nil
+	}
+	if _, ok := reg.Get("attach"); !ok {
+		t.Fatal("/attach not registered")
+	}
+
+	typeInto(app, "/attach "+path)
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := app.View().Content
+	if !strings.Contains(view, "notes.txt") || !strings.Contains(view, "/attachments clear") {
+		t.Fatalf("attachment chip missing from view:\n%s", view)
+	}
+
+	cmd := app.startSend("use this")
+	if cmd == nil {
+		t.Fatal("startSend returned nil")
+	}
+	_ = cmd()
+	var got []session.Part
+	select {
+	case got = <-gotCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("send function was not called")
+	}
+	if len(got) < 2 {
+		t.Fatalf("got parts = %+v, want prompt plus attachment", got)
+	}
+	if got[0].Text != "use this" {
+		t.Fatalf("first part text = %q", got[0].Text)
+	}
+	if !strings.Contains(got[1].Text, "Attached file:") || !strings.Contains(got[1].Text, "alpha bravo") {
+		t.Fatalf("attachment text part missing content: %+v", got[1])
+	}
+	if len(app.pendingAttachments) != 0 {
+		t.Fatalf("pending attachments not cleared: %+v", app.pendingAttachments)
+	}
+}
+
+func TestAttachRejectsTooLargeTextFile(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	path := filepath.Join(t.TempDir(), "large.txt")
+	data := strings.Repeat("x", maxPromptAttachmentTextBytes+1)
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	typeInto(app, "/attach "+path)
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(app.pendingAttachments) != 0 {
+		t.Fatalf("large file should not attach")
+	}
+	if !strings.Contains(app.notice, "too large") {
+		t.Fatalf("notice = %q, want too large", app.notice)
+	}
+}
+
+func TestAttachRejectsBinaryNonImageFile(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	path := filepath.Join(t.TempDir(), "blob.bin")
+	if err := os.WriteFile(path, []byte{0xff, 0x00, 0x01}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	typeInto(app, "/attach "+path)
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(app.pendingAttachments) != 0 {
+		t.Fatalf("binary file should not attach")
+	}
+	if !strings.Contains(app.notice, "binary files are not supported") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+}
+
+func TestAttachmentsClearCommand(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(path, []byte("alpha"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	typeInto(app, "/attach "+path)
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(app.pendingAttachments) != 1 {
+		t.Fatalf("setup attach failed: %q", app.notice)
+	}
+	typeInto(app, "/attachments clear")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(app.pendingAttachments) != 0 {
+		t.Fatalf("pending attachments not cleared")
+	}
+}
+
+func TestSlashCompletionIncludesAttachmentCommands(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/att")
+	view := app.View().Content
+	if !strings.Contains(view, "/attach") || !strings.Contains(view, "/attachments") {
+		t.Fatalf("attachment commands missing from palette:\n%s", view)
 	}
 }
 

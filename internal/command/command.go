@@ -69,6 +69,14 @@ const (
 	// message id.  Until session-management UI lands (T1.2) the TUI
 	// renders this as an explanatory notice and otherwise no-ops.
 	UpdateForkAt = "fork_at"
+
+	// UpdateAttachFile asks the TUI to attach a local file path to the next
+	// prompt. Value shape: local filesystem path typed by the user.
+	UpdateAttachFile = "attach_file"
+
+	// UpdateAttachments asks the TUI to mutate pending prompt attachments.
+	// Currently recognised value: "clear".
+	UpdateAttachments = "attachments"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].
