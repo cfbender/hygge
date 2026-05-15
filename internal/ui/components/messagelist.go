@@ -1,3 +1,9 @@
+// Package components contains the bubbletea sub-views that compose the App.
+//
+// Each file in this package exports one component as a simple struct with a
+// View(...) method.  The components are intentionally NOT tea.Model
+// implementations: the App owns the state machine; components are pure
+// presentation layers.
 package components
 
 import (
@@ -23,9 +29,6 @@ const (
 	RoleAssistant MessageRole = "assistant"
 	RoleTool      MessageRole = "tool"
 	RoleSystem    MessageRole = "system"
-	// RoleThinking renders assistant reasoning content as always-visible dim
-	// italic text preceding the assistant's response.  No expand/collapse.
-	RoleThinking MessageRole = "thinking"
 	// RoleMarker renders a prominent banner-style section break produced
 	// by a compaction event.  It shows the summary and tokens-saved count.
 	RoleMarker MessageRole = "marker"
@@ -272,19 +275,6 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	// and optional inline thinking above the response body.
 	if msg.Role == RoleAssistant {
 		return m.renderAssistantBubble(msg)
-	}
-
-	// RoleThinking: legacy path — should no longer be emitted after Phase 2.
-	// Kept as a dead branch for safety; renders as dim italic text.
-	if msg.Role == RoleThinking {
-		var style lipgloss.Style
-		if m.Theme != nil {
-			style = m.Theme.Style(theme.AtomMuted).Faint(true).Italic(true)
-		} else {
-			style = lipgloss.NewStyle().Faint(true).Italic(true)
-		}
-		body := strings.TrimRight(msg.Raw, "\n")
-		return style.Render(body)
 	}
 
 	// RoleMarker: prominent banner-style compaction section break.
@@ -722,8 +712,6 @@ func (m MessageList) roleStyle(role MessageRole) lipgloss.Style {
 		return m.Theme.Style(theme.AtomAccent).Bold(true)
 	case RoleTool:
 		return m.Theme.Style(theme.AtomMuted).Bold(true)
-	case RoleThinking:
-		return m.Theme.Style(theme.AtomMuted).Faint(true).Italic(true)
 	default:
 		return m.Theme.Style(theme.AtomMuted)
 	}

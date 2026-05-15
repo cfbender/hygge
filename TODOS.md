@@ -65,7 +65,13 @@ Items deferred during the v0.3 → v0.4 polish phase. Order is rough priority: t
 
 ---
 
-_Last updated as part of UI redesign Phase 4 (commit `958ee6d`)._
+## For carpenter / future UI work
+
+- Read `docs/agents/ui-v2-gotchas.md` before editing anything under `internal/ui/`. It documents the bubbletea / lipgloss / bubbles v2 traps the agent has hit repeatedly (especially: `lipgloss.Color` is a function, not a type — fields hold `color.Color` from `image/color`).
+
+---
+
+_Last updated after the sidebar slice (commit `f4c7dd0`)._
 
 ## Sidebar follow-ups
 

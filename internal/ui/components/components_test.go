@@ -8,41 +8,6 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-func TestStatusBarRendersIdentity(t *testing.T) {
-	t.Parallel()
-	sb := StatusBar{
-		Profile:  "work",
-		Provider: "anthropic",
-		Model:    "claude-sonnet-4-5",
-		Pwd:      "~/proj",
-		Width:    80,
-		Theme:    theme.ShellTheme(),
-	}
-	out := sb.View()
-	for _, want := range []string{"[profile:work]", "anthropic/claude-sonnet-4-5", "~/proj"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("statusbar missing %q in:\n%s", want, out)
-		}
-	}
-}
-
-func TestStatusBarSpinnerWhenBusy(t *testing.T) {
-	t.Parallel()
-	sb := StatusBar{Provider: "anthropic", Model: "claude", Width: 60, Busy: true, SpinnerTick: 0, Theme: theme.ShellTheme()}
-	out := sb.View()
-	if !strings.Contains(out, spinnerFrames[0]) {
-		t.Errorf("expected spinner glyph %q in:\n%s", spinnerFrames[0], out)
-	}
-
-	sb.Busy = false
-	out = sb.View()
-	for _, f := range spinnerFrames {
-		if strings.Contains(out, f) {
-			t.Errorf("expected NO spinner glyph when not busy, found %q", f)
-		}
-	}
-}
-
 func TestMessageListRendersRoles(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
