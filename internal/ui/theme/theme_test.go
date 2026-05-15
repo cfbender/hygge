@@ -64,7 +64,7 @@ error          = "#F7768E"
 "bubble.header.muted"   = "8"
 "bubble.body.muted"     = "8"
 "bubble.user.border"    = "4"
-"bubble.agent.border"   = "1"
+"bubble.agent.border"   = "5"
 `
 }
 
@@ -316,7 +316,7 @@ error          = "inherit:code.fg"
 "bubble.header.muted"   = "8"
 "bubble.body.muted"     = "8"
 "bubble.user.border"    = "4"
-"bubble.agent.border"   = "1"
+"bubble.agent.border"   = "5"
 `
 	_, err := parseTOMLTheme([]byte(content))
 	if err == nil {
