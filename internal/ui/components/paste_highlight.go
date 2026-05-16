@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-var pastedInputMarkerPattern = regexp.MustCompile(`\[ Pasted \d+ lines? \]`)
+var pastedInputMarkerPattern = regexp.MustCompile(`\[Pasted \d+ lines?\]`)
 
 // HighlightPastedInputMarkers applies style to collapsed multi-line paste markers.
 func HighlightPastedInputMarkers(s string, style lipgloss.Style) string {

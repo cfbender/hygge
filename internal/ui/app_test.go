@@ -139,14 +139,14 @@ func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("multi-line paste should be handled locally, got cmd %T", cmd)
 	}
-	if got, want := app.input.Value(), "[ Pasted 3 lines ] "; got != want {
+	if got, want := app.input.Value(), "[Pasted 3 lines] "; got != want {
 		t.Fatalf("input after paste = %q, want %q", got, want)
 	}
 	view := app.View().Content
 	chip := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("0")).
 		Background(lipgloss.Color("5")).
-		Render("[ Pasted 3 lines ]")
+		Render("[Pasted 3 lines]")
 	if !strings.Contains(view, chip) {
 		t.Fatalf("paste marker missing from view:\n%s", view)
 	}
@@ -178,7 +178,7 @@ func TestMultiLinePasteMarkerBackspacesAsSingleChip(t *testing.T) {
 
 	app.Update(tea.PasteMsg{Content: "alpha\nbravo\ncharlie"})
 	app.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if got, want := app.input.Value(), "[ Pasted 3 lines ]"; got != want {
+	if got, want := app.input.Value(), "[Pasted 3 lines]"; got != want {
 		t.Fatalf("first backspace should remove trailing paste space, got %q want %q", got, want)
 	}
 	if len(app.pastedInputBlocks) != 1 {
@@ -202,7 +202,7 @@ func TestMultiLinePasteMarkerCannotBeEditedInternally(t *testing.T) {
 	app.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	app.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	app.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
-	if got, want := app.input.Value(), "X[ Pasted 3 lines ] "; got != want {
+	if got, want := app.input.Value(), "X[Pasted 3 lines] "; got != want {
 		t.Fatalf("typing after moving left should land before chip, got %q want %q", got, want)
 	}
 }
