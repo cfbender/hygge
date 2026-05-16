@@ -27,9 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Multi-line paste visibility**
-  Pasting multi-line content hides it from view - showing "[ Pasted X lines]" in line that the cursor skips around
-
 - [ ] **Model selector only shows configured providers**
   Limit selectable models to providers configured by the user.
 

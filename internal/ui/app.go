@@ -324,6 +324,9 @@ type App struct {
 	// pendingAttachments are one-shot local files included with the next user
 	// message. They clear after Agent.Send accepts the turn/enqueue.
 	pendingAttachments []promptAttachment
+	// pastedInputBlocks keeps multi-line paste contents out of the editor while
+	// preserving the full pasted text for the next send.
+	pastedInputBlocks []pastedInputBlock
 
 	// paletteHighlight is the current row index into the active
 	// command palette matches.  -1 means "no row highlighted".
@@ -938,6 +941,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.clearSelection()
 		return a.handleKey(m)
 
+	case tea.PasteMsg:
+		a.clearSelection()
+		return a.handlePaste(m)
+
 	case tea.MouseClickMsg:
 		if !a.anyOverlayOpen() && m.Button == tea.MouseLeft {
 			// Check for subagent bubble click.
@@ -1070,6 +1077,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case "ctrl+l":
 		a.input.Reset()
+		a.pastedInputBlocks = nil
 		a.slashPaletteDismissed = false
 		a.mentionDismissed = false
 		return a, nil
@@ -1112,17 +1120,17 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k.Mod.Contains(tea.ModAlt) {
 			return a.insertInputNewline()
 		}
-		text := strings.TrimSpace(a.input.Value())
-		if text == "" {
+		displayText := strings.TrimSpace(a.input.Value())
+		if displayText == "" {
 			return a, nil
 		}
 		// Slash commands cannot be queued — block them while busy.
-		if a.busy && strings.HasPrefix(text, "/") {
+		if a.busy && strings.HasPrefix(displayText, "/") {
 			return a, nil
 		}
-		if strings.HasPrefix(text, "/") {
-			if slashPrefixOnly(text) {
-				name, _ := splitSlash(text)
+		if strings.HasPrefix(displayText, "/") {
+			if slashPrefixOnly(displayText) {
+				name, _ := splitSlash(displayText)
 				exact := false
 				if a.opts.Commands != nil {
 					_, exact = a.opts.Commands.Get(name)
@@ -1132,15 +1140,18 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			a.input.Reset()
+			a.pastedInputBlocks = nil
 			a.slashPaletteDismissed = false
-			return a, a.runSlashCommand(text)
+			return a, a.runSlashCommand(displayText)
 		}
-		mentionAttachments, err := a.promptAttachmentsForMentions(text)
+		mentionAttachments, err := a.promptAttachmentsForMentions(displayText)
 		if err != nil {
 			return a, a.setNotice("mention: " + err.Error())
 		}
+		text := strings.TrimSpace(a.expandPastedInputText(displayText))
 		a.history.Add(text)
 		a.input.Reset()
+		a.pastedInputBlocks = nil
 		a.slashPaletteDismissed = false
 		a.mentionDismissed = false
 		// Resume auto-scroll when the user sends a message.

@@ -130,6 +130,56 @@ func TestShiftEnterInsertsInputNewline(t *testing.T) {
 	}
 }
 
+func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	_, cmd := app.Update(tea.PasteMsg{Content: "alpha\nbravo\ncharlie"})
+	if cmd != nil {
+		t.Fatalf("multi-line paste should be handled locally, got cmd %T", cmd)
+	}
+	if got, want := app.input.Value(), "[ Pasted 3 lines ]"; got != want {
+		t.Fatalf("input after paste = %q, want %q", got, want)
+	}
+	view := app.View().Content
+	if !strings.Contains(view, "[ Pasted 3 lines ]") {
+		t.Fatalf("paste marker missing from view:\n%s", view)
+	}
+	if strings.Contains(view, "bravo") {
+		t.Fatalf("raw pasted middle line should not be visible in editor:\n%s", view)
+	}
+
+	typeInto(app, " summarize")
+	_, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	msg := cmd()
+	started, ok := msg.(sendStarted)
+	if !ok {
+		t.Fatalf("cmd returned %T, want sendStarted", msg)
+	}
+	if got, want := started.UserInput, "alpha\nbravo\ncharlie summarize"; got != want {
+		t.Fatalf("sent input = %q, want %q", got, want)
+	}
+	if len(app.pastedInputBlocks) != 0 {
+		t.Fatalf("pasted blocks not cleared after send: %+v", app.pastedInputBlocks)
+	}
+}
+
+func TestSingleLinePasteStaysEditableText(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Update(tea.PasteMsg{Content: "alpha"})
+	if got, want := app.input.Value(), "alpha"; got != want {
+		t.Fatalf("input after single-line paste = %q, want %q", got, want)
+	}
+	if len(app.pastedInputBlocks) != 0 {
+		t.Fatalf("single-line paste should not create collapsed blocks: %+v", app.pastedInputBlocks)
+	}
+}
+
 func TestAtMentionPaletteCompletesFilesAndSubagents(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
