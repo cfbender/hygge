@@ -304,13 +304,11 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		return nil
 	}
 
-	// Redirect slog to a log file so warnings/errors emitted from the
-	// agent loop, provider, tools, etc. are diagnosable even though the
-	// TUI owns stderr in alt-screen mode.  Best-effort: a failure to open
-	// the file is not fatal — we just keep the default handler.
-	if logCloser := setupTUILog(rt); logCloser != nil {
-		defer logCloser()
-	}
+	slog.Info("hygge: tui session started",
+		"pwd", rt.Pwd,
+		"provider", rt.Config.Model.Provider,
+		"model", rt.Config.Model.Name,
+		"profile", rt.Config.Profile)
 
 	prog := tea.NewProgram(app,
 		// Pass the exact environment so bubbletea uses our env for terminal
@@ -362,15 +360,16 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 }
 
 // setupTUILog redirects slog output to $XDG_STATE_HOME/hygge/hygge.log so
-// that warnings emitted under bubbletea's alt-screen are recoverable.
-// Returns a close function (or nil if redirection failed) that restores
-// the previous slog default handler and closes the file.
+// logs emitted during bootstrap and under bubbletea's alt-screen are
+// recoverable without leaking to the terminal. Returns a close function (or
+// nil if redirection failed) that restores the previous slog default handler
+// and closes the file.
 //
 // Log level: reads HYGGE_LOG_LEVEL (case-insensitive).  Accepted values:
 // debug, info, warn, error.  When unset the level defaults to debug,
 // matching the historical behaviour so existing users see no change.
-func setupTUILog(rt *appRuntime) func() {
-	dir := rt.StateOpts.XDGStateHome
+func setupTUILog(stateOpts state.LoadOptions) func() {
+	dir := stateOpts.XDGStateHome
 	if dir == "" {
 		// state.LoadOptions falls back to XDG_STATE_HOME or ~/.local/state
 		// at load time; if we don't have it here, just skip — the user
@@ -408,11 +407,6 @@ func setupTUILog(rt *appRuntime) func() {
 
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: level})))
-	slog.Info("hygge: tui session started",
-		"pwd", rt.Pwd,
-		"provider", rt.Config.Model.Provider,
-		"model", rt.Config.Model.Name,
-		"profile", rt.Config.Profile)
 	return func() {
 		slog.SetDefault(prev)
 		_ = f.Close()

@@ -77,6 +77,7 @@ type appRuntime struct {
 	MCPClients      []*mcp.Client
 	MCPConfigs      []mcp.ServerConfig
 	MCPStatuses     []MCPServerStatus
+	logCloser       func()
 	mcpMu           sync.Mutex
 	mcpWG           sync.WaitGroup
 	mcpCancel       context.CancelFunc
@@ -231,6 +232,10 @@ func (r *appRuntime) Close() error {
 			firstErr = err
 		}
 	}
+	if r.logCloser != nil {
+		r.logCloser()
+		r.logCloser = nil
+	}
 	return firstErr
 }
 
@@ -325,6 +330,12 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	stateOpts := state.LoadOptions{HomeDir: opts.HomeDir, XDGStateHome: xdgState}
+	logCloser := setupTUILog(stateOpts)
+	defer func() {
+		if err != nil && logCloser != nil {
+			logCloser()
+		}
+	}()
 
 	// Phase: config load
 	t0 := time.Now()
@@ -708,6 +719,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Plugins:          pluginReg,
 		PluginPM:         pluginPM,
 		catalogSrc:       catSrc,
+		logCloser:        logCloser,
 	}
 	return rt, nil
 }
