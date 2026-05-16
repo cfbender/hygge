@@ -1872,7 +1872,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 
 	case bus.ToolCallRequested:
 		if a.routeToSubagent(e.SessionID) {
-			a.appendSubagentTool(e.SessionID, e.ToolName, extractTarget(e.Args))
+			a.appendSubagentTool(e.SessionID, e.ToolName, e.ToolUseID, extractTarget(e.Args))
 			return nil
 		}
 		if !a.isForeground(e.SessionID) {
@@ -2707,7 +2707,7 @@ func (a *App) flushSubagentStream(subSessionID, role string) {
 
 // appendSubagentTool appends a streaming tool entry to the matching
 // sub-agent's transcript.
-func (a *App) appendSubagentTool(subSessionID, toolName, target string) {
+func (a *App) appendSubagentTool(subSessionID, toolName, toolUseID, target string) {
 	st, ok := a.subagents[subSessionID]
 	if !ok {
 		return
@@ -2715,6 +2715,7 @@ func (a *App) appendSubagentTool(subSessionID, toolName, target string) {
 	st.Messages = append(st.Messages, uiMessage{
 		Role:        components.RoleTool,
 		ToolName:    toolName,
+		ToolUseID:   toolUseID,
 		Target:      target,
 		Raw:         "(running…)",
 		IsStreaming: true,
@@ -2750,10 +2751,11 @@ func (a *App) finishSubagentTool(subSessionID string, e bus.ToolCallCompleted) {
 		out = e.Err
 	}
 	st.Messages = append(st.Messages, uiMessage{
-		Role:     components.RoleTool,
-		ToolName: e.ToolName,
-		Raw:      out,
-		IsError:  e.Err != "",
+		Role:      components.RoleTool,
+		ToolName:  e.ToolName,
+		ToolUseID: e.ToolUseID,
+		Raw:       out,
+		IsError:   e.Err != "",
 	})
 }
 
