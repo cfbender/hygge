@@ -25,6 +25,3 @@
 
 - Refactor and split out internal/ui/app.go
 
-## UI / interaction polish
-
-- At this point, tag as v0.3.0 and push the tag as a release on github
