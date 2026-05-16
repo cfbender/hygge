@@ -299,6 +299,9 @@ type App struct {
 	// reset to false when the user presses Enter (sends a message) or when
 	// the viewport is programmatically scrolled to the bottom.
 	userScrolled bool
+	// scrollDrag tracks an in-progress drag on the chat scrollbar thumb.
+	scrollDragActive     bool
+	scrollDragThumbDelta int
 
 	// permission state
 	pendingPerms []components.PermissionRequest // FIFO queue
@@ -1000,6 +1003,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if !a.anyOverlayOpen() && m.Button == tea.MouseLeft {
+			if a.beginScrollBarDrag(m.X, m.Y) {
+				a.clearSelection()
+				return a, nil
+			}
 			if idx := a.queuedDraftAtScreen(m.X, m.Y); idx >= 0 {
 				a.clearSelection()
 				a.editQueuedDraft(idx)
@@ -1024,6 +1031,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		if !a.anyOverlayOpen() {
+			if a.scrollDragActive {
+				a.dragScrollBar(m.Y)
+				return a, nil
+			}
 			// Track hover over subagent bubbles.
 			prev := a.hoverSubagentID
 			a.hoverSubagentID = a.subagentAtScreen(m.X, m.Y)
@@ -1039,6 +1050,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseReleaseMsg:
 		if !a.anyOverlayOpen() {
+			if a.scrollDragActive {
+				a.dragScrollBar(m.Y)
+				a.scrollDragActive = false
+				return a, nil
+			}
 			cmd := a.handleMouseUp(m.X, m.Y)
 			return a, cmd
 		}

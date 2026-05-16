@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] click and drag scrollbar handle to scroll
-
 - [ ] compaction summary box breaks out of viewport
 
 - [ ] match input border color to mode color

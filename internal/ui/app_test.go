@@ -206,6 +206,77 @@ func TestCtrlEEditorExpandsPastedMarkers(t *testing.T) {
 	}
 }
 
+func TestScrollBarDragScrollsChatViewport(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for i := range 80 {
+		app.messages = append(app.messages, uiMessage{
+			Role: components.RoleAssistant,
+			Raw:  "message line " + string(rune('a'+(i%26))),
+		})
+	}
+	app.invalidateMsgCache()
+	_ = app.View()
+
+	if !app.scrollBarVisible() {
+		t.Fatal("expected visible scrollbar for overflowing chat")
+	}
+	bottomOffset := app.msgViewport.YOffset()
+	if bottomOffset == 0 {
+		t.Fatal("expected viewport to start at bottom with overflow")
+	}
+	geom, ok := app.scrollBarGeometry()
+	if !ok {
+		t.Fatal("expected scrollbar geometry")
+	}
+
+	app.Update(tea.MouseClickMsg{X: geom.X, Y: geom.ThumbY, Button: tea.MouseLeft})
+	app.Update(tea.MouseMotionMsg{X: geom.X, Y: 0})
+	app.Update(tea.MouseReleaseMsg{X: geom.X, Y: 0, Button: tea.MouseLeft})
+
+	if app.scrollDragActive {
+		t.Fatal("scroll drag still active after release")
+	}
+	if got := app.msgViewport.YOffset(); got != 0 {
+		t.Fatalf("viewport offset = %d, want top", got)
+	}
+	if !app.userScrolled {
+		t.Fatal("dragging upward should pause auto-scroll")
+	}
+}
+
+func TestScrollBarDragToBottomResumesAutoScroll(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for i := range 80 {
+		app.messages = append(app.messages, uiMessage{
+			Role: components.RoleAssistant,
+			Raw:  "message line " + string(rune('a'+(i%26))),
+		})
+	}
+	app.invalidateMsgCache()
+	_ = app.View()
+	app.msgViewport.GotoTop()
+	app.userScrolled = true
+
+	geom, ok := app.scrollBarGeometry()
+	if !ok {
+		t.Fatal("expected scrollbar geometry")
+	}
+	app.Update(tea.MouseClickMsg{X: geom.X, Y: geom.ThumbY, Button: tea.MouseLeft})
+	app.Update(tea.MouseMotionMsg{X: geom.X, Y: app.height - 1})
+	app.Update(tea.MouseReleaseMsg{X: geom.X, Y: app.height - 1, Button: tea.MouseLeft})
+
+	if !app.msgViewport.AtBottom() {
+		t.Fatalf("viewport offset = %d, want bottom", app.msgViewport.YOffset())
+	}
+	if app.userScrolled {
+		t.Fatal("dragging to bottom should resume auto-scroll")
+	}
+}
+
 func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)

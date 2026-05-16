@@ -58,8 +58,10 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		a.drawSidebar(scr, l.sidebar)
 	}
 
-	// Draw scroll bar on the left edge of the sidebar when scrolled up.
-	if l.sidebarW > 0 && a.userScrolled && !a.msgViewport.AtBottom() {
+	// Draw scroll bar on the left edge of the sidebar when chat content
+	// overflows. Keeping it visible at the bottom makes the thumb draggable
+	// before the user has already scrolled with the wheel.
+	if a.scrollBarVisible() {
 		a.drawScrollBar(scr, l.sidebar.Min.X)
 	}
 
@@ -122,14 +124,10 @@ func (a *App) renderLeftColumn() string {
 // drawScrollBar renders a thin scroll position indicator on the first column
 // of the sidebar, spanning the full terminal height.
 func (a *App) drawScrollBar(scr uv.Screen, x int) {
-	h := a.height
-	if h < 3 {
+	geom, ok := a.scrollBarGeometry()
+	if !ok {
 		return
 	}
-	pct := a.msgViewport.ScrollPercent()
-	thumbH := max(1, min(3, h/8))
-	trackH := h - thumbH
-	thumbY := int(float64(trackH) * pct)
 
 	var trackBg, thumbColor color.Color
 	if a.styles != nil {
@@ -137,8 +135,8 @@ func (a *App) drawScrollBar(scr uv.Screen, x int) {
 		thumbColor = a.styles.WorkingLabelColor
 	}
 
-	for y := range h {
-		if y >= thumbY && y < thumbY+thumbH {
+	for y := range geom.Height {
+		if y >= geom.ThumbY && y < geom.ThumbY+geom.ThumbH {
 			scr.SetCell(x, y, &uv.Cell{
 				Content: "▐",
 				Style:   uv.Style{Fg: thumbColor, Bg: trackBg},
