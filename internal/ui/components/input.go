@@ -1,6 +1,7 @@
 package components
 
 import (
+	"image/color"
 	"math/rand/v2"
 
 	"charm.land/bubbles/v2/textarea"
@@ -40,6 +41,7 @@ type Input struct {
 	Styles           *styles.Styles
 	Theme            *theme.Theme // kept for gradual migration
 	PasteMarkerStyle lipgloss.Style
+	BorderColor      color.Color
 	Focused          bool
 	prevH            int // track height changes for layout recalc
 }
@@ -134,9 +136,13 @@ func (i *Input) View() string {
 	style := lipgloss.NewStyle().Padding(0, 1)
 
 	if i.Focused {
+		borderColor := i.BorderColor
+		if borderColor == nil {
+			borderColor = i.Styles.Dialog.TitleGradFrom
+		}
 		style = style.
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(i.Styles.Dialog.TitleGradFrom)
+			BorderForeground(borderColor)
 	} else {
 		style = style.
 			Border(lipgloss.RoundedBorder()).
