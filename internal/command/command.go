@@ -161,6 +161,10 @@ type Outcome struct {
 	// from view.  /clear sets this.
 	ClearHistory bool
 
+	// NewSession asks the TUI to clear the foreground and create a fresh
+	// session on the next user input. /new sets this; /clear aliases it.
+	NewSession bool
+
 	// Compact asks the TUI to trigger a compaction pass on the
 	// current session.  /compact sets this.
 	Compact bool
