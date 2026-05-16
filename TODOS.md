@@ -38,9 +38,6 @@
 
 - [ ] Splash screen with animated ASCII art logo and centered prompt box, with tips below (ie. ctrl + e to open prompt in external editor, ctrl + t to cycle model reasoning level, tab to switch mode)
 
-- [ ] **Hygge smoking chimney animation**
-  Add a smoking-chimney animation for Hygge branding/delight.
-
 - [ ] Configure default profile in user config
 
 - [ ] Show more info from model around tool usage. Right now, the chat only shows a list of tool usage, where in something like opencode, the agent explains what it's doing before calling the edit or write tools.
@@ -49,5 +46,11 @@
 
 - [ ] Header redesign - bolder, background color maybe?, more padding (3 rows)
 
+- At this point, tag as v0.3.0 and push the tag as a release on github
+
 - [ ] **Refine system prompt**
   Update the system prompt to reflect Hygge's current capabilities.
+
+- [ ] **Hygge smoking chimney animation**
+  Add a smoking-chimney animation for Hygge branding/delight.
+
