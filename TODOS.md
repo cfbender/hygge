@@ -21,10 +21,14 @@
 - [ ] **Extract `GitRunner` interface on `PackageManager` for test injection**
   Today `internal/plugin/pkgmgr.go` defensively neuters git credential helpers via env vars and `gitCommand` wrapping. The new `internal/state/git_numstat.go` also shells out to git. Extracting a shared `GitRunner` interface lets both inject a fake — no real `git` invocation, no keychain prompts.
 
+## Code
+
+- Refactor and split out internal/ui/app.go
+
 ## UI / interaction polish
 
 - [ ] **Multi-line paste visibility**
-  Pasting multi-line content currently hides it from view; keep pasted content visible or provide a clear collapsed preview.
+  Pasting multi-line content hides it from view - showing "[ Pasted X lines]" in line that the cursor skips around
 
 - [ ] **Model selector only shows configured providers**
   Limit selectable models to providers configured by the user.
