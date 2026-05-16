@@ -245,7 +245,20 @@ func TestCompact_UsesFantasySummaryWhenConfigured(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 	prov := newFakeProvider("fake")
-	fantasyModel := &fakeFantasyModel{provider: "fake", model: "fake-model", text: "fantasy compact summary", usage: fantasy.Usage{InputTokens: 42, OutputTokens: 7}}
+	fantasyModel := &fakeFantasyModel{
+		provider:    "fake",
+		model:       "fake-model",
+		generateErr: errors.New("stream must be set to true"),
+		onStream: func(call fantasy.Call) {
+			if call.MaxOutputTokens != nil {
+				t.Fatalf("streaming compaction should omit MaxOutputTokens; got %d", *call.MaxOutputTokens)
+			}
+		},
+		stream: []fantasy.StreamPart{
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "fantasy compact summary"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 42, OutputTokens: 7}},
+		},
+	}
 	a := env.newAgent(prov, func(o *Options) { o.FantasyModel = fantasyModel })
 	for i := range 3 {
 		if _, err := env.Store.AppendMessage(ctx, env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: userText(fmt.Sprintf("q%d", i))}); err != nil {
