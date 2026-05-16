@@ -13,13 +13,6 @@
 - [ ] **Migration: add `parent_tool_use_id TEXT` column to sessions**
   Subagent hydration currently parses `[toolUseID]` out of the session slug via `extractToolUseIDFromSlug`. Brittle if `buildSlug` format ever changes. A proper column makes the link exact.
 
-- [ ] **SQLite-concurrency test hardening under `-race`**
-  Three known flakes pass in isolation but fail intermittently under parallel `-race` load:
-  `TestConcurrent_ReadsAndOneWriter` (`internal/store`)
-  `TestOpenSessionsModalOnStart_SelectSessionSwitches` (`internal/ui`)
-  `TestEnsureSessionLazilyCreates` (`internal/ui`)
-  Probably need to drop `t.Parallel()` or add a small retry/backoff in test setup.
-
 - [ ] **`uiMessage` `CreatedAt`-based sorting for compaction markers**
   Phase 2 added a `Timestamp` field, but the multi-compaction ordering path still falls back to "append at end" when `BeforeMessageID` isn't found. Use `Timestamp` for chronological insertion.
 
@@ -33,17 +26,11 @@
 - [ ] **Multi-line paste visibility**
   Pasting multi-line content currently hides it from view; keep pasted content visible or provide a clear collapsed preview.
 
-- [x] **Input box width styling**
-  Fix prompt input styling so it does not stretch overly wide.
-
-- [ ] **Slash commands as modal popup**
-  Replace the current slash-command UI with a modal popup flow similar to Crush.
-
 - [ ] **Model selector only shows configured providers**
   Limit selectable models to providers configured by the user.
 
 - [ ] **Diff view component**
-  Add a diff view for displaying diffs and edit-tool changes; reference Crush's diff view behavior.
+  Add a diff view for displaying diffs and edit-tool changes; reference Crush's diff view behavior (eg. if it looks like a diff , show a diff)
 
 - [ ] **Expandable bash tool output**
   Bash tool blocks should show truncated output with click/keyboard affordance to expand.
@@ -57,11 +44,13 @@
 - [ ] **Yolo mode**
   Add a mode for reduced confirmations / more autonomous execution.
 
-- [ ] **Hygge smoking chimney animation**
-  Add a smoking-chimney animation for Hygge branding/delight.
-
 - [ ] **Queued messages sticky at bottom**
   Keep queued messages sticky at the bottom and do not send them until the main thread has a break.
 
 - [ ] Text alignment and bubble fill
   Text should take up the width of the bubble before wrapping.
+
+- [ ] /new command for new session. alias /clear to this as well and remove /clear's current functionality
+
+- [ ] **Hygge smoking chimney animation**
+  Add a smoking-chimney animation for Hygge branding/delight.

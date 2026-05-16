@@ -25,9 +25,9 @@ const commandPaletteMaxRows = 8
 // Filtering is done by the App via command.Registry.LookupPrefix so
 // this component is also reusable for non-slash menus in the future.
 //
-// Anchor: rendered immediately above the input via lipgloss.JoinVertical
-// in app.View.  The palette draws its own rounded border so it visually
-// floats above the input border.
+// Anchor: the App draws the palette as a floating layer above the editor. The
+// palette draws its own rounded border so it visually floats above the input
+// border.
 type CommandPalette struct {
 	// Width is the rendered width in cells (matches the input width).
 	Width int

@@ -37,6 +37,10 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	leftArea.Max.X = l.leftW
 	uv.NewStyledString(leftContent).Draw(scr, leftArea)
 
+	// Completion palettes float above the editor, covering chat content instead
+	// of participating in the left-column flow and pushing the editor down.
+	a.drawCompletionPalette(scr, area)
+
 	// Draw sidebar into the right column with its own background.
 	if l.sidebarW > 0 {
 		if a.styles != nil && a.styles.SidebarBg != nil {
@@ -147,6 +151,37 @@ func (a *App) drawScrollBar(scr uv.Screen, x int) {
 func (a *App) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	content := a.renderSidebarContent()
 	uv.NewStyledString(content).Draw(scr, area)
+}
+
+func (a *App) drawCompletionPalette(scr uv.Screen, area uv.Rectangle) {
+	if a.viewingSubagent() {
+		return
+	}
+	palette := a.renderCompletionPalette()
+	if palette == "" {
+		return
+	}
+
+	paletteH := lipgloss.Height(palette)
+	if paletteH <= 0 {
+		return
+	}
+
+	// The left column is composed as a flow, so anchor to the editor's actual
+	// screen position: immediately above the fixed footer.
+	editorTop := area.Max.Y - footerHeight - a.layout.editor.Dy()
+	minY := area.Min.Y + headerHeight
+	if editorTop <= minY {
+		return
+	}
+
+	y := max(editorTop-paletteH, minY)
+
+	paletteArea := area
+	paletteArea.Max.X = min(area.Min.X+a.layout.leftW, area.Max.X)
+	paletteArea.Min.Y = y
+	paletteArea.Max.Y = editorTop
+	uv.NewStyledString(palette).Draw(scr, paletteArea)
 }
 
 // drawOverlay renders the topmost modal/dialog over the full screen.

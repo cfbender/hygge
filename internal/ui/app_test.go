@@ -186,6 +186,42 @@ func TestAtMentionPaletteCompletesFilesAndSubagents(t *testing.T) {
 	}
 }
 
+func TestAtMentionPaletteOverlaysChatWithoutMovingEditor(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	b := bus.New()
+	app, err := New(AppOptions{
+		Bus:           b,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    dir,
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		Subagents: []MentionSubagent{{
+			Name:        "search",
+			Description: "Search the codebase",
+		}},
+		Now: func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	typeInto(app, "ask @sea")
+
+	lines := plainViewLines(app)
+	wantInputLine := editorTextLine(app)
+	if got := lineIndexContaining(lines, "┃ ask @sea"); got != wantInputLine {
+		t.Fatalf("input line = %d, want %d; mention palette should overlay chat without moving editor:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	}
+	if got := lineIndexContaining(lines, "@agent:search"); got == -1 || got >= wantInputLine {
+		t.Fatalf("mention palette line = %d, want it above input line %d:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	}
+}
+
 func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)

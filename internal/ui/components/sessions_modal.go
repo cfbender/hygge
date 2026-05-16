@@ -353,10 +353,7 @@ func (m SessionsModal) View() string {
 }
 
 func (m SessionsModal) renderBox(termWidth int) string {
-	boxWidth := max(termWidth-4, 60)
-	if boxWidth > 120 {
-		boxWidth = 120
-	}
+	boxWidth := min(max(termWidth-4, 60), 120)
 
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

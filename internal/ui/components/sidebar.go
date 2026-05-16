@@ -176,7 +176,7 @@ func (s Sidebar) View() string {
 	topCount := len(lines)
 	bottomCount := len(bottomLines)
 	flexRows := max(height-topCount-bottomCount, 0)
-	for i := 0; i < flexRows; i++ {
+	for range flexRows {
 		lines = append(lines, "")
 	}
 	lines = append(lines, bottomLines...)

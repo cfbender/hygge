@@ -327,7 +327,8 @@ func (a *App) renderQuitOverlay(w, h int) string {
 }
 
 // renderChromeContent produces the "chrome" elements between chat and footer:
-// status pills, command palette, banners, notices.
+// status pills, banners, notices. Completion palettes are drawn separately as
+// overlays so they don't consume layout height or push the editor down.
 func (a *App) renderChromeContent() string {
 	l := a.layout
 	var sections []string
@@ -349,38 +350,6 @@ func (a *App) renderChromeContent() string {
 	attachmentChips := a.renderAttachmentChips(l.leftW)
 	if attachmentChips != "" {
 		sections = append(sections, attachmentChips)
-	}
-
-	// Command palette.
-	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
-		matches := a.paletteMatches()
-		head, _ := splitSlash(a.input.Value())
-		p := components.CommandPalette{
-			Width:           l.leftW - 2,
-			Theme:           a.opts.Theme,
-			Matches:         matches,
-			Highlight:       a.clampedPaletteHighlight(matches),
-			QueryAfterSlash: head,
-		}
-		if v := p.View(); v != "" {
-			sections = append(sections, v)
-		}
-	}
-
-	// @ mention palette for repository files and configured sub-agents.
-	if _, _, ok := a.activeMentionQuery(); ok && !a.mentionDismissed {
-		matches := a.mentionMatches()
-		query, _, _ := a.activeMentionQuery()
-		p := components.MentionPalette{
-			Width:     l.leftW - 2,
-			Theme:     a.opts.Theme,
-			Matches:   mentionItems(matches),
-			Highlight: a.clampedMentionHighlight(matches),
-			Query:     query,
-		}
-		if v := p.View(); v != "" {
-			sections = append(sections, v)
-		}
 	}
 
 	// Compaction banner.
@@ -419,6 +388,46 @@ func (a *App) renderChromeContent() string {
 	}
 
 	return strings.Join(sections, "\n")
+}
+
+// renderCompletionPalette produces the active slash-command or @-mention
+// palette. The draw pass paints this as a floating overlay anchored above the
+// editor rather than inserting it into the chrome flow.
+func (a *App) renderCompletionPalette() string {
+	l := a.layout
+
+	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
+		matches := a.paletteMatches()
+		head, _ := splitSlash(a.input.Value())
+		p := components.CommandPalette{
+			Width:           l.leftW - 2,
+			Theme:           a.opts.Theme,
+			Matches:         matches,
+			Highlight:       a.clampedPaletteHighlight(matches),
+			QueryAfterSlash: head,
+		}
+		if v := p.View(); v != "" {
+			return v
+		}
+	}
+
+	// @ mention palette for repository files and configured sub-agents.
+	if _, _, ok := a.activeMentionQuery(); ok && !a.mentionDismissed {
+		matches := a.mentionMatches()
+		query, _, _ := a.activeMentionQuery()
+		p := components.MentionPalette{
+			Width:     l.leftW - 2,
+			Theme:     a.opts.Theme,
+			Matches:   mentionItems(matches),
+			Highlight: a.clampedMentionHighlight(matches),
+			Query:     query,
+		}
+		if v := p.View(); v != "" {
+			return v
+		}
+	}
+
+	return ""
 }
 
 // displayProviderName prettifies a canonical provider ID for display.

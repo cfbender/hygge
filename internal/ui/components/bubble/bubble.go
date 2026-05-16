@@ -126,10 +126,7 @@ func (b Bubble) View() string {
 	bubbleW := b.BubbleWidth
 	if bubbleW <= 0 {
 		// Auto: ~70% of parent, clamped between 40 and 100.
-		bubbleW = max(int(float64(width)*0.70), 40)
-		if bubbleW > 100 {
-			bubbleW = 100
-		}
+		bubbleW = min(max(int(float64(width)*0.70), 40), 100)
 	}
 	if bubbleW > width {
 		bubbleW = width
