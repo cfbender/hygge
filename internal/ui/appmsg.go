@@ -28,6 +28,10 @@ type sendCompleted struct {
 	Err    error
 }
 
+// workingVerbTickMsg fires periodically while the app is busy to rotate the
+// footer's working label without changing it on every spinner frame.
+type workingVerbTickMsg struct{}
+
 // clearToastMsg fires after the modal toast's display duration elapses.
 type clearToastMsg struct{}
 

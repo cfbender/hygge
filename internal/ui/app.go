@@ -299,6 +299,7 @@ type App struct {
 	busy        bool
 	spinner     spinner.Model
 	spinnerTick int
+	workingVerb string
 
 	// cost / context state
 	costDollars float64
@@ -787,6 +788,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.spinnerTick++
 		return a, cmd
 
+	case workingVerbTickMsg:
+		if !a.busy {
+			return a, nil
+		}
+		a.workingVerb = components.RandomWorkingVerb()
+		return a, a.workingVerbTick()
+
 	case anim.StepMsg:
 		// Route to the matching sub-agent anim.  The anims are keyed by
 		// SubSessionID, but StepMsg.ID is the anim's own internal id.
@@ -904,12 +912,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.setNotice("theme switched and saved: " + m.name)
 
 	case sendStarted:
+		wasBusy := a.busy
 		a.busy = true
+		a.workingVerb = components.RandomWorkingVerb()
 		suffix := ""
 		if a.queueCount > 0 {
 			suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
 		}
 		a.input.SetBusy(true, suffix)
+		if !wasBusy {
+			return a, a.workingVerbTick()
+		}
 		return a, nil
 
 	case sendCompleted:
@@ -921,6 +934,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// activeTurns counter since no matching TurnCompleted is coming.
 			a.activeTurns = 0
 			a.busy = false
+			a.workingVerb = ""
 			a.input.SetBusy(false, "")
 			if !errors.Is(m.Err, context.Canceled) {
 				// Surface the failure so the user has something to react to;
@@ -1011,6 +1025,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.input.Textarea, cmd = a.input.Textarea.Update(msg)
 	return a, cmd
+}
+
+func (a *App) workingVerbTick() tea.Cmd {
+	return tea.Tick(15*time.Second, func(time.Time) tea.Msg {
+		return workingVerbTickMsg{}
+	})
 }
 
 // handleKey dispatches a key.  When the modal is open, only the modal
@@ -1803,12 +1823,19 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		a.activeTurns++
+		wasBusy := a.busy
 		a.busy = true
+		if a.workingVerb == "" {
+			a.workingVerb = components.RandomWorkingVerb()
+		}
 		suffix := ""
 		if a.queueCount > 0 {
 			suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
 		}
 		a.input.SetBusy(true, suffix)
+		if !wasBusy {
+			return a.workingVerbTick()
+		}
 
 	case bus.TurnCompleted:
 		// Gate on foreground session and send turn-complete notification.
@@ -1828,6 +1855,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		if a.activeTurns == 0 && a.queueCount == 0 {
 			a.busy = false
+			a.workingVerb = ""
 			a.input.SetBusy(false, "")
 		}
 	}

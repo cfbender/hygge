@@ -173,6 +173,7 @@ func (a *App) renderFooterContent() string {
 		ModeIndicator:  a.formatModeIndicator(),
 		Busy:           a.busy,
 		SpinnerView:    a.spinner.View(),
+		WorkingVerb:    a.workingVerb,
 	}.View()
 }
 

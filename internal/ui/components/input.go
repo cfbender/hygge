@@ -28,16 +28,6 @@ var readyPlaceholders = []string{
 	"Listening...",
 }
 
-// workingPlaceholders are shown while the agent is processing.
-var workingPlaceholders = []string{
-	"Thinking…",
-	"Working…",
-	"Brrrrr…",
-	"Prrrrrrrr…",
-	"Processing…",
-	"Reasoning…",
-}
-
 // Input wraps a bubbles textarea with dynamic height, custom prompts,
 // and theme-aware styling.
 //
@@ -101,7 +91,7 @@ func (i *Input) SetStyles(s *styles.Styles) {
 // SetBusy switches the placeholder based on agent state.
 func (i *Input) SetBusy(busy bool, suffix string) {
 	if busy {
-		i.Textarea.Placeholder = randomPlaceholder(workingPlaceholders) + suffix
+		i.Textarea.Placeholder = "Queue up the next one, champ..." + suffix
 	} else {
 		i.Textarea.Placeholder = randomPlaceholder(readyPlaceholders)
 	}
