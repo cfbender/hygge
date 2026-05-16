@@ -231,8 +231,6 @@ type App struct {
 
 	// lastEscAt records when Esc was last pressed for double-Esc detection.
 	lastEscAt time.Time
-	// lastCtrlCAt records when Ctrl+C was last pressed for double-tap quit.
-	lastCtrlCAt time.Time
 
 	// expandedTools tracks which tool results are fully expanded (not truncated).
 	expandedTools map[string]bool
@@ -1012,6 +1010,14 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleAPIKeyModalKey(k)
 		case overlayTheme:
 			return a.handleThemeModalKey(k)
+		case overlayQuit:
+			switch k.String() {
+			case "y", "Y", "ctrl+c":
+				return a, tea.Quit
+			default:
+				a.closeOverlay(overlayQuit)
+				return a, nil
+			}
 		}
 	}
 
@@ -1021,13 +1027,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.inflightCancel()
 			return a, nil
 		}
-		// Double Ctrl+C within 500ms to quit.
-		now := a.opts.Now()
-		if now.Sub(a.lastCtrlCAt) < 500*time.Millisecond {
+		if a.overlays.Has(overlayQuit) {
 			return a, tea.Quit
 		}
-		a.lastCtrlCAt = now
-		return a, a.setNotice("press Ctrl+C again to quit")
+		a.openOverlay(overlayQuit)
+		return a, nil
 	case "ctrl+l":
 		a.input.Reset()
 		a.slashPaletteDismissed = false
@@ -1039,13 +1043,6 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 	case "ctrl+t":
-		// Toggle the most recent sub-agent block.  Chosen over
-		// `tab` (would conflict with textarea tab-insertion) and
-		// over a bare letter key (would conflict with input mode).
-		// `ctrl+t` is otherwise unbound by the textarea bubble.
-		a.toggleLatestSubagent()
-		return a, nil
-	case "ctrl+r":
 		// Cycle reasoning level: off → low → medium → high → off.
 		levels := []string{"", "low", "medium", "high"}
 		cur := a.opts.Reasoning.Effort
@@ -1515,6 +1512,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			ToolName:    e.ToolName,
 			ToolUseID:   e.ToolUseID,
 			Target:      target,
+			ToolArgs:    e.Args,
 			Raw:         "(running…)",
 			IsStreaming: true,
 			Status:      components.ToolStatusPending,
@@ -2424,32 +2422,6 @@ func (a *App) loadSessionTitle(id string) string {
 		return id[:12]
 	}
 	return id
-}
-
-// toggleLatestSubagent flips the Expanded flag on the most recently
-// started sub-agent block (running or completed).  No-op when no
-// sub-agent has been tracked yet.  Chosen as the simplest UX
-// consistent with the existing scroll-and-render TUI: a single
-// keybind toggles the obviously-latest block.  When cursor-based
-// navigation lands (v0.3), this should be replaced by a per-block
-// toggle keyed off the cursor selection.
-func (a *App) toggleLatestSubagent() {
-	if len(a.subagents) == 0 {
-		return
-	}
-	var latest *components.SubagentState
-	for _, st := range a.subagents {
-		if st == nil {
-			continue
-		}
-		if latest == nil || st.StartedAt.After(latest.StartedAt) {
-			latest = st
-		}
-	}
-	if latest == nil {
-		return
-	}
-	latest.Expanded = !latest.Expanded
 }
 
 // appendThinkingDelta appends thinking text to the trailing streaming

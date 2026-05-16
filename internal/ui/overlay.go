@@ -12,6 +12,7 @@ const (
 	overlayAPIKey         overlayKind = command.ModalAPIKey
 	overlayTheme          overlayKind = command.ModalTheme
 	overlayPermission     overlayKind = "permission"
+	overlayQuit           overlayKind = "quit"
 )
 
 type overlayStack struct {

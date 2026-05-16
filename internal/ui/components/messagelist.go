@@ -7,6 +7,7 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"strings"
@@ -73,9 +74,10 @@ type UIMessage struct {
 	ToolName  string // populated for RoleTool
 	ToolUseID string // optional provider-assigned tool_use_id; lets the
 	// view correlate this message with a SubagentState
-	Target        string // optional tool target hint (path/cmd)
-	Raw           string // raw text (streaming buffer or plain content)
-	FinalMarkdown string // cached glamour output once streaming completes
+	Target        string          // optional tool target hint (path/cmd)
+	ToolArgs      json.RawMessage // raw tool arguments for rich rendering
+	Raw           string          // raw text (streaming buffer or plain content)
+	FinalMarkdown string          // cached glamour output once streaming completes
 	IsStreaming   bool
 	IsError       bool // tool result error flag
 	// Status is the execution lifecycle state for RoleTool messages.
@@ -870,51 +872,89 @@ func (m MessageList) nestedFor(msg UIMessage) string {
 	return block.View()
 }
 
-// gutter renders the `▌user` / `▌assistant` / `▌tool: name (target)` header line.
+// gutter renders a rich tool header line in the style of opencode:
+//
+//	✱ Grep "pattern" in path (N matches)
+//	✱ Bash $ command
+//	✱ Read path (N lines)
+//	✱ Edit path
+//	✱ Glob pattern (N files)
 func (m MessageList) gutter(msg UIMessage) string {
-	label := "▌" + string(msg.Role)
-	if msg.Role == RoleTool {
-		label = "▌tool: " + msg.ToolName
-		if msg.Target != "" {
-			label += " (" + msg.Target + ")"
+	if msg.Role != RoleTool {
+		label := "▌" + string(msg.Role)
+		style := m.roleStyle(msg.Role)
+		return style.Render(label)
+	}
+
+	label := "✱ " + capitalize(msg.ToolName)
+	args := toolArgsMap(msg.ToolArgs)
+
+	switch msg.ToolName {
+	case "grep", "Grep":
+		if pat, ok := args["pattern"]; ok {
+			label += fmt.Sprintf(" %q", pat)
 		}
-		if msg.IsError {
-			label += " — error"
-		} else if summary := toolResultSummary(msg); summary != "" {
-			label += " — " + summary
+		if path, ok := args["path"]; ok {
+			label += " in " + path
+		}
+		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
+			n := strings.Count(msg.Raw, "\n") + 1
+			label += fmt.Sprintf(" (%d %s)", n, plural(n, "match", "matches"))
+		}
+	case "bash", "Bash":
+		if cmd := msg.Target; cmd != "" {
+			label += " $ " + cmd
+		}
+	case "read", "Read":
+		if msg.Target != "" {
+			label += " " + msg.Target
+		}
+		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
+			n := strings.Count(msg.Raw, "\n") + 1
+			label += fmt.Sprintf(" (%d %s)", n, plural(n, "line", "lines"))
+		}
+	case "glob", "Glob":
+		if pat, ok := args["pattern"]; ok {
+			label += " " + pat
+		}
+		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
+			n := strings.Count(msg.Raw, "\n") + 1
+			label += fmt.Sprintf(" (%d %s)", n, plural(n, "file", "files"))
+		}
+	case "edit", "Edit", "write", "Write":
+		if msg.Target != "" {
+			label += " " + msg.Target
+		}
+	default:
+		if msg.Target != "" {
+			label += " " + msg.Target
 		}
 	}
+
+	if msg.IsError {
+		label += " — error"
+	}
+
 	style := m.roleStyle(msg.Role)
 	return style.Render(label)
 }
 
-// toolResultSummary returns a brief summary of a tool result for the gutter.
-func toolResultSummary(msg UIMessage) string {
-	if msg.IsStreaming || msg.Raw == "" {
-		return ""
+// toolArgsMap decodes raw tool JSON args into a string map for display.
+func toolArgsMap(raw json.RawMessage) map[string]string {
+	if len(raw) == 0 {
+		return nil
 	}
-	lines := strings.Count(msg.Raw, "\n") + 1
-	switch msg.ToolName {
-	case "grep":
-		if lines == 1 {
-			return "1 match"
-		}
-		return itoa(lines) + " matches"
-	case "glob":
-		if lines == 1 {
-			return "1 file"
-		}
-		return itoa(lines) + " files"
-	case "bash":
-		if lines > 1 {
-			return itoa(lines) + " lines"
-		}
-	case "read":
-		if lines > 1 {
-			return itoa(lines) + " lines"
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
 		}
 	}
-	return ""
+	return out
 }
 
 // agentAccentColor returns the accent color for an assistant bubble.
@@ -1036,4 +1076,11 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+func plural(n int, singular, pluralForm string) string {
+	if n == 1 {
+		return singular
+	}
+	return pluralForm
 }

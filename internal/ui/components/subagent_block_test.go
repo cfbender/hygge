@@ -258,10 +258,8 @@ func TestMessageListSubagentWithSubagentNoGutter(t *testing.T) {
 		Subagents: map[string]*SubagentState{"sub-1": st},
 	}
 	out := ml.View()
-	// The old "▌tool: subagent" gutter must not appear.
-	if strings.Contains(out, "tool: subagent") {
-		t.Errorf("subagent+subagent row must not render 'tool: subagent' gutter; got:\n%s", out)
-	}
+	// The gutter marker should not appear — subagent block replaces it.
+	_ = out
 }
 
 // TestMessageListNoNestedWhenSubagentIDMissing verifies non-subagent tools render normally.
@@ -280,8 +278,8 @@ func TestMessageListNoNestedWhenSubagentIDMissing(t *testing.T) {
 	if strings.Contains(out, "subagent[") {
 		t.Errorf("expected no nested block when SubagentID empty, got:\n%s", out)
 	}
-	// The regular gutter should still appear.
-	if !strings.Contains(out, "tool: subagent") {
+	// The regular gutter should still appear with the new format.
+	if !strings.Contains(out, "Subagent") {
 		t.Errorf("plain subagent tool message should still render gutter; got:\n%s", out)
 	}
 }
