@@ -150,9 +150,7 @@ type MessageList struct {
 	Theme         *theme.Theme
 	Styles        *styles.Styles
 	Messages      []UIMessage
-	// EmptyFrame advances the empty-state splash logo animation.
-	EmptyFrame int
-	Subagents  map[string]*SubagentState
+	Subagents     map[string]*SubagentState
 	// AnimFor, when non-nil, maps SubSessionID to the running Anim for
 	// that sub-agent.  Passed through to SubagentBlock so the running
 	// state can display the animated spinner.
@@ -228,63 +226,11 @@ type renderChunk struct {
 // no actual width is known.
 const emptyStateMaxWidth = 80
 
-// renderEmptyState returns the centered welcome message shown when there are
-// no messages in the list.
+// renderEmptyState returns no chat content. The full idle splash is owned by
+// the App because it embeds the real prompt input; once the user starts typing,
+// the empty chat area should stay blank instead of showing a second splash.
 func (m MessageList) renderEmptyState() string {
-	width := m.Width
-	if width <= 0 {
-		width = emptyStateMaxWidth
-	}
-
-	var accentStyle, mutedStyle lipgloss.Style
-	if m.Theme != nil {
-		accentStyle = m.Theme.Style(theme.AtomAccent)
-		mutedStyle = m.Theme.Style(theme.AtomMuted)
-	} else {
-		accentStyle = lipgloss.NewStyle().Faint(true)
-		mutedStyle = lipgloss.NewStyle().Faint(true)
-	}
-
-	logo := renderSplashLogo(m.EmptyFrame, accentStyle, mutedStyle)
-	promptW := min(min(max(width*3/5, 28), 52), width)
-	prompt := lipgloss.NewStyle().
-		Width(max(promptW-4, 1)).
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		BorderForeground(accentStyle.GetForeground()).
-		Render(mutedStyle.Render("Type a message to get started"))
-	hints := mutedStyle.Render("ctrl+e  external editor · ctrl+t  reasoning · tab  switch mode")
-
-	content := logo + "\n\n" + prompt + "\n\n" + hints
-
-	// Center each line horizontally.
-	var centeredLines []string
-	for line := range strings.SplitSeq(content, "\n") {
-		visW := lipgloss.Width(line)
-		pad := max((width-visW)/2, 0)
-		centeredLines = append(centeredLines, strings.Repeat(" ", pad)+line)
-	}
-	return strings.Join(centeredLines, "\n")
-}
-
-func renderSplashLogo(frame int, accentStyle, mutedStyle lipgloss.Style) string {
-	lines := []string{
-		"╭─╮ ╭─╮ ╭─╮ ╭─╮ ╭─╮",
-		"│h│ │y│ │g│ │g│ │e│",
-		"╰─╯ ╰─╯ ╰─╯ ╰─╯ ╰─╯",
-	}
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		style := mutedStyle
-		if (frame+i)%3 == 0 {
-			style = accentStyle.Bold(true)
-		}
-		b.WriteString(style.Render(line))
-	}
-	return b.String()
+	return ""
 }
 
 // thinkingMaxLines is the maximum number of lines to show in the thinking
