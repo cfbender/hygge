@@ -409,6 +409,15 @@ func TestBootstrap_SkillsAppearInSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestDefaultSystemPromptGuidesToolNarration(t *testing.T) {
+	if !strings.Contains(defaultSystemPrompt, "Before using tools") {
+		t.Fatalf("defaultSystemPrompt should ask the model to narrate tool usage:\n%s", defaultSystemPrompt)
+	}
+	if !strings.Contains(defaultSystemPrompt, "inspect or change") {
+		t.Fatalf("defaultSystemPrompt should describe pre-tool context:\n%s", defaultSystemPrompt)
+	}
+}
+
 // TestBootstrap_AgentsMDAppearsInSystemPrompt verifies that an
 // AGENTS.md sitting next to .git in the project root is loaded and
 // appended to the system prompt under "## Project context".
