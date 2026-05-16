@@ -49,6 +49,51 @@ func TestSessionsListWithSeed(t *testing.T) {
 	}
 }
 
+func TestSessionsListShowsTitleAndLatestMessages(t *testing.T) {
+	home := hermeticHome(t)
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	sess, err := rt.Store.CreateSession(context.Background(), session.NewSession{
+		ProjectDir: home,
+		Model:      session.ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-5"},
+		Slug:       "Investigate sessions list",
+	})
+	if err != nil {
+		_ = rt.Close()
+		t.Fatalf("CreateSession: %v", err)
+	}
+	for _, msg := range []session.NewMessage{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "initial request"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "initial answer"}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest user message"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "latest agent message"}}},
+	} {
+		if _, err := rt.Store.AppendMessage(context.Background(), sess.ID, msg); err != nil {
+			_ = rt.Close()
+			t.Fatalf("AppendMessage: %v", err)
+		}
+	}
+	_ = rt.Close()
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"sessions", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"TITLE", "LAST USER", "LAST AGENT", "Investigate sessions list", "latest user message", "latest agent message"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestSessionsShow(t *testing.T) {
 	home := hermeticHome(t)
 	id := seedSession(t, home)

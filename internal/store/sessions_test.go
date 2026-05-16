@@ -537,6 +537,36 @@ func TestListSessions_QueryFilter_FirstMessage(t *testing.T) {
 	}
 }
 
+func TestListSessions_PopulatesLatestMessagePreviews(t *testing.T) {
+	s := newTestStore(t)
+	sess := mustCreateSession(t, s, "/p")
+
+	for _, msg := range []session.NewMessage{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "first user request"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "first assistant answer"}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest user follow up"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "latest assistant response"}}},
+	} {
+		if _, err := s.AppendMessage(t.Context(), sess.ID, msg); err != nil {
+			t.Fatalf("AppendMessage: %v", err)
+		}
+	}
+
+	got, err := s.ListSessions(t.Context(), session.ListOpts{ProjectDir: "/p"})
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListSessions len = %d, want 1", len(got))
+	}
+	if got[0].LastUserMessage != "latest user follow up" {
+		t.Fatalf("LastUserMessage = %q", got[0].LastUserMessage)
+	}
+	if got[0].LastAgentMessage != "latest assistant response" {
+		t.Fatalf("LastAgentMessage = %q", got[0].LastAgentMessage)
+	}
+}
+
 func TestListSessions_QueryFilter_CaseInsensitive(t *testing.T) {
 	s := newTestStore(t)
 	sess, err := s.CreateSession(t.Context(), session.NewSession{

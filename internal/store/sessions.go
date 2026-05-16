@@ -227,7 +227,8 @@ func (s *Store) ListSessions(ctx context.Context, opts session.ListOpts) ([]*ses
 		out = filterSessionsByQuery(out, opts.Query)
 	}
 
-	// Batch-fetch own totals for all returned sessions in a single query.
+	// Batch-fetch own totals and latest message previews for all returned
+	// sessions in single queries.
 	if len(out) > 0 {
 		ids := make([]string, len(out))
 		for i, sess := range out {
@@ -240,6 +241,16 @@ func (s *Store) ListSessions(ctx context.Context, opts session.ListOpts) ([]*ses
 		for _, sess := range out {
 			if t, ok := ownMap[sess.ID]; ok {
 				sess.OwnTotals = t
+			}
+		}
+		previews, err := s.fetchLatestMessagePreviews(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListSessions latest message previews: %w", err)
+		}
+		for _, sess := range out {
+			if p, ok := previews[sess.ID]; ok {
+				sess.LastUserMessage = p.User
+				sess.LastAgentMessage = p.Agent
 			}
 		}
 	}
@@ -538,6 +549,78 @@ func (s *Store) fetchOwnTotals(ctx context.Context, ids []string) (map[string]se
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("fetchOwnTotals iterate: %w", err)
+	}
+	return out, nil
+}
+
+type latestMessagePreviews struct {
+	User  string
+	Agent string
+}
+
+// fetchLatestMessagePreviews returns the latest direct user and assistant text
+// previews for the requested sessions. Messages are ordered newest-first and
+// the first text part from the first message seen for each role wins.
+func (s *Store) fetchLatestMessagePreviews(ctx context.Context, ids []string) (map[string]latestMessagePreviews, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	//nolint:gosec // G202: placeholders are "?,?,?" — no user input interpolated
+	q := `SELECT session_id, role, parts
+	        FROM messages
+	       WHERE session_id IN (` + placeholders + `)
+	         AND role IN ('user', 'assistant')
+	         AND deleted_at IS NULL
+	       ORDER BY session_id, role, created_at DESC, id DESC`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetchLatestMessagePreviews: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]latestMessagePreviews, len(ids))
+	seen := make(map[string]map[session.Role]bool, len(ids))
+	for rows.Next() {
+		var id, roleStr, partsJSON string
+		if err := rows.Scan(&id, &roleStr, &partsJSON); err != nil {
+			return nil, fmt.Errorf("fetchLatestMessagePreviews scan: %w", err)
+		}
+		role := session.Role(roleStr)
+		if seen[id] != nil && seen[id][role] {
+			continue
+		}
+		parts, err := session.UnmarshalParts([]byte(partsJSON))
+		if err != nil {
+			return nil, fmt.Errorf("fetchLatestMessagePreviews decode parts for session %q: %w", id, err)
+		}
+		preview := extractTextPreview(parts, 160)
+		if preview == "" {
+			continue
+		}
+		p := out[id]
+		switch role {
+		case session.RoleUser:
+			p.User = preview
+		case session.RoleAssistant:
+			p.Agent = preview
+		default:
+			continue
+		}
+		out[id] = p
+		if seen[id] == nil {
+			seen[id] = make(map[session.Role]bool, 2)
+		}
+		seen[id][role] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fetchLatestMessagePreviews iterate: %w", err)
 	}
 	return out, nil
 }
