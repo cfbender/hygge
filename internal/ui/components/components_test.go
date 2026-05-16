@@ -25,7 +25,7 @@ func TestMessageListRendersRoles(t *testing.T) {
 	out := ml.View()
 	// User and assistant render as bubbles; content must still appear.
 	// Non-task tool calls now render as a tool-group bubble (no "▌tool: read" gutter).
-	for _, want := range []string{"hello", "General", "hi back", "read", "/tmp/x"} {
+	for _, want := range []string{"hello", "General", "hi back", "Read", "/tmp/x"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("messagelist missing %q in:\n%s", want, out)
 		}
@@ -73,8 +73,8 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	out := ml.View()
 	// Non-task tool calls render as a tool-group bubble showing name+target only.
 	// The raw body is not shown; no collapse hint is emitted.
-	if !strings.Contains(out, "read") {
-		t.Errorf("expected tool name 'read' in output:\n%s", out)
+	if !strings.Contains(out, "Read") {
+		t.Errorf("expected tool name 'Read' in output:\n%s", out)
 	}
 	if !strings.Contains(out, "somefile.go") {
 		t.Errorf("expected target 'somefile.go' in output:\n%s", out)
@@ -452,14 +452,14 @@ func TestToolGroupBubble_ThreeCallGroup(t *testing.T) {
 	}
 	out := ml.View()
 	// All three tool names and targets must appear.
-	for _, want := range []string{"read", "/tmp/a.go", "grep", "func Main", "bash", "go build ."} {
+	for _, want := range []string{"Read", "/tmp/a.go", "Grep", "Bash", "go build ."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("tool group missing %q in:\n%s", want, out)
 		}
 	}
-	// The middle dot prefix must appear.
-	if !strings.Contains(out, "·") {
-		t.Errorf("tool group missing '·' dot prefix in:\n%s", out)
+	// The star prefix must appear.
+	if !strings.Contains(out, "✱") {
+		t.Errorf("tool group missing '✱' prefix in:\n%s", out)
 	}
 	// Old gutter format must be absent.
 	if strings.Contains(out, "▌tool:") {
@@ -485,8 +485,8 @@ func TestToolGroupBubble_SingleCall(t *testing.T) {
 		},
 	}
 	out := ml.View()
-	if !strings.Contains(out, "read") {
-		t.Errorf("single-call group missing 'read' in:\n%s", out)
+	if !strings.Contains(out, "Read") {
+		t.Errorf("single-call group missing 'Read' in:\n%s", out)
 	}
 	if !strings.Contains(out, "/etc/hosts") {
 		t.Errorf("single-call group missing target in:\n%s", out)
@@ -508,8 +508,8 @@ func TestToolGroupBubble_ErrorToolStyling(t *testing.T) {
 		},
 	}
 	out := ml.View()
-	if !strings.Contains(out, "bash") {
-		t.Errorf("error-tool group missing 'bash' in:\n%s", out)
+	if !strings.Contains(out, "Bash") {
+		t.Errorf("error-tool group missing 'Bash' in:\n%s", out)
 	}
 	if !strings.Contains(out, "error") {
 		t.Errorf("error-tool group missing 'error' suffix in:\n%s", out)
@@ -546,7 +546,7 @@ func TestToolGroupBubble_InterleavedWithTask(t *testing.T) {
 	out := ml.View()
 
 	// All content must appear.
-	for _, want := range []string{"read", "main.go", "grep", "TODO", "General Subagent", "deploy", "bash", "go vet ./..."} {
+	for _, want := range []string{"Read", "main.go", "Grep", "General Subagent", "deploy", "Bash", "go vet ./..."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("interleaved output missing %q in:\n%s", want, out)
 		}
@@ -939,7 +939,7 @@ func TestToolGroup_NoStatusTextWhenCompleted(t *testing.T) {
 		}
 	}
 	// Tool name and target must still appear.
-	if !strings.Contains(out, "read") {
+	if !strings.Contains(out, "Read") {
 		t.Errorf("completed tool row must still show tool name; got:\n%s", out)
 	}
 }

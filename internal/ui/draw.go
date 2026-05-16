@@ -54,9 +54,9 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		a.drawSidebar(scr, l.sidebar)
 	}
 
-	// Draw scroll bar on the left edge of the sidebar (or right edge of chat).
+	// Draw scroll bar on the left edge of the sidebar when scrolled up.
 	if l.sidebarW > 0 && a.userScrolled && !a.msgViewport.AtBottom() {
-		a.drawScrollBar(scr, l.sidebar.Min.X, headerHeight, l.chat.Dy())
+		a.drawScrollBar(scr, l.sidebar.Min.X)
 	}
 
 	// Apply text selection highlight (reverse video on selected cells).
@@ -73,12 +73,13 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		uv.NewStyledString(toastStr).Draw(scr, toastArea)
 	}
 
-	// Overlays paint last, over everything.
+	// Overlay drawn last, over everything.
+	var cursor *tea.Cursor
 	if top, ok := a.overlays.Top(); ok {
-		return a.drawOverlay(scr, l.overlay, top)
+		cursor = a.drawOverlay(scr, a.layout.overlay, top)
 	}
 
-	return nil
+	return cursor
 }
 
 // renderLeftColumn composes chat + chrome + editor + footer into a single
@@ -113,34 +114,32 @@ func (a *App) renderLeftColumn() string {
 	return strings.Join(sections, "\n")
 }
 
-// drawScrollBar renders a thin scroll position indicator on a single column.
-func (a *App) drawScrollBar(scr uv.Screen, x, startY, height int) {
-	if height < 3 {
+// drawScrollBar renders a thin scroll position indicator on the first column
+// of the sidebar, spanning the full terminal height.
+func (a *App) drawScrollBar(scr uv.Screen, x int) {
+	h := a.height
+	if h < 3 {
 		return
 	}
 	pct := a.msgViewport.ScrollPercent()
-	thumbH := max(1, height/5)
-	trackH := height - thumbH
-	thumbY := startY + int(float64(trackH)*pct)
+	thumbH := max(1, min(3, h/8))
+	trackH := h - thumbH
+	thumbY := int(float64(trackH) * pct)
 
-	var trackColor, thumbColor color.Color
+	var trackBg, thumbColor color.Color
 	if a.styles != nil {
-		trackColor = a.styles.Background
+		trackBg = a.styles.SidebarBg
 		thumbColor = a.styles.WorkingLabelColor
 	}
 
-	for y := startY; y < startY+height; y++ {
-		content := "│"
-		fg := trackColor
+	for y := 0; y < h; y++ {
 		if y >= thumbY && y < thumbY+thumbH {
-			content = "┃"
-			fg = thumbColor
+			scr.SetCell(x, y, &uv.Cell{
+				Content: "▐",
+				Style:   uv.Style{Fg: thumbColor, Bg: trackBg},
+				Width:   1,
+			})
 		}
-		scr.SetCell(x, y, &uv.Cell{
-			Content: content,
-			Style:   uv.Style{Fg: fg},
-			Width:   1,
-		})
 	}
 }
 
