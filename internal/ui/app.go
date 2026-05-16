@@ -307,10 +307,11 @@ type App struct {
 	scrollDragThumbDelta int
 
 	// modal prompt state
-	pendingPerms     []components.PermissionRequest // FIFO queue
-	pendingQuestions []components.QuestionRequest   // FIFO queue
-	modalToast       string                         // transient message inside the modal
-	overlays         overlayStack                   // typed topmost-first dialog routing foundation
+	pendingPerms          []components.PermissionRequest // FIFO queue
+	pendingQuestions      []components.QuestionRequest   // FIFO queue
+	questionSelectedIndex int                            // selected answer in the active question modal
+	modalToast            string                         // transient message inside the modal
+	overlays              overlayStack                   // typed topmost-first dialog routing foundation
 
 	// status state
 	busy        bool
@@ -1545,13 +1546,34 @@ func (a *App) handleQuestionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	dismiss := func() {
 		a.pendingQuestions = a.pendingQuestions[1:]
+		a.questionSelectedIndex = 0
 		a.syncQuestionOverlay()
 		a.updateInputFocus()
 	}
+	selectOption := func(idx int) (tea.Model, tea.Cmd) {
+		if idx < 0 || idx >= len(current.Options) {
+			return a, nil
+		}
+		opt := current.Options[idx]
+		dismiss()
+		return a, reply(opt.ID, opt.Label, false)
+	}
 
-	if k.String() == "esc" {
+	switch k.String() {
+	case "esc":
 		dismiss()
 		return a, reply("", "", true)
+	case "up", "k", "ctrl+p":
+		a.moveQuestionSelection(-1)
+		return a, nil
+	case "down", "j", "ctrl+n":
+		a.moveQuestionSelection(1)
+		return a, nil
+	case "enter":
+		return selectOption(a.questionSelectedIndex)
+	}
+	if k.Code == tea.KeySpace {
+		return selectOption(a.questionSelectedIndex)
 	}
 	if len(k.Text) != 1 {
 		return a, nil
@@ -1564,9 +1586,16 @@ func (a *App) handleQuestionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if idx < 0 || idx >= len(current.Options) {
 		return a, nil
 	}
-	opt := current.Options[idx]
-	dismiss()
-	return a, reply(opt.ID, opt.Label, false)
+	return selectOption(idx)
+}
+
+func (a *App) moveQuestionSelection(delta int) {
+	if len(a.pendingQuestions) == 0 || len(a.pendingQuestions[0].Options) == 0 {
+		a.questionSelectedIndex = 0
+		return
+	}
+	n := len(a.pendingQuestions[0].Options)
+	a.questionSelectedIndex = (a.questionSelectedIndex + delta + n) % n
 }
 
 // startSend launches a goroutine that calls Agent.Send and returns a tea.Cmd
@@ -2041,6 +2070,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Question:  e.Question,
 			Options:   opts,
 		})
+		a.clampQuestionSelection()
 		a.syncQuestionOverlay()
 		a.updateInputFocus()
 		a.maybeNotify(notify.Notification{
@@ -2054,6 +2084,9 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		for i, q := range a.pendingQuestions {
 			if q.RequestID == e.RequestID {
 				a.pendingQuestions = append(a.pendingQuestions[:i], a.pendingQuestions[i+1:]...)
+				if i == 0 {
+					a.questionSelectedIndex = 0
+				}
 				break
 			}
 		}
@@ -3316,10 +3349,27 @@ func (a *App) syncPermissionOverlay() {
 
 func (a *App) syncQuestionOverlay() {
 	if len(a.pendingQuestions) > 0 {
+		a.clampQuestionSelection()
 		a.overlays.Push(overlayQuestion)
 		return
 	}
+	a.questionSelectedIndex = 0
 	a.overlays.Remove(overlayQuestion)
+}
+
+func (a *App) clampQuestionSelection() {
+	if len(a.pendingQuestions) == 0 || len(a.pendingQuestions[0].Options) == 0 {
+		a.questionSelectedIndex = 0
+		return
+	}
+	if a.questionSelectedIndex < 0 {
+		a.questionSelectedIndex = 0
+		return
+	}
+	maxIndex := len(a.pendingQuestions[0].Options) - 1
+	if a.questionSelectedIndex > maxIndex {
+		a.questionSelectedIndex = maxIndex
+	}
 }
 
 func (a *App) syncActiveModal() {

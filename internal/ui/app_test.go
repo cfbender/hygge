@@ -1097,6 +1097,54 @@ func TestQuestionModalPublishesSelectedAnswer(t *testing.T) {
 	}
 }
 
+func TestQuestionModalArrowKeysSelectRenderedMarkdownAnswer(t *testing.T) {
+	app, b := newTestApp(t)
+	repliedCh := bus.Subscribe[bus.QuestionAnswered](b, bus.SubscribeOptions{})
+	defer repliedCh.Unsubscribe()
+
+	app.Handle(bus.QuestionAsked{
+		RequestID: "q-markdown",
+		ToolName:  "question",
+		Question:  "Pick a **strategy** with `markdown`",
+		Options: []bus.QuestionOption{
+			{ID: "1", Label: "**Fast** option"},
+			{ID: "2", Label: "_Careful_ option with `checks`"},
+		},
+	})
+	plain := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	for _, rawMarker := range []string{"**strategy**", "`markdown`", "**Fast**", "_Careful_", "`checks`"} {
+		if strings.Contains(plain, rawMarker) {
+			t.Fatalf("question modal preserved raw markdown marker %q in:\n%s", rawMarker, plain)
+		}
+	}
+	if !strings.Contains(plain, "› [1]") {
+		t.Fatalf("expected first answer selected initially, got:\n%s", plain)
+	}
+
+	app.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if app.questionSelectedIndex != 1 {
+		t.Fatalf("questionSelectedIndex = %d, want 1", app.questionSelectedIndex)
+	}
+	plain = ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	if !strings.Contains(plain, "› [2]") {
+		t.Fatalf("expected second answer selected after down arrow, got:\n%s", plain)
+	}
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected reply cmd")
+	}
+	cmd()
+	select {
+	case reply := <-repliedCh.C():
+		if reply.RequestID != "q-markdown" || reply.AnswerID != "2" || reply.Answer != "_Careful_ option with `checks`" || reply.Canceled {
+			t.Fatalf("unexpected reply: %+v", reply)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for QuestionAnswered")
+	}
+}
+
 func TestContextUsageUpdatesSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
