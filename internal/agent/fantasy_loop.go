@@ -278,6 +278,8 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			if len(step.Content.ToolCalls()) == 0 {
 				return appendAssistant(u)
 			}
+			// Tool-call steps are persisted by beforeRun -> appendAssistant(u),
+			// which also records usage. Do not record the same step again here.
 			mu.Lock()
 			currentID = ""
 			textBuf.Reset()
@@ -285,9 +287,6 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			streamToolCalls = nil
 			activeToolCalls = map[string]toolCallEvent{}
 			mu.Unlock()
-			storeMu.Lock()
-			a.recordUsage(ctx, sessionID, modelName, u)
-			storeMu.Unlock()
 			return nil
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {

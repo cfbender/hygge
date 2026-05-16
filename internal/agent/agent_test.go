@@ -900,6 +900,13 @@ func TestSend_FantasyParallelToolsAppendAssistantOnce(t *testing.T) {
 	if got := wrappedStore.toolUseAssistantAppends.Load(); got != 1 {
 		t.Fatalf("tool-use assistant appends = %d, want 1", got)
 	}
+	sess, err := env.Store.GetSession(context.Background(), env.sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Totals.InputTokens != 2 || sess.Totals.OutputTokens != 2 {
+		t.Fatalf("totals = input %d output %d, want 2/2 without double-counting tool-use step", sess.Totals.InputTokens, sess.Totals.OutputTokens)
+	}
 }
 
 func TestSend_FantasyIgnoresLegacyMaxIterations(t *testing.T) {

@@ -416,6 +416,9 @@ func TestDefaultSystemPromptGuidesToolNarration(t *testing.T) {
 	if !strings.Contains(defaultSystemPrompt, "inspect or change") {
 		t.Fatalf("defaultSystemPrompt should describe pre-tool context:\n%s", defaultSystemPrompt)
 	}
+	if !strings.Contains(defaultSystemPrompt, "concise, natural language") || !strings.Contains(defaultSystemPrompt, "Avoid terse shorthand") {
+		t.Fatalf("defaultSystemPrompt should require natural-language tool narration:\n%s", defaultSystemPrompt)
+	}
 	for _, want := range []string{"Hygge", "subagents", "yolo-mode", "permission prompts", "verified without evidence"} {
 		if !strings.Contains(defaultSystemPrompt, want) {
 			t.Fatalf("defaultSystemPrompt missing %q:\n%s", want, defaultSystemPrompt)
