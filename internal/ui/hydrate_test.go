@@ -802,13 +802,16 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 		t.Fatalf("AppendMessage tool: %v", err)
 	}
 
-	// Create child session (KindSubagent) with slug containing the ToolUseID.
+	// Create child session (KindSubagent) with the exact parent tool_use_id in
+	// the dedicated column. The slug deliberately omits it so hydration does not
+	// depend on display formatting.
 	child, err := st.CreateSession(ctx, session.NewSession{
-		ProjectDir: "/tmp/proj",
-		Model:      model,
-		ParentID:   parent.ID,
-		Kind:       session.KindSubagent,
-		Slug:       "general: find something [" + toolUseID + "]",
+		ProjectDir:      "/tmp/proj",
+		Model:           model,
+		ParentID:        parent.ID,
+		ParentToolUseID: toolUseID,
+		Kind:            session.KindSubagent,
+		Slug:            "general: find something",
 	})
 	if err != nil {
 		t.Fatalf("CreateSession child: %v", err)

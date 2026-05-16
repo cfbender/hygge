@@ -59,13 +59,13 @@ func (s *Store) CreateSession(ctx context.Context, in session.NewSession) (*sess
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, parent_id, fork_message_id, slug, project_dir,
+			id, parent_id, fork_message_id, parent_tool_use_id, slug, project_dir,
 			model_provider, model_name,
 			total_input_tokens, total_output_tokens,
 			total_cache_read_tokens, total_cache_write_tokens, total_cost_usd,
 			created_at, updated_at, deleted_at, metadata, kind
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0.0, ?, ?, NULL, '{}', ?)`,
-		id, nullableString(in.ParentID), nullableString(in.ForkMessageID), nullableString(in.Slug),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0.0, ?, ?, NULL, '{}', ?)`,
+		id, nullableString(in.ParentID), nullableString(in.ForkMessageID), nullableString(in.ParentToolUseID), nullableString(in.Slug),
 		in.ProjectDir, in.Model.Provider, in.Model.Name, nowMillis, nowMillis, string(kind),
 	)
 	if err != nil {
@@ -73,16 +73,17 @@ func (s *Store) CreateSession(ctx context.Context, in session.NewSession) (*sess
 	}
 
 	return &session.Session{
-		ID:            id,
-		ParentID:      in.ParentID,
-		ForkMessageID: in.ForkMessageID,
-		Slug:          in.Slug,
-		ProjectDir:    in.ProjectDir,
-		Model:         in.Model,
-		Kind:          kind,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		Metadata:      []byte("{}"),
+		ID:              id,
+		ParentID:        in.ParentID,
+		ForkMessageID:   in.ForkMessageID,
+		ParentToolUseID: in.ParentToolUseID,
+		Slug:            in.Slug,
+		ProjectDir:      in.ProjectDir,
+		Model:           in.Model,
+		Kind:            kind,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Metadata:        []byte("{}"),
 	}, nil
 }
 
@@ -110,7 +111,7 @@ func (s *Store) GetSession(ctx context.Context, id string) (*session.Session, er
 // sessionSelectColumns is the canonical column list, used by every read path
 // to keep scan order in lockstep with the schema.
 const sessionSelectColumns = `SELECT
-	id, parent_id, fork_message_id, slug, project_dir,
+	id, parent_id, fork_message_id, parent_tool_use_id, slug, project_dir,
 	model_provider, model_name,
 	total_input_tokens, total_output_tokens,
 	total_cache_read_tokens, total_cache_write_tokens, total_cost_usd,
@@ -128,6 +129,7 @@ func scanSession(r rowScanner) (*session.Session, error) {
 		s               session.Session
 		parentID        sql.NullString
 		forkMsg         sql.NullString
+		parentToolUseID sql.NullString
 		slug            sql.NullString
 		createdMs       int64
 		updatedMs       int64
@@ -137,7 +139,7 @@ func scanSession(r rowScanner) (*session.Session, error) {
 		firstMsgPreview string
 	)
 	if err := r.Scan(
-		&s.ID, &parentID, &forkMsg, &slug, &s.ProjectDir,
+		&s.ID, &parentID, &forkMsg, &parentToolUseID, &slug, &s.ProjectDir,
 		&s.Model.Provider, &s.Model.Name,
 		&s.Totals.InputTokens, &s.Totals.OutputTokens,
 		&s.Totals.CacheReadTokens, &s.Totals.CacheWriteTokens, &s.Totals.CostUSD,
@@ -148,6 +150,7 @@ func scanSession(r rowScanner) (*session.Session, error) {
 	}
 	s.ParentID = nullStr(parentID)
 	s.ForkMessageID = nullStr(forkMsg)
+	s.ParentToolUseID = nullStr(parentToolUseID)
 	s.Slug = nullStr(slug)
 	s.CreatedAt = time.UnixMilli(createdMs).UTC()
 	s.UpdatedAt = time.UnixMilli(updatedMs).UTC()
