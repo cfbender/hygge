@@ -51,9 +51,6 @@
 - [ ] **Expandable bash tool output**
   Bash tool blocks should show truncated output with click/keyboard affordance to expand.
 
-- [ ] **Richer tool block subtext**
-  Give grep, glob, and other tool blocks more informative secondary text.
-
 - [ ] **Refine system prompt**
   Update the system prompt to reflect Hygge's current capabilities.
 
