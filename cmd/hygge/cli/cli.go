@@ -8,9 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is the human-facing version string.  Real release tagging is a
-// post-v0.1 concern; for now the constant lives here.
-const Version = "0.1.0-dev"
+// Version is the human-facing version string surfaced by CLI and TUI chrome.
+const Version = "0.3.0"
 
 // globalFlags holds values bound to root-level persistent flags.  A
 // single struct keeps subcommand bodies free of cobra-Flag plumbing.
