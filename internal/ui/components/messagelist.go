@@ -729,7 +729,6 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	var rows []string
 	for _, msg := range items {
 		label := toolGroupLabel(msg, nameStyle, targetStyle)
-		subtext := toolGroupSubtext(msg)
 
 		statusTxt := toolStatusText(msg.Status, m.Theme)
 		if statusTxt == "" && msg.IsError {
@@ -747,12 +746,6 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 			label = truncateTarget(label, innerW)
 		}
 		rows = append(rows, label)
-		if subtext != "" {
-			if lipgloss.Width(subtext) > innerW-2 {
-				subtext = truncateTarget(subtext, innerW-2)
-			}
-			rows = append(rows, muted.Render("  "+subtext))
-		}
 
 		// Bash: show command on its own line + collapsed output.
 		if msg.ToolName == "bash" || msg.ToolName == "Bash" {
@@ -1021,68 +1014,6 @@ func toolGroupLabel(msg UIMessage, nameStyle, targetStyle lipgloss.Style) string
 	}
 }
 
-// toolGroupSubtext returns secondary details from a tool's raw args without
-// exposing bulky or sensitive fields such as file contents and replacement text.
-func toolGroupSubtext(msg UIMessage) string {
-	args := toolArgsMap(msg.ToolArgs)
-	if len(args) == 0 {
-		return ""
-	}
-
-	var parts []string
-	switch msg.ToolName {
-	case "bash", "Bash":
-		if desc := args["description"]; desc != "" {
-			parts = append(parts, desc)
-		}
-		if timeout := args["timeout_ms"]; timeout != "" {
-			parts = append(parts, "timeout "+timeout+"ms")
-		}
-	case "grep", "Grep":
-		if include := args["include"]; include != "" {
-			parts = append(parts, "include "+include)
-		}
-		if maxResults := args["max_results"]; maxResults != "" {
-			parts = append(parts, "limit "+maxResults)
-		}
-	case "glob", "Glob":
-		if path := args["path"]; path != "" {
-			parts = append(parts, "root "+path)
-		}
-		if maxResults := args["max_results"]; maxResults != "" {
-			parts = append(parts, "limit "+maxResults)
-		}
-	case "read", "Read":
-		if offset := args["offset"]; offset != "" {
-			parts = append(parts, "from line "+offset)
-		}
-		if limit := args["limit"]; limit != "" {
-			parts = append(parts, "limit "+limit+" lines")
-		}
-	case "write", "Write":
-		if content := args["content"]; content != "" {
-			parts = append(parts, fmt.Sprintf("writes %d bytes", len(content)))
-		}
-	case "edit", "Edit":
-		if args["replaceAll"] == "true" {
-			parts = append(parts, "replace all occurrences")
-		} else if _, ok := args["replaceAll"]; ok {
-			parts = append(parts, "single replacement")
-		}
-		oldString, hasOld := args["oldString"]
-		newString, hasNew := args["newString"]
-		if hasOld && hasNew {
-			parts = append(parts, fmt.Sprintf("%d→%d bytes", len(oldString), len(newString)))
-		}
-	default:
-		if desc := args["description"]; desc != "" {
-			parts = append(parts, desc)
-		}
-	}
-
-	return strings.Join(parts, " · ")
-}
-
 // toolArgsMap decodes raw tool JSON args into a string map for display.
 func toolArgsMap(raw json.RawMessage) map[string]string {
 	if len(raw) == 0 {
@@ -1094,17 +1025,8 @@ func toolArgsMap(raw json.RawMessage) map[string]string {
 	}
 	out := make(map[string]string, len(m))
 	for k, v := range m {
-		switch v := v.(type) {
-		case string:
-			out[k] = v
-		case bool:
-			out[k] = fmt.Sprintf("%t", v)
-		case float64:
-			if v == float64(int64(v)) {
-				out[k] = fmt.Sprintf("%d", int64(v))
-			} else {
-				out[k] = fmt.Sprintf("%g", v)
-			}
+		if s, ok := v.(string); ok {
+			out[k] = s
 		}
 	}
 	return out
