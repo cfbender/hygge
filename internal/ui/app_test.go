@@ -251,7 +251,7 @@ func TestCtrlEEditorExpandsPastedMarkers(t *testing.T) {
 
 func seedLargeStreamingChat(t *testing.T, app *App) {
 	t.Helper()
-	for i := 0; i < 80; i++ {
+	for range 80 {
 		app.messages = append(app.messages, uiMessage{
 			Role: components.RoleAssistant,
 			Raw:  strings.Repeat("history line\n", 4),
@@ -316,6 +316,96 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	}
 	if app.msgCacheStreamingDirty {
 		t.Fatal("streaming dirty flag should clear after rebuild")
+	}
+}
+
+func TestFlushAssistantStreamRestoresPersistedTextWhenDeltasWereDropped(t *testing.T) {
+	t.Parallel()
+	app, st, _ := newTestAppWithStore(t, nil)
+
+	// Simulate the UI having missed the beginning of a fast stream. The final
+	// persisted message is authoritative and should replace the partial buffer
+	// when MessageAppended arrives.
+	app.messages = []uiMessage{{
+		Role:        components.RoleAssistant,
+		Raw:         "tail only",
+		IsStreaming: true,
+	}}
+
+	full := "complete beginning plus tail only"
+	msg, err := st.AppendMessage(context.Background(), app.opts.SessionID, session.NewMessage{
+		Role: session.RoleAssistant,
+		Parts: []session.Part{{
+			Kind: session.PartText,
+			Text: full,
+		}},
+		OutputTokens: 42,
+		CostUSD:      0.0123,
+		DurationMs:   1234,
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	app.Handle(bus.MessageAppended{SessionID: app.opts.SessionID, MessageID: msg.ID, Role: string(session.RoleAssistant)})
+
+	if len(app.messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(app.messages))
+	}
+	got := app.messages[0]
+	if got.IsStreaming {
+		t.Fatal("assistant message should be finalized")
+	}
+	if got.Raw != full {
+		t.Fatalf("assistant raw = %q, want persisted full text %q", got.Raw, full)
+	}
+	if got.OutputTokens != 42 || got.CostUSD != 0.0123 || got.DurationMs != 1234 {
+		t.Fatalf("usage metadata not restored from persisted message: %#v", got)
+	}
+	if !strings.Contains(ansiEscapeRE.ReplaceAllString(got.FinalMarkdown, ""), "complete beginning") {
+		t.Fatalf("final markdown missing restored beginning: %q", got.FinalMarkdown)
+	}
+}
+
+func TestFlushAssistantStreamInsertsPersistedTextWhenAllDeltasWereDropped(t *testing.T) {
+	t.Parallel()
+	app, st, _ := newTestAppWithStore(t, nil)
+
+	// If every text delta was missed and a tool request arrived first, the
+	// finalized assistant message should still appear before the trailing tool row.
+	app.messages = []uiMessage{{
+		Role:        components.RoleTool,
+		ToolName:    "read",
+		ToolUseID:   "tu-1",
+		Target:      "/tmp/x",
+		ToolArgs:    []byte(`{"path":"/tmp/x"}`),
+		Raw:         "(running…)",
+		IsStreaming: true,
+		Status:      components.ToolStatusPending,
+	}}
+
+	full := "assistant text recovered from the store"
+	msg, err := st.AppendMessage(context.Background(), app.opts.SessionID, session.NewMessage{
+		Role: session.RoleAssistant,
+		Parts: []session.Part{{
+			Kind: session.PartText,
+			Text: full,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	app.Handle(bus.MessageAppended{SessionID: app.opts.SessionID, MessageID: msg.ID, Role: string(session.RoleAssistant)})
+
+	if len(app.messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(app.messages))
+	}
+	if app.messages[0].Role != components.RoleAssistant || app.messages[0].Raw != full {
+		t.Fatalf("messages[0] = %#v, want recovered assistant text", app.messages[0])
+	}
+	if app.messages[1].Role != components.RoleTool {
+		t.Fatalf("messages[1].Role = %q, want trailing tool preserved", app.messages[1].Role)
 	}
 }
 
