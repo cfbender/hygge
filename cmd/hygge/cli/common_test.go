@@ -401,7 +401,7 @@ func TestBootstrap_SkillsAppearInSystemPrompt(t *testing.T) {
 	if !strings.Contains(rt.SystemPrompt, "## Available skills") {
 		t.Errorf("SystemPrompt missing skills header:\n%s", rt.SystemPrompt)
 	}
-	if !strings.Contains(rt.SystemPrompt, "- foo:") {
+	if !strings.Contains(rt.SystemPrompt, "<name>foo</name>") {
 		t.Errorf("SystemPrompt missing foo entry:\n%s", rt.SystemPrompt)
 	}
 	if _, ok := rt.Tools.Get("skill"); !ok {

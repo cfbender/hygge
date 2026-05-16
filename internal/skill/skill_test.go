@@ -109,6 +109,33 @@ func TestLoad_HyggeUserOverridesAgentsUser(t *testing.T) {
 	}
 }
 
+func TestLoad_ClaudeCompatibleSkillDirs(t *testing.T) {
+	home, pwd := fakeHome(t)
+	writeDirSkill(t, filepath.Join(home, ".claude", "skills"),
+		"user-claude", "from user claude", "body")
+	writeDirSkill(t, filepath.Join(pwd, ".claude", "skills"),
+		"project-claude", "from project claude", "body")
+
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cases := map[string]Source{
+		"user-claude":    SourceUserClaude,
+		"project-claude": SourceProjectClaude,
+	}
+	for name, want := range cases {
+		sk, ok := reg.Get(name)
+		if !ok {
+			t.Errorf("Get(%s): not found", name)
+			continue
+		}
+		if sk.Source != want {
+			t.Errorf("Get(%s).Source = %v, want %v", name, sk.Source, want)
+		}
+	}
+}
+
 func TestLoad_ProjectAgentsOverridesUserHygge(t *testing.T) {
 	home, pwd := fakeHome(t)
 	writeSkill(t, filepath.Join(home, ".config", "hygge", "skills"),
@@ -314,8 +341,10 @@ func TestRegistry_SourceValuesPerLayer(t *testing.T) {
 
 func TestSourceString(t *testing.T) {
 	cases := map[Source]string{
+		SourceUserClaude:    "user/.claude",
 		SourceUserAgents:    "user/.agents",
 		SourceUserHygge:     "user/hygge",
+		SourceProjectClaude: "project/.claude",
 		SourceProjectAgents: "project/.agents",
 		SourceProjectHygge:  "project/hygge",
 		Source(99):          "unknown(99)",
@@ -349,15 +378,19 @@ func TestBuildSystemPromptAdditions_Format(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	got := BuildSystemPromptAdditions(reg)
-	want := "## Available skills\n\n" +
-		"Skills provide specialized instructions for specific tasks. Load a " +
-		"skill by name via the `skill` tool when the task matches its description.\n\n" +
-		"- alpha: alpha desc\n" +
-		"  alpha when\n" +
-		"- bravo: bravo desc\n" +
-		"  bravo when"
-	if got != want {
-		t.Errorf("BuildSystemPromptAdditions mismatch.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	for _, want := range []string{
+		"Skills provide specialized instructions and workflows for specific tasks.",
+		"Use the skill tool to load a skill when a task matches its description.",
+		"<available_skills>",
+		"<name>alpha</name>",
+		"<description>alpha desc</description>",
+		"<when_to_use>alpha when</when_to_use>",
+		"<name>bravo</name>",
+		"</available_skills>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("BuildSystemPromptAdditions missing %q.\n--- got ---\n%s", want, got)
+		}
 	}
 }
 
