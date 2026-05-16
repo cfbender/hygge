@@ -82,8 +82,12 @@ type appRuntime struct {
 	mcpCancel       context.CancelFunc
 	mcpAsyncConfigs []mcp.ServerConfig
 	mcpAsyncStarted bool
-	SystemPrompt    string
-	Pwd             string
+	// BaseSystemPrompt is the stable prompt assembled from the default/override,
+	// skills, and project context. Mode prompts are composed with it at runtime so
+	// switching modes replaces the mode-specific tail instead of accumulating it.
+	BaseSystemPrompt string
+	SystemPrompt     string
+	Pwd              string
 	// Plugins is the plugin registry (nil when no plugins are configured).
 	Plugins *plugin.Registry
 	// PluginPM is the package manager used by the plugins registry.
@@ -569,16 +573,17 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		cmdReg, _ = command.Load(command.LoadOptions{})
 	}
 
-	sysPrompt := opts.SystemPrompt
-	if sysPrompt == "" {
-		sysPrompt = defaultSystemPrompt
+	baseSysPrompt := opts.SystemPrompt
+	if baseSysPrompt == "" {
+		baseSysPrompt = defaultSystemPrompt
 	}
 	if extras := skill.BuildSystemPromptAdditions(skillReg); extras != "" {
-		sysPrompt += "\n\n" + extras
+		baseSysPrompt += "\n\n" + extras
 	}
 	if extras := agentsmd.BuildSystemPromptAdditions(agentsBlocks); extras != "" {
-		sysPrompt += "\n\n" + extras
+		baseSysPrompt += "\n\n" + extras
 	}
+	sysPrompt := composeModeSystemPrompt(baseSysPrompt, activeModePrompt(cfg, xdgConfig, 0))
 
 	// Hooks: load from the standard four-layer paths.  Failures here
 	// are non-fatal — no hooks is a valid (and safe) configuration.
@@ -657,37 +662,57 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	slog.Debug("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
 
 	rt = &appRuntime{
-		Config:          cfg,
-		Provenance:      prov,
-		State:           st,
-		StateOpts:       stateOpts,
-		XDGConfigHome:   xdgConfig,
-		Bus:             b,
-		Store:           stOpen,
-		Provider:        prv,
-		ProviderFactory: opts.ProviderFactory,
-		Permission:      permEngine,
-		Tools:           tools,
-		Catalog:         catalog,
-		Agent:           ag,
-		Theme:           thm,
-		Skills:          skillReg,
-		Subagents:       subagentReg,
-		SubagentRunner:  subRunner,
-		Commands:        cmdReg,
-		Hooks:           hookReg,
-		AgentsBlocks:    agentsBlocks,
-		MCPClients:      mcpClients,
-		MCPConfigs:      mcpConfigs,
-		MCPStatuses:     mcpStatuses,
-		mcpAsyncConfigs: mcpConfigs,
-		SystemPrompt:    sysPrompt,
-		Pwd:             opts.Pwd,
-		Plugins:         pluginReg,
-		PluginPM:        pluginPM,
-		catalogSrc:      catSrc,
+		Config:           cfg,
+		Provenance:       prov,
+		State:            st,
+		StateOpts:        stateOpts,
+		XDGConfigHome:    xdgConfig,
+		Bus:              b,
+		Store:            stOpen,
+		Provider:         prv,
+		ProviderFactory:  opts.ProviderFactory,
+		Permission:       permEngine,
+		Tools:            tools,
+		Catalog:          catalog,
+		Agent:            ag,
+		Theme:            thm,
+		Skills:           skillReg,
+		Subagents:        subagentReg,
+		SubagentRunner:   subRunner,
+		Commands:         cmdReg,
+		Hooks:            hookReg,
+		AgentsBlocks:     agentsBlocks,
+		MCPClients:       mcpClients,
+		MCPConfigs:       mcpConfigs,
+		MCPStatuses:      mcpStatuses,
+		mcpAsyncConfigs:  mcpConfigs,
+		BaseSystemPrompt: baseSysPrompt,
+		SystemPrompt:     sysPrompt,
+		Pwd:              opts.Pwd,
+		Plugins:          pluginReg,
+		PluginPM:         pluginPM,
+		catalogSrc:       catSrc,
 	}
 	return rt, nil
+}
+
+func activeModePrompt(cfg *config.Config, xdgConfig string, modeIndex int) string {
+	if cfg == nil || modeIndex < 0 || modeIndex >= len(cfg.Modes) {
+		return ""
+	}
+	return config.ResolvePrompt(cfg.Modes[modeIndex].Prompt, filepath.Join(xdgConfig, "hygge"))
+}
+
+func composeModeSystemPrompt(basePrompt, modePrompt string) string {
+	basePrompt = strings.TrimSpace(basePrompt)
+	modePrompt = strings.TrimSpace(modePrompt)
+	if modePrompt == "" {
+		return basePrompt
+	}
+	if basePrompt == "" {
+		return modePrompt
+	}
+	return basePrompt + "\n\n" + modePrompt
 }
 
 // bootstrapMCP loads mcp.toml files, spawns each enabled server, and

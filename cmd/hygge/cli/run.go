@@ -212,7 +212,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}
 		},
 		OpenSessionsModalOnStart: openSessionsModalOnStart,
-		SwitchModel: func(ctx context.Context, providerName, modelName string) error {
+		SwitchModel: func(ctx context.Context, providerName, modelName, modeName string) error {
 			modelOpts, err := resolveProviderOptionsFor(providerName, rt.Config, rt.StateOpts)
 			if err != nil {
 				return err
@@ -227,6 +227,16 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}
 			if err := rt.Agent.SetModel(providerName, modelName, prv, resolved.Model); err != nil {
 				return err
+			}
+			if modeName != "" {
+				for i, mode := range rt.Config.Modes {
+					if mode.Name == modeName {
+						if err := rt.Agent.SetSystemPrompt(composeModeSystemPrompt(rt.BaseSystemPrompt, activeModePrompt(rt.Config, rt.XDGConfigHome, i))); err != nil {
+							return err
+						}
+						break
+					}
+				}
 			}
 			rt.Provider = prv
 			return nil

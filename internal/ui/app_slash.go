@@ -277,7 +277,7 @@ func (a *App) switchYoloCmd(value string) tea.Cmd {
 func (a *App) switchModelCmd(providerName, modelName string) tea.Cmd {
 	return func() tea.Msg {
 		if a.opts.SwitchModel != nil {
-			if err := a.opts.SwitchModel(a.ctx, providerName, modelName); err != nil {
+			if err := a.opts.SwitchModel(a.ctx, providerName, modelName, ""); err != nil {
 				return modelSwitchResult{provider: providerName, model: modelName, err: err}
 			}
 		}

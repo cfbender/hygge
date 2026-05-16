@@ -286,10 +286,29 @@ func modelName(m fantasy.LanguageModel) string {
 	return m.Model()
 }
 
+// SetSystemPrompt replaces the system prompt used by subsequent sends. It does
+// not mutate persisted messages; callers own any UI/config semantics for why the
+// prompt changed.
+func (a *Agent) SetSystemPrompt(prompt string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return ErrClosed
+	}
+	a.opts.SystemPrompt = prompt
+	return nil
+}
+
 func (a *Agent) activeModel() session.ModelRef {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.model
+}
+
+func (a *Agent) systemPrompt() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.opts.SystemPrompt
 }
 
 // Close releases the agent.  After Close, Send and Compact return

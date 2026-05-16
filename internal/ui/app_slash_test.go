@@ -110,7 +110,7 @@ func TestAPIKeyDialogMasksSavesAndRefreshesCurrentProvider(t *testing.T) {
 		saved = append(saved, providerName+":"+apiKey)
 		return nil
 	}
-	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName, _ string) error {
 		switched = append(switched, providerName+"/"+modelName)
 		return nil
 	}
@@ -218,7 +218,7 @@ func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 	var switched []string
 	var saved []string
-	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName, _ string) error {
 		switched = append(switched, providerName+"/"+modelName)
 		return nil
 	}
@@ -342,7 +342,7 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 	var switched []string
 	var saved []string
-	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName, _ string) error {
 		switched = append(switched, providerName+"/"+modelName)
 		return nil
 	}
@@ -380,7 +380,7 @@ func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testi
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	var switched []string
-	app.opts.SwitchModel = func(_ context.Context, providerName, modelName string) error {
+	app.opts.SwitchModel = func(_ context.Context, providerName, modelName, _ string) error {
 		switched = append(switched, providerName+"/"+modelName)
 		return nil
 	}
