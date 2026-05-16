@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
@@ -117,7 +118,7 @@ func (a *App) renderChatContent() string {
 			HoverSubagentID: a.hoverSubagentID,
 			ExpandedTools:   a.expandedTools,
 		}
-		a.msgCache, a.subagentHitZones = ml.ViewWithHitZones()
+		a.msgCache, a.subagentHitZones, a.toolHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
 		a.msgCacheW = l.leftW
 		a.msgCacheLen = len(visibleMessages)
@@ -248,15 +249,25 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 func (a *App) renderQuitOverlay(w, h int) string {
 	question := "Are you sure you want to quit?"
 
-	// Render buttons with selection highlight.
+	// Button styles.
+	var selectedBg, selectedFg, normalFg, boxBg, textFg color.Color
+	selectedBg = lipgloss.Color("#C75B7A")
+	selectedFg = lipgloss.Color("#180810")
+	normalFg = lipgloss.Color("#71685E")
+	textFg = lipgloss.Color("#DDD3C7")
+	boxBg = lipgloss.Color("#2B1F22")
+	if a.styles != nil {
+		boxBg = a.styles.BubbleBg
+	}
+
 	selectedStyle := lipgloss.NewStyle().
 		Bold(true).
 		Padding(0, 3).
-		Background(lipgloss.Color("#C75B7A")).
-		Foreground(lipgloss.Color("#180810"))
+		Background(selectedBg).
+		Foreground(selectedFg)
 	normalStyle := lipgloss.NewStyle().
 		Padding(0, 3).
-		Faint(true)
+		Foreground(normalFg)
 
 	var yesBtn, noBtn string
 	if a.quitSelectedNo {
@@ -266,21 +277,13 @@ func (a *App) renderQuitOverlay(w, h int) string {
 		yesBtn = selectedStyle.Render("Yep!")
 		noBtn = normalStyle.Render("Nope")
 	}
-	buttons := yesBtn + "  " + noBtn
+	buttons := yesBtn + " " + noBtn
 
 	boxStyle := lipgloss.NewStyle().
-		Padding(1, 3)
+		Padding(1, 4).
+		Background(boxBg)
 
-	if a.styles != nil {
-		boxStyle = boxStyle.
-			Background(a.styles.BubbleBg).
-			Foreground(a.styles.Background)
-	}
-
-	qStyle := lipgloss.NewStyle()
-	if a.styles != nil {
-		qStyle = qStyle.Foreground(lipgloss.Color("#DDD3C7"))
-	}
+	qStyle := lipgloss.NewStyle().Foreground(textFg)
 
 	content := lipgloss.JoinVertical(lipgloss.Center, qStyle.Render(question), "", buttons)
 	box := boxStyle.Render(content)

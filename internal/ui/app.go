@@ -272,6 +272,7 @@ type App struct {
 	msgCacheLen      int       // message count at which cache was rendered
 	msgCacheTime     time.Time // time at which cache was rendered (for relative timestamps)
 	subagentHitZones []components.SubagentHitZone
+	toolHitZones     []components.ToolHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
@@ -931,10 +932,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if !a.anyOverlayOpen() && m.Button == tea.MouseLeft {
-			// Check for subagent bubble click before selection.
+			// Check for subagent bubble click.
 			if id := a.subagentAtScreen(m.X, m.Y); id != "" {
 				a.clearSelection()
 				a.pushForeground(id)
+				return a, nil
+			}
+			// Check for tool block click (expand/collapse bash output).
+			if id := a.toolAtScreen(m.X, m.Y); id != "" {
+				a.clearSelection()
+				a.expandedTools[id] = !a.expandedTools[id]
+				a.invalidateMsgCache()
 				return a, nil
 			}
 			a.handleMouseDown(m.X, m.Y)
@@ -1075,19 +1083,6 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		a.invalidateMsgCache()
 		return a, a.showToast("Reasoning", label)
-	case "ctrl+e":
-		// Toggle all tool output expansion.
-		if len(a.expandedTools) > 0 {
-			a.expandedTools = make(map[string]bool)
-		} else {
-			for _, msg := range a.messages {
-				if msg.Role == components.RoleTool && msg.ToolUseID != "" {
-					a.expandedTools[msg.ToolUseID] = true
-				}
-			}
-		}
-		a.invalidateMsgCache()
-		return a, nil
 	case "ctrl+g":
 		return a, a.followIntoLatestSubagent()
 	case "enter":
@@ -1827,6 +1822,34 @@ func (a *App) subagentAtScreen(screenX, screenY int) string {
 	for _, zone := range a.subagentHitZones {
 		if contentLine >= zone.StartLine && contentLine < zone.EndLine {
 			return zone.SubSessionID
+		}
+	}
+	return ""
+}
+
+// toolAtScreen returns the ToolUseID of a bash tool block at the given screen
+// coordinates, or "" if none. Uses the same coordinate translation as subagentAtScreen.
+func (a *App) toolAtScreen(screenX, screenY int) string {
+	if len(a.toolHitZones) == 0 {
+		return ""
+	}
+	bubbleW := int(float64(a.layout.leftW) * 0.80)
+	if screenX > bubbleW {
+		return ""
+	}
+	viewportTop := headerHeight
+	chatH := a.layout.chat.Dy()
+	viewportBottom := viewportTop + chatH
+	if screenY < viewportTop || screenY >= viewportBottom {
+		return ""
+	}
+	contentLine := (screenY - viewportTop) + a.msgViewport.YOffset()
+	if contentLine < 0 {
+		return ""
+	}
+	for _, zone := range a.toolHitZones {
+		if contentLine >= zone.StartLine && contentLine < zone.EndLine {
+			return zone.ToolUseID
 		}
 	}
 	return ""
