@@ -29,6 +29,9 @@ type Footer struct {
 	Busy bool
 	// SpinnerView is the pre-rendered spinner frame (e.g. "⣾").
 	SpinnerView string
+	// WorkingVerb is the busy label selected by the owner. It should be stable
+	// between periodic rotations rather than changing on every spinner frame.
+	WorkingVerb string
 }
 
 // View renders the footer.
@@ -56,6 +59,11 @@ func (f Footer) View() string {
 	}
 	if f.Busy && f.SpinnerView != "" {
 		left = append(left, f.SpinnerView)
+		verb := f.WorkingVerb
+		if verb == "" {
+			verb = "Working…"
+		}
+		left = append(left, f.workingVerbStyle().Render(verb))
 	}
 
 	// Right side: model + provider + reasoning.
@@ -95,6 +103,10 @@ func (f Footer) muted() lipgloss.Style {
 		return f.Theme.Style(theme.AtomMuted)
 	}
 	return lipgloss.NewStyle()
+}
+
+func (f Footer) workingVerbStyle() lipgloss.Style {
+	return f.muted().Faint(true)
 }
 
 // capitalize returns s with the first rune uppercased.

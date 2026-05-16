@@ -221,7 +221,7 @@ func pastedInputMarker(lineCount int) string {
 	if lineCount == 1 {
 		label = "line"
 	}
-	return fmt.Sprintf("[ Pasted %d %s ]", lineCount, label)
+	return fmt.Sprintf("[Pasted %d %s]", lineCount, label)
 }
 
 func isInputBackspace(k tea.KeyPressMsg) bool {
