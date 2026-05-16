@@ -1,6 +1,7 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -523,6 +524,42 @@ func TestToolGroupBubble_HasTopPaddingInsideBlock(t *testing.T) {
 	paddingLine := strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(lines[readLine-1], " "), "▌"))
 	if paddingLine != "" {
 		t.Errorf("line above tool label should be empty bubble padding, got %q in:\n%s", lines[readLine-1], out)
+	}
+}
+
+func TestToolGroupBubble_RendersSecondaryToolDetails(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "grep",
+				ToolArgs: json.RawMessage(`{"pattern":"TODO","path":"internal/ui","include":"*.go","max_results":25}`),
+			},
+			{
+				Role:     RoleTool,
+				ToolName: "glob",
+				ToolArgs: json.RawMessage(`{"pattern":"**/*.go","path":"internal/ui","max_results":10}`),
+			},
+			{
+				Role:     RoleTool,
+				ToolName: "bash",
+				Target:   "go test ./internal/ui/components",
+				ToolArgs: json.RawMessage(`{"command":"go test ./internal/ui/components","description":"Run component tests","timeout_ms":120000}`),
+			},
+		},
+	}
+	out := stripANSI(ml.View())
+	for _, want := range []string{
+		"include *.go · limit 25",
+		"root internal/ui · limit 10",
+		"Run component tests · timeout 120000ms",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tool block missing secondary detail %q in:\n%s", want, out)
+		}
 	}
 }
 
