@@ -1498,6 +1498,61 @@ func TestHydrate_UserMessageHasTimestamp(t *testing.T) {
 	}
 }
 
+func TestHydrate_OrphanCompactionMarkerUsesTimestampOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	app, st, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "deleted before marker"}},
+		},
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "visible after marker"}},
+		},
+	})
+
+	msgs, err := st.MessagesDirectForSession(ctx, app.opts.SessionID)
+	if err != nil {
+		t.Fatalf("MessagesDirectForSession: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 stored messages, got %d", len(msgs))
+	}
+	marker, err := st.AddCompactionMarker(ctx, app.opts.SessionID, msgs[0].ID, "older compacted context", 123)
+	if err != nil {
+		t.Fatalf("AddCompactionMarker: %v", err)
+	}
+
+	base := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if _, err := st.DB().ExecContext(ctx, `UPDATE messages SET created_at = ? WHERE id = ?`, base.UnixMilli(), msgs[0].ID); err != nil {
+		t.Fatalf("update first message timestamp: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE messages SET created_at = ? WHERE id = ?`, base.Add(2*time.Minute).UnixMilli(), msgs[1].ID); err != nil {
+		t.Fatalf("update second message timestamp: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE compaction_markers SET created_at = ? WHERE id = ?`, base.Add(time.Minute).UnixMilli(), marker.ID); err != nil {
+		t.Fatalf("update marker timestamp: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE messages SET deleted_at = ? WHERE id = ?`, base.Add(3*time.Minute).UnixMilli(), msgs[0].ID); err != nil {
+		t.Fatalf("soft-delete first message: %v", err)
+	}
+
+	_ = app.Init()
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected marker plus visible message, got %d: %+v", got, app.messages)
+	}
+	if app.messages[0].Role != components.RoleMarker {
+		t.Fatalf("first role = %q, want marker", app.messages[0].Role)
+	}
+	if app.messages[0].MarkerSummary != "older compacted context" {
+		t.Errorf("marker summary = %q", app.messages[0].MarkerSummary)
+	}
+	if app.messages[1].Role != components.RoleUser || app.messages[1].Raw != "visible after marker" {
+		t.Fatalf("second message = role %q raw %q, want visible user message", app.messages[1].Role, app.messages[1].Raw)
+	}
+}
+
 // TestHydrate_AssistantThinkingOnly verifies that an assistant message with
 // ONLY thinking parts (no text) produces one assistant entry with Thinking
 // populated and empty Raw.
