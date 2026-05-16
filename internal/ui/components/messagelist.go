@@ -637,19 +637,29 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 // renderMarker renders a RoleMarker message as a prominent banner-style
 // compaction section break.  Shows the tokens saved and the full summary text.
 func (m MessageList) renderMarker(msg UIMessage) string {
+	width := m.Width
+	if width <= 0 {
+		width = emptyStateMaxWidth
+	}
+	innerW := max(width-4, 1) // rounded border (2) + horizontal padding (2)
+
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1)
+		Padding(0, 1).
+		Width(innerW + 2)
 	labelStyle := lipgloss.NewStyle().Bold(true)
-	bodyStyle := lipgloss.NewStyle()
+	bodyStyle := lipgloss.NewStyle().Width(innerW)
 	if m.Theme != nil {
 		borderStyle = borderStyle.
 			BorderForeground(m.Theme.Style(theme.AtomWarn).GetForeground())
 		labelStyle = m.Theme.Style(theme.AtomWarn).Bold(true)
-		bodyStyle = m.Theme.Style(theme.AtomMuted)
+		bodyStyle = m.Theme.Style(theme.AtomMuted).Width(innerW)
 	}
 
 	header := fmt.Sprintf("── compacted · %s saved ──", formatTokensSaved(msg.MarkerTokensSaved))
+	if lipgloss.Width(header) > innerW {
+		header = truncate(header, innerW)
+	}
 	body := msg.MarkerSummary
 	if body == "" {
 		body = "(no summary)"

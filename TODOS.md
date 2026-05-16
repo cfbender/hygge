@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] compaction summary box breaks out of viewport
-
 - [ ] match input border color to mode color
 
 - [ ] compaction change from notice above input to compaction block with crunching animation while working
