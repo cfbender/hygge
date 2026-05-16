@@ -1718,6 +1718,114 @@ func TestQueueChanged_RendersQueuedPromptsNearInput(t *testing.T) {
 	}
 }
 
+func TestBusySubmitQueuesDraftOutOfChatAndClickEdits(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	app.busy = true
+	app.input.SetBusy(true, "")
+
+	typeInto(app, "queued one")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("busy submit should queue locally without starting send, got cmd %T", cmd)
+	}
+	if len(app.messages) != 0 {
+		t.Fatalf("queued draft should not appear in chat, messages = %#v", app.messages)
+	}
+	if app.queueCount != 1 || len(app.queuedDrafts) != 1 || app.queuedPrompts[0] != "queued one" {
+		t.Fatalf("queue state = count %d drafts %#v prompts %#v", app.queueCount, app.queuedDrafts, app.queuedPrompts)
+	}
+	out := app.View().Content
+	if !strings.Contains(out, "click to edit") {
+		t.Fatalf("queued draft hint missing from view:\n%s", out)
+	}
+
+	queuedY := headerHeight + app.layout.chat.Dy() + chatBottomPadding + 1
+	app.Update(tea.MouseClickMsg{X: 4, Y: queuedY, Button: tea.MouseLeft})
+	if got := app.input.Value(); got != "queued one" {
+		t.Fatalf("input after queued draft click = %q, want queued one", got)
+	}
+	if app.queueCount != 0 || len(app.queuedDrafts) != 0 {
+		t.Fatalf("queued draft not removed after edit: count %d drafts %#v", app.queueCount, app.queuedDrafts)
+	}
+}
+
+func TestQueuedDraftEditPreservesOriginalPosition(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	app.busy = true
+	app.input.SetBusy(true, "")
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "one"})
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "two"})
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "three"})
+	_ = app.View()
+
+	secondQueuedY := headerHeight + app.layout.chat.Dy() + chatBottomPadding + 2
+	app.Update(tea.MouseClickMsg{X: 4, Y: secondQueuedY, Button: tea.MouseLeft})
+	if got := app.input.Value(); got != "two" {
+		t.Fatalf("input after queued draft click = %q, want two", got)
+	}
+	app.setInputValueAndCursor("four", len("four"))
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("busy edited draft submit should queue locally, got cmd %T", cmd)
+	}
+	if got := strings.Join(app.queuedPrompts, ","); got != "one,four,three" {
+		t.Fatalf("queued prompts = %q, want one,four,three", got)
+	}
+}
+
+func TestTurnCompletedFlushesQueuedDraftsInOrder(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.SessionID = "sess"
+	seen := make(chan string, 2)
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		seen <- firstTextPart(parts)
+		return nil, nil
+	}
+	app.busy = true
+	app.activeTurns = 1
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "queued one"})
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "queued two"})
+
+	cmd := app.Handle(bus.TurnCompleted{SessionID: "sess"})
+	if cmd == nil {
+		t.Fatal("expected queued flush cmd")
+	}
+	if len(app.queuedDrafts) != 1 || app.queueCount != 1 || app.queuedPrompts[0] != "queued two" {
+		t.Fatalf("only sent draft should be dequeued, count %d drafts %#v prompts %#v", app.queueCount, app.queuedDrafts, app.queuedPrompts)
+	}
+	app.Update(cmd())
+	got := []string{readSeenPrompt(t, seen)}
+	app.activeTurns = 1
+	cmd = app.Handle(bus.TurnCompleted{SessionID: "sess"})
+	if cmd == nil {
+		t.Fatal("expected second queued flush cmd")
+	}
+	if len(app.queuedDrafts) != 0 || app.queueCount != 0 {
+		t.Fatalf("second draft should be dequeued, count %d drafts %#v", app.queueCount, app.queuedDrafts)
+	}
+	app.Update(cmd())
+	got = append(got, readSeenPrompt(t, seen))
+	if strings.Join(got, ",") != "queued one,queued two" {
+		t.Fatalf("flushed sends = %v", got)
+	}
+}
+
+func readSeenPrompt(t *testing.T, ch <-chan string) string {
+	t.Helper()
+	select {
+	case got := <-ch:
+		return got
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued send")
+		return ""
+	}
+}
+
 // TestQueueChanged_ClearQueue verifies that a QueueChanged event with
 // Count=0 clears the queued indicator.
 func TestQueueChanged_ClearQueue(t *testing.T) {

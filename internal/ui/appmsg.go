@@ -28,6 +28,11 @@ type sendCompleted struct {
 	Err    error
 }
 
+type queuedPromptDraft struct {
+	Text        string
+	Attachments []promptAttachment
+}
+
 // workingVerbTickMsg fires periodically while the app is busy to rotate the
 // footer's working label without changing it on every spinner frame.
 type workingVerbTickMsg struct{}
