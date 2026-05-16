@@ -156,3 +156,55 @@ name = "gpt-5"
 		t.Fatalf("model dropped: %#v", m)
 	}
 }
+
+func TestWriteDefaultProfileCreatesUserConfig(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	xdg := filepath.Join(home, ".config")
+	wrote, err := WriteDefaultProfile(WriteDefaultProfileOptions{HomeDir: home, XDGConfigHome: xdg}, "work")
+	if err != nil {
+		t.Fatalf("WriteDefaultProfile: %v", err)
+	}
+	want := filepath.Join(xdg, "hygge", "config.toml")
+	if wrote != want {
+		t.Fatalf("target = %q, want %q", wrote, want)
+	}
+	m, err := loadTOMLFile(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["default_profile"] != "work" {
+		t.Fatalf("default_profile = %#v", m["default_profile"])
+	}
+}
+
+func TestWriteDefaultProfilePreservesUnrelatedFields(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	xdg := filepath.Join(home, ".config")
+	path := filepath.Join(xdg, "hygge", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := WriteDefaultProfile(WriteDefaultProfileOptions{HomeDir: home, XDGConfigHome: xdg}, "work"); err != nil {
+		t.Fatalf("WriteDefaultProfile: %v", err)
+	}
+	m, err := loadTOMLFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["default_profile"] != "work" {
+		t.Fatalf("default_profile = %#v", m["default_profile"])
+	}
+	model := m["model"].(map[string]any)
+	if model["provider"] != "anthropic" || model["name"] != "claude-sonnet-4-5" {
+		t.Fatalf("model dropped: %#v", model)
+	}
+}

@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cfbender/hygge/internal/state"
+	"github.com/cfbender/hygge/internal/config"
 )
 
 // newProfileCmd builds the `hygge profile` subcommand group.
@@ -27,7 +27,7 @@ func newProfileCmd() *cobra.Command {
 func newProfileListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List available profiles, marking the active one",
+		Short: "List available profiles, marking the configured default one",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			rt, err := bootstrap(context.Background(), bootstrapOptions{
@@ -64,7 +64,7 @@ func newProfileListCmd() *cobra.Command {
 			}
 			sort.Strings(names)
 
-			active := rt.State.ActiveProfile
+			active := rt.Config.Profile
 			if active == "" {
 				active = "default"
 			}
@@ -90,7 +90,7 @@ func newProfileListCmd() *cobra.Command {
 func newProfileUseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "use <name>",
-		Short: "Set the active profile and persist it to state.json",
+		Short: "Set the default profile in user config",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rt, err := bootstrap(context.Background(), bootstrapOptions{
@@ -104,11 +104,14 @@ func newProfileUseCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
-			name := args[0]
-			if err := state.SetActiveProfile(name, rt.StateOpts); err != nil {
-				return fmt.Errorf("cli: set active profile: %w", err)
+			name := strings.TrimSpace(args[0])
+			if _, err := config.WriteDefaultProfile(config.WriteDefaultProfileOptions{
+				HomeDir:       optsHomeDir(rt),
+				XDGConfigHome: profilesConfigHome(rt),
+			}, name); err != nil {
+				return fmt.Errorf("cli: set default profile: %w", err)
 			}
-			printf(out(cmd), "active profile set to %q\n", name)
+			printf(out(cmd), "default profile set to %q\n", name)
 			return nil
 		},
 	}
@@ -157,6 +160,10 @@ func newProfileShowCmd() *cobra.Command {
 // itself does not currently expose the resolved xdgConfig directly, so
 // we derive it the same way bootstrap did.
 func profilesDirFromOpts(rt *appRuntime) string {
+	return filepath.Join(profilesConfigHome(rt), "hygge", "profiles")
+}
+
+func profilesConfigHome(rt *appRuntime) string {
 	// Prefer the test override when set; mirrors the resolution order in
 	// bootstrap above.
 	xdgConfig := ""
@@ -167,15 +174,15 @@ func profilesDirFromOpts(rt *appRuntime) string {
 		if v, ok := os.LookupEnv("XDG_CONFIG_HOME"); ok && v != "" {
 			xdgConfig = v
 		} else {
-			xdgConfig = filepath.Join(homeDirFromRuntime(rt), ".config")
+			xdgConfig = filepath.Join(optsHomeDir(rt), ".config")
 		}
 	}
-	return filepath.Join(xdgConfig, "hygge", "profiles")
+	return xdgConfig
 }
 
-// homeDirFromRuntime returns the resolved HomeDir for the current
+// optsHomeDir returns the resolved HomeDir for the current
 // bootstrap.  Mirrors bootstrap's order.
-func homeDirFromRuntime(_ *appRuntime) string {
+func optsHomeDir(_ *appRuntime) string {
 	if testOverrides != nil && testOverrides.HomeDir != "" {
 		return testOverrides.HomeDir
 	}
@@ -183,4 +190,8 @@ func homeDirFromRuntime(_ *appRuntime) string {
 		return h
 	}
 	return ""
+}
+
+func homeDirFromRuntime(rt *appRuntime) string {
+	return optsHomeDir(rt)
 }

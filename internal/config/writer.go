@@ -27,6 +27,10 @@ type WriteProviderAPIKeyOptions = WriteModelOptions
 // theme selection. It shares the model writer's target-resolution inputs.
 type WriteThemeSelectionOptions = WriteModelOptions
 
+// WriteDefaultProfileOptions controls the narrow config writer used by
+// `hygge profile use`. It always writes the user config, not project config.
+type WriteDefaultProfileOptions = WriteModelOptions
+
 // WriteModelSelection persists provider/name to one deterministic writable
 // file. Target policy: if the winning model provenance already comes from a
 // real config file, update that file; otherwise create/update the user config
@@ -150,6 +154,39 @@ func WriteThemeSelection(opts WriteThemeSelectionOptions, themeName string) (str
 	}
 	if err := os.WriteFile(target, buf.Bytes(), 0o600); err != nil {
 		return target, fmt.Errorf("config: write theme target: %w", err)
+	}
+	return target, nil
+}
+
+// WriteDefaultProfile persists default_profile in the user config while
+// preserving unrelated config fields. CLI --profile still overrides this value.
+func WriteDefaultProfile(opts WriteDefaultProfileOptions, profileName string) (string, error) {
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		return "", fmt.Errorf("config: default profile name is required")
+	}
+	target := filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+	m := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
+		parsed, err := parseTOMLBytes(data)
+		if err != nil {
+			return target, &ParseError{File: target, Err: err}
+		}
+		m = parsed
+	} else if !os.IsNotExist(err) {
+		return target, fmt.Errorf("config: read default profile target: %w", err)
+	}
+	m["default_profile"] = profileName
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return target, fmt.Errorf("config: encode default profile target: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return target, fmt.Errorf("config: create config dir: %w", err)
+	}
+	if err := os.WriteFile(target, buf.Bytes(), 0o600); err != nil {
+		return target, fmt.Errorf("config: write default profile target: %w", err)
 	}
 	return target, nil
 }

@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] Configure default profile in user config
-
 - [ ] Show more info from model around tool usage. Right now, the chat only shows a list of tool usage, where in something like opencode, the agent explains what it's doing before calling the edit or write tools.
 
 - [ ] Layout shift on glamourization after message finishes streaming

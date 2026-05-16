@@ -348,7 +348,7 @@ func Load(ctx context.Context, opts LoadOptions) (*Config, Provenance, error) {
 	xdgStateHome := xdgStateDir(opts)
 
 	// Resolve profile name.
-	profileName, err := resolveProfileName(opts, xdgStateHome)
+	profileName, err := resolveProfileName(opts, xdgConfigHome, xdgStateHome)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -432,10 +432,18 @@ func xdgStateDir(opts LoadOptions) string {
 }
 
 // resolveProfileName picks the active profile name via the precedence:
-// opts.Profile → state file (active_profile) → "default".
-func resolveProfileName(opts LoadOptions, xdgStateHome string) (string, error) {
+// opts.Profile → user config default_profile → state file (active_profile) → "default".
+func resolveProfileName(opts LoadOptions, xdgConfigHome, xdgStateHome string) (string, error) {
 	if opts.Profile != "" {
 		return opts.Profile, nil
+	}
+
+	profileName, err := defaultProfileFromUserConfig(xdgConfigHome)
+	if err != nil {
+		return "", err
+	}
+	if profileName != "" {
+		return profileName, nil
 	}
 
 	st, err := state.Load(state.LoadOptions{
@@ -455,6 +463,23 @@ func resolveProfileName(opts LoadOptions, xdgStateHome string) (string, error) {
 	}
 
 	return "default", nil
+}
+
+func defaultProfileFromUserConfig(xdgConfigHome string) (string, error) {
+	path := filepath.Join(xdgConfigHome, "hygge", "config.toml")
+	data, err := os.ReadFile(path) //nolint:gosec // intentional config path
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("config: read user config for default profile: %w", err)
+	}
+	m, err := parseTOMLBytes(data)
+	if err != nil {
+		return "", &ParseError{File: path, Err: err}
+	}
+	profileName, _ := m["default_profile"].(string)
+	return strings.TrimSpace(profileName), nil
 }
 
 // decodeToStruct converts the merged map to a typed Config using mapstructure.

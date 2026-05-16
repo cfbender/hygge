@@ -760,6 +760,57 @@ name = "from-state-profile"
 	}
 }
 
+func TestLoad_UserConfigDefaultProfile(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	profilesDir := filepath.Join(cfgDir, "profiles")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `default_profile = "work"`)
+	writeTOML(t, filepath.Join(profilesDir, "work.toml"), `
+[model]
+name = "from-config-profile"
+`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "work" {
+		t.Fatalf("Profile = %q, want work", cfg.Profile)
+	}
+	if cfg.Model.Name != "from-config-profile" {
+		t.Fatalf("model.name = %q, want from-config-profile", cfg.Model.Name)
+	}
+}
+
+func TestLoad_UserConfigDefaultProfileBeatsState(t *testing.T) {
+	tmp := t.TempDir()
+	if err := state.Save(&state.State{ActiveProfile: "state-profile"}, state.LoadOptions{HomeDir: tmp}); err != nil {
+		t.Fatalf("state.Save: %v", err)
+	}
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	profilesDir := filepath.Join(cfgDir, "profiles")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `default_profile = "config-profile"`)
+	writeTOML(t, filepath.Join(profilesDir, "config-profile.toml"), `
+[model]
+name = "from-config-profile"
+`)
+	writeTOML(t, filepath.Join(profilesDir, "state-profile.toml"), `
+[model]
+name = "from-state-profile"
+`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "config-profile" {
+		t.Fatalf("Profile = %q, want config-profile", cfg.Profile)
+	}
+	if cfg.Model.Name != "from-config-profile" {
+		t.Fatalf("model.name = %q, want from-config-profile", cfg.Model.Name)
+	}
+}
+
 // --- Reasoning fields --------------------------------------------------------
 
 // TestLoad_Reasoning_ValidValues exercises the happy path: each
