@@ -130,6 +130,82 @@ func TestShiftEnterInsertsInputNewline(t *testing.T) {
 	}
 }
 
+func TestCtrlEEditsPromptExternally(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	var initial string
+	app.opts.EditPrompt = func(_ context.Context, text string) (string, error) {
+		initial = text
+		return "edited\nbody\n", nil
+	}
+
+	typeInto(app, "draft")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected editor cmd")
+	}
+	app.Update(cmd())
+
+	if initial != "draft" {
+		t.Fatalf("editor initial text = %q, want draft", initial)
+	}
+	if got := app.input.Value(); got != "edited\nbody" {
+		t.Fatalf("input value = %q, want edited body", got)
+	}
+	if app.notice != "" {
+		t.Fatalf("notice = %q, want none", app.notice)
+	}
+}
+
+func TestCtrlEEditorFailureShowsNotice(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.EditPrompt = func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("editor unavailable")
+	}
+
+	typeInto(app, "draft")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected editor cmd")
+	}
+	app.Update(cmd())
+
+	if got := app.input.Value(); got != "draft" {
+		t.Fatalf("input value changed after editor failure: %q", got)
+	}
+	if !strings.Contains(app.notice, "editor unavailable") {
+		t.Fatalf("notice = %q, want editor failure", app.notice)
+	}
+}
+
+func TestCtrlEEditorExpandsPastedMarkers(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	var initial string
+	app.opts.EditPrompt = func(_ context.Context, text string) (string, error) {
+		initial = text
+		return "edited paste", nil
+	}
+
+	app.Update(tea.PasteMsg{Content: "alpha\nbravo"})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected editor cmd")
+	}
+	app.Update(cmd())
+
+	if initial != "alpha\nbravo " {
+		t.Fatalf("editor initial text = %q, want expanded paste", initial)
+	}
+	if got := app.input.Value(); got != "edited paste" {
+		t.Fatalf("input value = %q, want edited paste", got)
+	}
+	if len(app.pastedInputBlocks) != 0 {
+		t.Fatalf("pasted blocks not cleared: %#v", app.pastedInputBlocks)
+	}
+}
+
 func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
