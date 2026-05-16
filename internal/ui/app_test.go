@@ -174,6 +174,26 @@ func TestUserSubmitClearsInputAndStartsSend(t *testing.T) {
 	}
 }
 
+func TestUserSubmitPreservesPromptWhitespace(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	input := "  hello\nworld\n\n"
+	app.input.Textarea.SetValue(input)
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd from Enter")
+	}
+	msg := cmd()
+	started, ok := msg.(sendStarted)
+	if !ok {
+		t.Fatalf("expected sendStarted, got %T (%v)", msg, msg)
+	}
+	if started.UserInput != input {
+		t.Fatalf("sendStarted.UserInput = %q, want %q", started.UserInput, input)
+	}
+}
+
 func TestShiftEnterInsertsInputNewline(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
@@ -739,7 +759,7 @@ func TestAtFileMentionAddsFileToPromptContext(t *testing.T) {
 		if len(parts) != 2 {
 			t.Fatalf("sent %d parts, want text plus attachment: %+v", len(parts), parts)
 		}
-		if got := parts[0].Text; got != "read @docs/notes.md" {
+		if got := parts[0].Text; got != "read @docs/notes.md " {
 			t.Fatalf("prompt text = %q", got)
 		}
 		if !strings.Contains(parts[1].Text, "Attached file: "+path) || !strings.Contains(parts[1].Text, "important context") {

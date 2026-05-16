@@ -44,6 +44,7 @@ function hygge.register_tool(spec) end
 ---@alias HyggeHookDecision
 ---| 'allow'
 ---| 'deny'
+---| 'modify'
 
 ---@class HyggeHookOptions
 ---@field name? string Explicit hook name. Defaults to `plugin:<plugin>:<event>`.
@@ -57,6 +58,7 @@ function hygge.register_tool(spec) end
 ---@field pwd string
 ---@field tool_name string
 ---@field message string
+---@field mode_name string Active mode name when the hook was invoked by a mode switch refresh.
 ---@field tool_input? table
 
 ---@class HyggeHookAction
@@ -64,6 +66,7 @@ function hygge.register_tool(spec) end
 ---@field reason? string Human-readable reason for deny/allow decisions.
 ---@field modified_tool_input? table Replacement tool input for pre-tool hooks.
 ---@field modified_message? string Replacement message for pre-message hooks.
+---@field system_prompt_append? string One-turn system prompt addition for pre-message hooks. Not rendered as user text.
 
 ---Register a hook for a tool/message event.
 ---@overload fun(event: HyggeHookEvent, handler: fun(event: HyggeHookInput): HyggeHookAction|nil)

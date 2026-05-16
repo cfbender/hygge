@@ -624,6 +624,40 @@ end)
 	}
 }
 
+// TestLuaLoader_hookWithSystemPromptAppend verifies Lua pre_message hooks can
+// return non-rendered one-turn system prompt additions and observe mode_name
+// during refresh-style invocations.
+func TestLuaLoader_hookWithSystemPromptAppend(t *testing.T) {
+	reg, _, hookReg, _, _ := buildTestRegistry(t)
+
+	lua := `
+hygge.register_hook("pre_message", function(event)
+    return { decision = "allow", system_prompt_append = "mode=" .. event.mode_name .. "; msg=" .. event.message }
+end)
+`
+	dir := t.TempDir()
+	writeFile(t, dir, "plugin.lua", lua)
+	if err := reg.Install(context.Background(), "local:"+dir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	in := hook.Input{
+		Event:    hook.EventPreMessage,
+		Message:  "original",
+		ModeName: "Smart",
+	}
+	out, dec, _, _, _ := hookReg.RunPre(context.Background(), hook.EventPreMessage, in)
+	if dec != hook.DecisionAllow {
+		t.Errorf("expected Allow decision, got %v", dec)
+	}
+	if out.Message != "original" {
+		t.Errorf("message = %q, want original", out.Message)
+	}
+	if len(out.SystemPromptAdditions) != 1 || out.SystemPromptAdditions[0] != "mode=Smart; msg=original" {
+		t.Fatalf("SystemPromptAdditions = %#v", out.SystemPromptAdditions)
+	}
+}
+
 // TestPluginToolAdapter_inputSchema verifies InputSchema returns a valid map.
 func TestPluginToolAdapter_inputSchema(t *testing.T) {
 	reg, toolReg, _, _, _ := buildTestRegistry(t)

@@ -144,6 +144,7 @@ func (r *Registry) RunPre(
 		case DecisionModify:
 			applyPreModify(event, &out, act)
 		}
+		applyPreSystemPromptAppend(event, &out, act)
 		// Allow or empty decision: continue chain.
 	}
 	return out, DecisionAllow, "", "", warns
@@ -251,6 +252,13 @@ func applyPreModify(event Event, out *Input, act Action) {
 			out.Message = act.ModifiedMessage
 		}
 	}
+}
+
+func applyPreSystemPromptAppend(event Event, out *Input, act Action) {
+	if event != EventPreMessage || strings.TrimSpace(act.SystemPromptAppend) == "" {
+		return
+	}
+	out.SystemPromptAdditions = append(out.SystemPromptAdditions, act.SystemPromptAppend)
 }
 
 // applyPostModify mutates out based on act for post_* events.

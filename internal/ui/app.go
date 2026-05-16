@@ -1246,7 +1246,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k.Mod.Contains(tea.ModAlt) {
 			return a.insertInputNewline()
 		}
-		displayText := strings.TrimSpace(a.input.Value())
+		rawText := a.input.Value()
+		displayText := strings.TrimSpace(rawText)
 		if displayText == "" {
 			return a, nil
 		}
@@ -1270,11 +1271,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.slashPaletteDismissed = false
 			return a, a.runSlashCommand(displayText)
 		}
-		mentionAttachments, err := a.promptAttachmentsForMentions(displayText)
+		text := a.expandPastedInputText(rawText)
+		mentionAttachments, err := a.promptAttachmentsForMentions(text)
 		if err != nil {
 			return a, a.setNotice("mention: " + err.Error())
 		}
-		text := strings.TrimSpace(a.expandPastedInputText(displayText))
 		a.history.Add(text)
 		attachments := a.drainPromptAttachments(mentionAttachments)
 		a.input.Reset()

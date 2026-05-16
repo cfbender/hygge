@@ -169,8 +169,9 @@ type Agent struct {
 	session *SessionAgent
 	model   session.ModelRef
 
-	// mu guards closed, ctx, cancel, locks, pendingLazy, thresholdFired,
-	// pluginInjects, activeRuns, and queues.
+	// mu guards closed, ctx, cancel, locks, pendingLazy,
+	// pendingSystemAdditions, activeModeName, thresholdFired, pluginInjects,
+	// activeRuns, and queues.
 	mu     sync.Mutex
 	closed bool
 
@@ -186,6 +187,14 @@ type Agent struct {
 	// the next provider turn.  Drained before each buildRequest in
 	// runLoop.  Guarded by mu.
 	pendingLazy map[string][]agentsmd.Block
+	// pendingSystemAdditions maps sessionID -> one-turn system prompt
+	// additions queued by pre_message hooks. Drained before each provider
+	// turn and never persisted into visible message history. Guarded by mu.
+	pendingSystemAdditions map[string][]string
+	// activeModeName is included in pre_message hook input so plugins can
+	// rebuild system prompt additions for the currently selected UI mode.
+	// Guarded by mu.
+	activeModeName string
 	// thresholdFired tracks which sessions have already received the
 	// advisory compaction suggestion for the current threshold crossing.
 	// Keyed by session id.  The flag is set the first time usage climbs
@@ -239,15 +248,16 @@ func New(opts Options) (*Agent, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Agent{
-		opts:           opts,
-		model:          session.ModelRef{Provider: opts.Provider.Name(), Name: modelName(opts.FantasyModel)},
-		ctx:            ctx,
-		cancel:         cancel,
-		locks:          make(map[string]*sync.Mutex),
-		pendingLazy:    make(map[string][]agentsmd.Block),
-		thresholdFired: make(map[string]bool),
-		activeRuns:     make(map[string]struct{}),
-		queues:         make(map[string][]QueuedSend),
+		opts:                   opts,
+		model:                  session.ModelRef{Provider: opts.Provider.Name(), Name: modelName(opts.FantasyModel)},
+		ctx:                    ctx,
+		cancel:                 cancel,
+		locks:                  make(map[string]*sync.Mutex),
+		pendingLazy:            make(map[string][]agentsmd.Block),
+		pendingSystemAdditions: make(map[string][]string),
+		thresholdFired:         make(map[string]bool),
+		activeRuns:             make(map[string]struct{}),
+		queues:                 make(map[string][]QueuedSend),
 	}
 	a.runtime = NewRuntime(RuntimeOptions{
 		Model:         opts.FantasyModel,
@@ -300,6 +310,46 @@ func (a *Agent) SetSystemPrompt(prompt string) error {
 		return ErrClosed
 	}
 	a.opts.SystemPrompt = prompt
+	return nil
+}
+
+// RefreshHookSystemPromptAdditions invokes pre_message hooks without
+// persisting a user message so plugins can rebuild their one-turn system
+// prompt additions after external context changes, such as a UI mode switch.
+// Deny/modified_message decisions are ignored because there is no user
+// message to block or rewrite; system_prompt_append results replace any
+// previously queued hook additions for the session.
+func (a *Agent) RefreshHookSystemPromptAdditions(ctx context.Context, sessionID, modeName string) error {
+	if a.isClosed() {
+		return ErrClosed
+	}
+	a.setActiveModeName(modeName)
+	if sessionID == "" {
+		return nil
+	}
+	if a.opts.Hooks == nil {
+		return nil
+	}
+
+	pwd := a.opts.Pwd
+	if pwd == "" {
+		if wd, err := os.Getwd(); err == nil {
+			pwd = wd
+		}
+	}
+	out, dec, denier, reason, warns := a.opts.Hooks.RunPre(ctx, hook.EventPreMessage, hook.Input{
+		Event:     hook.EventPreMessage,
+		SessionID: sessionID,
+		HookName:  "pre_message",
+		Pwd:       pwd,
+		ModeName:  modeName,
+	})
+	logHookWarns(warns)
+	if dec == hook.DecisionDeny {
+		slog.Warn("agent: ignoring pre_message deny during system prompt refresh",
+			"hook", denier, "reason", reason)
+	}
+	a.replacePendingSystemAdditions(sessionID, out.SystemPromptAdditions)
 	return nil
 }
 
@@ -482,6 +532,18 @@ func (a *Agent) systemPrompt() string {
 	return a.opts.SystemPrompt
 }
 
+func (a *Agent) setActiveModeName(modeName string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.activeModeName = modeName
+}
+
+func (a *Agent) activeHookModeName() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.activeModeName
+}
+
 // Close releases the agent.  After Close, Send and Compact return
 // [ErrClosed].  Idempotent.
 func (a *Agent) Close() error {
@@ -651,7 +713,10 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 
 	// Run pre_message hook BEFORE persisting the user message.  On Deny,
 	// return immediately without appending anything.  On Modify, replace
-	// the text in the user parts.
+	// the text in the user parts. Hooks may also return one-turn system
+	// prompt additions; those are queued after the user message is safely
+	// persisted so plugin context does not alter the visible transcript.
+	var systemPromptAdditions []string
 	if a.opts.Hooks != nil {
 		hookIn := hook.Input{
 			Event:     hook.EventPreMessage,
@@ -659,6 +724,7 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 			HookName:  "pre_message",
 			Pwd:       pwd,
 			Message:   userText.String(),
+			ModeName:  a.activeHookModeName(),
 		}
 		out, dec, denier, reason, warns := a.opts.Hooks.RunPre(ctx, hook.EventPreMessage, hookIn)
 		logHookWarns(warns)
@@ -669,6 +735,7 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 		if out.Message != "" && out.Message != userText.String() {
 			userParts = replaceTextParts(userParts, out.Message)
 		}
+		systemPromptAdditions = append(systemPromptAdditions, out.SystemPromptAdditions...)
 	}
 
 	// Persist the user message before any provider work.
@@ -678,6 +745,10 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent: Send: append user: %w", err)
+	}
+	if a.opts.Hooks != nil {
+		a.replacePendingSystemAdditions(sessionID, systemPromptAdditions)
+		defer a.clearPendingSystemAdditions(sessionID)
 	}
 	// Seed a preview title from the user's message when the session has no
 	// slug yet, so the sidebar updates instantly. The title model
@@ -801,6 +872,38 @@ func (a *Agent) drainPendingLazy(sessionID string) []agentsmd.Block {
 	}
 	delete(a.pendingLazy, sessionID)
 	return blocks
+}
+
+// replacePendingSystemAdditions replaces one-turn system prompt additions for
+// sessionID. An empty additions slice clears any previously queued hook context.
+// Guarded by a.mu.
+func (a *Agent) replacePendingSystemAdditions(sessionID string, additions []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(additions) == 0 {
+		delete(a.pendingSystemAdditions, sessionID)
+		return
+	}
+	a.pendingSystemAdditions[sessionID] = append([]string(nil), additions...)
+}
+
+// drainPendingSystemAdditions returns and clears queued one-turn system prompt
+// additions for sessionID.  Guarded by a.mu.
+func (a *Agent) drainPendingSystemAdditions(sessionID string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	additions := a.pendingSystemAdditions[sessionID]
+	if len(additions) == 0 {
+		return nil
+	}
+	delete(a.pendingSystemAdditions, sessionID)
+	return additions
+}
+
+func (a *Agent) clearPendingSystemAdditions(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.pendingSystemAdditions, sessionID)
 }
 
 // replaceTextParts returns a copy of parts where every PartText entry

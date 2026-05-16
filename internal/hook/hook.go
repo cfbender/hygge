@@ -58,7 +58,8 @@ const (
 	EventPostTool Event = "post_tool"
 
 	// EventPreMessage fires before the user message is persisted, right
-	// at the start of Send.  Sync-only.  Can deny or modify the text.
+	// at the start of Send.  Sync-only.  Can deny, modify the text, or
+	// append one-turn system prompt context.
 	EventPreMessage Event = "pre_message"
 
 	// EventPostMessage fires after the assistant message is committed.
@@ -127,6 +128,16 @@ type Input struct {
 	// Message is the text payload.  Set for pre_message (user input) and
 	// post_message (assistant text).
 	Message string `json:"message,omitempty"`
+
+	// ModeName is set when a pre_message hook is invoked to refresh
+	// one-turn system prompt additions after a UI mode switch.
+	ModeName string `json:"mode_name,omitempty"`
+
+	// SystemPromptAdditions are one-turn additions collected from
+	// pre_message hooks. They are intentionally not exposed to hook
+	// subprocesses or plugin handlers; callers append them to the system
+	// prompt without persisting them into visible message history.
+	SystemPromptAdditions []string `json:"-"`
 }
 
 // ToolResult carries a tool's outcome for post_tool hooks.
@@ -157,6 +168,12 @@ type Action struct {
 	// ModifiedToolResult, when Decision="modify" on a post_tool event,
 	// replaces the tool's result before returning to the model.
 	ModifiedToolResult *ToolResult `json:"modified_tool_result,omitempty"`
+
+	// SystemPromptAppend, when returned from a pre_message hook, appends
+	// one-turn context to the model's system prompt. Unlike
+	// ModifiedMessage, this does not alter or persist the visible user
+	// message. It is honored for allow and modify decisions.
+	SystemPromptAppend string `json:"system_prompt_append,omitempty"`
 }
 
 // Warning captures a non-fatal hook execution error (e.g. malformed
