@@ -174,7 +174,7 @@ func TestToolCallDisplay(t *testing.T) {
 	out := app.View().Content
 	// Non-task tool calls now render as tool-group bubbles (no "▌tool: read" gutter,
 	// no raw body in view).  Name and target must appear; raw lines must not.
-	for _, want := range []string{"read", "/etc/passwd"} {
+	for _, want := range []string{"Read", "/etc/passwd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("tool view missing %q in:\n%s", want, out)
 		}

@@ -702,7 +702,6 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 
 	// Build body: one line per tool call.
-	dotStyle := m.muted()
 	nameStyle := lipgloss.NewStyle()
 	if m.Theme != nil {
 		nameStyle = m.Theme.Style(theme.AtomPrimary)
@@ -711,51 +710,26 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 
 	var rows []string
 	for _, msg := range items {
-		dot := dotStyle.Render("·")
-		name := nameStyle.Render(msg.ToolName)
+		// Build rich label like the gutter: ✱ Grep "pat" in path (N matches)
+		label := toolGroupLabel(msg, nameStyle, targetStyle)
 
-		// Plain visible width of "· {name} " prefix (without ANSI).
-		prefixVisW := 2 + len(msg.ToolName) + 1 // "· " + name + " "
-
-		// Compute the inline status suffix.  For errored tools that also have
-		// a ToolStatus set, prefer the ToolStatus rendering; fall back to the
-		// legacy IsError flag when Status is zero/unknown (e.g. hydrated rows
-		// that predate the status field).
 		statusTxt := toolStatusText(msg.Status, m.Theme)
 		if statusTxt == "" && msg.IsError {
-			// Legacy path: no Status but IsError is set.
 			if m.Theme != nil {
 				statusTxt = m.Theme.Style(theme.AtomError).Faint(true).Render("error")
 			} else {
 				statusTxt = lipgloss.NewStyle().Faint(true).Render("error")
 			}
 		}
-
-		var row string
-		if msg.Target != "" {
-			// Truncate target to fit inside innerW: leave room for prefix + status suffix.
-			statusLen := lipgloss.Width(statusTxt)
-			sepLen := 0
-			if statusLen > 0 {
-				sepLen = 1 // one space separator
-			}
-			avail := innerW - prefixVisW - statusLen - sepLen
-			if avail < 1 {
-				avail = 1
-			}
-			target := truncateTarget(msg.Target, avail)
-			tgt := targetStyle.Render(target)
-			row = dot + " " + name + " " + tgt
-			if statusTxt != "" {
-				row += " " + statusTxt
-			}
-		} else {
-			row = dot + " " + name
-			if statusTxt != "" {
-				row += " " + statusTxt
-			}
+		if statusTxt != "" {
+			label += " " + statusTxt
 		}
-		rows = append(rows, row)
+
+		// Truncate to fit.
+		if lipgloss.Width(label) > innerW {
+			label = truncateTarget(label, innerW)
+		}
+		rows = append(rows, label)
 	}
 	body := strings.Join(rows, "\n")
 
@@ -937,6 +911,68 @@ func (m MessageList) gutter(msg UIMessage) string {
 
 	style := m.roleStyle(msg.Role)
 	return style.Render(label)
+}
+
+// toolGroupLabel builds a rich label for a tool call inside a tool group bubble.
+func toolGroupLabel(msg UIMessage, nameStyle, targetStyle lipgloss.Style) string {
+	args := toolArgsMap(msg.ToolArgs)
+	name := nameStyle.Render(capitalize(msg.ToolName))
+
+	switch msg.ToolName {
+	case "grep", "Grep":
+		pat := ""
+		if v, ok := args["pattern"]; ok {
+			pat = fmt.Sprintf("%q", v)
+		}
+		path := ""
+		if v, ok := args["path"]; ok {
+			path = v
+		}
+		label := "✱ " + name
+		if pat != "" {
+			label += " " + targetStyle.Render(pat)
+		}
+		if path != "" {
+			label += " in " + targetStyle.Render(path)
+		}
+		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
+			n := strings.Count(msg.Raw, "\n") + 1
+			label += targetStyle.Render(fmt.Sprintf(" (%d %s)", n, plural(n, "match", "matches")))
+		}
+		return label
+	case "bash", "Bash":
+		label := "✱ " + name
+		if msg.Target != "" {
+			label += " " + targetStyle.Render("$ "+msg.Target)
+		}
+		return label
+	case "read", "Read":
+		label := "✱ " + name
+		if msg.Target != "" {
+			label += " " + targetStyle.Render(msg.Target)
+		}
+		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
+			n := strings.Count(msg.Raw, "\n") + 1
+			label += targetStyle.Render(fmt.Sprintf(" (%d %s)", n, plural(n, "line", "lines")))
+		}
+		return label
+	case "glob", "Glob":
+		label := "✱ " + name
+		if pat, ok := args["pattern"]; ok {
+			label += " " + targetStyle.Render(pat)
+		}
+		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
+			n := strings.Count(msg.Raw, "\n") + 1
+			label += targetStyle.Render(fmt.Sprintf(" (%d %s)", n, plural(n, "file", "files")))
+		}
+		return label
+	default:
+		label := "✱ " + name
+		if msg.Target != "" {
+			label += " " + targetStyle.Render(msg.Target)
+		}
+		return label
+	}
 }
 
 // toolArgsMap decodes raw tool JSON args into a string map for display.
