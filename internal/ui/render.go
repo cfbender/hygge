@@ -12,51 +12,6 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-func formatTokens(tok int64) string {
-	if tok <= 0 {
-		return ""
-	}
-	if tok >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(tok)/1_000_000)
-	}
-	if tok >= 1_000 {
-		return fmt.Sprintf("%.0fK", float64(tok)/1_000)
-	}
-	return fmt.Sprintf("%d", tok)
-}
-
-func formatCost(dollars float64) string {
-	if dollars <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("$%.2f", dollars)
-}
-
-// renderHeaderContent produces the branded header bar.
-func (a *App) renderHeaderContent() string {
-	if a.styles == nil {
-		return ""
-	}
-	l := a.layout
-
-	if l.compact {
-		return components.CompactHeader{
-			Width:   l.leftW,
-			Styles:  a.styles,
-			AppName: "hygge",
-			Model:   displayModelName(a.opts.ModelName),
-			Tokens:  formatTokens(a.usedTok),
-			Cost:    formatCost(a.costDollars),
-		}.View()
-	}
-	return components.Header{
-		Width:   l.leftW,
-		Styles:  a.styles,
-		AppName: "hygge",
-		Version: a.opts.Version,
-	}.View()
-}
-
 // invalidateMsgCache marks the message content cache as stale so the next
 // render rebuilds it. Call this whenever messages change (append, stream
 // delta, resize, theme switch).
