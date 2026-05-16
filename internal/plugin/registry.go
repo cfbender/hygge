@@ -171,6 +171,7 @@ func (r *Registry) loadOne(ctx context.Context, uri string) error {
 
 	host := r.newPluginHost(manifest.Name)
 	if err := p.Load(ctx, host); err != nil {
+		r.UnregisterAll(manifest.Name)
 		_ = p.Close(ctx)
 		return fmt.Errorf("plugin: load %q: %w", manifest.Name, err)
 	}
@@ -239,7 +240,9 @@ func (r *Registry) Update(ctx context.Context, name string) error {
 		return fmt.Errorf("plugin: update %q: %w", name, err)
 	}
 
-	// Close old, reload.
+	// Remove old host registrations before closing and reloading so updated
+	// plugin declarations can claim the same tool/hook/command/subagent names.
+	r.UnregisterAll(name)
 	if err := p.Close(ctx); err != nil {
 		slog.Warn("plugin: close error during update", "name", name, "err", err)
 	}
@@ -266,6 +269,7 @@ func (r *Registry) Remove(ctx context.Context, name string) error {
 	r.mu.Unlock()
 
 	if ok {
+		r.UnregisterAll(name)
 		if err := p.Close(ctx); err != nil {
 			slog.Warn("plugin: close error during remove", "name", name, "err", err)
 		}
@@ -286,6 +290,37 @@ func (r *Registry) OwnedRegistrations() []OwnedRegistration {
 	out := make([]OwnedRegistration, len(r.owned))
 	copy(out, r.owned)
 	return out
+}
+
+// UnregisterAll removes every host registration owned by pluginName from the
+// tool, hook, slash-command, and subagent registries. It is safe to call for a
+// plugin that has no tracked registrations.
+func (r *Registry) UnregisterAll(pluginName string) {
+	r.mu.Lock()
+	owned := r.owned[:0]
+	toRemove := make([]OwnedRegistration, 0)
+	for _, reg := range r.owned {
+		if reg.Owner == pluginName {
+			toRemove = append(toRemove, reg)
+			continue
+		}
+		owned = append(owned, reg)
+	}
+	r.owned = owned
+	r.mu.Unlock()
+
+	for _, reg := range toRemove {
+		switch reg.Kind {
+		case "tool":
+			r.opts.Tools.Unregister(reg.Name)
+		case "hook":
+			r.opts.Hooks.Unregister(reg.Name)
+		case "command":
+			r.opts.Commands.Unregister(reg.Name)
+		case "subagent":
+			r.opts.Subagents.Unregister(reg.Name)
+		}
+	}
 }
 
 // PM returns the underlying PackageManager, for CLI commands that need to

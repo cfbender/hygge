@@ -70,6 +70,25 @@ func (r *Registry) Register(cmd Command) error {
 	return nil
 }
 
+// Unregister removes the command registered under name. It is a no-op when the
+// name is not present.
+func (r *Registry) Unregister(name string) {
+	if r == nil {
+		return
+	}
+	if _, ok := r.byName[name]; !ok {
+		return
+	}
+	delete(r.byName, name)
+	out := r.order[:0]
+	for _, existing := range r.order {
+		if existing != name {
+			out = append(out, existing)
+		}
+	}
+	r.order = out
+}
+
 // registerOrReplace inserts cmd, overriding any same-named entry.
 // Used by the TOML loader so a later layer wins over an earlier one
 // (or over a built-in).  The replaced entry's slot in [order] is
