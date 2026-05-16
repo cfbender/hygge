@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/cfbender/hygge/internal/gitexec"
 )
 
 // SourceKind is the type of plugin source URI.
@@ -157,12 +158,22 @@ func sanitizePathSegment(s string) string {
 // PackageManager handles plugin source resolution and cache management.
 type PackageManager struct {
 	cacheDir string // root of the plugin cache
+	git      gitexec.Runner
 }
 
 // NewPackageManager constructs a PackageManager using the given cacheDir.
 // Typically $XDG_STATE_HOME/hygge/plugins.
 func NewPackageManager(cacheDir string) *PackageManager {
-	return &PackageManager{cacheDir: cacheDir}
+	return NewPackageManagerWithGitRunner(cacheDir, nil)
+}
+
+// NewPackageManagerWithGitRunner constructs a PackageManager with an injected
+// git runner. Passing nil uses the production non-interactive runner.
+func NewPackageManagerWithGitRunner(cacheDir string, runner gitexec.Runner) *PackageManager {
+	if runner == nil {
+		runner = gitexec.DefaultRunner{}
+	}
+	return &PackageManager{cacheDir: cacheDir, git: runner}
 }
 
 // Resolve ensures the plugin source is available on disk and returns the
@@ -269,36 +280,8 @@ func (pm *PackageManager) CacheDir(src Source) string {
 	return filepath.Join(pm.cacheDir, src.CacheDirName())
 }
 
-// --- git helpers ---
-
-// gitCommand returns an exec.Cmd configured so git never prompts interactively.
-// Missing or private repos surface as errors instead of blocking on a terminal
-// credential prompt, the macOS Git Credential Manager, or a user-configured
-// credential.helper (e.g. one that shells out to `gh`).
-func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	// Wipe any inherited credential.helper / core.askPass for this invocation.
-	// Without this, a user-configured helper (e.g. `manager`, `!gh auth git-credential`)
-	// can still pop a UI or stdin prompt even with GIT_TERMINAL_PROMPT=0.
-	full := append([]string{
-		"-c", "credential.helper=",
-		"-c", "core.askPass=",
-	}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...) //nolint:gosec // args composed from validated source fields and managed cache paths
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0", // disable git's own username/password prompt
-		"GIT_ASKPASS=/bin/echo", // neutralise askpass: echo returns empty, git treats it as no creds
-		"SSH_ASKPASS=/bin/echo", // same for ssh askpass fallback
-		"GCM_INTERACTIVE=Never", // disable Git Credential Manager UI on macOS/Windows
-	)
-	// Detach stdin so even if some helper tries to read from us, it gets EOF.
-	cmd.Stdin = nil
-	return cmd
-}
-
 func (pm *PackageManager) gitClone(ctx context.Context, url, dir string) error {
-	cmd := gitCommand(ctx, "clone", "--depth=1", url, dir)
-	cmd.Stderr = nil
-	out, err := cmd.CombinedOutput()
+	out, err := pm.git.Run(ctx, "", "clone", "--depth=1", url, dir)
 	if err != nil {
 		return fmt.Errorf("git clone failed: %w\n%s", err, string(out))
 	}
@@ -306,8 +289,7 @@ func (pm *PackageManager) gitClone(ctx context.Context, url, dir string) error {
 }
 
 func (pm *PackageManager) gitCheckout(ctx context.Context, dir, ref string) error {
-	cmd := gitCommand(ctx, "-C", dir, "checkout", ref)
-	out, err := cmd.CombinedOutput()
+	out, err := pm.git.Run(ctx, "", "-C", dir, "checkout", ref)
 	if err != nil {
 		return fmt.Errorf("git checkout %q failed: %w\n%s", ref, err, string(out))
 	}
@@ -315,8 +297,7 @@ func (pm *PackageManager) gitCheckout(ctx context.Context, dir, ref string) erro
 }
 
 func (pm *PackageManager) gitPull(ctx context.Context, dir string) error {
-	cmd := gitCommand(ctx, "-C", dir, "pull", "--ff-only")
-	out, err := cmd.CombinedOutput()
+	out, err := pm.git.Run(ctx, "", "-C", dir, "pull", "--ff-only")
 	if err != nil {
 		return fmt.Errorf("git pull failed: %w\n%s", err, string(out))
 	}

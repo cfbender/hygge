@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cfbender/hygge/internal/plugin"
@@ -136,4 +137,41 @@ func TestSource_CloneURL(t *testing.T) {
 	if got := local.CloneURL(); got != "" {
 		t.Errorf("CloneURL() for local = %q, want empty", got)
 	}
+}
+
+func TestPackageManager_ResolveGitHubUsesInjectedGitRunner(t *testing.T) {
+	runner := &fakeGitRunner{}
+	pm := plugin.NewPackageManagerWithGitRunner(t.TempDir(), runner)
+	src, err := plugin.ParseSource("github:cfbender/hygge-policy-guard#main")
+	if err != nil {
+		t.Fatalf("ParseSource: %v", err)
+	}
+	if _, err := pm.Resolve(context.Background(), src); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("calls = %#v, want clone + checkout", runner.calls)
+	}
+	clone := runner.calls[0]
+	if len(clone.args) != 4 || clone.args[0] != "clone" || clone.args[1] != "--depth=1" || clone.args[2] != src.CloneURL() {
+		t.Fatalf("clone args = %#v", clone.args)
+	}
+	checkout := runner.calls[1]
+	if len(checkout.args) != 4 || checkout.args[0] != "-C" || checkout.args[2] != "checkout" || checkout.args[3] != "main" {
+		t.Fatalf("checkout args = %#v", checkout.args)
+	}
+}
+
+type fakeGitRunner struct {
+	calls []fakeGitCall
+}
+
+type fakeGitCall struct {
+	dir  string
+	args []string
+}
+
+func (f *fakeGitRunner) Run(_ context.Context, dir string, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, fakeGitCall{dir: dir, args: append([]string(nil), args...)})
+	return nil, nil
 }

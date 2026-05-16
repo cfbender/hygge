@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cfbender/hygge/internal/gitexec"
 )
 
 // Numstat holds the line-level diff counts for a single file.
@@ -17,46 +17,35 @@ type Numstat struct {
 	Deleted int
 }
 
-// NumstatForFiles runs `git diff --numstat HEAD -- <files...>` in projectDir
-// and returns a map from absolute path to Numstat.
-//
-// Safety: the invocation sets GIT_TERMINAL_PROMPT=0, GIT_ASKPASS=/bin/echo,
-// SSH_ASKPASS=/bin/echo, and GCM_INTERACTIVE=Never, and blanks
-// credential.helper and core.askPass via -c flags so no authentication
-// prompt can appear in the terminal.
+// NumstatForFiles runs `git diff --numstat HEAD -- <files...>` with the
+// production non-interactive git runner.
+func NumstatForFiles(ctx context.Context, projectDir string, files []string) map[string]Numstat {
+	return NumstatForFilesWithGitRunner(ctx, projectDir, files, nil)
+}
+
+// NumstatForFilesWithGitRunner runs `git diff --numstat HEAD -- <files...>` in
+// projectDir and returns a map from absolute path to Numstat. Passing nil uses
+// the production non-interactive git runner.
 //
 // The call is best-effort: any error (git not found, not a repo, timeout)
 // returns an empty map rather than propagating an error to the caller.
 // A 2-second context timeout prevents a hanging git from blocking the UI.
-func NumstatForFiles(ctx context.Context, projectDir string, files []string) map[string]Numstat {
+func NumstatForFilesWithGitRunner(ctx context.Context, projectDir string, files []string, runner gitexec.Runner) map[string]Numstat {
 	if len(files) == 0 || projectDir == "" {
 		return nil
+	}
+	if runner == nil {
+		runner = gitexec.DefaultRunner{}
 	}
 
 	// Apply a short deadline so git can never block the UI render loop.
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	args := []string{
-		"-c", "credential.helper=",
-		"-c", "core.askPass=",
-		"diff", "--numstat", "HEAD", "--",
-	}
+	args := []string{"diff", "--numstat", "HEAD", "--"}
 	args = append(args, files...)
 
-	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // projectDir is user-supplied project root
-	cmd.Dir = projectDir
-	// Inherit the full environment so git can find its own binaries, then
-	// override the interactive-prompt variables so no dialog can appear.
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_ASKPASS=/bin/echo",
-		"SSH_ASKPASS=/bin/echo",
-		"GCM_INTERACTIVE=Never",
-	)
-	cmd.Stdin = nil // explicit: no stdin
-
-	out, err := cmd.Output()
+	out, err := runner.Run(ctx, projectDir, args...)
 	if err != nil {
 		return nil
 	}

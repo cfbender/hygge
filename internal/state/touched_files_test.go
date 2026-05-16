@@ -1,9 +1,7 @@
 package state
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"context"
 	"sort"
 	"testing"
 )
@@ -127,49 +125,39 @@ func TestParseNumstat_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestNumstatForFiles_RealGit(t *testing.T) {
-	// This test uses a real `git init` to exercise the full code path
-	// including the safety env vars.  If git is not available, skip.
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git not available:", err)
+func TestNumstatForFiles_UsesInjectedGitRunner(t *testing.T) {
+	runner := &fakeGitRunner{out: []byte("2\t1\thello.go\n")}
+	got := NumstatForFilesWithGitRunner(t.Context(), "/repo", []string{"/repo/hello.go"}, runner)
+	ns, ok := got["/repo/hello.go"]
+	if !ok {
+		t.Fatalf("expected entry for hello.go; map=%v", got)
 	}
-	_ = gitPath
-
-	dir := t.TempDir()
-
-	runCmd := func(label string, args ...string) {
-		t.Helper()
-		c := exec.Command("git", args...) //nolint:gosec
-		c.Dir = dir
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("%s: git %v failed: %v\n%s", label, args, err, out)
+	if ns.Added != 2 || ns.Deleted != 1 {
+		t.Fatalf("numstat = %+v", ns)
+	}
+	if runner.dir != "/repo" {
+		t.Fatalf("runner dir = %q", runner.dir)
+	}
+	wantArgs := []string{"diff", "--numstat", "HEAD", "--", "/repo/hello.go"}
+	if len(runner.args) != len(wantArgs) {
+		t.Fatalf("args len = %d, want %d: %v", len(runner.args), len(wantArgs), runner.args)
+	}
+	for i := range wantArgs {
+		if runner.args[i] != wantArgs[i] {
+			t.Fatalf("args[%d] = %q, want %q; args=%v", i, runner.args[i], wantArgs[i], runner.args)
 		}
 	}
+}
 
-	runCmd("init", "init")
-	runCmd("config-email", "config", "user.email", "test@test.invalid")
-	runCmd("config-name", "config", "user.name", "Test")
+type fakeGitRunner struct {
+	dir  string
+	args []string
+	out  []byte
+	err  error
+}
 
-	filePath := filepath.Join(dir, "hello.go")
-	if err := os.WriteFile(filePath, []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	runCmd("add", "add", "hello.go")
-	runCmd("commit", "commit", "-m", "initial")
-
-	// Modify so there is a diff against HEAD.
-	if err := os.WriteFile(filePath, []byte("package main\nimport \"fmt\"\nfunc main() { fmt.Println() }\n"), 0o644); err != nil {
-		t.Fatalf("modify file: %v", err)
-	}
-
-	got := NumstatForFiles(t.Context(), dir, []string{filePath})
-	ns, ok := got[filePath]
-	if !ok {
-		t.Fatalf("expected entry for %q; map=%v", filePath, got)
-	}
-	if ns.Added < 1 {
-		t.Errorf("expected added>=1, got %d", ns.Added)
-	}
+func (f *fakeGitRunner) Run(_ context.Context, dir string, args ...string) ([]byte, error) {
+	f.dir = dir
+	f.args = append([]string(nil), args...)
+	return append([]byte(nil), f.out...), f.err
 }
