@@ -2,14 +2,18 @@ package components
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/cfbender/hygge/internal/ui/styles"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
+
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 
 func TestMessageListRendersRoles(t *testing.T) {
 	t.Parallel()
@@ -33,6 +37,25 @@ func TestMessageListRendersRoles(t *testing.T) {
 	// The old gutter format must not appear for non-task tools.
 	if strings.Contains(out, "▌tool: read") {
 		t.Errorf("messagelist should not render '▌tool: read' gutter for non-task tool; got:\n%s", out)
+	}
+}
+
+func TestHeaderRendersThreeRowBand(t *testing.T) {
+	t.Parallel()
+	s := styles.ThemeByName("")
+	out := Header{Width: 48, Styles: &s, AppName: "hygge", Version: "v0.3.0"}.View()
+	plain := ansiEscapeRE.ReplaceAllString(out, "")
+	lines := strings.Split(plain, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("header lines = %d, want 3:\n%s", len(lines), out)
+	}
+	if !strings.Contains(plain, "·hygge·") || !strings.Contains(plain, "v0.3.0") {
+		t.Fatalf("header missing brand/version:\n%s", out)
+	}
+	for i, line := range lines {
+		if got := lipgloss.Width(line); got != 48 {
+			t.Fatalf("line %d width = %d, want 48: %q", i, got, line)
+		}
 	}
 }
 
