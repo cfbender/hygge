@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
@@ -105,22 +106,48 @@ func (r *Runtime) Summarize(ctx context.Context, messages []fantasy.Message, max
 
 // GenerateTitle is the narrow no-tool seam for model-generated session titles.
 // Callers decide whether to persist the returned title or treat KEEP as a no-op.
+// Uses streaming because some OpenAI-compatible providers reject non-stream
+// completions (e.g. "Stream must be set to true"), matching how Summarize runs.
+// maxTokens is accepted for API stability but intentionally not forwarded:
+// several reasoning-class endpoints reject max_output_tokens entirely. The
+// titleSystemInstruction prompt already constrains the model to a single line.
 func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens int) (string, provider.Usage, error) {
 	if !r.hasFantasyModel() {
 		return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
 	}
-	maxOutputTokens := int64(maxTokens)
-	res, err := r.newTitleAgent().Generate(ctx, fantasy.AgentCall{Messages: []fantasy.Message{
-		fantasy.NewSystemMessage("Follow the user's title-formatting instructions exactly."),
-		fantasy.NewUserMessage(prompt),
-	}, MaxOutputTokens: &maxOutputTokens})
+	_ = maxTokens
+	modelName := ""
+	if r.titleModel != nil {
+		modelName = r.titleModel.Model()
+	} else if r.model != nil {
+		modelName = r.model.Model()
+	}
+	slog.Debug("runtime: title model call", "model", modelName, "title_model_explicit", r.titleModelExplicit, "prompt_len", len(prompt))
+	var text strings.Builder
+	res, err := r.newTitleAgent().Stream(ctx, fantasy.AgentStreamCall{
+		Messages: []fantasy.Message{
+			fantasy.NewSystemMessage("Follow the user's title-formatting instructions exactly."),
+			fantasy.NewUserMessage(prompt),
+		},
+		OnTextDelta: func(_, delta string) error {
+			text.WriteString(delta)
+			return nil
+		},
+	})
 	if err != nil {
+		slog.Warn("runtime: title model error", "model", modelName, "err", err)
 		return "", provider.Usage{}, err
 	}
 	if res == nil {
 		return "", provider.Usage{}, fmt.Errorf("agent: fantasy title returned nil result")
 	}
-	return strings.TrimSpace(res.Response.Content.Text()), usageFromFantasy(res.TotalUsage), nil
+	out := text.String()
+	if out == "" {
+		out = res.Response.Content.Text()
+	}
+	out = strings.TrimSpace(out)
+	slog.Debug("runtime: title model returned", "model", modelName, "text", out)
+	return out, usageFromFantasy(res.TotalUsage), nil
 }
 
 func (r *Runtime) buildFantasyTools(opts fantasyToolOptions) []fantasy.AgentTool {

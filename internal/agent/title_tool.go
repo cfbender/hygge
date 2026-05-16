@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
+
+	"github.com/cfbender/hygge/internal/bus"
 )
 
 const renameSessionToolName = "rename_session"
@@ -62,6 +65,13 @@ func (t *sessionTitleTool) Run(ctx context.Context, call fantasy.ToolCall) (fant
 	if err := t.agent.opts.Store.RenameSession(ctx, t.sessionID, title); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
+	slog.Info("agent: title renamed by tool", "session", t.sessionID, "topic", topic, "title", title)
+	bus.Publish(t.agent.opts.Bus, bus.SessionTitleUpdated{
+		SessionID: t.sessionID,
+		Title:     title,
+		Source:    "tool",
+		At:        t.agent.opts.Now(),
+	})
 	return fantasy.NewTextResponse(fmt.Sprintf("Renamed session to %q", title)), nil
 }
 

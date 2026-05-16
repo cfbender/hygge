@@ -346,14 +346,19 @@ func (a *Agent) RefreshSessionTitle(ctx context.Context, sessionID string) (titl
 	if currentCopiesPrompt {
 		currentTitle = ""
 	}
+	slog.Debug("agent: refresh session title",
+		"session", sessionID, "current_slug", sess.Slug, "msg_count", len(messages), "copies_prompt", currentCopiesPrompt)
 	input := titlePrompt(currentTitle, messages)
 	if input == "" {
+		slog.Debug("agent: title prompt empty, no-op", "session", sessionID)
 		return sess.Slug, false, nil
 	}
 	proposed, _, err := a.runtime.GenerateTitle(ctx, input, 32)
 	if err != nil {
+		slog.Warn("agent: title model call failed", "session", sessionID, "err", err)
 		return "", false, err
 	}
+	slog.Debug("agent: title model proposed", "session", sessionID, "proposed", proposed)
 	proposed = cleanModelTitle(proposed)
 	if proposed == "" || strings.EqualFold(proposed, "KEEP") {
 		if currentCopiesPrompt {
@@ -378,11 +383,20 @@ func (a *Agent) RefreshSessionTitle(ctx context.Context, sessionID string) (titl
 		}
 	}
 	if strings.EqualFold(proposed, sess.Slug) {
+		slog.Debug("agent: title unchanged", "session", sessionID, "title", proposed)
 		return sess.Slug, false, nil
 	}
 	if err := a.opts.Store.RenameSession(ctx, sessionID, proposed); err != nil {
+		slog.Warn("agent: title persist failed", "session", sessionID, "err", err)
 		return "", false, err
 	}
+	slog.Info("agent: title updated", "session", sessionID, "old", sess.Slug, "new", proposed)
+	bus.Publish(a.opts.Bus, bus.SessionTitleUpdated{
+		SessionID: sessionID,
+		Title:     proposed,
+		Source:    "generated",
+		At:        a.opts.Now(),
+	})
 	return proposed, true, nil
 }
 
@@ -415,6 +429,45 @@ func (a *Agent) repairCopiedTitle(ctx context.Context, currentTitle string, mess
 		return "", err
 	}
 	return cleanModelTitle(proposed), nil
+}
+
+// maybeSeedPreviewTitle persists a preview slug derived from the user's most
+// recent message when sessionID still has no slug. It publishes
+// [bus.SessionTitleUpdated] with Source="preview" on success. Best-effort:
+// store errors are logged and swallowed so they do not fail the turn.
+func (a *Agent) maybeSeedPreviewTitle(ctx context.Context, sessionID string, userParts []session.Part) {
+	if a == nil || a.opts.Store == nil || sessionID == "" {
+		return
+	}
+	sess, err := a.opts.Store.GetSession(ctx, sessionID)
+	if err != nil || sess == nil || sess.Slug != "" {
+		return
+	}
+	var b strings.Builder
+	for _, p := range userParts {
+		if p.Kind != session.PartText || strings.TrimSpace(p.Text) == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(p.Text)
+	}
+	preview := cleanModelTitle(b.String())
+	if preview == "" {
+		return
+	}
+	if err := a.opts.Store.RenameSession(ctx, sessionID, preview); err != nil {
+		slog.Warn("agent: seed preview title failed", "session", sessionID, "err", err)
+		return
+	}
+	slog.Debug("agent: seeded preview title", "session", sessionID, "preview", preview)
+	bus.Publish(a.opts.Bus, bus.SessionTitleUpdated{
+		SessionID: sessionID,
+		Title:     preview,
+		Source:    "preview",
+		At:        a.opts.Now(),
+	})
 }
 
 func (a *Agent) activeModel() session.ModelRef {
@@ -626,6 +679,11 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	if err != nil {
 		return nil, fmt.Errorf("agent: Send: append user: %w", err)
 	}
+	// Seed a preview title from the user's message when the session has no
+	// slug yet, so the sidebar updates instantly. The title model
+	// (RefreshSessionTitle) treats the verbatim copy as a forced-regen signal
+	// and replaces it once a real summary is available.
+	a.maybeSeedPreviewTitle(ctx, sessionID, userParts)
 	bus.Publish(a.opts.Bus, bus.MessageAppended{
 		SessionID: sessionID,
 		MessageID: userMsg.ID,
