@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] Splash screen with animated ASCII art logo and centered prompt box, with tips below (ie. ctrl + e to open prompt in external editor, ctrl + t to cycle model reasoning level, tab to switch mode)
-
 - [ ] Configure default profile in user config
 
 - [ ] Show more info from model around tool usage. Right now, the chat only shows a list of tool usage, where in something like opencode, the agent explains what it's doing before calling the edit or write tools.

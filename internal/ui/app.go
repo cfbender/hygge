@@ -813,6 +813,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.spinner, cmd = a.spinner.Update(m)
 		a.spinnerTick++
+		if len(a.messages) == 0 {
+			a.invalidateMsgCache()
+		}
 		return a, cmd
 
 	case workingVerbTickMsg:

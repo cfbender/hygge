@@ -150,7 +150,9 @@ type MessageList struct {
 	Theme         *theme.Theme
 	Styles        *styles.Styles
 	Messages      []UIMessage
-	Subagents     map[string]*SubagentState
+	// EmptyFrame advances the empty-state splash logo animation.
+	EmptyFrame int
+	Subagents  map[string]*SubagentState
 	// AnimFor, when non-nil, maps SubSessionID to the running Anim for
 	// that sub-agent.  Passed through to SubagentBlock so the running
 	// state can display the animated spinner.
@@ -243,10 +245,17 @@ func (m MessageList) renderEmptyState() string {
 		mutedStyle = lipgloss.NewStyle().Faint(true)
 	}
 
-	glyph := accentStyle.Bold(true).Render("·hygge·")
-	hints := mutedStyle.Render("Type a message to get started.\nctrl+p  commands · ctrl+g  view subagents")
+	logo := renderSplashLogo(m.EmptyFrame, accentStyle, mutedStyle)
+	promptW := min(min(max(width*3/5, 28), 52), width)
+	prompt := lipgloss.NewStyle().
+		Width(max(promptW-4, 1)).
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		BorderForeground(accentStyle.GetForeground()).
+		Render(mutedStyle.Render("Type a message to get started"))
+	hints := mutedStyle.Render("ctrl+e  external editor · ctrl+t  reasoning · tab  switch mode")
 
-	content := glyph + "\n\n" + hints
+	content := logo + "\n\n" + prompt + "\n\n" + hints
 
 	// Center each line horizontally.
 	var centeredLines []string
@@ -256,6 +265,26 @@ func (m MessageList) renderEmptyState() string {
 		centeredLines = append(centeredLines, strings.Repeat(" ", pad)+line)
 	}
 	return strings.Join(centeredLines, "\n")
+}
+
+func renderSplashLogo(frame int, accentStyle, mutedStyle lipgloss.Style) string {
+	lines := []string{
+		"╭─╮ ╭─╮ ╭─╮ ╭─╮ ╭─╮",
+		"│h│ │y│ │g│ │g│ │e│",
+		"╰─╯ ╰─╯ ╰─╯ ╰─╯ ╰─╯",
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		style := mutedStyle
+		if (frame+i)%3 == 0 {
+			style = accentStyle.Bold(true)
+		}
+		b.WriteString(style.Render(line))
+	}
+	return b.String()
 }
 
 // thinkingMaxLines is the maximum number of lines to show in the thinking

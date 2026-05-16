@@ -143,8 +143,8 @@ func TestMessageListEmpty(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
 	out := ml.View()
-	// New empty state: centered welcome with hygge glyph and hints.
-	for _, want := range []string{"hygge", "Type a message", "ctrl+p", "ctrl+g"} {
+	// Splash empty state: animated logo, prompt box, and shortcut tips.
+	for _, want := range []string{"│h│", "Type a message", "ctrl+e", "ctrl+t", "tab"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("empty state missing %q in:\n%s", want, out)
 		}
@@ -161,8 +161,19 @@ func TestMessageListEmptyState_NoMessagesShowsWelcome(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
 	out := ml.View()
-	if !strings.Contains(out, "·hygge·") {
-		t.Errorf("empty state must contain '·hygge·' glyph; got:\n%s", out)
+	if !strings.Contains(out, "│h│ │y│ │g│ │g│ │e│") {
+		t.Errorf("empty state must contain Hygge ASCII logo; got:\n%s", out)
+	}
+}
+
+func TestMessageListEmptyState_AnimatesLogo(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{Width: 80, Theme: theme.ShellTheme(), EmptyFrame: 0}
+	first := ml.View()
+	ml.EmptyFrame = 1
+	second := ml.View()
+	if first == second {
+		t.Fatalf("empty-state splash should animate across frames")
 	}
 }
 
@@ -178,7 +189,7 @@ func TestMessageListEmptyState_DisappearsWithMessage(t *testing.T) {
 		},
 	}
 	out := ml.View()
-	if strings.Contains(out, "·hygge·") {
+	if strings.Contains(out, "│h│ │y│ │g│ │g│ │e│") {
 		t.Errorf("welcome glyph must not appear when messages are present; got:\n%s", out)
 	}
 	if strings.Contains(out, "Type a message to get started") {

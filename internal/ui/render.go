@@ -115,6 +115,7 @@ func (a *App) renderChatContent() string {
 			Theme:           a.opts.Theme,
 			Styles:          a.styles,
 			Messages:        visibleMessages,
+			EmptyFrame:      a.spinnerTick,
 			Subagents:       a.subagents,
 			AnimFor:         a.subagentAnims,
 			Now:             now,
