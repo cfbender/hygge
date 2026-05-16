@@ -66,9 +66,9 @@ const (
 
 // UIMessage is one entry in the conversation view.
 //
-// FinalMarkdown is the glamour-rendered output, populated once the assistant
-// stops streaming.  While IsStreaming is true the View renders Raw verbatim
-// (no markdown) for snappy incremental updates.
+// FinalMarkdown is the glamour-rendered output. Assistant messages populate it
+// while streaming and again on completion so the body does not reflow when the
+// stream finalizes.
 type UIMessage struct {
 	Role      MessageRole
 	ToolName  string // populated for RoleTool
@@ -530,9 +530,10 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		bubbleW = 1
 	}
 
-	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
+	// Body: prefer rendered markdown when available, including during streaming,
+	// so completion does not cause a visible raw→glamour layout jump.
 	rawBody := msg.Raw
-	if !msg.IsStreaming && msg.FinalMarkdown != "" {
+	if msg.FinalMarkdown != "" {
 		rawBody = msg.FinalMarkdown
 	}
 	rawBody = strings.TrimRight(rawBody, "\n")

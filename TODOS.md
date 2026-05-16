@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] Layout shift on glamourization after message finishes streaming
-
 - [ ] Header redesign - bolder, background color maybe?, more padding (3 rows)
 
 - At this point, tag as v0.3.0 and push the tag as a release on github
