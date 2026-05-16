@@ -27,9 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Diff view component**
-  Add a diff view for displaying diffs and edit-tool changes; reference Crush's diff view behavior (eg. if it looks like a diff , show a diff)
-
 - [ ] **Expandable bash tool output**
   Bash tool blocks should show truncated output with click/keyboard affordance to expand.
 

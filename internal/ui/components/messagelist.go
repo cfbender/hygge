@@ -750,6 +750,12 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		}
 		rows = append(rows, label)
 
+		if diff := m.toolDiffPreview(msg, innerW); diff != "" {
+			rows = append(rows, "")
+			rows = append(rows, diff)
+			continue
+		}
+
 		// Bash: show command on its own line + collapsed output.
 		if msg.ToolName == "bash" || msg.ToolName == "Bash" {
 			if cmd := msg.Target; cmd != "" {
@@ -760,6 +766,14 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 				expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
 				bodyLines := strings.Split(strings.TrimRight(msg.Raw, "\n"), "\n")
 				rows = append(rows, "")
+				if looksLikeDiff(msg.Raw) {
+					maxLines := defaultDiffPreviewLines
+					if expanded {
+						maxLines = 10_000
+					}
+					rows = append(rows, DiffView{Raw: msg.Raw, Width: innerW, Theme: m.Theme, MaxLines: maxLines}.View())
+					continue
+				}
 				if expanded {
 					for _, line := range bodyLines {
 						rows = append(rows, muted.Render(line))
@@ -802,6 +816,30 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		SubStyle:        bubble.StyleDistinct,
 	}
 	return b.View()
+}
+
+func (m MessageList) toolDiffPreview(msg UIMessage, width int) string {
+	if msg.IsError {
+		return ""
+	}
+	if msg.ToolName == "bash" || msg.ToolName == "Bash" {
+		return ""
+	}
+	if !msg.IsStreaming && looksLikeDiff(msg.Raw) {
+		return DiffView{Raw: msg.Raw, Width: width, Theme: m.Theme}.View()
+	}
+	args := toolArgsMap(msg.ToolArgs)
+	var raw string
+	switch msg.ToolName {
+	case "edit", "Edit":
+		raw = editArgsDiff(args)
+	case "write", "Write":
+		raw = writeArgsDiff(args)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	return DiffView{Raw: raw, Width: width, Theme: m.Theme}.View()
 }
 
 // wrapSubagentBubble wraps existing SubagentBlock content in a distinct side-bar bubble.

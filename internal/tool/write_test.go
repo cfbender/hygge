@@ -40,6 +40,11 @@ func TestWrite_CreateNewFile(t *testing.T) {
 	if !tracker.hasRead(ec.SessionID, filepath.Join(dir, "new.txt")) {
 		t.Errorf("file should be marked read after write")
 	}
+	for _, want := range []string{"wrote 11 bytes", "--- /dev/null", "+++ ", "+hello world"} {
+		if !strings.Contains(res.Content, want) {
+			t.Errorf("result diff missing %q in:\n%s", want, res.Content)
+		}
+	}
 }
 
 func TestWrite_OverwriteRefusedWithoutRead(t *testing.T) {
@@ -94,6 +99,11 @@ func TestWrite_OverwriteOkAfterRead(t *testing.T) {
 	}
 	if res.Metadata["created"].(bool) {
 		t.Errorf("created: want false on overwrite")
+	}
+	for _, want := range []string{"wrote 2 bytes", "--- ", "+++ ", "-v1", "+v2"} {
+		if !strings.Contains(res.Content, want) {
+			t.Errorf("result diff missing %q in:\n%s", want, res.Content)
+		}
 	}
 }
 

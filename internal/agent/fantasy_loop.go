@@ -129,7 +129,11 @@ func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.T
 	if res.IsError {
 		errString = res.Content
 	}
-	bus.Publish(a.opts.Bus, bus.ToolCallCompleted{SessionID: f.opts.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Err: errString, DurationMs: time.Since(started).Milliseconds(), At: a.opts.Now()})
+	var resultBytes []byte
+	if !res.IsError {
+		resultBytes = []byte(res.Content)
+	}
+	bus.Publish(a.opts.Bus, bus.ToolCallCompleted{SessionID: f.opts.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Result: resultBytes, Err: errString, DurationMs: time.Since(started).Milliseconds(), At: a.opts.Now()})
 	if res.IsError {
 		return fantasy.NewTextErrorResponse(res.Content), nil
 	}
