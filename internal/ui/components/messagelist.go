@@ -988,6 +988,10 @@ func (m MessageList) gutter(msg UIMessage) string {
 			n := strings.Count(msg.Raw, "\n") + 1
 			label += fmt.Sprintf(" (%d %s)", n, plural(n, "file", "files"))
 		}
+	case "skill", "Skill":
+		if name, ok := args["name"]; ok {
+			label += " " + name
+		}
 	case "edit", "Edit", "write", "Write":
 		if msg.Target != "" {
 			label += " " + msg.Target
@@ -1053,6 +1057,12 @@ func toolGroupLabel(msg UIMessage, nameStyle, targetStyle lipgloss.Style) string
 		if !msg.IsStreaming && !msg.IsError && msg.Raw != "" {
 			n := strings.Count(msg.Raw, "\n") + 1
 			label += targetStyle.Render(fmt.Sprintf(" (%d %s)", n, plural(n, "file", "files")))
+		}
+		return label
+	case "skill", "Skill":
+		label := "✱ " + name
+		if skillName, ok := args["name"]; ok {
+			label += " " + targetStyle.Render(skillName)
 		}
 		return label
 	default:

@@ -567,6 +567,23 @@ func TestToolGroupBubble_SingleCall(t *testing.T) {
 	}
 }
 
+func TestToolGroupBubble_SkillShowsLoadedName(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "skill", ToolArgs: []byte(`{"name":"diagnose"}`)},
+		},
+	}
+	out := stripANSI(ml.View())
+	for _, want := range []string{"✱ Skill", "diagnose"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("skill tool block missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestToolGroupBubble_HasTopPaddingInsideBlock(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
