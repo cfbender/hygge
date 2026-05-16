@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type pastedInputBlock struct {
@@ -233,4 +234,16 @@ func isInputDelete(k tea.KeyPressMsg) bool {
 
 func isInputMoveLeft(k tea.KeyPressMsg) bool {
 	return k.Code == tea.KeyLeft || k.String() == "left" || k.String() == "ctrl+b"
+}
+
+func (a *App) pasteInputMarkerStyle() lipgloss.Style {
+	bg := a.activeModeColor()
+	if bg == nil && a.styles != nil {
+		bg = a.styles.Dialog.TitleGradFrom
+	}
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("0"))
+	if bg != nil {
+		style = style.Background(bg)
+	}
+	return style
 }
