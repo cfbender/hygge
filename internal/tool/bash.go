@@ -120,21 +120,37 @@ func (t *bashTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 	}
 	cmd.Env = filteredEnv(envPassthrough)
 
-	stdoutR, err := cmd.StdoutPipe()
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		return Result{}, newExecutionFailed("attach stdout pipe", err)
+		return Result{}, newExecutionFailed("create stdout pipe", err)
 	}
-	stderrR, err := cmd.StderrPipe()
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
-		return Result{}, newExecutionFailed("attach stderr pipe", err)
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		return Result{}, newExecutionFailed("create stderr pipe", err)
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+
+	closePipes := func() {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
 	}
 
 	nowFn := ec.nowFn()
 	start := nowFn()
 
 	if err := cmd.Start(); err != nil {
+		closePipes()
 		return Result{}, newExecutionFailed("start command", err)
 	}
+	// The child now owns duplicated write ends; close the parent's writers so
+	// readers see EOF when the process tree releases its descriptors.
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
 
 	var (
 		mu           sync.Mutex
@@ -191,12 +207,23 @@ func (t *bashTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 	go scanPipe(&wg, stdoutR, "stdout", appendOutput, publishLine)
 	go scanPipe(&wg, stderrR, "stderr", appendOutput, publishLine)
 
-	// Wait for both readers to drain before calling cmd.Wait. The os/exec
-	// StdoutPipe/StderrPipe contract explicitly requires reads to complete
-	// before Wait; calling Wait first can close the pipes early and drop short
-	// outputs on some platforms.
-	wg.Wait()
+	// Wait for the command first. These are owned pipes, not os/exec
+	// StdoutPipe/StderrPipe, so Wait will not close the read side early. Then
+	// give readers a bounded window to drain. If a shell-spawned grandchild keeps
+	// stdout/stderr open after timeout, closing the reads prevents a CI hang.
 	waitErr := cmd.Wait()
+	readerDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(readerDone)
+	}()
+	select {
+	case <-readerDone:
+	case <-time.After(250 * time.Millisecond):
+		_ = stdoutR.Close()
+		_ = stderrR.Close()
+		<-readerDone
+	}
 
 	duration := nowFn().Sub(start)
 

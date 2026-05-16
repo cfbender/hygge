@@ -99,8 +99,9 @@ type stdioTransport struct {
 	sendMu sync.Mutex
 
 	// waitDone is closed when the wait goroutine finishes.
-	waitDone chan struct{}
-	waitErr  error
+	waitDone   chan struct{}
+	stderrDone chan struct{}
+	waitErr    error
 }
 
 // NewStdio constructs a stdio Transport.  The subprocess is not
@@ -175,9 +176,11 @@ func (t *stdioTransport) Start(_ context.Context) error {
 	t.stdoutBR = bufio.NewReader(stdout)
 	t.stderrW = newRingBuffer(stderrRingSize)
 	t.waitDone = make(chan struct{})
+	t.stderrDone = make(chan struct{})
 
 	// Pump stderr into the ring buffer.
 	go func() {
+		defer close(t.stderrDone)
 		_, _ = io.Copy(t.stderrW, stderrPipe)
 	}()
 
@@ -249,6 +252,7 @@ func (t *stdioTransport) Close() error {
 	stdin := t.stdinW
 	stdout := t.stdoutR
 	waitDone := t.waitDone
+	stderrDone := t.stderrDone
 	stderrBuf := t.stderrW
 	t.mu.Unlock()
 
@@ -279,6 +283,9 @@ func (t *stdioTransport) Close() error {
 
 	if stdout != nil {
 		_ = stdout.Close()
+	}
+	if stderrDone != nil {
+		<-stderrDone
 	}
 
 	werr := t.waitErr
