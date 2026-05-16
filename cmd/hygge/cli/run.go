@@ -167,6 +167,15 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			ToolCount: s.ToolCount,
 		})
 	}
+	subagentMentions := make([]ui.MentionSubagent, 0)
+	if rt.Subagents != nil {
+		for _, t := range rt.Subagents.List() {
+			subagentMentions = append(subagentMentions, ui.MentionSubagent{
+				Name:        t.Name,
+				Description: t.Description,
+			})
+		}
+	}
 
 	app, err := ui.New(ui.AppOptions{
 		Bus:           rt.Bus,
@@ -183,6 +192,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		ProfileName:   rt.Config.Profile,
 		Reasoning:     resolveReasoning(rt.Config, reasoningFlag),
 		Commands:      rt.Commands,
+		Subagents:     subagentMentions,
 		Version:       Version,
 		HomeDir:       homeDir(),
 		NerdFonts:     rt.Config.UI.NerdFonts,

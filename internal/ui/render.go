@@ -367,6 +367,22 @@ func (a *App) renderChromeContent() string {
 		}
 	}
 
+	// @ mention palette for repository files and configured sub-agents.
+	if _, _, ok := a.activeMentionQuery(); ok && !a.mentionDismissed {
+		matches := a.mentionMatches()
+		query, _, _ := a.activeMentionQuery()
+		p := components.MentionPalette{
+			Width:     l.leftW - 2,
+			Theme:     a.opts.Theme,
+			Matches:   mentionItems(matches),
+			Highlight: a.clampedMentionHighlight(matches),
+			Query:     query,
+		}
+		if v := p.View(); v != "" {
+			sections = append(sections, v)
+		}
+	}
+
 	// Compaction banner.
 	bannerView := components.CompactionBanner{
 		Width:   l.leftW,

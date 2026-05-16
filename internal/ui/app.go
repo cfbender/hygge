@@ -79,6 +79,7 @@ type AppOptions struct {
 	ProfileName   string
 	Reasoning     provider.Reasoning
 	Commands      *command.Registry // slash-command registry; nil disables slash routing
+	Subagents     []MentionSubagent // sub-agent types selectable from @ mentions
 	Now           func() time.Time
 	// ContextWindow is the model's maximum context size in tokens.  Used by
 	// the compaction modal to display usage info.  0 means unknown.
@@ -331,6 +332,14 @@ type App struct {
 	// slashPaletteDismissed tracks an Esc-dismissed slash palette until
 	// the next input edit. The typed slash buffer is preserved.
 	slashPaletteDismissed bool
+	// mentionHighlight is the current row index into active @ mention matches.
+	mentionHighlight int
+	// mentionDismissed tracks an Esc-dismissed @ mention palette until the next
+	// input edit. The typed @ token is preserved.
+	mentionDismissed bool
+	// mentionFileCache caches project-relative file paths for @ file mentions.
+	mentionFileRoot  string
+	mentionFileCache []string
 
 	// activeModal mirrors the top non-permission overlay for existing tests and
 	// compatibility; overlay routing/rendering uses overlays.
@@ -1094,6 +1103,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if a.viewingSubagent() {
 			return a, nil
 		}
+		if a.acceptMentionCompletion() {
+			return a, nil
+		}
 		// Alt+Enter inserts a newline; route by key code/modifier so
 		// terminal-specific string rendering cannot accidentally submit it.
 		if k.Mod.Contains(tea.ModAlt) {
@@ -1143,7 +1155,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "tab":
-		// Tab completes the palette in slash mode, otherwise cycles agent modes.
+		// Tab completes active palettes before falling back to mode cycling.
+		if a.acceptMentionCompletion() {
+			return a, nil
+		}
 		if a.acceptPaletteCompletion() {
 			return a, nil
 		}
@@ -1160,6 +1175,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
 			a.paletteHighlight = -1
 			a.slashPaletteDismissed = true
+			return a, nil
+		}
+		if _, _, ok := a.activeMentionQuery(); ok && !a.mentionDismissed {
+			a.mentionHighlight = -1
+			a.mentionDismissed = true
 			return a, nil
 		}
 		// Double-Esc within 500ms: interrupt everything.
@@ -1206,6 +1226,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.movePaletteHighlight(-1)
 			return a, nil
 		}
+		if a.moveMentionHighlight(-1) {
+			return a, nil
+		}
 		if text, ok := a.history.Up(a.input.Value()); ok {
 			a.input.Textarea.SetValue(text)
 			a.input.Textarea.CursorEnd()
@@ -1217,6 +1240,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.movePaletteHighlight(-1)
 			return a, nil
 		}
+		if a.moveMentionHighlight(-1) {
+			return a, nil
+		}
 	case "down":
 		if a.viewingSubagent() {
 			a.navigateSubagent(+1) // newer subagent
@@ -1224,6 +1250,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") {
 			a.movePaletteHighlight(+1)
+			return a, nil
+		}
+		if a.moveMentionHighlight(+1) {
 			return a, nil
 		}
 		if a.history.Browsing() {
@@ -1239,6 +1268,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.movePaletteHighlight(+1)
 			return a, nil
 		}
+		if a.moveMentionHighlight(+1) {
+			return a, nil
+		}
 	}
 
 	return a.updateInputKey(k)
@@ -1252,6 +1284,8 @@ func (a *App) updateInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.history.Reset()
 		a.paletteHighlight = -1
 		a.slashPaletteDismissed = false
+		a.mentionHighlight = -1
+		a.mentionDismissed = false
 	}
 	return a, cmd
 }
@@ -1263,6 +1297,8 @@ func (a *App) insertInputNewline() (tea.Model, tea.Cmd) {
 		a.history.Reset()
 		a.paletteHighlight = -1
 		a.slashPaletteDismissed = false
+		a.mentionHighlight = -1
+		a.mentionDismissed = false
 	}
 	return a, nil
 }
