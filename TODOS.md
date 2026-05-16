@@ -30,9 +30,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Busy spinner after submitting a message**
-  Show an activity indicator whenever a network request or background process is running.
-
 - [ ] **`@` mentions for files and subagents**
   Support mention-style insertion/selection for repository files and available subagents.
 
@@ -41,9 +38,6 @@
 
 - [ ] **Input box width styling**
   Fix prompt input styling so it does not stretch overly wide.
-
-- [ ] **Viewport scroll bar**
-  Add a visible scrollbar/position indicator to the chat viewport.
 
 - [ ] **Slash commands as modal popup**
   Replace the current slash-command UI with a modal popup flow similar to Crush.
@@ -63,29 +57,17 @@
 - [ ] **Refine system prompt**
   Update the system prompt to reflect Hygge's current capabilities.
 
-- [ ] **`Ctrl+T` thinking level selector**
-  Add a shortcut to change the model thinking level.
-
 - [ ] **`Ctrl+E` external prompt editor**
   Add a shortcut to edit the current prompt in an external editor.
 
-- [ ] **`Ctrl+C` close confirmation**
-  Show a confirmation modal before closing on `Ctrl+C`.
-
 - [ ] **Yolo mode**
   Add a mode for reduced confirmations / more autonomous execution.
-
-- [ ] **Sidebar width/right-side coverage fix**
-  Fix sidebar width so it fully covers the right side as intended.
 
 - [ ] **Hygge smoking chimney animation**
   Add a smoking-chimney animation for Hygge branding/delight.
 
 - [ ] **Queued messages sticky at bottom**
   Keep queued messages sticky at the bottom and do not send them until the main thread has a break.
-
-- [ ] **Double-Esc interrupts all processes**
-  Support `Esc` + `Esc` to interrupt all running processes.
 
 - [ ] Text alignment and bubble fill
   Text should take up the width of the bubble before wrapping.

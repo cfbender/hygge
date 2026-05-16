@@ -286,6 +286,14 @@ func (m MessageList) truncateThinking(thinking string) string {
 	return strings.Join(visible, "\n") + "\n" + indicatorStyle.Render(indicator)
 }
 
+// ToolHitZone maps a range of content lines to a tool use ID for click-to-expand.
+type ToolHitZone struct {
+	StartLine int
+	EndLine   int
+	ToolUseID string
+	partIndex int
+}
+
 // SubagentHitZone maps a range of content lines to a subagent session ID.
 type SubagentHitZone struct {
 	StartLine    int // inclusive, relative to message list content
@@ -298,15 +306,15 @@ type SubagentHitZone struct {
 // The pre-pass groups consecutive non-task RoleTool entries into a single
 // tool-calls bubble; task tool calls and all other roles render individually.
 func (m MessageList) View() string {
-	content, _ := m.ViewWithHitZones()
+	content, _, _ := m.ViewWithHitZones()
 	return content
 }
 
 // ViewWithHitZones renders all messages and returns both the rendered content
 // and the line ranges of clickable subagent bubbles.
-func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
+func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZone) {
 	if len(m.Messages) == 0 {
-		return m.renderEmptyState(), nil
+		return m.renderEmptyState(), nil, nil
 	}
 	collapseLimit := m.CollapseLines
 	if collapseLimit <= 0 {
@@ -317,6 +325,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
 
 	var parts []string
 	var zones []SubagentHitZone
+	var toolZones []ToolHitZone
 
 	for _, chunk := range chunks {
 		var text string
@@ -324,6 +333,15 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
 		switch chunk.kind {
 		case chunkToolGroup:
 			text = m.renderToolGroup(chunk.group)
+			// Track bash tool blocks for click-to-expand.
+			for _, msg := range chunk.group {
+				if (msg.ToolName == "bash" || msg.ToolName == "Bash") && msg.ToolUseID != "" {
+					toolZones = append(toolZones, ToolHitZone{
+						ToolUseID: msg.ToolUseID,
+						partIndex: len(parts),
+					})
+				}
+			}
 		default:
 			text = m.renderOne(chunk.single, collapseLimit)
 			if chunk.single.Role == RoleTool && chunk.single.ToolName == "subagent" && chunk.single.SubagentID != "" {
@@ -337,8 +355,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
 		if subID != "" {
 			zones = append(zones, SubagentHitZone{
 				SubSessionID: subID,
-				// partIndex is filled below after joining
-				partIndex: len(parts) - 1,
+				partIndex:    len(parts) - 1,
 			})
 		}
 	}
@@ -346,9 +363,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
 	joined := strings.Join(parts, "\n\n")
 
 	// Walk the joined string to compute actual line offsets for each zone.
-	// Split into lines and find each part boundary.
-	if len(zones) > 0 {
-		// Build a cumulative line offset table for each part.
+	if len(zones) > 0 || len(toolZones) > 0 {
 		line := 0
 		for i, part := range parts {
 			partLines := strings.Count(part, "\n") + 1
@@ -358,14 +373,20 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone) {
 					zones[zi].EndLine = line + partLines
 				}
 			}
+			for zi := range toolZones {
+				if toolZones[zi].partIndex == i {
+					toolZones[zi].StartLine = line
+					toolZones[zi].EndLine = line + partLines
+				}
+			}
 			line += partLines
 			if i < len(parts)-1 {
-				line++ // "\n\n" separator = one blank line
+				line++
 			}
 		}
 	}
 
-	return joined, zones
+	return joined, zones, toolZones
 }
 
 // buildChunks walks m.Messages and produces a slice of renderChunks.
@@ -732,24 +753,31 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		}
 		rows = append(rows, label)
 
-		// Show truncated output for bash/grep/glob when completed.
-		if !msg.IsStreaming && msg.Raw != "" && msg.Raw != "(running…)" {
-			expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
-			bodyLines := strings.Split(strings.TrimRight(msg.Raw, "\n"), "\n")
-			if expanded {
-				for _, line := range bodyLines {
-					rows = append(rows, muted.Render("  "+line))
-				}
-			} else if len(bodyLines) > collapseLimit {
-				for _, line := range bodyLines[:collapseLimit] {
-					rows = append(rows, muted.Render("  "+line))
-				}
-				extra := len(bodyLines) - collapseLimit
-				hint := muted.Italic(true).Render(fmt.Sprintf("  [+%d more — Ctrl+E to expand]", extra))
-				rows = append(rows, hint)
-			} else {
-				for _, line := range bodyLines {
-					rows = append(rows, muted.Render("  "+line))
+		// Bash: show command on its own line + collapsed output.
+		if msg.ToolName == "bash" || msg.ToolName == "Bash" {
+			if cmd := msg.Target; cmd != "" {
+				rows = append(rows, "")
+				rows = append(rows, muted.Render("$ "+cmd))
+			}
+			if !msg.IsStreaming && msg.Raw != "" && msg.Raw != "(running…)" {
+				expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
+				bodyLines := strings.Split(strings.TrimRight(msg.Raw, "\n"), "\n")
+				rows = append(rows, "")
+				if expanded {
+					for _, line := range bodyLines {
+						rows = append(rows, muted.Render(line))
+					}
+				} else if len(bodyLines) > collapseLimit {
+					for _, line := range bodyLines[:collapseLimit] {
+						rows = append(rows, muted.Render(line))
+					}
+					rows = append(rows, muted.Render("…"))
+					rows = append(rows, "")
+					rows = append(rows, muted.Italic(true).Render("Click to expand"))
+				} else {
+					for _, line := range bodyLines {
+						rows = append(rows, muted.Render(line))
+					}
 				}
 			}
 		}
@@ -899,9 +927,7 @@ func (m MessageList) gutter(msg UIMessage) string {
 			label += fmt.Sprintf(" (%d %s)", n, plural(n, "match", "matches"))
 		}
 	case "bash", "Bash":
-		if cmd := msg.Target; cmd != "" {
-			label += " $ " + cmd
-		}
+		// Command shown on its own line in the bubble body, not inline.
 	case "read", "Read":
 		if msg.Target != "" {
 			label += " " + msg.Target
@@ -964,11 +990,7 @@ func toolGroupLabel(msg UIMessage, nameStyle, targetStyle lipgloss.Style) string
 		}
 		return label
 	case "bash", "Bash":
-		label := "✱ " + name
-		if msg.Target != "" {
-			label += " " + targetStyle.Render("$ "+msg.Target)
-		}
-		return label
+		return "✱ " + name
 	case "read", "Read":
 		label := "✱ " + name
 		if msg.Target != "" {

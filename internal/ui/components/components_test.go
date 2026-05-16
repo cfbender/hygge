@@ -79,9 +79,9 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	if !strings.Contains(out, "somefile.go") {
 		t.Errorf("expected target 'somefile.go' in output:\n%s", out)
 	}
-	// Tool output is now shown inline — first few lines should appear.
-	if !strings.Contains(out, "line0") {
-		t.Errorf("expected tool output lines in tool-group bubble; got:\n%s", out)
+	// Non-bash tools don't show output inline.
+	if strings.Contains(out, "line0") {
+		t.Errorf("read tool should not show output inline; got:\n%s", out)
 	}
 }
 
