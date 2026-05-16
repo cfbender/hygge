@@ -278,15 +278,41 @@ func (a *App) renderQuitOverlay(w, h int) string {
 		yesBtn = selectedStyle.Render("Yep!")
 		noBtn = normalStyle.Render("Nope")
 	}
-	buttons := yesBtn + " " + noBtn
+	buttonRow := yesBtn + " " + noBtn
+
+	// Build content manually to avoid JoinVertical centering artifacts.
+	// Ensure every line has the box background.
+	qText := question
+	qW := lipgloss.Width(qText)
+	bW := lipgloss.Width(buttonRow)
+	innerW := qW
+	if bW > innerW {
+		innerW = bW
+	}
+
+	// Center the button row within the inner width.
+	btnPad := (innerW - bW) / 2
+	if btnPad < 0 {
+		btnPad = 0
+	}
+	bgPad := lipgloss.NewStyle().Background(boxBg)
+	centeredButtons := bgPad.Render(strings.Repeat(" ", btnPad)) + buttonRow + bgPad.Render(strings.Repeat(" ", innerW-bW-btnPad))
+
+	// Center the question too.
+	qPad := (innerW - qW) / 2
+	if qPad < 0 {
+		qPad = 0
+	}
+	qStyle := lipgloss.NewStyle().Foreground(textFg).Background(boxBg)
+	centeredQ := bgPad.Render(strings.Repeat(" ", qPad)) + qStyle.Render(qText) + bgPad.Render(strings.Repeat(" ", innerW-qW-qPad))
+
+	blankLine := bgPad.Render(strings.Repeat(" ", innerW))
 
 	boxStyle := lipgloss.NewStyle().
 		Padding(1, 4).
 		Background(boxBg)
 
-	qStyle := lipgloss.NewStyle().Foreground(textFg)
-
-	content := lipgloss.JoinVertical(lipgloss.Center, qStyle.Render(question), "", buttons)
+	content := centeredQ + "\n" + blankLine + "\n" + centeredButtons
 	box := boxStyle.Render(content)
 
 	boxW := lipgloss.Width(box)
