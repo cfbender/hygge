@@ -828,18 +828,7 @@ func (m MessageList) toolDiffPreview(msg UIMessage, width int) string {
 	if !msg.IsStreaming && looksLikeDiff(msg.Raw) {
 		return DiffView{Raw: msg.Raw, Width: width, Theme: m.Theme}.View()
 	}
-	args := toolArgsMap(msg.ToolArgs)
-	var raw string
-	switch msg.ToolName {
-	case "edit", "Edit":
-		raw = editArgsDiff(args)
-	case "write", "Write":
-		raw = writeArgsDiff(args)
-	}
-	if strings.TrimSpace(raw) == "" {
-		return ""
-	}
-	return DiffView{Raw: raw, Width: width, Theme: m.Theme}.View()
+	return ""
 }
 
 // wrapSubagentBubble wraps existing SubagentBlock content in a distinct side-bar bubble.
