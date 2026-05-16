@@ -3780,6 +3780,7 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 				Role:              components.RoleMarker,
 				MarkerSummary:     mk.Summary,
 				MarkerTokensSaved: mk.InputTokensSaved,
+				Timestamp:         mk.CreatedAt,
 			})
 		}
 		entries := uiEntriesFromStoreMessage(m, toolResults, toolUseIDs)
@@ -3805,20 +3806,39 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 	}
 
 	// Handle markers whose BeforeMessageID no longer matches any message
-	// (e.g. the message was deleted or the chain was rebased).  Fall back
-	// to appending orphaned markers at the end.
+	// (e.g. the message was deleted or the chain was rebased).  Insert them
+	// chronologically by marker CreatedAt instead of appending at the end, so
+	// multi-compaction histories remain stable even when a cut-off message is
+	// no longer present in the hydrated message chain.
 	injectedIDs := make(map[string]struct{}, len(storeMsgs))
 	for _, m := range storeMsgs {
 		injectedIDs[m.ID] = struct{}{}
 	}
 	for _, mk := range markers {
-		if _, found := injectedIDs[mk.BeforeMessageID]; !found {
-			out = append(out, uiMessage{
-				Role:              components.RoleMarker,
-				MarkerSummary:     mk.Summary,
-				MarkerTokensSaved: mk.InputTokensSaved,
-			})
+		if _, found := injectedIDs[mk.BeforeMessageID]; found {
+			continue
 		}
+		markerMsg := uiMessage{
+			Role:              components.RoleMarker,
+			MarkerSummary:     mk.Summary,
+			MarkerTokensSaved: mk.InputTokensSaved,
+			Timestamp:         mk.CreatedAt,
+		}
+		insertAt := len(out)
+		if !mk.CreatedAt.IsZero() {
+			for i, msg := range out {
+				if msg.Timestamp.IsZero() {
+					continue
+				}
+				if mk.CreatedAt.Before(msg.Timestamp) || mk.CreatedAt.Equal(msg.Timestamp) {
+					insertAt = i
+					break
+				}
+			}
+		}
+		out = append(out, uiMessage{})
+		copy(out[insertAt+1:], out[insertAt:])
+		out[insertAt] = markerMsg
 	}
 
 	// Reconstruct subagent state for `task` tool messages.

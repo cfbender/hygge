@@ -13,9 +13,6 @@
 - [ ] **Migration: add `parent_tool_use_id TEXT` column to sessions**
   Subagent hydration currently parses `[toolUseID]` out of the session slug via `extractToolUseIDFromSlug`. Brittle if `buildSlug` format ever changes. A proper column makes the link exact.
 
-- [ ] **`uiMessage` `CreatedAt`-based sorting for compaction markers**
-  Phase 2 added a `Timestamp` field, but the multi-compaction ordering path still falls back to "append at end" when `BeforeMessageID` isn't found. Use `Timestamp` for chronological insertion.
-
 ## Testing / hermeticity
 
 - [ ] **Extract `GitRunner` interface on `PackageManager` for test injection**
