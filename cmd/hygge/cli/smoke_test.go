@@ -285,8 +285,8 @@ func TestSmoke_EndToEnd(t *testing.T) {
 		t.Errorf("Totals.CostUSD = %v; want >= 0", reloaded.Totals.CostUSD)
 	}
 
-	// Assertion 6: bus events appeared in a sensible order.
-	rec.assertOrdered(t, sess.ID)
+	// Assertion 6: bus events appeared in a sensible shape.
+	rec.assertObserved(t, sess.ID)
 
 	// Assertion 7: state.RecentSessions contains the new session id.
 	stReloaded, err := state.Load(rt.StateOpts)
@@ -586,7 +586,7 @@ func (r *busRecorder) stop() {
 	}
 }
 
-// assertOrdered checks the documented per-iteration order for the
+// assertObserved checks the documented per-iteration shape for the
 // scripted conversation:
 //
 //	SessionStart
@@ -597,90 +597,61 @@ func (r *busRecorder) stop() {
 //	MessageAppended (tool)
 //	MessageAppended (assistant, final)
 //
-// Other events (deltas, cost, context usage) interleave freely.  We
-// just check that the milestone events appear in this relative order.
-func (r *busRecorder) assertOrdered(t *testing.T, sessionID string) {
+// The bus has one subscription channel per event type. The recorder drains
+// each type in its own goroutine, so cross-type ordering is intentionally not
+// observable here: a ToolCallRequested can be recorded before the assistant
+// MessageAppended even when it was published after it. We therefore assert
+// FIFO order within MessageAppended, plus presence and payload sanity for the
+// tool and delta event streams.
+func (r *busRecorder) assertObserved(t *testing.T, sessionID string) {
 	t.Helper()
 	r.mu.Lock()
 	events := append([]recordedEvent(nil), r.events...)
 	r.mu.Unlock()
 
-	type checkpoint struct {
-		name  string
-		match func(recordedEvent) bool
-	}
-	checkpoints := []checkpoint{
-		{"SessionStart", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.SessionStart)
-			return ok && ev.SessionID == sessionID
-		}},
-		{"MessageAppended(user)", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.MessageAppended)
-			return ok && ev.Role == string(session.RoleUser)
-		}},
-		{"MessageAppended(assistant#1)", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.MessageAppended)
-			return ok && ev.Role == string(session.RoleAssistant)
-		}},
-		{"ToolCallRequested", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.ToolCallRequested)
-			return ok && ev.ToolName == "read"
-		}},
-		{"ToolCallCompleted", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.ToolCallCompleted)
-			return ok && ev.ToolName == "read"
-		}},
-		{"MessageAppended(tool)", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.MessageAppended)
-			return ok && ev.Role == string(session.RoleTool)
-		}},
-		{"MessageAppended(assistant#2)", func(e recordedEvent) bool {
-			ev, ok := e.at.(bus.MessageAppended)
-			return ok && ev.Role == string(session.RoleAssistant)
-		}},
-	}
-
-	pos := 0
-	matched := make([]int64, 0, len(checkpoints))
-	for _, want := range checkpoints {
-		found := -1
-		for i := pos; i < len(events); i++ {
-			if want.match(events[i]) {
-				// Skip an assistant#1 match if we've already consumed
-				// it for that checkpoint — the recorder doesn't know
-				// "first" vs "second".  We rely on iteration order:
-				// the next assistant MessageAppended after pos is the
-				// next checkpoint.
-				found = i
-				break
+	var sawStart bool
+	messageRoles := []string{}
+	var requested, completed bool
+	var deltaText strings.Builder
+	for _, e := range events {
+		switch ev := e.at.(type) {
+		case bus.SessionStart:
+			if ev.SessionID == sessionID {
+				sawStart = true
 			}
-		}
-		if found < 0 {
-			t.Errorf("bus order: missing checkpoint %q at/after seq %d. events=%v",
-				want.name, pos, debugKinds(events))
-			return
-		}
-		matched = append(matched, events[found].seq)
-		pos = found + 1
-	}
-	// Optional sanity: assistant text deltas appeared between
-	// ToolCallCompleted and the final MessageAppended(assistant).
-	deltaSeen := false
-	if len(matched) >= 2 {
-		toolDone := matched[4]
-		finalAsst := matched[6]
-		for _, e := range events {
-			if e.seq <= toolDone || e.seq >= finalAsst {
-				continue
+		case bus.MessageAppended:
+			if ev.SessionID == sessionID {
+				messageRoles = append(messageRoles, ev.Role)
 			}
-			if _, ok := e.at.(bus.AssistantTextDelta); ok {
-				deltaSeen = true
-				break
+		case bus.ToolCallRequested:
+			if ev.SessionID == sessionID && ev.ToolUseID == "tu-1" && ev.ToolName == "read" {
+				requested = true
+			}
+		case bus.ToolCallCompleted:
+			if ev.SessionID == sessionID && ev.ToolUseID == "tu-1" && ev.ToolName == "read" && ev.Err == "" {
+				completed = true
+			}
+		case bus.AssistantTextDelta:
+			if ev.SessionID == sessionID {
+				deltaText.WriteString(ev.Text)
 			}
 		}
 	}
-	if !deltaSeen {
-		t.Errorf("bus order: no AssistantTextDelta between tool completion and final assistant message")
+	if !sawStart {
+		t.Errorf("bus events: missing SessionStart. events=%v", debugKinds(events))
+	}
+	wantRoles := []string{string(session.RoleUser), string(session.RoleAssistant), string(session.RoleTool), string(session.RoleAssistant)}
+	if !reflect.DeepEqual(messageRoles, wantRoles) {
+		t.Errorf("bus MessageAppended roles = %v, want %v. events=%v", messageRoles, wantRoles, debugKinds(events))
+	}
+	if !requested {
+		t.Errorf("bus events: missing read ToolCallRequested. events=%v", debugKinds(events))
+	}
+	if !completed {
+		t.Errorf("bus events: missing successful read ToolCallCompleted. events=%v", debugKinds(events))
+	}
+	if !strings.Contains(deltaText.String(), "package declarations") {
+		t.Errorf("bus AssistantTextDelta = %q; missing final text", deltaText.String())
 	}
 }
 

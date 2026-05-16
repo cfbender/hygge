@@ -63,8 +63,8 @@ func TestMentionTokensHighlightedInInputAndUserBubble(t *testing.T) {
 func TestPastedInputMarkerHighlightIgnoresCursorANSI(t *testing.T) {
 	t.Parallel()
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("5"))
-	in := "\x1b[7m[ Pasted \x1b[0m3 lines ]"
-	want := style.Render("[ Pasted 3 lines ]")
+	in := "\x1b[7m[Pasted \x1b[0m3 lines]"
+	want := style.Render("[Pasted 3 lines]")
 	if out := HighlightPastedInputMarkers(in, style); !strings.Contains(out, want) {
 		t.Fatalf("paste marker was not highlighted across ANSI cursor styling; want %q in %q", want, out)
 	}
