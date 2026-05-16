@@ -30,6 +30,7 @@ func RegisterBuiltins(reg *Registry) {
 func builtinCommands() []Command {
 	return []Command{
 		&helpCmd{},
+		&newCmd{},
 		&clearCmd{},
 		&compactCmd{},
 		&costCmd{},
@@ -219,19 +220,26 @@ func (*attachmentsCmd) Execute(_ context.Context, _ App, input string) (Outcome,
 	return Outcome{Updates: map[string]string{UpdateAttachments: "clear"}}, nil
 }
 
-// --- /clear ---------------------------------------------------------------
+// --- /new /clear ----------------------------------------------------------
+
+type newCmd struct{}
+
+func (*newCmd) Name() string        { return "new" }
+func (*newCmd) Description() string { return "Start a fresh session" }
+func (*newCmd) Source() string      { return "builtin" }
+func (*newCmd) Args() []ArgSpec     { return nil }
+func (*newCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
+	return Outcome{NewSession: true}, nil
+}
 
 type clearCmd struct{}
 
 func (*clearCmd) Name() string        { return "clear" }
-func (*clearCmd) Description() string { return "Clear the rendered session history" }
+func (*clearCmd) Description() string { return "Alias for /new" }
 func (*clearCmd) Source() string      { return "builtin" }
 func (*clearCmd) Args() []ArgSpec     { return nil }
 func (*clearCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
-	return Outcome{
-		ClearHistory: true,
-		Notice:       "history cleared",
-	}, nil
+	return Outcome{NewSession: true}, nil
 }
 
 // --- /compact -------------------------------------------------------------

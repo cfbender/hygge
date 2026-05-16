@@ -3537,6 +3537,7 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 		a.sessionTitle = ""
 		a.todoIncomplete = 0
 		a.todoInProgress = 0
+		a.todosCache = nil
 	}
 
 	var cmds []tea.Cmd
