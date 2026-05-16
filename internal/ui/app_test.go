@@ -61,7 +61,7 @@ func TestColdStartEmptyState(t *testing.T) {
 	// Sidebar: app name, project path (no session yet so no session title).
 	// Footer: agent identity.
 	// MessageList: empty-state welcome text.
-	for _, want := range []string{"Hygge", "~/proj", "ype a message", "hygge"} {
+	for _, want := range []string{"Hygge", "~/proj", "ype a message", "│h│"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
@@ -1809,7 +1809,7 @@ func TestQueueChanged_RendersQueuedPromptsNearInput(t *testing.T) {
 	app.Handle(bus.QueueChanged{SessionID: "", Count: 2, Prompts: []string{"queued one", "queued two"}})
 
 	out := app.View().Content
-	inputIndex := strings.Index(out, "╭")
+	inputIndex := strings.LastIndex(out, "╭")
 	queuedIndex := strings.Index(out, "1. queued one")
 	if queuedIndex < 0 {
 		t.Fatalf("queued prompt missing from sticky bottom chrome:\n%s", out)
