@@ -58,8 +58,8 @@ func readGitBranch(projectPath string) string {
 	}
 	content := strings.TrimSpace(string(data))
 	const refPrefix = "ref: refs/heads/"
-	if strings.HasPrefix(content, refPrefix) {
-		return strings.TrimPrefix(content, refPrefix)
+	if after, ok := strings.CutPrefix(content, refPrefix); ok {
+		return after
 	}
 	// Detached HEAD — return first 7 chars of the SHA prefixed by "@".
 	if len(content) >= 7 {

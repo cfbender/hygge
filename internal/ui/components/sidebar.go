@@ -125,10 +125,7 @@ func (s Sidebar) View() string {
 
 	// The left border takes 1 cell; inner content area:
 	//   innerW = Width - 1 (border) - 1 (left pad) - 1 (right pad)
-	innerW := s.Width - 3
-	if innerW < 1 {
-		innerW = 1
-	}
+	innerW := max(s.Width-3, 1)
 
 	sectionStyle := s.atomStyle(theme.AtomSidebarSection).Bold(true)
 	mutedStyle := s.atomStyle(theme.AtomSidebarMuted)
@@ -178,10 +175,7 @@ func (s Sidebar) View() string {
 	// Fill with empty lines so the bottom block is flush to the bottom.
 	topCount := len(lines)
 	bottomCount := len(bottomLines)
-	flexRows := height - topCount - bottomCount
-	if flexRows < 0 {
-		flexRows = 0
-	}
+	flexRows := max(height-topCount-bottomCount, 0)
 	for i := 0; i < flexRows; i++ {
 		lines = append(lines, "")
 	}

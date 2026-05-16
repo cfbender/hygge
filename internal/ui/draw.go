@@ -132,7 +132,7 @@ func (a *App) drawScrollBar(scr uv.Screen, x int) {
 		thumbColor = a.styles.WorkingLabelColor
 	}
 
-	for y := 0; y < h; y++ {
+	for y := range h {
 		if y >= thumbY && y < thumbY+thumbH {
 			scr.SetCell(x, y, &uv.Cell{
 				Content: "▐",

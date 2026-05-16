@@ -1,5 +1,7 @@
 package ui
 
+import "slices"
+
 import "github.com/cfbender/hygge/internal/command"
 
 type overlayKind string
@@ -52,12 +54,7 @@ func (s overlayStack) Top() (overlayKind, bool) {
 }
 
 func (s overlayStack) Has(kind overlayKind) bool {
-	for _, entry := range s.entries {
-		if entry == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.entries, kind)
 }
 
 func (s overlayStack) Open() bool { return len(s.entries) > 0 }

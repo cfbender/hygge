@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -82,9 +83,7 @@ func (t *mcpTool) InputSchema() map[string]any {
 	// Return a shallow copy so callers can mutate it without
 	// affecting the cached definition.
 	out := make(map[string]any, len(t.def.InputSchema))
-	for k, v := range t.def.InputSchema {
-		out[k] = v
-	}
+	maps.Copy(out, t.def.InputSchema)
 	return out
 }
 

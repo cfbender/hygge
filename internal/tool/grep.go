@@ -375,19 +375,19 @@ func grepWithRg(ctx context.Context, rgPath, root, pattern, include string, limi
 // splitRgLine parses "path:line:text" leniently — line is the first
 // run of digits after the first colon.
 func splitRgLine(s string) (path string, line int, text string, ok bool) {
-	first := strings.IndexByte(s, ':')
-	if first < 0 {
+	before, after, ok0 := strings.Cut(s, ":")
+	if !ok0 {
 		return "", 0, "", false
 	}
-	path = s[:first]
-	rest := s[first+1:]
-	second := strings.IndexByte(rest, ':')
-	if second < 0 {
+	path = before
+	rest := after
+	before, after, ok0 := strings.Cut(rest, ":")
+	if !ok0 {
 		return "", 0, "", false
 	}
 	var n int
-	if _, err := fmt.Sscanf(rest[:second], "%d", &n); err != nil {
+	if _, err := fmt.Sscanf(before, "%d", &n); err != nil {
 		return "", 0, "", false
 	}
-	return path, n, rest[second+1:], true
+	return path, n, after, true
 }

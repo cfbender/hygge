@@ -73,8 +73,8 @@ func resolveAPIKey(opts map[string]any) (string, error) {
 			if strings.HasPrefix(s, "op://") {
 				return "", fmt.Errorf("%w: %s", provider.ErrAuthOpRefUnsupported, s)
 			}
-			if strings.HasPrefix(s, "$") {
-				name := strings.TrimPrefix(s, "$")
+			if after, ok0 := strings.CutPrefix(s, "$"); ok0 {
+				name := after
 				if v := os.Getenv(name); v != "" {
 					return v, nil
 				}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -214,12 +215,9 @@ func buildEnvMap(opts LoadOptions) map[string]any {
 
 		// Skip env vars that produce empty segments (e.g. HYGGE___foo).
 		valid := true
-		for _, p := range parts {
-			if p == "" {
-				slog.Warn("config: skipping malformed env var (empty segment)", "var", env)
-				valid = false
-				break
-			}
+		if slices.Contains(parts, "") {
+			slog.Warn("config: skipping malformed env var (empty segment)", "var", env)
+			valid = false
 		}
 		if !valid {
 			continue
@@ -309,12 +307,9 @@ func buildEnvMapFromKeys(keys []string, lookup func(string) (string, bool)) map[
 
 		// Skip env vars that produce empty segments (e.g. HYGGE___foo).
 		valid := true
-		for _, p := range parts {
-			if p == "" {
-				slog.Warn("config: skipping malformed env var (empty segment)", "var", env)
-				valid = false
-				break
-			}
+		if slices.Contains(parts, "") {
+			slog.Warn("config: skipping malformed env var (empty segment)", "var", env)
+			valid = false
 		}
 		if !valid {
 			continue

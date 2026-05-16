@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -48,9 +49,7 @@ func newAdapter(t *testing.T, baseURL string, extra map[string]any) provider.Pro
 		"base_url": baseURL,
 		"cache":    false,
 	}
-	for k, v := range extra {
-		opts[k] = v
-	}
+	maps.Copy(opts, extra)
 	p, err := New(opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)

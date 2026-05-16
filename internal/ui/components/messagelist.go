@@ -250,12 +250,9 @@ func (m MessageList) renderEmptyState() string {
 
 	// Center each line horizontally.
 	var centeredLines []string
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		visW := lipgloss.Width(line)
-		pad := (width - visW) / 2
-		if pad < 0 {
-			pad = 0
-		}
+		pad := max((width-visW)/2, 0)
 		centeredLines = append(centeredLines, strings.Repeat(" ", pad)+line)
 	}
 	return strings.Join(centeredLines, "\n")
@@ -717,10 +714,7 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	bubbleW := m.toolBubbleWidth(width)
 
 	// Content width = bubble width minus the side bar and horizontal padding.
-	innerW := bubbleW - 3
-	if innerW < 1 {
-		innerW = 1
-	}
+	innerW := max(bubbleW-3, 1)
 
 	// Build body: one line per tool call.
 	nameStyle := lipgloss.NewStyle()

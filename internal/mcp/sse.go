@@ -327,7 +327,7 @@ func (t *sseTransport) drainStream(ctx context.Context, body io.Closer, scanner 
 	}
 
 	backoff := t.opts.ReconnectInitialBackoff
-	for i := 0; i < reconnects; i++ {
+	for range reconnects {
 		backoff *= 2
 		if backoff > t.opts.ReconnectMaxBackoff {
 			backoff = t.opts.ReconnectMaxBackoff

@@ -114,7 +114,7 @@ func TestGrep_RgAndFallbackAgree(t *testing.T) {
 
 func matchPrefixes(s string) map[string]struct{} {
 	out := map[string]struct{}{}
-	for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(s), "\n") {
 		if line == "" {
 			continue
 		}

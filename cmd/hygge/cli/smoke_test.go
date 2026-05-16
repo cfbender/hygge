@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -293,11 +294,8 @@ func TestSmoke_EndToEnd(t *testing.T) {
 		t.Fatalf("state.Load: %v", err)
 	}
 	var sawRecent bool
-	for _, id := range stReloaded.RecentSessions {
-		if id == sess.ID {
-			sawRecent = true
-			break
-		}
+	if slices.Contains(stReloaded.RecentSessions, sess.ID) {
+		sawRecent = true
 	}
 	if !sawRecent {
 		t.Errorf("state.RecentSessions = %v; missing %s", stReloaded.RecentSessions, sess.ID)

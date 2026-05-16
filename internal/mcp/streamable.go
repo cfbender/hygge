@@ -430,7 +430,7 @@ func (t *streamableTransport) retryNotifGet(ctx context.Context, reconnects int)
 	}
 
 	backoff := t.opts.ReconnectInitialBackoff
-	for i := 0; i < reconnects; i++ {
+	for range reconnects {
 		backoff *= 2
 		if backoff > t.opts.ReconnectMaxBackoff {
 			backoff = t.opts.ReconnectMaxBackoff

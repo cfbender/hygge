@@ -345,9 +345,7 @@ func TestAsk_Concurrent_NoCrosstalk(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make([]Decision, N)
 	for i := range N {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			target := "cmd-allow"
 			if i%2 == 0 {
 				target = "cmd-deny"
@@ -362,7 +360,7 @@ func TestAsk_Concurrent_NoCrosstalk(t *testing.T) {
 				return
 			}
 			results[i] = d
-		}()
+		})
 	}
 	wg.Wait()
 

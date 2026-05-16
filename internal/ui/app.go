@@ -2665,18 +2665,18 @@ func (a *App) ensureRenderer() *glamour.TermRenderer {
 func extractTarget(args []byte) string {
 	s := string(args)
 	for _, key := range []string{`"path"`, `"file"`, `"command"`, `"url"`, `"target"`} {
-		if idx := strings.Index(s, key); idx >= 0 {
-			rest := s[idx+len(key):]
+		if _, after, ok := strings.Cut(s, key); ok {
+			rest := after
 			rest = strings.TrimLeft(rest, " \t:")
 			if !strings.HasPrefix(rest, `"`) {
 				continue
 			}
 			rest = rest[1:]
-			end := strings.Index(rest, `"`)
-			if end < 0 {
+			before, _, ok := strings.Cut(rest, `"`)
+			if !ok {
 				continue
 			}
-			return rest[:end]
+			return before
 		}
 	}
 	return ""
@@ -2720,21 +2720,21 @@ func extractPathFromArgs(args []byte) string {
 func extractFieldString(raw []byte, field string) string {
 	key := `"` + field + `"`
 	s := string(raw)
-	idx := strings.Index(s, key)
-	if idx < 0 {
+	_, after, ok := strings.Cut(s, key)
+	if !ok {
 		return ""
 	}
-	rest := s[idx+len(key):]
+	rest := after
 	rest = strings.TrimLeft(rest, " \t\r\n:")
 	if !strings.HasPrefix(rest, `"`) {
 		return ""
 	}
 	rest = rest[1:]
-	end := strings.Index(rest, `"`)
-	if end < 0 {
+	before, _, ok := strings.Cut(rest, `"`)
+	if !ok {
 		return ""
 	}
-	return rest[:end]
+	return before
 }
 
 // updateInputFocus sets input.Focused based on whether any modal is currently
@@ -3599,11 +3599,11 @@ func extractToolUseIDFromSlug(slug string) string {
 		return ""
 	}
 	rest := slug[last+1:]
-	end := strings.Index(rest, "]")
-	if end < 0 {
+	before, _, ok := strings.Cut(rest, "]")
+	if !ok {
 		return ""
 	}
-	return rest[:end]
+	return before
 }
 
 // parseTypeDescFromSlug extracts the type and description from a subagent

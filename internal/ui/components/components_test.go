@@ -59,7 +59,7 @@ func TestThemeModalFilterNavigateApplyCancel(t *testing.T) {
 func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	t.Parallel()
 	var lines []string
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		lines = append(lines, "line"+itoa(i))
 	}
 	ml := MessageList{
@@ -138,7 +138,7 @@ func TestThinkingTruncation(t *testing.T) {
 	t.Parallel()
 	// Build 12 lines of thinking.
 	var thinkLines []string
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		thinkLines = append(thinkLines, "thought line "+itoa(i))
 	}
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
@@ -146,7 +146,7 @@ func TestThinkingTruncation(t *testing.T) {
 	plain := stripANSI(result)
 
 	// First 7 lines (thinkingMaxLines-1=7) must appear.
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		if !strings.Contains(plain, "thought line "+itoa(i)) {
 			t.Errorf("expected line %d to be visible in truncated thinking: %q", i, plain)
 		}
@@ -182,7 +182,7 @@ func TestThinkingTruncation_NoIndicatorWhenFits(t *testing.T) {
 func TestThinkingTruncation_ExactlyAtMaxNoIndicator(t *testing.T) {
 	t.Parallel()
 	var lines []string
-	for i := 0; i < thinkingMaxLines; i++ {
+	for range thinkingMaxLines {
 		lines = append(lines, "line")
 	}
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}

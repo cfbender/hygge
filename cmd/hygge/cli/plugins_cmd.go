@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -155,10 +156,8 @@ Example:
 			defer func() { _ = rt.Close() }()
 
 			// Check if already installed.
-			for _, existing := range rt.Config.Plugins.Sources {
-				if existing == sourceURI {
-					return die(cmd, "plugin %q is already installed", sourceURI)
-				}
+			if slices.Contains(rt.Config.Plugins.Sources, sourceURI) {
+				return die(cmd, "plugin %q is already installed", sourceURI)
 			}
 
 			ctx := context.Background()

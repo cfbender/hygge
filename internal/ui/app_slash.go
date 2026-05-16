@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -275,12 +276,7 @@ func (a *App) knownProvider(providerName string) bool {
 	if a.opts.Catalog == nil || a.opts.Catalog.Source() == nil {
 		return true
 	}
-	for _, p := range a.opts.Catalog.Source().Providers() {
-		if p == providerName {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.opts.Catalog.Source().Providers(), providerName)
 }
 
 func providerHasAPIKey(cfg *config.Config, providerName, currentProvider string) bool {
@@ -349,10 +345,7 @@ func (a *App) movePaletteHighlight(delta int) {
 		a.paletteHighlight = -1
 		return
 	}
-	hi := a.paletteHighlight
-	if hi < 0 {
-		hi = 0
-	}
+	hi := max(a.paletteHighlight, 0)
 	hi += delta
 	if hi < 0 {
 		hi = 0

@@ -219,7 +219,7 @@ func TestLuaLoader_concurrentCalls(t *testing.T) {
 	var wg sync.WaitGroup
 	errors := make(chan error, goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(_ int) {
 			defer wg.Done()

@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -441,13 +442,7 @@ func TestListSessions_ParentIDFilter(t *testing.T) {
 	}
 	gotIDs := ids(got)
 	for _, wantID := range []string{sub1.ID, sub2.ID} {
-		found := false
-		for _, gid := range gotIDs {
-			if gid == wantID {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(gotIDs, wantID)
 		if !found {
 			t.Errorf("ParentID filter missing %s", wantID)
 		}

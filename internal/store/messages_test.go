@@ -424,21 +424,17 @@ func TestConcurrent_ReadsAndOneWriter(t *testing.T) {
 
 	// 4 readers.
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for !stop.Load() {
 				if _, err := s.MessagesForSession(t.Context(), sess.ID); err != nil {
 					readErrs.Add(1)
 				}
 			}
-		}()
+		})
 	}
 
 	// 1 writer.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer stop.Store(true)
 		for range 100 {
 			if _, err := s.AppendMessage(t.Context(), sess.ID, session.NewMessage{
@@ -448,7 +444,7 @@ func TestConcurrent_ReadsAndOneWriter(t *testing.T) {
 				writeErrs.Add(1)
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 	if writeErrs.Load() != 0 {

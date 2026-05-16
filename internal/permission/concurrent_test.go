@@ -45,9 +45,7 @@ func TestAsk_ConcurrentSameCategory_SinglePrompt(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, N)
 	for range N {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			d, err := e.Ask(context.Background(), req)
 			if err != nil {
 				errs <- err
@@ -56,7 +54,7 @@ func TestAsk_ConcurrentSameCategory_SinglePrompt(t *testing.T) {
 			if d.Action != ActionAllow {
 				errs <- nil
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

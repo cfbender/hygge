@@ -24,7 +24,6 @@ func TestNextToken(t *testing.T) {
 		{in: `"unterminated`, wantErr: true},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.in, func(t *testing.T) {
 			t.Parallel()
 			tok, rest, err := nextToken(c.in)

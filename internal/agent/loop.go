@@ -254,10 +254,10 @@ drain:
 	// for post_message at load time).  Fire-and-forget; does not affect
 	// the return value.
 	if a.opts.Hooks != nil {
-		var asstText string
+		var asstText strings.Builder
 		for _, p := range asstParts {
 			if p.Kind == session.PartText {
-				asstText += p.Text
+				asstText.WriteString(p.Text)
 			}
 		}
 		hookIn := hook.Input{
@@ -265,7 +265,7 @@ drain:
 			SessionID: sessionID,
 			HookName:  "post_message",
 			Pwd:       a.opts.Pwd,
-			Message:   asstText,
+			Message:   asstText.String(),
 		}
 		_, warns := a.opts.Hooks.RunPost(ctx, hook.EventPostMessage, hookIn)
 		logHookWarns(warns)

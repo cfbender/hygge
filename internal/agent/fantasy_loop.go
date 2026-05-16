@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -77,9 +78,7 @@ func requiredStrings(raw any) []string {
 
 func cloneSchemaMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -320,13 +319,13 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		return final, wrapFantasyStreamError(err)
 	}
 	if final != nil && a.opts.Hooks != nil {
-		var text string
+		var text strings.Builder
 		for _, p := range final.Parts {
 			if p.Kind == session.PartText {
-				text += p.Text
+				text.WriteString(p.Text)
 			}
 		}
-		_, warns := a.opts.Hooks.RunPost(ctx, hook.EventPostMessage, hook.Input{Event: hook.EventPostMessage, SessionID: sessionID, HookName: "post_message", Pwd: pwd, Message: text})
+		_, warns := a.opts.Hooks.RunPost(ctx, hook.EventPostMessage, hook.Input{Event: hook.EventPostMessage, SessionID: sessionID, HookName: "post_message", Pwd: pwd, Message: text.String()})
 		logHookWarns(warns)
 	}
 	return final, nil

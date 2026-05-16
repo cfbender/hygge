@@ -1110,7 +1110,7 @@ func TestCompact_HappyPath(t *testing.T) {
 	)
 
 	a := env.newAgent(prov)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
 			t.Fatalf("Send: %v", err)
 		}

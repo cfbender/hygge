@@ -236,7 +236,7 @@ func TestSSEScanner_DataSizeLimitExceeded(t *testing.T) {
 	// Build a data line just over the limit.
 	const chunk = 1024 * 1024 // 1 MiB per line
 	var sb strings.Builder
-	for i := 0; i < 17; i++ { // 17 MiB total > 16 MiB limit
+	for range 17 { // 17 MiB total > 16 MiB limit
 		sb.WriteString("data: ")
 		sb.WriteString(strings.Repeat("x", chunk))
 		sb.WriteByte('\n')
@@ -810,7 +810,7 @@ func TestSSETransport_RecvEOFAfterClose(t *testing.T) {
 func TestSSETransport_GoroutineLeak(t *testing.T) {
 	t.Parallel()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		var srvURL string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -892,7 +892,6 @@ func TestSSETransport_ServerLabel(t *testing.T) {
 		{"empty", SSEOptions{}, "sse:(unset)"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tr := NewSSE(tc.opts)

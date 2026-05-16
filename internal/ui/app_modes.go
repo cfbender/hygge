@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"image/color"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -129,12 +130,12 @@ func (a *App) formatModeIndicator() string {
 		sep = s.Header.Separator.Render(" · ")
 	}
 
-	result := ""
+	var result strings.Builder
 	for i, p := range parts {
 		if i > 0 {
-			result += sep
+			result.WriteString(sep)
 		}
-		result += p
+		result.WriteString(p)
 	}
-	return result
+	return result.String()
 }

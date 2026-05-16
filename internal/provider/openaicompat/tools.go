@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/cfbender/hygge/internal/provider"
@@ -108,17 +109,17 @@ func toWireMessages(system string, msgs []session.Message) ([]chatMessage, error
 // the single string OpenAI accepts.
 func joinTextParts(parts []session.Part) string {
 	first := true
-	out := ""
+	var out strings.Builder
 	for _, p := range parts {
 		if p.Kind == session.PartText {
 			if !first {
-				out += "\n\n"
+				out.WriteString("\n\n")
 			}
-			out += p.Text
+			out.WriteString(p.Text)
 			first = false
 		}
 	}
-	return out
+	return out.String()
 }
 
 // userMessageToWire builds a user-role chatMessage from session parts.
@@ -139,18 +140,18 @@ func userMessageToWire(parts []session.Part) (chatMessage, error) {
 	}
 
 	if !hasImage {
-		text := ""
+		var text strings.Builder
 		first := true
 		for _, p := range parts {
 			if p.Kind == session.PartText {
 				if !first {
-					text += "\n\n"
+					text.WriteString("\n\n")
 				}
-				text += p.Text
+				text.WriteString(p.Text)
 				first = false
 			}
 		}
-		content, err := encodeJSON(text)
+		content, err := encodeJSON(text.String())
 		if err != nil {
 			return chatMessage{}, err
 		}
@@ -191,7 +192,7 @@ func userMessageToWire(parts []session.Part) (chatMessage, error) {
 //
 // content=null is represented by leaving the Content field nil (omitempty).
 func assistantMessageToWire(parts []session.Part) (chatMessage, error) {
-	text := ""
+	var text strings.Builder
 	textFirst := true
 	var toolCalls []chatToolCall
 
@@ -199,9 +200,9 @@ func assistantMessageToWire(parts []session.Part) (chatMessage, error) {
 		switch p.Kind {
 		case session.PartText:
 			if !textFirst {
-				text += "\n\n"
+				text.WriteString("\n\n")
 			}
-			text += p.Text
+			text.WriteString(p.Text)
 			textFirst = false
 		case session.PartToolUse:
 			args := string(p.ToolInput)
@@ -228,8 +229,8 @@ func assistantMessageToWire(parts []session.Part) (chatMessage, error) {
 	}
 
 	wm := chatMessage{Role: "assistant", ToolCalls: toolCalls}
-	if text != "" || len(toolCalls) == 0 {
-		content, err := encodeJSON(text)
+	if text.String() != "" || len(toolCalls) == 0 {
+		content, err := encodeJSON(text.String())
 		if err != nil {
 			return chatMessage{}, err
 		}

@@ -353,10 +353,7 @@ func (m SessionsModal) View() string {
 }
 
 func (m SessionsModal) renderBox(termWidth int) string {
-	boxWidth := termWidth - 4
-	if boxWidth < 60 {
-		boxWidth = 60
-	}
+	boxWidth := max(termWidth-4, 60)
 	if boxWidth > 120 {
 		boxWidth = 120
 	}
@@ -595,10 +592,7 @@ func humanAgo(t time.Time, now time.Time) string {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	d := now.Sub(t)
-	if d < 0 {
-		d = 0
-	}
+	d := max(now.Sub(t), 0)
 	switch {
 	case d < time.Minute:
 		return "just now"

@@ -316,7 +316,7 @@ func TestStreamable_SessionIDRotation(t *testing.T) {
 	defer func() { _ = tr.Close() }()
 
 	for i := 1; i <= 2; i++ {
-		if err := tr.Send(ctx, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"ping"}`, i))); err != nil {
+		if err := tr.Send(ctx, fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"method":"ping"}`, i)); err != nil {
 			t.Fatalf("Send %d: %v", i, err)
 		}
 		_, _ = tr.Recv(ctx)
@@ -715,7 +715,6 @@ func TestStreamable_UnexpectedContentType(t *testing.T) {
 func TestStreamable_ErrorStatus(t *testing.T) {
 	t.Parallel()
 	for _, status := range []int{400, 401, 403, 404, 500} {
-		status := status
 		t.Run(fmt.Sprintf("HTTP%d", status), func(t *testing.T) {
 			t.Parallel()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -761,7 +760,6 @@ func TestStreamable_ServerLabel(t *testing.T) {
 		{"empty", StreamableOptions{}, "http:(unset)"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tr := NewStreamable(tc.opts)
@@ -900,7 +898,7 @@ func TestStreamable_SendAfterClose(t *testing.T) {
 func TestStreamable_GoroutineLeak(t *testing.T) {
 	t.Parallel()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodPost:

@@ -77,10 +77,7 @@ func (f Footer) View() string {
 	// Spread left and right across the full width.
 	leftW := lipgloss.Width(leftStr)
 	rightW := lipgloss.Width(rightStr)
-	gap := width - leftW - rightW
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(width-leftW-rightW, 1)
 	line := leftStr + strings.Repeat(" ", gap) + rightStr
 
 	visible := lipgloss.Width(line)

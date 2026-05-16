@@ -132,7 +132,7 @@ func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
-	for line := 0; line < 10; line++ {
+	for range 10 {
 		app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
 	}

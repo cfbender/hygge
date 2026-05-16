@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,7 +16,9 @@ import (
 )
 
 // boolPtr returns a pointer to b.
-func boolPtr(b bool) *bool { return &b }
+//
+//go:fix inline
+func boolPtr(b bool) *bool { return new(b) }
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -92,7 +95,7 @@ func newFixtureServer(t *testing.T) *httptest.Server {
 
 func TestNew_EmbeddedSnapshotAvailable(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		StateDir:          t.TempDir(),
 	})
 	if err != nil {
@@ -104,13 +107,7 @@ func TestNew_EmbeddedSnapshotAvailable(t *testing.T) {
 	if len(provs) == 0 {
 		t.Errorf("expected embedded providers, got none")
 	}
-	found := false
-	for _, p := range provs {
-		if p == "anthropic" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(provs, "anthropic")
 	if !found {
 		t.Errorf("expected anthropic in embedded providers, got %v", provs)
 	}
@@ -123,7 +120,7 @@ func TestResolve_HitAndMiss(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
 		BaseURL:           srv.URL,
 		HTTPClient:        srv.Client(),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		StateDir:          t.TempDir(),
 	})
 	if err != nil {
@@ -196,7 +193,7 @@ func TestRefresh_ETagCacheBehavior(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
 		BaseURL:           srv.URL,
 		HTTPClient:        srv.Client(),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		StateDir:          t.TempDir(),
 	})
 	if err != nil {
@@ -237,7 +234,7 @@ func TestResolve_PricingAndReasoningFields(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
 		BaseURL:           srv.URL,
 		HTTPClient:        srv.Client(),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		StateDir:          t.TempDir(),
 	})
 	if err != nil {
@@ -291,7 +288,7 @@ func TestResolve_PricingAndReasoningFields(t *testing.T) {
 // from the embedded catwalk snapshot (no real HTTP requests fired).
 func TestNoLiveNetwork(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		StateDir:          t.TempDir(),
 		// No BaseURL → would use the default catwalk service URL
 		// if it fired a request.  BackgroundRefresh=false prevents
@@ -330,7 +327,7 @@ func TestPhase0_ImportsCompile(_ *testing.T) {
 
 func TestClose_Idempotent(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		StateDir:          t.TempDir(),
 	})
 	if err != nil {
@@ -349,7 +346,7 @@ func TestClose_WithPeriodicRefresh(t *testing.T) {
 	c, err := llm.NewWithOptions(llm.Options{
 		BaseURL:           srv.URL,
 		HTTPClient:        srv.Client(),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		RefreshInterval:   interval,
 		StateDir:          t.TempDir(),
 	})

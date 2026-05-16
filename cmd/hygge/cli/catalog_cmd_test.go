@@ -179,7 +179,7 @@ func TestCatalogShow_O3MiniReasoningTrue(t *testing.T) {
 		t.Fatalf("missing reasoning row:\n%s", got)
 	}
 	// The line should read "reasoning:  true".
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.Contains(line, "reasoning:") {
 			if !strings.Contains(line, "true") {
 				t.Errorf("o3-mini reasoning row not true: %q", line)
