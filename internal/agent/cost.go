@@ -265,7 +265,7 @@ func (a *Agent) generateCompactionSummary(
 		values = append(values, *m)
 	}
 	if a.runtime != nil && a.runtime.hasFantasyModel() {
-		fmsgs := append([]fantasy.Message{fantasy.NewSystemMessage(compactionSystemPrompt)}, toFantasyMessages(msgs, nil, "", nil)...)
+		fmsgs := append([]fantasy.Message{fantasy.NewSystemMessage(compactionSystemPrompt)}, toFantasyMessages(msgs, nil, "", nil, nil)...)
 		fmsgs = append(fmsgs, fantasy.NewUserMessage("Summarize the conversation above."))
 		return a.runtime.Summarize(ctx, fmsgs, a.opts.CompactionMaxTokens)
 	}

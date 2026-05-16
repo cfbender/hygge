@@ -1315,7 +1315,7 @@ func TestToFantasyMessagesSynthesizesMissingToolResults(t *testing.T) {
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "try again"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil)
 	if len(fmsgs) != 4 {
 		t.Fatalf("fantasy messages len = %d, want 4: %+v", len(fmsgs), fmsgs)
 	}
@@ -1704,6 +1704,30 @@ func (h *staticHook) Run(_ context.Context, _ hook.Input) (hook.Action, error) {
 	return h.action, h.err
 }
 
+type inputHook struct {
+	name   string
+	events []hook.Event
+	mode   hook.Mode
+	called *atomic.Int32
+	run    func(hook.Input) (hook.Action, error)
+}
+
+func (h *inputHook) Name() string           { return h.name }
+func (h *inputHook) Description() string    { return "test" }
+func (h *inputHook) Source() string         { return "test" }
+func (h *inputHook) Events() []hook.Event   { return h.events }
+func (h *inputHook) Mode() hook.Mode        { return h.mode }
+func (h *inputHook) Timeout() time.Duration { return 5 * time.Second }
+func (h *inputHook) Run(_ context.Context, in hook.Input) (hook.Action, error) {
+	if h.called != nil {
+		h.called.Add(1)
+	}
+	if h.run == nil {
+		return hook.Action{Decision: hook.DecisionAllow}, nil
+	}
+	return h.run(in)
+}
+
 // TestHook_PreToolDeny verifies that a pre_tool deny surfaces as an IsError
 // tool result and the underlying tool is never executed.
 func TestHook_PreToolDeny(t *testing.T) {
@@ -1863,6 +1887,146 @@ func TestHook_PreMessageDeny(t *testing.T) {
 	msgs := readMessages(t, env.Store, env.sessionID)
 	if len(msgs) != 0 {
 		t.Fatalf("want 0 messages after pre_message deny, got %d", len(msgs))
+	}
+}
+
+// TestHook_PreMessageSystemPromptAppendIsNotRendered verifies plugin hook
+// context rides in the system prompt without rewriting the persisted user text.
+func TestHook_PreMessageSystemPromptAppendIsNotRendered(t *testing.T) {
+	env := newTestEnv(t)
+
+	hookImpl := &inputHook{
+		name:   "context-hook",
+		events: []hook.Event{hook.EventPreMessage},
+		mode:   hook.ModeSync,
+		run: func(in hook.Input) (hook.Action, error) {
+			if in.Message != "  hello\n\n" {
+				t.Fatalf("hook message = %q, want whitespace-preserved hello", in.Message)
+			}
+			return hook.Action{Decision: hook.DecisionAllow, SystemPromptAppend: "plugin-only context"}, nil
+		},
+	}
+
+	var seenSystem string
+	prov := newFakeProvider("fake", scriptText("ok", provider.Usage{}))
+	prov.onStream = func(req provider.Request) { seenSystem = req.System }
+	a := env.newAgent(prov, func(o *Options) { o.Hooks = singleHookReg(hookImpl) })
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("  hello\n\n")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if !strings.Contains(seenSystem, "plugin-only context") {
+		t.Fatalf("system prompt missing hook context: %q", seenSystem)
+	}
+
+	msgs := readMessages(t, env.Store, env.sessionID)
+	if len(msgs) == 0 || msgs[0].Role != session.RoleUser {
+		t.Fatalf("first message = %+v", msgs)
+	}
+	if len(msgs[0].Parts) != 1 || msgs[0].Parts[0].Kind != session.PartText {
+		t.Fatalf("first user message shape = %+v, want one text part", msgs[0].Parts)
+	}
+	if got := msgs[0].Parts[0].Text; got != "  hello\n\n" {
+		t.Fatalf("persisted user text = %q, want whitespace-preserved hello", got)
+	}
+	if strings.Contains(msgs[0].Parts[0].Text, "plugin-only context") {
+		t.Fatalf("hook context leaked into visible user text: %+v", msgs[0].Parts)
+	}
+}
+
+// TestHook_ModeSwitchRefreshInvokesPreMessage verifies mode switches call the
+// pre_message hook so plugins can refresh system prompt additions for the active
+// mode, and subsequent sends expose that mode to the hook too.
+func TestHook_ModeSwitchRefreshInvokesPreMessage(t *testing.T) {
+	env := newTestEnv(t)
+
+	var called atomic.Int32
+	var mu sync.Mutex
+	var seenHookInputs []hook.Input
+	hookImpl := &inputHook{
+		name:   "mode-context-hook",
+		events: []hook.Event{hook.EventPreMessage},
+		mode:   hook.ModeSync,
+		called: &called,
+		run: func(in hook.Input) (hook.Action, error) {
+			mu.Lock()
+			seenHookInputs = append(seenHookInputs, in)
+			mu.Unlock()
+			return hook.Action{Decision: hook.DecisionAllow, SystemPromptAppend: "mode context: " + in.ModeName}, nil
+		},
+	}
+
+	var seenSystem string
+	prov := newFakeProvider("fake", scriptText("ok", provider.Usage{}))
+	prov.onStream = func(req provider.Request) { seenSystem = req.System }
+	a := env.newAgent(prov, func(o *Options) { o.Hooks = singleHookReg(hookImpl) })
+
+	if err := a.RefreshHookSystemPromptAdditions(context.Background(), env.sessionID, "Deep"); err != nil {
+		t.Fatalf("RefreshHookSystemPromptAdditions: %v", err)
+	}
+	if called.Load() != 1 {
+		t.Fatalf("hook calls after refresh = %d, want 1", called.Load())
+	}
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("hello")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if called.Load() != 2 {
+		t.Fatalf("hook calls after send = %d, want 2", called.Load())
+	}
+	if !strings.Contains(seenSystem, "mode context: Deep") {
+		t.Fatalf("system prompt missing refreshed mode context: %q", seenSystem)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seenHookInputs) != 2 {
+		t.Fatalf("seenHookInputs len = %d", len(seenHookInputs))
+	}
+	if seenHookInputs[0].ModeName != "Deep" || seenHookInputs[0].Message != "" {
+		t.Fatalf("refresh hook input = %+v, want mode Deep and empty message", seenHookInputs[0])
+	}
+	if seenHookInputs[1].ModeName != "Deep" || seenHookInputs[1].Message != "hello" {
+		t.Fatalf("send hook input = %+v, want mode Deep and message hello", seenHookInputs[1])
+	}
+}
+
+// TestHook_ModeSwitchRefreshWithoutSessionDoesNotFail verifies mode switches
+// before the first session-backed send do not surface an error, but still prime
+// the active mode name for the first real pre_message hook invocation.
+func TestHook_ModeSwitchRefreshWithoutSessionDoesNotFail(t *testing.T) {
+	env := newTestEnv(t)
+
+	var called atomic.Int32
+	var seen hook.Input
+	hookImpl := &inputHook{
+		name:   "mode-context-hook",
+		events: []hook.Event{hook.EventPreMessage},
+		mode:   hook.ModeSync,
+		called: &called,
+		run: func(in hook.Input) (hook.Action, error) {
+			seen = in
+			return hook.Action{Decision: hook.DecisionAllow}, nil
+		},
+	}
+	prov := newFakeProvider("fake", scriptText("ok", provider.Usage{}))
+	a := env.newAgent(prov, func(o *Options) { o.Hooks = singleHookReg(hookImpl) })
+
+	if err := a.RefreshHookSystemPromptAdditions(context.Background(), "", "Deep"); err != nil {
+		t.Fatalf("RefreshHookSystemPromptAdditions with no session: %v", err)
+	}
+	if called.Load() != 0 {
+		t.Fatalf("hook calls after no-session refresh = %d, want 0", called.Load())
+	}
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("hello")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if called.Load() != 1 {
+		t.Fatalf("hook calls after send = %d, want 1", called.Load())
+	}
+	if seen.ModeName != "Deep" || seen.Message != "hello" {
+		t.Fatalf("first real hook input = %+v, want mode Deep and message hello", seen)
 	}
 }
 

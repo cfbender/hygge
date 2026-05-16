@@ -205,6 +205,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		NerdFonts:     rt.Config.UI.NerdFonts,
 		MCPStatuses:   mcpStatuses,
 		OnSessionCreated: func(id string) {
+			sessionID = id
 			if err := state.AddRecentSession(id, rt.StateOpts); err != nil {
 				// State write failure is non-fatal for the running
 				// session — log and continue.
@@ -236,6 +237,9 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 						}
 						break
 					}
+				}
+				if err := rt.Agent.RefreshHookSystemPromptAdditions(ctx, sessionID, modeName); err != nil {
+					return err
 				}
 			}
 			rt.Provider = prv

@@ -325,6 +325,7 @@ func (p *luaPlugin) luaRegisterHook(L *lua.LState) int {
 			L.SetField(evtTbl, "pwd", lua.LString(in.Pwd))
 			L.SetField(evtTbl, "tool_name", lua.LString(in.ToolName))
 			L.SetField(evtTbl, "message", lua.LString(in.Message))
+			L.SetField(evtTbl, "mode_name", lua.LString(in.ModeName))
 			if in.ToolInput != nil {
 				var m map[string]any
 				if err := json.Unmarshal(in.ToolInput, &m); err == nil {
@@ -359,6 +360,9 @@ func (p *luaPlugin) luaRegisterHook(L *lua.LState) int {
 				}
 				if modMsg := retTbl.RawGetString("modified_message"); modMsg != lua.LNil {
 					action.ModifiedMessage = modMsg.String()
+				}
+				if sysAdd := retTbl.RawGetString("system_prompt_append"); sysAdd != lua.LNil {
+					action.SystemPromptAppend = sysAdd.String()
 				}
 			}
 			return nil

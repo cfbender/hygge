@@ -185,6 +185,8 @@ Hygge supports stdio, SSE, and Streamable HTTP transports.
 
 Hooks are external commands configured in `hooks.toml`. They can observe or gate
 events such as `pre_tool`, `post_tool`, `pre_message`, and `post_message`.
+`pre_message` hooks may return `system_prompt_append` to add one-turn model
+context without rendering or persisting that context as user text.
 
 Plugins are Lua modules installed from local paths or GitHub repositories. They
 can register tools, hooks, slash commands, and subagent types through Hygge's Lua

@@ -56,6 +56,7 @@ func (a *Agent) runLegacyLoop(ctx context.Context, sessionID, modelName string) 
 		// iteration's tool batch.  These ride along in the system
 		// prompt for THIS turn only — never persisted to history.
 		lazyBlocks := a.drainPendingLazy(sessionID)
+		systemPromptAdditions := a.drainPendingSystemAdditions(sessionID)
 
 		req := buildRequest(
 			msgs, marker,
@@ -64,6 +65,7 @@ func (a *Agent) runLegacyLoop(ctx context.Context, sessionID, modelName string) 
 			modelName,
 			nil,
 			lazyBlocks,
+			systemPromptAdditions,
 			a.opts.Reasoning,
 		)
 

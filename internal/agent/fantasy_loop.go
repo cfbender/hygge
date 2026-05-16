@@ -146,7 +146,8 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		return nil, fmt.Errorf("agent: load messages: %w", err)
 	}
 	lazyBlocks := a.drainPendingLazy(sessionID)
-	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), lazyBlocks)
+	systemPromptAdditions := a.drainPendingSystemAdditions(sessionID)
+	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), lazyBlocks, systemPromptAdditions)
 	pwd := a.opts.Pwd
 	if pwd == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -334,9 +335,15 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 	return final, nil
 }
 
-func toFantasyMessages(msgs []*session.Message, marker *session.Marker, system string, lazy []agentsmd.Block) []fantasy.Message {
+func toFantasyMessages(
+	msgs []*session.Message,
+	marker *session.Marker,
+	system string,
+	lazy []agentsmd.Block,
+	systemPromptAdditions []string,
+) []fantasy.Message {
 	out := []fantasy.Message{}
-	if sys := composeSystemPrompt(system, marker, lazy); strings.TrimSpace(sys) != "" {
+	if sys := composeSystemPrompt(system, marker, lazy, systemPromptAdditions); strings.TrimSpace(sys) != "" {
 		out = append(out, fantasy.NewSystemMessage(sys))
 	}
 	knownToolCallIDs := make(map[string]struct{})
