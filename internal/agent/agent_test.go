@@ -110,17 +110,29 @@ type fakeFantasyModel struct {
 	stream        []fantasy.StreamPart
 	streamBatches [][]fantasy.StreamPart
 	streamErr     error
+	generateErr   error
+	onGenerate    func(fantasy.Call)
+	onStream      func(fantasy.Call)
 	calls         atomic.Int32
 	mu            sync.Mutex
 }
 
-func (f *fakeFantasyModel) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+func (f *fakeFantasyModel) Generate(_ context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	f.calls.Add(1)
+	if f.onGenerate != nil {
+		f.onGenerate(call)
+	}
+	if f.generateErr != nil {
+		return nil, f.generateErr
+	}
 	return &fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: f.text}}, Usage: f.usage}, nil
 }
 
-func (f *fakeFantasyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+func (f *fakeFantasyModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 	f.calls.Add(1)
+	if f.onStream != nil {
+		f.onStream(call)
+	}
 	f.mu.Lock()
 	stream := f.stream
 	if len(f.streamBatches) > 0 {

@@ -64,15 +64,28 @@ func (r *Runtime) Summarize(ctx context.Context, messages []fantasy.Message, max
 	if !r.hasFantasyModel() {
 		return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
 	}
-	maxOutputTokens := int64(maxTokens)
-	res, err := r.newInternalAgent().Generate(ctx, fantasy.AgentCall{Messages: messages, MaxOutputTokens: &maxOutputTokens})
+	// Some streaming providers reject max_output_tokens for this internal call;
+	// rely on the compaction prompt to keep summaries short instead.
+	_ = maxTokens
+	var text strings.Builder
+	res, err := r.newInternalAgent().Stream(ctx, fantasy.AgentStreamCall{
+		Messages: messages,
+		OnTextDelta: func(_, delta string) error {
+			text.WriteString(delta)
+			return nil
+		},
+	})
 	if err != nil {
 		return "", provider.Usage{}, err
 	}
 	if res == nil {
 		return "", provider.Usage{}, fmt.Errorf("agent: fantasy summary returned nil result")
 	}
-	return strings.TrimSpace(res.Response.Content.Text()), usageFromFantasy(res.TotalUsage), nil
+	summary := text.String()
+	if summary == "" {
+		summary = res.Response.Content.Text()
+	}
+	return strings.TrimSpace(summary), usageFromFantasy(res.TotalUsage), nil
 }
 
 // GenerateTitle is the narrow no-tool seam for future model-generated session
