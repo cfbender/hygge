@@ -318,13 +318,14 @@ func TestStatusPillsRendersQueueCount(t *testing.T) {
 func TestStatusPillsRendersQueuedPrompts(t *testing.T) {
 	t.Parallel()
 	out := StatusPills{
-		Width:         60,
-		Theme:         theme.ShellTheme(),
-		QueueCount:    4,
-		QueuedPrompts: []string{"first prompt", "second\nline", "third prompt", "fourth prompt"},
+		Width:          60,
+		Theme:          theme.ShellTheme(),
+		QueueCount:     4,
+		QueuedPrompts:  []string{"first prompt", "second\nline", "third prompt", "fourth prompt"},
+		QueuedEditable: true,
 	}.View()
 	plain := stripANSI(out)
-	for _, want := range []string{"4 queued", "1. first prompt", "2. second ↵ line", "3. third prompt", "… 1 more queued"} {
+	for _, want := range []string{"4 queued · click to edit", "1. first prompt", "2. second ↵ line", "3. third prompt", "… 1 more queued"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("queued prompt view missing %q; got:\n%s", want, plain)
 		}

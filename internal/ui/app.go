@@ -152,6 +152,8 @@ type uiMessage = components.UIMessage
 // internal/ui/components package directly.  See AppOptions.MCPStatuses.
 type SidebarMCPStatus = components.SidebarMCPStatus
 
+const queuedDraftHitRows = 3
+
 // New constructs the App.  Validates required fields and starts the bus
 // bridge goroutine.
 func New(opts AppOptions) (*App, error) {
@@ -494,6 +496,16 @@ type App struct {
 	// queuedPrompts holds the prompt texts for queued sends (for display).
 	// Updated on bus.QueueChanged.
 	queuedPrompts []string
+	queuedDrafts  []queuedPromptDraft
+	// queuedDraftEditing remembers the original queue index for a draft being
+	// edited in the input. Submitting while busy reinserts at this index.
+	queuedDraftEditing bool
+	queuedDraftEditIdx int
+
+	// optimisticUserPending is true after startSend renders the active turn's
+	// user prompt before the store confirms it. Queued prompts do not set this;
+	// they stay in queuedPrompts until their persisted MessageAppended event.
+	optimisticUserPending bool
 
 	// todoIncomplete/todoInProgress summarize the foreground session's agent
 	// todo list. Updated on bus.TodoChanged.
@@ -954,6 +966,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The goroutine is done; no more cancellable work on this context.
 		a.inflightCancel = nil
 		if m.Err != nil {
+			a.optimisticUserPending = false
 			// An error means no TurnCompleted will fire (the turn failed or was
 			// cancelled), so we must flip busy=false here.  Also reset the
 			// activeTurns counter since no matching TurnCompleted is coming.
@@ -986,6 +999,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if !a.anyOverlayOpen() && m.Button == tea.MouseLeft {
+			if idx := a.queuedDraftAtScreen(m.X, m.Y); idx >= 0 {
+				a.clearSelection()
+				a.editQueuedDraft(idx)
+				return a, nil
+			}
 			// Check for subagent bubble click.
 			if id := a.subagentAtScreen(m.X, m.Y); id != "" {
 				a.clearSelection()
@@ -1125,6 +1143,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.pastedInputBlocks = nil
 		a.slashPaletteDismissed = false
 		a.mentionDismissed = false
+		a.cancelQueuedDraftEdit()
 		return a, nil
 	case "ctrl+x":
 		// Dismiss the compaction threshold-suggestion banner for this crossing.
@@ -1200,13 +1219,18 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		text := strings.TrimSpace(a.expandPastedInputText(displayText))
 		a.history.Add(text)
+		attachments := a.drainPromptAttachments(mentionAttachments)
 		a.input.Reset()
 		a.pastedInputBlocks = nil
 		a.slashPaletteDismissed = false
 		a.mentionDismissed = false
 		// Resume auto-scroll when the user sends a message.
 		a.userScrolled = false
-		return a, a.startSend(text, mentionAttachments...)
+		if a.busy {
+			a.enqueuePromptDraft(queuedPromptDraft{Text: text, Attachments: attachments})
+			return a, nil
+		}
+		return a, a.startSendWithAttachments(text, attachments)
 	case "pgup":
 		// Scroll message list up one page; pause auto-scroll.
 		if !a.msgViewport.AtTop() {
@@ -1257,6 +1281,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				a.inflightCancel()
 			}
 			// Clear the queue.
+			a.queuedDrafts = nil
+			a.cancelQueuedDraftEdit()
+			a.syncQueuedDraftDisplay()
 			rootID := a.rootSessionID()
 			if a.testAgentClearQueueFn != nil {
 				a.testAgentClearQueueFn(rootID)
@@ -1271,6 +1298,13 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		// First Esc while busy: clear the queue if any.
+		if len(a.queuedDrafts) > 0 {
+			dropped := len(a.queuedDrafts)
+			a.queuedDrafts = nil
+			a.cancelQueuedDraftEdit()
+			a.syncQueuedDraftDisplay()
+			return a, a.setNotice(fmt.Sprintf("cleared %d queued message(s) — press Esc again to interrupt", dropped))
+		}
 		if a.queueCount > 0 {
 			rootID := a.rootSessionID()
 			var dropped int
@@ -1448,9 +1482,17 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // In tests that do not wire a *tea.Program, sendOutOfBand is a no-op; tests
 // drive sendCompleted manually via app.Update(sendCompleted{...}).
 func (a *App) startSend(text string, mentionAttachments ...promptAttachment) tea.Cmd {
+	return a.startSendWithAttachments(text, a.drainPromptAttachments(mentionAttachments))
+}
+
+func (a *App) drainPromptAttachments(mentionAttachments []promptAttachment) []promptAttachment {
 	attachments := append([]promptAttachment(nil), a.pendingAttachments...)
 	attachments = appendUniquePromptAttachments(attachments, mentionAttachments...)
 	a.pendingAttachments = nil
+	return attachments
+}
+
+func (a *App) startSendWithAttachments(text string, attachments []promptAttachment) tea.Cmd {
 	if a.opts.Agent == nil && a.testAgentSendFn == nil {
 		// No agent wired up — useful for tests that just want to verify
 		// input handling.  Just emit sendStarted so the busy state flips.
@@ -1458,17 +1500,21 @@ func (a *App) startSend(text string, mentionAttachments ...promptAttachment) tea
 			return sendStarted{UserInput: text, StartedAt: a.opts.Now()}
 		}
 	}
-	// Optimistically render the user message so they see it before the
-	// provider responds.
-	userMsg := uiMessage{
-		Role:      components.RoleUser,
-		Raw:       text,
-		Timestamp: a.opts.Now(),
+	// Optimistically render only the active turn. When the app is already busy,
+	// Agent.Send will enqueue this prompt; queued prompts should remain in the
+	// sticky chrome until their persisted MessageAppended event arrives.
+	if !a.busy {
+		userMsg := uiMessage{
+			Role:      components.RoleUser,
+			Raw:       text,
+			Timestamp: a.opts.Now(),
+		}
+		if text != "" {
+			userMsg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), text)
+		}
+		a.messages = append(a.messages, userMsg)
+		a.optimisticUserPending = true
 	}
-	if text != "" {
-		userMsg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), text)
-	}
-	a.messages = append(a.messages, userMsg)
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.inflightCancel = cancel
@@ -1496,6 +1542,138 @@ func (a *App) startSend(text string, mentionAttachments ...promptAttachment) tea
 	return func() tea.Msg {
 		return sendStarted{UserInput: text, StartedAt: startedAt}
 	}
+}
+
+func (a *App) enqueuePromptDraft(draft queuedPromptDraft) {
+	if a.queuedDraftEditing {
+		idx := min(max(a.queuedDraftEditIdx, 0), len(a.queuedDrafts))
+		a.queuedDrafts = append(a.queuedDrafts, queuedPromptDraft{})
+		copy(a.queuedDrafts[idx+1:], a.queuedDrafts[idx:])
+		a.queuedDrafts[idx] = draft
+		a.cancelQueuedDraftEdit()
+		a.syncQueuedDraftDisplay()
+		return
+	}
+	a.queuedDrafts = append(a.queuedDrafts, draft)
+	a.syncQueuedDraftDisplay()
+}
+
+func (a *App) cancelQueuedDraftEdit() {
+	a.queuedDraftEditing = false
+	a.queuedDraftEditIdx = 0
+}
+
+func (a *App) syncQueuedDraftDisplay() {
+	if len(a.queuedDrafts) == 0 {
+		a.queueCount = 0
+		a.queuedPrompts = nil
+		return
+	}
+	a.queueCount = len(a.queuedDrafts)
+	a.queuedPrompts = make([]string, 0, len(a.queuedDrafts))
+	for _, draft := range a.queuedDrafts {
+		a.queuedPrompts = append(a.queuedPrompts, draft.Text)
+	}
+	if a.busy {
+		a.input.SetBusy(true, fmt.Sprintf(" (%d queued)", a.queueCount))
+	}
+}
+
+func (a *App) flushQueuedDraftsCmd() tea.Cmd {
+	if len(a.queuedDrafts) == 0 {
+		return nil
+	}
+	draft := a.queuedDrafts[0]
+	a.queuedDrafts = a.queuedDrafts[1:]
+	a.cancelQueuedDraftEdit()
+	a.syncQueuedDraftDisplay()
+	if a.opts.Agent == nil && a.testAgentSendFn == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.inflightCancel = cancel
+	sendFn := func(ctx context.Context, sid string, parts []session.Part) (*session.Message, error) {
+		return a.opts.Agent.Send(ctx, sid, parts)
+	}
+	if a.testAgentSendFn != nil {
+		sendFn = a.testAgentSendFn
+	}
+	startedAt := a.opts.Now()
+	go func() {
+		defer cancel()
+		sid, err := a.ensureSession(ctx)
+		if err != nil {
+			a.sendOutOfBand(sendCompleted{Err: err})
+			return
+		}
+		msg, err := sendFn(ctx, sid, attachmentParts(draft.Text, draft.Attachments))
+		if err != nil {
+			a.sendOutOfBand(sendCompleted{Err: err})
+			return
+		}
+		a.sendOutOfBand(sendCompleted{Result: msg})
+	}()
+	return func() tea.Msg {
+		return sendStarted{UserInput: draft.Text, StartedAt: startedAt}
+	}
+}
+
+func (a *App) appendPersistedUserMessage(messageID string) {
+	if a.opts.Store == nil || messageID == "" {
+		a.optimisticUserPending = false
+		return
+	}
+	msg, err := a.opts.Store.GetMessage(a.ctx, messageID)
+	if err != nil {
+		slog.Warn("ui: appendPersistedUserMessage: failed to load message", "message_id", messageID, "err", err)
+		a.optimisticUserPending = false
+		return
+	}
+	entries := uiEntriesFromStoreMessage(msg, map[string]session.Part{}, map[string]struct{}{})
+	if len(entries) == 0 {
+		a.optimisticUserPending = false
+		return
+	}
+	entry := entries[0]
+	if a.optimisticUserPending && len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == components.RoleUser {
+		a.messages[len(a.messages)-1] = entry
+	} else {
+		a.messages = append(a.messages, entry)
+	}
+	a.optimisticUserPending = false
+	a.invalidateMsgCache()
+}
+
+func (a *App) queuedDraftAtScreen(screenX, screenY int) int {
+	if len(a.queuedDrafts) == 0 || screenX < 0 || screenX >= a.layout.leftW {
+		return -1
+	}
+	chromeY := headerHeight + a.layout.chat.Dy() + chatBottomPadding
+	firstPromptY := chromeY + 1 // row 0 is the queue/status pill itself.
+	idx := screenY - firstPromptY
+	if idx < 0 || idx >= len(a.queuedDrafts) || idx >= queuedDraftHitRows {
+		return -1
+	}
+	return idx
+}
+
+func (a *App) editQueuedDraft(index int) {
+	if index < 0 || index >= len(a.queuedDrafts) {
+		return
+	}
+	draft := a.queuedDrafts[index]
+	a.queuedDrafts = append(a.queuedDrafts[:index], a.queuedDrafts[index+1:]...)
+	a.queuedDraftEditing = true
+	a.queuedDraftEditIdx = index
+	a.syncQueuedDraftDisplay()
+	a.pendingAttachments = append([]promptAttachment(nil), draft.Attachments...)
+	a.setInputValueAndCursor(draft.Text, len([]rune(draft.Text)))
+	a.history.Reset()
+	a.paletteHighlight = -1
+	a.slashPaletteDismissed = false
+	a.mentionHighlight = -1
+	a.mentionDismissed = false
 }
 
 func (a *App) renderAttachmentChips(width int) string {
@@ -1623,6 +1801,10 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		// Finalize any trailing thinking block when the message is committed.
 		a.finalizeTrailingThinking()
+		if e.Role == string(session.RoleUser) {
+			a.appendPersistedUserMessage(e.MessageID)
+			return nil
+		}
 		a.flushAssistantStream(e.Role, e.MessageID)
 
 	case bus.ToolCallRequested:
@@ -1819,6 +2001,9 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// compactionCompleteMsg handling.
 
 	case bus.QueueChanged:
+		if len(a.queuedDrafts) > 0 {
+			return nil
+		}
 		// Only update the queue state for the root (active send) session.
 		rootID := a.rootSessionID()
 		if rootID != "" && e.SessionID != rootID {
@@ -1882,6 +2067,12 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// keeping it set here avoids a visible flicker.
 		if a.activeTurns > 0 {
 			a.activeTurns--
+		}
+		if a.activeTurns == 0 && len(a.queuedDrafts) > 0 {
+			a.busy = false
+			a.workingVerb = ""
+			a.input.SetBusy(false, "")
+			return a.flushQueuedDraftsCmd()
 		}
 		if a.activeTurns == 0 && a.queueCount == 0 {
 			a.busy = false

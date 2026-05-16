@@ -336,12 +336,13 @@ func (a *App) renderChromeContent() string {
 
 	// Status pills.
 	statusPills := components.StatusPills{
-		Width:         l.leftW,
-		Theme:         a.opts.Theme,
-		QueueCount:    a.queueCount,
-		QueuedPrompts: a.queuedPrompts,
-		TodoCount:     a.todoIncomplete,
-		TodoRunning:   a.busy && a.todoInProgress > 0,
+		Width:          l.leftW,
+		Theme:          a.opts.Theme,
+		QueueCount:     a.queueCount,
+		QueuedPrompts:  a.queuedPrompts,
+		QueuedEditable: len(a.queuedDrafts) > 0,
+		TodoCount:      a.todoIncomplete,
+		TodoRunning:    a.busy && a.todoInProgress > 0,
 	}.View()
 	if statusPills != "" {
 		sections = append(sections, statusPills)

@@ -13,12 +13,13 @@ const maxQueuedPromptRows = 3
 
 // StatusPills renders compact input-adjacent status chips.
 type StatusPills struct {
-	Width         int
-	Theme         *theme.Theme
-	QueueCount    int
-	QueuedPrompts []string
-	TodoCount     int
-	TodoRunning   bool
+	Width          int
+	Theme          *theme.Theme
+	QueueCount     int
+	QueuedPrompts  []string
+	QueuedEditable bool
+	TodoCount      int
+	TodoRunning    bool
 }
 
 // View renders a single row of pills. Empty state renders nothing so the input
@@ -26,7 +27,11 @@ type StatusPills struct {
 func (p StatusPills) View() string {
 	var pills []string
 	if p.QueueCount > 0 {
-		pills = append(pills, p.pill(fmt.Sprintf("%d queued", p.QueueCount), theme.AtomAccent))
+		label := fmt.Sprintf("%d queued", p.QueueCount)
+		if p.QueuedEditable {
+			label += " · click to edit"
+		}
+		pills = append(pills, p.pill(label, theme.AtomAccent))
 	}
 	if p.TodoCount > 0 {
 		label := fmt.Sprintf("%d todo", p.TodoCount)
