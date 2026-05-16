@@ -36,6 +36,30 @@ func TestMessageListRendersRoles(t *testing.T) {
 	}
 }
 
+func TestMentionTokensHighlightedInInputAndUserBubble(t *testing.T) {
+	t.Parallel()
+	th := theme.ShellTheme()
+	accentMention := th.Style(theme.AtomAccent).Render("@internal/ui/app.go")
+
+	in := NewInput(th)
+	in.Textarea.SetValue("read @internal/ui/app.go")
+	if out := in.View(); !strings.Contains(out, accentMention) {
+		t.Fatalf("input mention was not highlighted; want %q in:\n%s", accentMention, out)
+	}
+
+	ml := MessageList{
+		Width: 100,
+		Theme: th,
+		Messages: []UIMessage{{
+			Role: RoleUser,
+			Raw:  "read @internal/ui/app.go",
+		}},
+	}
+	if out := ml.View(); !strings.Contains(out, accentMention) {
+		t.Fatalf("user bubble mention was not highlighted; want %q in:\n%s", accentMention, out)
+	}
+}
+
 func TestThemeModalFilterNavigateApplyCancel(t *testing.T) {
 	t.Parallel()
 	m := ThemeModal{Current: "shell", Themes: []string{"shell", "midnight", "solarized"}}

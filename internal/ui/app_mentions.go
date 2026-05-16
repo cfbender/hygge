@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -11,6 +14,8 @@ import (
 )
 
 const maxMentionFileCandidates = 2000
+
+var promptMentionPattern = regexp.MustCompile(`(^|\s)@([^\s]+)`)
 
 // MentionSubagent is the UI-facing description of a selectable sub-agent type.
 // The CLI maps internal/subagent.Type values into this shape so internal/ui can
@@ -192,4 +197,66 @@ func mentionItems(candidates []mentionCandidate) []components.MentionItem {
 		items = append(items, c.MentionItem)
 	}
 	return items
+}
+
+func (a *App) promptAttachmentsForMentions(text string) ([]promptAttachment, error) {
+	root := a.opts.ProjectDir
+	if root == "" || strings.HasPrefix(root, "~") {
+		return nil, nil
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project dir: %w", err)
+	}
+	seen := map[string]struct{}{}
+	var attachments []promptAttachment
+	for _, token := range mentionFileTokens(text) {
+		if strings.HasPrefix(token, "agent:") {
+			continue
+		}
+		path := strings.TrimRight(token, ".,;:!?)")
+		if path == "" {
+			continue
+		}
+		candidate := filepath.FromSlash(path)
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(rootAbs, candidate)
+		}
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(rootAbs, abs)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		att, err := loadPromptAttachment(abs)
+		if err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, att)
+		seen[abs] = struct{}{}
+	}
+	return attachments, nil
+}
+
+func mentionFileTokens(text string) []string {
+	matches := promptMentionPattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) >= 3 {
+			out = append(out, m[2])
+		}
+	}
+	return out
 }

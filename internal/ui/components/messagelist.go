@@ -501,6 +501,9 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		body = msg.FinalMarkdown
 	}
 	body = strings.TrimRight(body, "\n")
+	if m.Theme != nil {
+		body = HighlightMentions(body, m.Theme.Style(theme.AtomAccent))
+	}
 
 	// Header-right: relative timestamp.
 	headerRight := ""
