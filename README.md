@@ -93,9 +93,14 @@ When the picker opens (via `hygge resume` with multiple sessions or `resume_defa
 User config lives at `~/.config/hygge/config.toml` (or
 `$XDG_CONFIG_HOME/hygge/config.toml`).
 
-Profiles live in `~/.config/hygge/profiles/<name>.toml` and are activated
-with `hygge profile use <name>`. A profile can `extends = "other"` to
-inherit from another profile.
+Profiles live in `~/.config/hygge/profiles/<name>.toml` and are selected with
+the `default_profile` key in user config. `hygge profile use <name>` writes
+that key for you. A profile can `extends = "other"` to inherit from another
+profile.
+
+```toml
+default_profile = "work"
+```
 
 A `.hygge/config.toml` file in the current directory (or any parent) is
 picked up automatically as the highest-priority layer. Use this for

@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/cfbender/hygge/internal/state"
 )
 
 func TestProfileListEmpty(t *testing.T) {
@@ -81,15 +79,44 @@ func TestProfileUse(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	// Verify the state file now has ActiveProfile=work.
-	st, err := state.Load(state.LoadOptions{
-		HomeDir:      home,
-		XDGStateHome: filepath.Join(home, ".local", "state"),
-	})
+	// Verify the user config now sets default_profile=work.
+	data, err := os.ReadFile(filepath.Join(home, ".config", "hygge", "config.toml")) // #nosec G304 -- hermetic test path under t.TempDir
 	if err != nil {
-		t.Fatalf("state.Load: %v", err)
+		t.Fatalf("read config: %v", err)
 	}
-	if st.ActiveProfile != "work" {
-		t.Errorf("ActiveProfile = %q, want work", st.ActiveProfile)
+	if !strings.Contains(string(data), `default_profile = 'work'`) && !strings.Contains(string(data), `default_profile = "work"`) {
+		t.Errorf("config missing default_profile: %s", data)
+	}
+}
+
+func TestProfileListMarksConfigDefaultProfile(t *testing.T) {
+	home := hermeticHome(t)
+	dir := filepath.Join(home, ".config", "hygge", "profiles")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, name := range []string{"default.toml", "work.toml"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(""), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "hygge", "config.toml"), []byte(`default_profile = "work"`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"profile", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "* work") {
+		t.Errorf("expected work to be marked default:\n%s", got)
+	}
+	if strings.Contains(got, "* default") {
+		t.Errorf("default should not be marked when config default_profile is work:\n%s", got)
 	}
 }
