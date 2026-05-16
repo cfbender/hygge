@@ -59,7 +59,7 @@ func (a *Agent) runLegacyLoop(ctx context.Context, sessionID, modelName string) 
 
 		req := buildRequest(
 			msgs, marker,
-			a.opts.SystemPrompt,
+			a.systemPrompt(),
 			a.opts.Tools.AsProviderTools(),
 			modelName,
 			nil,

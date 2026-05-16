@@ -60,7 +60,7 @@ type modeSwitchResult struct {
 
 func (a *App) switchModeCmd(providerName, modelName, modeName string) tea.Cmd {
 	return func() tea.Msg {
-		if err := a.opts.SwitchModel(context.Background(), providerName, modelName); err != nil {
+		if err := a.opts.SwitchModel(context.Background(), providerName, modelName, modeName); err != nil {
 			return modeSwitchResult{name: modeName, err: err}
 		}
 		return modeSwitchResult{name: modeName}

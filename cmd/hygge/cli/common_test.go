@@ -409,6 +409,52 @@ func TestBootstrap_SkillsAppearInSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestComposeModeSystemPromptDoesNotAccumulatePreviousModes(t *testing.T) {
+	base := "base\n\nskills\n\nproject context"
+	first := composeModeSystemPrompt(base, "mode one")
+	second := composeModeSystemPrompt(base, "mode two")
+
+	if first != "base\n\nskills\n\nproject context\n\nmode one" {
+		t.Fatalf("first prompt = %q", first)
+	}
+	if second != "base\n\nskills\n\nproject context\n\nmode two" {
+		t.Fatalf("second prompt = %q", second)
+	}
+	if strings.Contains(second, "mode one") {
+		t.Fatalf("second prompt retained previous mode: %q", second)
+	}
+}
+
+func TestBootstrap_AppendsDefaultModePrompt(t *testing.T) {
+	home := hermeticHome(t)
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(filepath.Join(cfgDir, "prompts"), 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "prompts", "smart.md"), []byte("smart mode: delegate read-only codebase mapping to @agent:search"), 0o600); err != nil {
+		t.Fatalf("write smart prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(`
+[[modes]]
+name = "smart"
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+prompt = "file:prompts/smart.md"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if !strings.Contains(rt.SystemPrompt, "smart mode: delegate read-only codebase mapping to @agent:search") {
+		t.Fatalf("SystemPrompt missing default mode prompt:\n%s", rt.SystemPrompt)
+	}
+}
+
 func TestDefaultSystemPromptGuidesToolNarration(t *testing.T) {
 	if !strings.Contains(defaultSystemPrompt, "Before using tools") {
 		t.Fatalf("defaultSystemPrompt should ask the model to narrate tool usage:\n%s", defaultSystemPrompt)

@@ -123,8 +123,10 @@ type AppOptions struct {
 	Config *config.Config
 
 	// SwitchModel applies a provider/model selection to the running backend.
-	// When nil, /model remains a session-only UI selection.
-	SwitchModel func(ctx context.Context, providerName, modelName string) error
+	// modeName is non-empty when the switch came from a mode change; it is empty
+	// for direct /model selections. When nil, /model remains a session-only UI
+	// selection.
+	SwitchModel func(ctx context.Context, providerName, modelName, modeName string) error
 	// SaveModel persists a successful provider/model runtime switch.  Save
 	// failures are surfaced to the UI without rolling back the runtime switch.
 	SaveModel  func(ctx context.Context, providerName, modelName string) error
@@ -3263,7 +3265,7 @@ func (a *App) saveAPIKeyCmd(providerName, apiKey string) tea.Cmd {
 			}
 		}
 		if a.opts.SwitchModel != nil && providerName == a.opts.ModelProvider && a.opts.ModelName != "" {
-			if err := a.opts.SwitchModel(a.ctx, a.opts.ModelProvider, a.opts.ModelName); err != nil {
+			if err := a.opts.SwitchModel(a.ctx, a.opts.ModelProvider, a.opts.ModelName, a.ActiveModeName()); err != nil {
 				return apiKeySaveResult{provider: providerName, err: err}
 			}
 		}

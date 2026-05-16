@@ -146,7 +146,7 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		return nil, fmt.Errorf("agent: load messages: %w", err)
 	}
 	lazyBlocks := a.drainPendingLazy(sessionID)
-	fmsgs := toFantasyMessages(msgs, marker, a.opts.SystemPrompt, lazyBlocks)
+	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), lazyBlocks)
 	pwd := a.opts.Pwd
 	if pwd == "" {
 		if wd, err := os.Getwd(); err == nil {

@@ -226,6 +226,49 @@ func scriptText(text string, usage provider.Usage) fakeScript {
 	return fakeScript{events: evs}
 }
 
+func TestSetSystemPromptChangesSubsequentSendPrompt(t *testing.T) {
+	env := newTestEnv(t)
+	prov := newFakeProvider("test",
+		scriptText("ok", provider.Usage{}),
+		scriptText("ok again", provider.Usage{}),
+	)
+	a := env.newAgent(prov, func(o *Options) { o.SystemPrompt = "base\n\nmode one" })
+	sess, err := env.Store.CreateSession(t.Context(), session.NewSession{
+		ProjectDir: env.pwd,
+		Model:      session.ModelRef{Provider: "test", Name: "test-model"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	var seen []string
+	prov.onStream = func(req provider.Request) {
+		seen = append(seen, req.System)
+	}
+	if _, err := a.Send(t.Context(), sess.ID, userText("first")); err != nil {
+		t.Fatalf("first Send: %v", err)
+	}
+	if err := a.SetSystemPrompt("base\n\nmode two"); err != nil {
+		t.Fatalf("SetSystemPrompt: %v", err)
+	}
+	if _, err := a.Send(t.Context(), sess.ID, userText("second")); err != nil {
+		t.Fatalf("second Send: %v", err)
+	}
+
+	if len(seen) != 2 {
+		t.Fatalf("stream calls = %d, want 2", len(seen))
+	}
+	if seen[0] != "base\n\nmode one" {
+		t.Fatalf("first system prompt = %q", seen[0])
+	}
+	if seen[1] != "base\n\nmode two" {
+		t.Fatalf("second system prompt = %q", seen[1])
+	}
+	if strings.Contains(seen[1], "mode one") {
+		t.Fatalf("switched prompt retained old mode prompt: %q", seen[1])
+	}
+}
+
 func TestSetModelChangesSubsequentSendProviderAndModel(t *testing.T) {
 	env := newTestEnv(t)
 	first := newFakeProvider("first", scriptText("one", provider.Usage{}))
