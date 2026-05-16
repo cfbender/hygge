@@ -16,6 +16,7 @@ const (
 	overlayAPIKey         overlayKind = command.ModalAPIKey
 	overlayTheme          overlayKind = command.ModalTheme
 	overlayPermission     overlayKind = "permission"
+	overlayQuestion       overlayKind = "question"
 	overlayQuit           overlayKind = "quit"
 )
 

@@ -142,6 +142,7 @@ func DefaultWith(opts DefaultOptions) *Registry {
 	mustRegister(r, newGrepTool())
 	mustRegister(r, newGlobTool())
 	mustRegister(r, newTodoTool(r.todos, opts.TodoStore))
+	mustRegister(r, NewQuestionTool())
 	if opts.SkillRegistry != nil {
 		mustRegister(r, NewSkillTool(opts.SkillRegistry))
 	}

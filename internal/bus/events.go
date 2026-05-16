@@ -154,6 +154,32 @@ type PermissionReplied struct {
 	At time.Time
 }
 
+// QuestionOption is one selectable answer for a QuestionAsked event.
+type QuestionOption struct {
+	ID    string
+	Label string
+}
+
+// QuestionAsked fires when the model asks the user to choose between bounded
+// options. Subscribers render an interactive prompt and publish QuestionAnswered.
+type QuestionAsked struct {
+	RequestID string
+	SessionID string
+	ToolName  string
+	Question  string
+	Options   []QuestionOption
+	At        time.Time
+}
+
+// QuestionAnswered resolves a QuestionAsked prompt.
+type QuestionAnswered struct {
+	RequestID string
+	AnswerID  string
+	Answer    string
+	Canceled  bool
+	At        time.Time
+}
+
 // MCPStatusUpdated fires when async MCP startup changes one configured server's
 // status. The UI uses this to let MCP sidebar rows move from starting to ready
 // or failed without delaying the first frame.

@@ -1055,6 +1055,48 @@ func TestPermissionModalStacks(t *testing.T) {
 	}
 }
 
+func TestQuestionModalPublishesSelectedAnswer(t *testing.T) {
+	app, b := newTestApp(t)
+	repliedCh := bus.Subscribe[bus.QuestionAnswered](b, bus.SubscribeOptions{})
+	defer repliedCh.Unsubscribe()
+
+	app.Handle(bus.QuestionAsked{
+		RequestID: "q-1",
+		ToolName:  "question",
+		Question:  "Pick a strategy",
+		Options: []bus.QuestionOption{
+			{ID: "1", Label: "Fast"},
+			{ID: "2", Label: "Careful"},
+		},
+	})
+	if len(app.pendingQuestions) != 1 {
+		t.Fatalf("pendingQuestions len = %d, want 1", len(app.pendingQuestions))
+	}
+	plain := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	for _, want := range []string{"question", "Pick a strategy", "[1] Fast", "[2] Careful"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("question modal missing %q in:\n%s", want, plain)
+		}
+	}
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	if cmd == nil {
+		t.Fatal("expected reply cmd")
+	}
+	cmd()
+	if len(app.pendingQuestions) != 0 {
+		t.Fatalf("pendingQuestions len = %d, want 0", len(app.pendingQuestions))
+	}
+	select {
+	case reply := <-repliedCh.C():
+		if reply.RequestID != "q-1" || reply.AnswerID != "2" || reply.Answer != "Careful" || reply.Canceled {
+			t.Fatalf("unexpected reply: %+v", reply)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for QuestionAnswered")
+	}
+}
+
 func TestContextUsageUpdatesSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
