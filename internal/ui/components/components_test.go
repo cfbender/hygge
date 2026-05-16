@@ -36,6 +36,26 @@ func TestMessageListRendersRoles(t *testing.T) {
 	}
 }
 
+func TestMessageListCompactionMarkerStaysWithinWidth(t *testing.T) {
+	t.Parallel()
+	const width = 44
+	ml := MessageList{
+		Width: width,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{{
+			Role:              RoleMarker,
+			MarkerTokensSaved: 1234,
+			MarkerSummary:     strings.Repeat("This compacted summary should wrap inside the marker box. ", 5),
+		}},
+	}
+	out := ml.View()
+	for line := range strings.SplitSeq(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("marker line width = %d, want <= %d\nline: %q\noutput:\n%s", got, width, line, out)
+		}
+	}
+}
+
 func TestMentionTokensHighlightedInInputAndUserBubble(t *testing.T) {
 	t.Parallel()
 	th := theme.ShellTheme()
