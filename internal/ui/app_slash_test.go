@@ -16,6 +16,7 @@ import (
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
@@ -495,18 +496,51 @@ func TestSlashCommandReasonUpdatesOpts(t *testing.T) {
 	}
 }
 
-func TestSlashCommandClearWipesMessages(t *testing.T) {
+func TestSlashCommandNewStartsFreshSessionAndClearAliases(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
+	app.opts.SessionID = "01HZSESSION"
+	app.resetForeground("01HZSESSION")
+	app.todoIncomplete = 2
+	app.todoInProgress = 1
+	app.todosCache = []components.SidebarTodo{{Title: "old todo", Status: components.SidebarTodoInProgress}}
 	app.appendAssistantDelta("hello")
 	app.flushAssistantStream("assistant", "")
+	if len(app.messages) == 0 || app.opts.SessionID == "" {
+		t.Fatal("setup: expected active session with messages")
+	}
+
+	typeInto(app, "/new")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if app.opts.SessionID != "" {
+		t.Fatalf("SessionID = %q, want empty for fresh session", app.opts.SessionID)
+	}
+	if len(app.messages) != 0 {
+		t.Fatalf("/new should clear rendered messages, got %d", len(app.messages))
+	}
+	if app.todoIncomplete != 0 || app.todoInProgress != 0 || len(app.todosCache) != 0 {
+		t.Fatalf("/new should clear todos, incomplete=%d in_progress=%d cache=%+v", app.todoIncomplete, app.todoInProgress, app.todosCache)
+	}
+
+	app.opts.SessionID = "01HZSESSION2"
+	app.resetForeground("01HZSESSION2")
+	app.todoIncomplete = 1
+	app.todosCache = []components.SidebarTodo{{Title: "stale todo", Status: components.SidebarTodoPending}}
+	app.appendAssistantDelta("again")
+	app.flushAssistantStream("assistant", "")
 	if len(app.messages) == 0 {
-		t.Fatal("setup: expected a message before /clear")
+		t.Fatal("setup: expected messages before /clear alias")
 	}
 	typeInto(app, "/clear")
 	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if app.opts.SessionID != "" {
+		t.Fatalf("/clear alias SessionID = %q, want empty", app.opts.SessionID)
+	}
 	if len(app.messages) != 0 {
-		t.Errorf("expected /clear to wipe messages, got %d", len(app.messages))
+		t.Errorf("/clear alias should clear rendered messages, got %d", len(app.messages))
+	}
+	if app.todoIncomplete != 0 || app.todoInProgress != 0 || len(app.todosCache) != 0 {
+		t.Fatalf("/clear alias should clear todos, incomplete=%d in_progress=%d cache=%+v", app.todoIncomplete, app.todoInProgress, app.todosCache)
 	}
 }
 

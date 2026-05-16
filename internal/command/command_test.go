@@ -52,6 +52,7 @@ func TestCommandInterfaceImplementations(t *testing.T) {
 	// Compile-time sanity that the package surface still exposes
 	// the names we expect.
 	var _ Command = (*helpCmd)(nil)
+	var _ Command = (*newCmd)(nil)
 	var _ Command = (*clearCmd)(nil)
 	var _ Command = (*compactCmd)(nil)
 	var _ Command = (*costCmd)(nil)
@@ -67,7 +68,7 @@ func TestCommandInterfaceImplementations(t *testing.T) {
 func TestOutcomeZeroValueIsNoop(t *testing.T) {
 	t.Parallel()
 	o := Outcome{}
-	if o.Message != "" || o.Notice != "" || o.ClearHistory || o.Compact || o.OpenModal != "" || len(o.Updates) != 0 {
+	if o.Message != "" || o.Notice != "" || o.ClearHistory || o.NewSession || o.Compact || o.OpenModal != "" || len(o.Updates) != 0 {
 		t.Fatalf("zero Outcome has non-zero fields: %+v", o)
 	}
 }
@@ -171,7 +172,7 @@ func TestBuiltinHelpListsEverything(t *testing.T) {
 	if out.OpenModal != ModalHelp {
 		t.Errorf("OpenModal = %q, want %q", out.OpenModal, ModalHelp)
 	}
-	for _, name := range []string{"help", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "yolo", "version"} {
+	for _, name := range []string{"help", "new", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "yolo", "version"} {
 		if !strings.Contains(out.Notice, "/"+name) {
 			t.Errorf("/help notice missing /%s:\n%s", name, out.Notice)
 		}
@@ -228,8 +229,20 @@ func TestBuiltinOutcomes(t *testing.T) {
 			name:    "clear",
 			cmdName: "clear",
 			check: func(t *testing.T, o Outcome) {
-				if !o.ClearHistory {
-					t.Error("expected ClearHistory=true")
+				if !o.NewSession {
+					t.Error("expected NewSession=true")
+				}
+				if o.ClearHistory {
+					t.Error("expected ClearHistory=false")
+				}
+			},
+		},
+		{
+			name:    "new",
+			cmdName: "new",
+			check: func(t *testing.T, o Outcome) {
+				if !o.NewSession {
+					t.Error("expected NewSession=true")
 				}
 			},
 		},

@@ -60,11 +60,14 @@ func splitSlash(text string) (name, body string) {
 
 // applyOutcome interprets the fields of out and returns a single
 // tea.Cmd that performs every effect the outcome asked for.  Several
-// fields may be set on the same outcome (e.g. /clear sets both a
-// notice and ClearHistory); applyOutcome combines them with
+// fields may be set on the same outcome; applyOutcome combines them with
 // tea.Batch.
 func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 	var cmds []tea.Cmd
+
+	if out.NewSession {
+		cmds = append(cmds, a.applySwitchSession(""))
+	}
 
 	if out.ClearHistory {
 		a.messages = nil

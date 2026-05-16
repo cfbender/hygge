@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] /new command for new session. alias /clear to this as well and remove /clear's current functionality
-
 - [ ] click and drag scrollbar handle to scroll
 
 - [ ] compaction summary box breaks out of viewport
