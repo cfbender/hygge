@@ -189,8 +189,7 @@ func (p *luaPlugin) luaRegisterTool(L *lua.LState) int {
 	var inputSchema json.RawMessage
 	if schemaVal := tbl.RawGetString("input_schema"); schemaVal != lua.LNil {
 		if schemaTbl, ok := schemaVal.(*lua.LTable); ok {
-			m := luaTableToMap(schemaTbl)
-			b, err := json.Marshal(m)
+			b, err := json.Marshal(luaSchemaTableToGo(schemaTbl, ""))
 			if err == nil {
 				inputSchema = b
 			}
@@ -353,8 +352,7 @@ func (p *luaPlugin) luaRegisterHook(L *lua.LState) int {
 				// Modified fields.
 				if modInput := retTbl.RawGetString("modified_tool_input"); modInput != lua.LNil {
 					if modTbl, ok := modInput.(*lua.LTable); ok {
-						m := luaTableToMap(modTbl)
-						b, _ := json.Marshal(m)
+						b, _ := json.Marshal(luaTableToGo(modTbl))
 						action.ModifiedToolInput = b
 					}
 				}
@@ -545,15 +543,107 @@ func luaToGo(v lua.LValue) any {
 	case lua.LString:
 		return string(val)
 	case *lua.LTable:
-		return luaTableToMap(val)
+		return luaTableToGo(val)
 	default:
 		return nil
 	}
 }
 
-// luaTableToMap converts a Lua table to a map[string]any.  Integer-keyed
-// tables become map["1"]=...; for proper arrays the caller should check the
-// table shape.
+// luaTableToGo converts a Lua table to either []any for contiguous 1-indexed
+// sequence tables or map[string]any for object-shaped tables.
+func luaTableToGo(t *lua.LTable) any {
+	maxIndex := 0
+	count := 0
+	isSequence := true
+	t.ForEach(func(k, _ lua.LValue) {
+		count++
+		idx, ok := luaTableArrayIndex(k)
+		if !ok {
+			isSequence = false
+			return
+		}
+		if idx > maxIndex {
+			maxIndex = idx
+		}
+	})
+
+	if count > 0 && isSequence && maxIndex == count {
+		items := make([]any, 0, maxIndex)
+		for i := 1; i <= maxIndex; i++ {
+			items = append(items, luaToGo(t.RawGetInt(i)))
+		}
+		return items
+	}
+
+	return luaTableToMap(t)
+}
+
+func luaSchemaValueToGo(key string, v lua.LValue) any {
+	if tbl, ok := v.(*lua.LTable); ok {
+		return luaSchemaTableToGo(tbl, key)
+	}
+	return luaToGo(v)
+}
+
+// luaSchemaTableToGo is like luaTableToGo, but preserves JSON Schema's empty
+// array-valued keywords. Lua represents both {} and [] as an empty table, so
+// schema-key context is needed to keep `required = {}` as JSON [] while leaving
+// `properties = {}` as JSON {}.
+func luaSchemaTableToGo(t *lua.LTable, key string) any {
+	maxIndex := 0
+	count := 0
+	isSequence := true
+	t.ForEach(func(k, _ lua.LValue) {
+		count++
+		idx, ok := luaTableArrayIndex(k)
+		if !ok {
+			isSequence = false
+			return
+		}
+		if idx > maxIndex {
+			maxIndex = idx
+		}
+	})
+
+	if count == 0 && schemaArrayKeyword(key) {
+		return []any{}
+	}
+
+	if count > 0 && isSequence && maxIndex == count {
+		items := make([]any, 0, maxIndex)
+		for i := 1; i <= maxIndex; i++ {
+			items = append(items, luaSchemaValueToGo("", t.RawGetInt(i)))
+		}
+		return items
+	}
+
+	m := make(map[string]any)
+	t.ForEach(func(k, v lua.LValue) {
+		key := k.String()
+		m[key] = luaSchemaValueToGo(key, v)
+	})
+	return m
+}
+
+func schemaArrayKeyword(key string) bool {
+	switch key {
+	case "required", "enum", "type", "anyOf", "oneOf", "allOf":
+		return true
+	default:
+		return false
+	}
+}
+
+func luaTableArrayIndex(v lua.LValue) (int, bool) {
+	n, ok := v.(lua.LNumber)
+	if !ok {
+		return 0, false
+	}
+	idx := int(n)
+	return idx, idx >= 1 && lua.LNumber(idx) == n
+}
+
+// luaTableToMap converts a Lua table to a map[string]any.
 func luaTableToMap(t *lua.LTable) map[string]any {
 	m := make(map[string]any)
 	t.ForEach(func(k, v lua.LValue) {

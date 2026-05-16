@@ -496,6 +496,99 @@ hygge.register_tool {
 	}
 }
 
+// TestLuaLoader_inputSchemaPreservesLuaArrays verifies Lua sequence tables in
+// JSON schemas are marshalled as JSON arrays, not objects with numeric keys.
+func TestLuaLoader_inputSchemaPreservesLuaArrays(t *testing.T) {
+	reg, toolReg, _, _, _ := buildTestRegistry(t)
+
+	lua := `
+hygge.register_tool {
+    name = "schema_array_test",
+    description = "Test schema array conversion",
+    input_schema = {
+        type = "object",
+        properties = {
+            title = { type = "string" },
+            mode = { type = "string", enum = { "approve", "comment" } },
+        },
+        required = { "title", "mode" },
+        additionalProperties = false,
+    },
+    execute = function(ctx, input)
+        return { content = "ok" }
+    end,
+}
+hygge.register_tool {
+    name = "empty_required_test",
+    description = "Test empty required conversion",
+    input_schema = {
+        type = "object",
+        properties = {},
+        required = {},
+        additionalProperties = false,
+    },
+    execute = function(ctx, input)
+        return { content = "ok" }
+    end,
+}
+`
+	dir := t.TempDir()
+	writeFile(t, dir, "plugin.lua", lua)
+	if err := reg.Install(context.Background(), "local:"+dir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	toolFn, ok := toolReg.Get("schema_array_test")
+	if !ok {
+		t.Fatal("schema_array_test not registered")
+	}
+
+	schema := toolFn.InputSchema()
+	required, ok := schema["required"].([]any)
+	if !ok {
+		t.Fatalf("required = %T (%#v), want []any", schema["required"], schema["required"])
+	}
+	if len(required) != 2 || required[0] != "title" || required[1] != "mode" {
+		t.Fatalf("required = %#v, want [title mode]", required)
+	}
+
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %T (%#v), want map[string]any", schema["properties"], schema["properties"])
+	}
+	mode, ok := properties["mode"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties.mode = %T (%#v), want map[string]any", properties["mode"], properties["mode"])
+	}
+	enumValues, ok := mode["enum"].([]any)
+	if !ok {
+		t.Fatalf("enum = %T (%#v), want []any", mode["enum"], mode["enum"])
+	}
+	if len(enumValues) != 2 || enumValues[0] != "approve" || enumValues[1] != "comment" {
+		t.Fatalf("enum = %#v, want [approve comment]", enumValues)
+	}
+
+	emptyRequiredTool, ok := toolReg.Get("empty_required_test")
+	if !ok {
+		t.Fatal("empty_required_test not registered")
+	}
+	emptyRequiredSchema := emptyRequiredTool.InputSchema()
+	emptyRequired, ok := emptyRequiredSchema["required"].([]any)
+	if !ok {
+		t.Fatalf("empty required = %T (%#v), want []any", emptyRequiredSchema["required"], emptyRequiredSchema["required"])
+	}
+	if len(emptyRequired) != 0 {
+		t.Fatalf("empty required = %#v, want []", emptyRequired)
+	}
+	emptyProperties, ok := emptyRequiredSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("empty properties = %T (%#v), want map[string]any", emptyRequiredSchema["properties"], emptyRequiredSchema["properties"])
+	}
+	if len(emptyProperties) != 0 {
+		t.Fatalf("empty properties = %#v, want empty map", emptyProperties)
+	}
+}
+
 // TestLuaLoader_hookMissingFunc verifies that registering a hook without a
 // handler function errors at load time.
 func TestLuaLoader_hookMissingFunc(t *testing.T) {
