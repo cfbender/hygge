@@ -5,6 +5,8 @@ Bubble Tea TUI, streaming model responses, persistent SQLite sessions, tools,
 plugins, MCP integrations, hooks, subagents, slash commands, and themeable chat
 UI chrome.
 
+<img width="1772" height="1046" alt="image" src="https://github.com/user-attachments/assets/3c63744c-f9a9-47ab-9e94-6a239bf3442c" />
+
 ## Install
 
 Requires Go 1.26 or newer.
