@@ -315,6 +315,25 @@ func TestStatusPillsRendersQueueCount(t *testing.T) {
 	}
 }
 
+func TestStatusPillsRendersQueuedPrompts(t *testing.T) {
+	t.Parallel()
+	out := StatusPills{
+		Width:         60,
+		Theme:         theme.ShellTheme(),
+		QueueCount:    4,
+		QueuedPrompts: []string{"first prompt", "second\nline", "third prompt", "fourth prompt"},
+	}.View()
+	plain := stripANSI(out)
+	for _, want := range []string{"4 queued", "1. first prompt", "2. second ↵ line", "3. third prompt", "… 1 more queued"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("queued prompt view missing %q; got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "fourth prompt") {
+		t.Errorf("queued prompt view should collapse overflow; got:\n%s", plain)
+	}
+}
+
 func TestStatusPillsNoQueueEmpty(t *testing.T) {
 	t.Parallel()
 	out := StatusPills{Width: 60, Theme: theme.ShellTheme()}.View()

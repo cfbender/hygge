@@ -27,9 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Queued messages sticky at bottom**
-  Keep queued messages sticky at the bottom and do not send them until the main thread has a break.
-
 - [ ] Text alignment and bubble fill
   Text should take up the width of the bubble before wrapping.
 
