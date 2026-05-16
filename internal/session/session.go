@@ -109,6 +109,8 @@ type Session struct {
 	DeletedAt           time.Time // zero value if not deleted
 	Metadata            json.RawMessage
 	FirstMessagePreview string // "" when no user message exists yet
+	LastUserMessage     string // "" when no user message exists yet
+	LastAgentMessage    string // "" when no assistant message exists yet
 }
 
 // Role identifies who produced a message.

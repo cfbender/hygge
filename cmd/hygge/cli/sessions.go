@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -76,24 +77,25 @@ func newSessionsListCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "ID\tCREATED\tMODEL\tSLUG\tPROJECT\tKIND")
+			writeln(tw, "ID\tCREATED\tMODEL\tTITLE\tLAST USER\tLAST AGENT\tPROJECT\tKIND")
 			home := homeDirFromRuntime(rt)
 			for _, s := range sessions {
-				slug := s.Slug
-				if slug == "" {
-					slug = "-"
-				}
+				title := sessionListTitle(s)
+				lastUser := sessionListPreview(s.LastUserMessage)
+				lastAgent := sessionListPreview(s.LastAgentMessage)
 				marker := ""
 				if !s.DeletedAt.IsZero() {
 					marker = " (deleted)"
 				}
-				printf(tw, "%s%s\t%s\t%s/%s\t%s\t%s\t%s\n",
+				printf(tw, "%s%s\t%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\n",
 					shortID(s.ID),
 					marker,
 					s.CreatedAt.Format("2006-01-02 15:04"),
 					s.Model.Provider,
 					s.Model.Name,
-					slug,
+					title,
+					lastUser,
+					lastAgent,
 					abbreviatePath(s.ProjectDir, home),
 					string(s.Kind),
 				)
@@ -109,6 +111,28 @@ func newSessionsListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&kind, "kind", "", "filter by kind: primary | subagent (default: primary unless --include-subagents)")
 	cmd.Flags().StringVar(&parentID, "parent", "", "filter to children of this session id")
 	return cmd
+}
+
+func sessionListTitle(s *session.Session) string {
+	if s.Slug != "" {
+		return sessionListPreview(s.Slug)
+	}
+	if s.FirstMessagePreview != "" {
+		return sessionListPreview(s.FirstMessagePreview)
+	}
+	return "-"
+}
+
+func sessionListPreview(text string) string {
+	if text == "" {
+		return "-"
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	const max = 48
+	if len(text) <= max {
+		return text
+	}
+	return text[:max-3] + "..."
 }
 
 // newSessionsShowCmd builds `hygge sessions show <id-prefix>`.
