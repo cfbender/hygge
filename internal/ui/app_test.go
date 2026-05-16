@@ -790,18 +790,11 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	app.Handle(bus.MessageAppended{Role: "assistant"})
 	r1 := app.renderer
 
-	// Resize.
+	// Resize. Final rendered markdown is rebuilt immediately so completed
+	// bubbles wrap to the new width instead of keeping stale hard wraps.
 	app.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
-	if app.renderer != nil {
-		t.Errorf("expected renderer to be invalidated on resize")
-	}
-
-	// Re-render → new renderer built.
-	app.messages[0].FinalMarkdown = "" // force rebuild path on next stream completion
-	app.messages[0].IsStreaming = true
-	app.Handle(bus.MessageAppended{Role: "assistant"})
 	if app.renderer == nil {
-		t.Fatal("expected renderer rebuilt after stream completion")
+		t.Fatal("expected renderer rebuilt after resize")
 	}
 	if app.renderer == r1 {
 		t.Errorf("expected new renderer instance after resize")
@@ -846,6 +839,34 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 	if app.msgColW != wantRendererW {
 		t.Errorf("msgColW = %d, want %d", app.msgColW, wantRendererW)
 	}
+}
+
+func TestResizeRerendersFinalMarkdownToBubbleWidth(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	raw := "Added and reverted a larger temporary block in `TODOS.md` while checking whether final markdown wraps at the current bubble width."
+	app.messages = []uiMessage{{
+		Role:          components.RoleAssistant,
+		Raw:           raw,
+		FinalMarkdown: renderMarkdown(app.ensureRenderer(), raw),
+	}}
+	narrow := app.messages[0].FinalMarkdown
+
+	app.Update(tea.WindowSizeMsg{Width: 250, Height: 30})
+	wide := app.messages[0].FinalMarkdown
+	if wide == narrow {
+		t.Fatal("FinalMarkdown was not rerendered after resize")
+	}
+
+	plain := ansiEscapeRE.ReplaceAllString(wide, "")
+	for line := range strings.SplitSeq(plain, "\n") {
+		if strings.Contains(strings.Join(strings.Fields(line), " "), "temporary block in TODOS.md") {
+			return
+		}
+	}
+	t.Fatalf("wide FinalMarkdown should use the wider bubble before wrapping; got:\n%s", plain)
 }
 
 func TestPromptInputWidthFillsMainViewport(t *testing.T) {

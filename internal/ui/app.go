@@ -786,6 +786,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Glamour renderer is sized to the body width; rebuild lazily.
 		a.renderer = nil
 		a.rendererW = 0
+		a.rerenderFinalMarkdownMessages()
 		return a, nil
 
 	case tea.BackgroundColorMsg:
@@ -2963,6 +2964,24 @@ func (a *App) ensureRenderer() *glamour.TermRenderer {
 	a.renderer = r
 	a.rendererW = w
 	return a.renderer
+}
+
+func (a *App) rerenderFinalMarkdownMessages() {
+	r := a.ensureRenderer()
+	if r == nil {
+		return
+	}
+	for i := range a.messages {
+		msg := &a.messages[i]
+		if msg.IsStreaming || msg.Raw == "" {
+			continue
+		}
+		switch msg.Role {
+		case components.RoleUser, components.RoleAssistant:
+			msg.FinalMarkdown = renderMarkdown(r, msg.Raw)
+		}
+	}
+	a.invalidateMsgCache()
 }
 
 // extractTarget makes a best-effort attempt to surface a useful target
