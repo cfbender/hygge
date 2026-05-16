@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -43,14 +42,14 @@ func (a *App) renderSplashContent() string {
 	a.input.Textarea.Placeholder = placeholder
 
 	logo := a.renderSplashLogo()
-	meta := a.renderSplashMeta(inputW)
-	hints := a.splashMutedStyle().Render("tab  switch mode    ctrl+p  commands")
 	tip := a.splashTipStyle().Render("• Tip") + a.splashMutedStyle().Render("  Ctrl+E opens this prompt in your external editor")
 
-	content := strings.Join([]string{logo, input, meta, hints, tip}, "\n\n")
+	content := strings.Join([]string{logo, input, tip}, "\n\n")
 	content = centerBlock(w, content)
 	padTop := max((h-lipgloss.Height(content))/2, 0)
-	return strings.Repeat("\n", padTop) + content
+	content = strings.Repeat("\n", padTop) + content
+	padBottom := max(h-lipgloss.Height(content), 0)
+	return content + strings.Repeat("\n", padBottom)
 }
 
 func splashInputWidth(width int) int {
@@ -68,18 +67,6 @@ func (a *App) renderSplashLogo() string {
 	}
 	frame := frames[a.splashFrame()%len(frames)]
 	return a.splashLogoStyle().Render(frame)
-}
-
-func (a *App) renderSplashMeta(width int) string {
-	mode := a.ActiveModeName()
-	model := displayModelName(a.opts.ModelName)
-	provider := displayProviderName(a.opts.ModelProvider)
-	reasoning := a.opts.Reasoning.Effort
-	if reasoning == "" {
-		reasoning = "off"
-	}
-	meta := fmt.Sprintf("%s · %s · %s · %s", mode, model, provider, reasoning)
-	return centerBlock(width, a.splashMutedStyle().Render(meta))
 }
 
 func (a *App) splashLogoStyle() lipgloss.Style {
