@@ -167,6 +167,56 @@ func TestSubagentStreamingAndCompletion(t *testing.T) {
 	}
 }
 
+func TestSubagentViewBashClickExpandsOutput(t *testing.T) {
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", ToolUseID: "parent-tu", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "parent-tu",
+		Type:            "general",
+		Description:     "inspect logs",
+		Model:           "anthropic/claude-haiku-4-5",
+		At:              time.Now(),
+	})
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "sub-1",
+		ToolName:  "bash",
+		ToolUseID: "bash-tu",
+		Args:      []byte(`{"command":"go test ./..."}`),
+	})
+	app.Handle(bus.ToolCallCompleted{
+		SessionID:  "sub-1",
+		ToolName:   "bash",
+		ToolUseID:  "bash-tu",
+		Result:     []byte("line 1\nline 2\nline 3\nline 4\nline 5\nline 6"),
+		DurationMs: 10,
+	})
+
+	app.pushForeground("sub-1")
+	_ = app.View()
+	if len(app.toolHitZones) != 1 {
+		t.Fatalf("toolHitZones len = %d, want 1", len(app.toolHitZones))
+	}
+	if app.toolHitZones[0].ToolUseID != "bash-tu" {
+		t.Fatalf("ToolUseID = %q, want bash-tu", app.toolHitZones[0].ToolUseID)
+	}
+
+	visibleLine := app.toolHitZones[0].StartLine
+	if offset := app.msgViewport.YOffset(); visibleLine < offset {
+		visibleLine = offset
+	}
+	y := headerHeight + visibleLine - app.msgViewport.YOffset()
+	if got := app.toolAtScreen(2, y); got != "bash-tu" {
+		t.Fatalf("toolAtScreen = %q, want bash-tu (y=%d zone=%+v offset=%d)", got, y, app.toolHitZones[0], app.msgViewport.YOffset())
+	}
+	app.Update(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
+	if !app.expandedTools["bash-tu"] {
+		t.Fatal("expected bash tool to expand after clicking its subagent-view block")
+	}
+}
+
 func TestSubagentIterationLimitMarksFailed(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
