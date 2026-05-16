@@ -1,18 +1,15 @@
 // Package skill loads named markdown procedures the model can invoke
 // at runtime.  Skills live in plain-text `.md` files with a small
 // YAML-like frontmatter block; the loader assembles a Registry by
-// reading every file from a fixed four-layer search path.
+// reading every file from a layered search path.
 //
 // # The .agents convention
 //
 // Hygge follows the vendor-neutral `.agents` directory convention as the
 // gravitational center for shared agent assets.  Skills are loaded from
-// four layers (lowest priority first, later overrides earlier):
-//
-//  1. ~/.agents/skills/             — vendor-neutral, per-user
-//  2. ~/.config/hygge/skills/       — hygge-native, per-user
-//  3. <pwd>/.agents/skills/         — vendor-neutral, per-project (walk-up)
-//  4. <pwd>/.hygge/skills/          — hygge-native, per-project (walk-up)
+// several layers (lowest priority first, later overrides earlier), including
+// `.claude/skills`, `.agents/skills`, and Hygge-native `.hygge/skills` /
+// `~/.config/hygge/skills` locations.
 //
 // The hygge-native paths override `.agents` paths so users can shadow a
 // shared skill with a hygge-specific tweak.  Project paths override user
@@ -88,7 +85,7 @@ type Skill struct {
 	// relative paths inside the skill body.
 	Dir string
 
-	// Source identifies which of the four layers this skill came from.
+	// Source identifies which compatibility layer this skill came from.
 	Source Source
 
 	// LoadedAt is when the parser finished reading the file.
@@ -100,10 +97,14 @@ type Source int
 
 // Source values, ordered by precedence (lower-priority first).
 const (
+	// SourceUserClaude is ~/.claude/skills/.
+	SourceUserClaude Source = iota
 	// SourceUserAgents is ~/.agents/skills/.
-	SourceUserAgents Source = iota
+	SourceUserAgents
 	// SourceUserHygge is ~/.config/hygge/skills/.
 	SourceUserHygge
+	// SourceProjectClaude is <pwd>/.claude/skills/ (walk-up).
+	SourceProjectClaude
 	// SourceProjectAgents is <pwd>/.agents/skills/ (walk-up).
 	SourceProjectAgents
 	// SourceProjectHygge is <pwd>/.hygge/skills/ (walk-up).
@@ -113,10 +114,14 @@ const (
 // String returns a short diagnostic token for the source.
 func (s Source) String() string {
 	switch s {
+	case SourceUserClaude:
+		return "user/.claude"
 	case SourceUserAgents:
 		return "user/.agents"
 	case SourceUserHygge:
 		return "user/hygge"
+	case SourceProjectClaude:
+		return "project/.claude"
 	case SourceProjectAgents:
 		return "project/.agents"
 	case SourceProjectHygge:
@@ -146,7 +151,7 @@ type Registry struct {
 	byName map[string]Skill
 }
 
-// Load reads skills from all four layers and returns a Registry.
+// Load reads skills from all configured compatibility layers and returns a Registry.
 // Skills with the same Name are deduped using the precedence order
 // documented on the package: later layers override earlier ones.
 // Returns an empty Registry if no skills exist anywhere.
@@ -174,16 +179,17 @@ func Load(opts LoadOptions) (*Registry, error) {
 
 	reg := &Registry{byName: make(map[string]Skill)}
 
-	// Layer 1: ~/.agents/skills/
+	// User/global layers. Later loads override earlier loads.
+	loadFromDir(reg, filepath.Join(homeDir, ".claude", "skills"), SourceUserClaude)
 	loadFromDir(reg, filepath.Join(homeDir, ".agents", "skills"), SourceUserAgents)
-
-	// Layer 2: ~/.config/hygge/skills/
 	loadFromDir(reg, filepath.Join(xdgConfig, "hygge", "skills"), SourceUserHygge)
 
-	// Layer 3 + 4: project walk-up.  We pass homeDir as a stop so the
-	// walk does not climb into $HOME and re-treat the user-level
-	// .agents/.hygge directories as project layers.
+	// Project walk-up.  We pass homeDir as a stop so the walk does not
+	// climb into $HOME and re-treat user-level directories as project layers.
 	if opts.Pwd != "" {
+		if dir := findProjectDir(opts.Pwd, filepath.Join(".claude", "skills"), homeDir); dir != "" {
+			loadFromDir(reg, dir, SourceProjectClaude)
+		}
 		if dir := findProjectDir(opts.Pwd, filepath.Join(".agents", "skills"), homeDir); dir != "" {
 			loadFromDir(reg, dir, SourceProjectAgents)
 		}

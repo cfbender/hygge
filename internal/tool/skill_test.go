@@ -53,6 +53,22 @@ func TestSkillTool_HappyPath(t *testing.T) {
 	}
 }
 
+func TestSkillTool_DescriptionIncludesAvailableSkills(t *testing.T) {
+	reg := loadOneSkill(t, "foo", "Body of foo skill.")
+	tool := NewSkillTool(reg)
+	desc := tool.Description()
+	for _, want := range []string{
+		"Load a specialized skill that provides domain-specific instructions and workflows.",
+		"When you recognize that a task matches one of the available skills listed below",
+		"## Available Skills",
+		"- **foo**: desc-foo",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("Description missing %q.\n--- got ---\n%s", want, desc)
+		}
+	}
+}
+
 func TestSkillTool_NotFound(t *testing.T) {
 	reg := loadOneSkill(t, "foo", "foo body")
 	tool := NewSkillTool(reg)

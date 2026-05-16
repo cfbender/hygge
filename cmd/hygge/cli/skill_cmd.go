@@ -107,9 +107,8 @@ func newSkillsShowCmd() *cobra.Command {
 	}
 }
 
-// newSkillsDoctorCmd builds `hygge skills doctor`.  It walks the four
-// skill-discovery directories and reports any files that failed to
-// load and why.
+// newSkillsDoctorCmd builds `hygge skills doctor`. It walks the primary
+// skill-discovery directories and reports any files that failed to load and why.
 func newSkillsDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -136,14 +135,16 @@ func newSkillsDoctorCmd() *cobra.Command {
 				source string
 			}
 			dirs := []dirSpec{
+				{filepath.Join(home, ".claude", "skills"), "user/.claude"},
 				{filepath.Join(home, ".agents", "skills"), "user/.agents"},
 				{filepath.Join(xdgConfig, "hygge", "skills"), "user/hygge"},
 			}
 			// Project layers — we don't replicate the walk-up here; we
-			// just check the immediate paths under pwd.  Doctor is
+			// just check the immediate paths under pwd. Doctor is
 			// best-effort guidance.
 			if pwd != "" {
 				dirs = append(dirs,
+					dirSpec{filepath.Join(pwd, ".claude", "skills"), "project/.claude"},
 					dirSpec{filepath.Join(pwd, ".agents", "skills"), "project/.agents"},
 					dirSpec{filepath.Join(pwd, ".hygge", "skills"), "project/hygge"},
 				)

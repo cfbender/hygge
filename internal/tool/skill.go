@@ -34,7 +34,18 @@ func (t *skillTool) Name() string { return "skill" }
 func (t *skillTool) Parallelizable() bool { return true }
 
 func (t *skillTool) Description() string {
-	return "Load the full body of a named skill. Use this when one of the listed available skills applies to the current task."
+	return strings.Join([]string{
+		"Load a specialized skill that provides domain-specific instructions and workflows.",
+		"",
+		"When you recognize that a task matches one of the available skills listed below, use this tool to load the full skill instructions.",
+		"",
+		"The skill will inject detailed instructions, workflows, and access to bundled resources (scripts, references, templates) into the conversation context.",
+		"",
+		"The following skills provide specialized sets of instructions for particular tasks.",
+		"Invoke this tool to load a skill when a task matches one of the available skills listed below:",
+		"",
+		skill.FormatAvailable(t.registry),
+	}, "\n")
 }
 
 func (t *skillTool) InputSchema() map[string]any {
@@ -69,7 +80,8 @@ func (t *skillTool) Execute(_ context.Context, raw json.RawMessage, _ ExecContex
 		return Result{
 			IsError: true,
 			Content: "no skills configured. Place skill files under .agents/skills/, " +
-				".hygge/skills/, ~/.agents/skills/, or ~/.config/hygge/skills/.",
+				".claude/skills/, .hygge/skills/, ~/.agents/skills/, ~/.claude/skills/, " +
+				"or ~/.config/hygge/skills/.",
 			Metadata: map[string]any{
 				"error": "no_skills_configured",
 				"name":  a.Name,
