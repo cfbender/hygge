@@ -1,1066 +1,222 @@
-# hygge
+# Hygge
 
-A terminal-based AI coding assistant.
+Hygge is a terminal AI coding assistant built in Go. It provides a local-first
+Bubble Tea TUI, streaming model responses, persistent SQLite sessions, tools,
+plugins, MCP integrations, hooks, subagents, slash commands, and themeable chat
+UI chrome.
 
-## Status
+## Install
 
-v0.1-dev. The core loop is working:
+Requires Go 1.26 or newer.
 
-- Anthropic provider with streaming responses and prompt caching.
-- Six builtin tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`.
-- Permission engine with secrets denylist, scope-based allowances
-  (`once` / `session` / `always`), and a `.hygge/config.toml` walk-up.
-- SQLite-backed session store with resume.
-- TOML config with profile inheritance and `state.json` for runtime data.
-- Cost tracking via the [models.dev](https://models.dev) catalog with an
-  embedded snapshot for offline use.
-- Unified model catalog (`internal/catalog`) sourced from models.dev,
-  driving cost lookups, provider model lists, and capability detection
-  (reasoning, tools, vision).
+```sh
+go install github.com/cfbender/hygge@latest
+```
+
+With mise:
+
+```sh
+mise install go:github.com/cfbender/hygge@latest
+```
+
+For a pinned release:
+
+```sh
+go install github.com/cfbender/hygge@v0.3.3
+mise install go:github.com/cfbender/hygge@v0.3.3
+```
 
 ## Quick start
 
-Requires [mise](https://mise.jdx.dev) for the Go toolchain pin.
+Set an API key for your provider, then launch Hygge from a project directory:
 
 ```sh
-mise install                    # installs Go 1.26 and golangci-lint 2
-mise run build                  # compiles to ./bin/hygge
-export ANTHROPIC_API_KEY=...    # required to talk to the model
-./bin/hygge                     # launches the TUI in the current directory
+export ANTHROPIC_API_KEY=...
+hygge
 ```
 
-## Commands
+Or build from source:
 
-- `hygge` — launch the TUI; default behaviour determined by `[session] resume_default` (see "Resume behaviour" below).
-- `hygge --continue` / `-c` — resume the most recent session for the current directory; falls back to a fresh session if none exist.
-- `hygge --new` — force a fresh session even when `resume_default = "continue"`.
-- `hygge resume [id-prefix]` — re-open a session (see "Resume behaviour" for picker logic).
-- `hygge sessions list` — list recent sessions; `--include-deleted` to show soft-deleted rows.
-- `hygge sessions delete <id-prefix>` — soft-delete a session.
-- `hygge profile list` / `hygge profile use <name>` — manage config profiles.
-- `hygge provider auth [name]` / `list` / `remove` — manage per-machine API credentials.
-- `hygge config explain [key]` — print the effective config with provenance.
-- `hygge theme list` / `hygge theme show <name>` — inspect available themes.
-- `hygge skills list` / `show <name>` / `doctor` — inspect loaded skills.
-- `hygge subagents list` / `hygge subagents show <name>` — inspect registered sub-agent types invokable by the `task` tool.
-- `hygge commands list` / `hygge commands show <name>` — inspect slash commands available in the TUI.
-- `hygge context list` / `show` / `paths` — inspect the project-context files (`AGENTS.md` / `CLAUDE.md`) contributing to the system prompt.
-- `hygge catalog list [<provider>]` / `show <provider>/<model>` / `refresh` — inspect and refresh the models.dev-backed model catalog.
-- `hygge hooks list [--event <event>]` / `hygge hooks show <name>` — inspect configured hooks.
-- `hygge plugins list` / `show <name>` / `install <source>` / `remove <name>` / `update [<name>]` — manage Lua plugins.
-- `hygge version` — print version, Go version, OS/arch.
-
-### Resume behaviour
-
-| Invocation | Behaviour |
-|---|---|
-| `hygge` | Honour `[session] resume_default`. Default: `"new"`. |
-| `hygge --continue` / `-c` | Resume most recent session for cwd. If none, start fresh with a log notice. |
-| `hygge --new` | Start fresh, override `resume_default`. |
-| `hygge resume` | Picker if cwd has > 1 session; auto-pick if exactly 1; error if 0. |
-| `hygge resume <prefix>` | Prefix-match, cwd-scoped by default. |
-| `hygge resume --any` | Global scope (all projects). Combine with `<prefix>` or alone. |
-
-When both `--continue` and `--new` are set, hygge errors: "conflicting flags".
-
-#### `[session] resume_default`
-
-Configure the bare `hygge` default in `config.toml`:
-
-```toml
-[session]
-resume_default = "continue"   # "new" | "continue" | "ask"
+```sh
+mise install
+mise run build
+./bin/hygge
 ```
 
-| Value | Behaviour |
-|---|---|
-| `"new"` (default) | Always start a fresh session. |
-| `"continue"` | Resume the cwd's most recent session; fall back to fresh if none. |
-| `"ask"` | Open the sessions picker on launch. When the project has no sessions, the picker shows a "No sessions yet. [n] new session [esc] cancel" affordance. |
+## What Hygge does
 
-#### Interactive picker
+- Streams assistant responses into a terminal chat UI.
+- Persists sessions, messages, compaction markers, todos, token usage, and cost
+  in SQLite.
+- Resolves provider/model metadata through the Catwalk-backed catalog with an
+  embedded fallback for offline startup.
+- Runs model tool calls through built-in tools, plugins, and MCP servers.
+- Gates side effects with permissions, project config, hooks, and yolo-mode
+  boundaries.
+- Supports slash commands, subagents, skills, project context files, profiles,
+  themes, model switching, reasoning settings, and session resume.
 
-When the picker opens (via `hygge resume` with multiple sessions or `resume_default = "ask"`):
+## Common commands
 
-- Navigate with `↑/k` and `↓/j`, press `Enter` to select.
-- Press `/` to filter by name, project, or first message.
-- Press `Esc` with no selection — if hygge was launched with no foreground session (e.g. bare `hygge` with `resume_default = "ask"`) — exits hygge.
-- In a project with no sessions yet, press `n` to start a fresh session or `Esc` to cancel.
-- `--any` on `hygge resume` is the only path to cross-project resume; document clearly when sharing instructions.
+```sh
+hygge                         # launch the TUI
+hygge --continue              # resume the most recent session for this cwd
+hygge --new                   # force a fresh session
+hygge resume [id-prefix]      # resume a session
+hygge sessions list           # list sessions
+hygge sessions delete <id>    # soft-delete a session
+hygge version                 # print version and platform info
+```
+
+Configuration and discovery:
+
+```sh
+hygge config explain [key]
+hygge profile list
+hygge profile use <name>
+hygge provider auth [name]
+hygge provider list
+hygge catalog list [provider]
+hygge catalog show <provider>/<model>
+hygge catalog refresh
+```
+
+Runtime extensions:
+
+```sh
+hygge skills list
+hygge skills show <name>
+hygge skills doctor
+hygge subagents list
+hygge subagents show <name>
+hygge commands list
+hygge commands show <name>
+hygge hooks list
+hygge hooks show <name>
+hygge mcp list
+hygge mcp tools [server]
+hygge mcp doctor
+hygge plugins list
+hygge plugins install <source>
+hygge plugins update [name]
+hygge plugins remove <name>
+```
 
 ## Configuration
 
-User config lives at `~/.config/hygge/config.toml` (or
-`$XDG_CONFIG_HOME/hygge/config.toml`).
+User config lives at:
 
-Profiles live in `~/.config/hygge/profiles/<name>.toml` and are selected with
-the `default_profile` key in user config. `hygge profile use <name>` writes
-that key for you. A profile can `extends = "other"` to inherit from another
-profile.
+```text
+~/.config/hygge/config.toml
+```
+
+or:
+
+```text
+$XDG_CONFIG_HOME/hygge/config.toml
+```
+
+Project config can live in `.hygge/config.toml` in the current directory or any
+parent project directory.
+
+Profiles live in:
+
+```text
+~/.config/hygge/profiles/<name>.toml
+```
+
+Select a profile with:
+
+```sh
+hygge profile use work
+```
+
+Example config:
 
 ```toml
 default_profile = "work"
-```
 
-A `.hygge/config.toml` file in the current directory (or any parent) is
-picked up automatically as the highest-priority layer. Use this for
-per-project model or permission overrides.
+[session]
+resume_default = "continue" # "new" | "continue" | "ask"
 
-`hygge config explain` shows the resolved config along with the source
-of every value: builtin default, user config, profile, or project file.
-
-### Conventions
-
-Hygge follows the vendor-neutral [`.agents`](https://agents.md) directory
-convention for shared agent assets (skills, prompts, and any future
-filesystem-discovered config) alongside its own `.hygge` directories.
-Every feature that loads config from disk consults the same four layers,
-in this order (lowest priority first; later layers override earlier ones
-with the same name):
-
-1. `~/.agents/<feature>/...` — vendor-neutral, per-user.
-2. `~/.config/hygge/<feature>/...` — hygge-native, per-user.
-3. `<project-root>/.agents/<feature>/...` — vendor-neutral, per-project (discovered by walking up from the current directory).
-4. `<project-root>/.hygge/<feature>/...` — hygge-native, per-project (same walk-up).
-
-Hygge-native paths override `.agents` paths so users can shadow a
-shared asset with a hygge-specific tweak. Project paths override user
-paths so per-repo conventions win.
-
-The walk-up for project layers stops at the first `.git` directory at
-or above the current level (the conventional "this is the project
-root" signal) and never climbs into `$HOME`.
-
-### Skills
-
-Skills are named markdown procedures the model can invoke at runtime.
-Hygge supports two file layouts in any `skills/` directory under the
-four layers above:
-
-**Directory-style** (the `.agents` standard — recommended):
-
-```
-skills/
-  refactor-handler/
-    SKILL.md           # frontmatter + body
-    scripts/           # optional auxiliary files
-    reference/
-```
-
-**Flat-style** (simpler — one file per skill):
-
-```
-skills/
-  refactor-handler.md
-```
-
-Either way the file carries a `name` and `description` in frontmatter
-plus a free-form markdown body. `when_to_use` is optional — fold that
-guidance into the description if you prefer the `.agents` convention.
-Any additional keys (`version`, `allowed-tools`, etc.) are preserved in
-`extras` and shown by `hygge skills show`. Multi-line values are
-supported via YAML block scalars (`>` folded, `|` literal) and implicit
-indented blocks.
-
-```markdown
----
-name: refactor-handler
-description: >
-  Refactor an HTTP handler to extract its core logic. Use when asked
-  to split a long handler into testable pieces.
-version: 1.0.0
----
-# Procedure
-
-1. Identify the handler function …
-2. …
-```
-
-For directory-style skills, `Skill directory: <absolute path>` is
-prepended to the body when the model loads it via the `skill` tool, so
-the model can resolve relative paths to auxiliary scripts or
-references.
-
-The system prompt advertises every loaded skill's `name` and
-`description` (and `when_to_use` when present); the full body is
-fetched on demand via the built-in `skill` tool. Use `hygge skills
-list` to see what is loaded, `hygge skills show <name>` to inspect one,
-and `hygge skills doctor` to diagnose files that failed to parse.
-
-### Sub-agents and the `task` tool
-
-The `task` tool dispatches a focused mission to a sub-agent that runs
-in isolation and returns a single summary message. Use it for
-self-contained work — codebase searches, documentation lookups,
-focused refactors — that would otherwise pollute the main context.
-
-Hygge ships a built-in **general** sub-agent type with access to all
-built-in tools (except `task` itself). Add more types by declaring
-them in a `subagents.toml` under any of the four discovery layers
-(`~/.agents/`, `~/.config/hygge/`, `<project>/.agents/`,
-`<project>/.hygge/`):
-
-```toml
-# subagents.toml
-[subagents.search]
-description = "Codebase recon. Reads files, runs grep/glob, returns a summary with file:line citations."
-prompt = """
-You are a search sub-agent.  Your job is to find specific facts in
-this codebase and return a concise summary with file:line citations.
-Don't read more than necessary.  Return one final message.
-"""
-tools = ["read", "grep", "glob", "bash"]
-
-[subagents.librarian]
-description = "External documentation lookup."
-prompt = "..."
-tools = ["read", "bash"]
-model = "anthropic/claude-haiku-4-5"   # optional: pin this type to a specific provider+model
-```
-
-#### Per-type model overrides
-
-A sub-agent type may pin its own provider and model via the `model`
-field. The value must be of the form `<provider>/<model-id>`, e.g.
-`anthropic/claude-haiku-4-5`, `openai/gpt-4o-mini`, or
-`openrouter/anthropic/claude-haiku-4-5`. The provider name must match
-a registered provider (`anthropic`, `openai`, `openrouter`, ...); the
-model id is passed through unchanged.
-
-When the override targets the same provider as the parent's config,
-hygge reuses the parent's already-authenticated provider instance.
-When it targets a different provider, hygge constructs that provider
-on demand using the same credential precedence as the parent
-(`model.options.api_key` → `$<PROVIDER>_API_KEY` → `auth.json`), so
-make sure the relevant key is configured before launching a sub-agent
-that needs it.
-
-Malformed model strings (anything not matching
-`<provider>/<model-id>`) are logged with a warning at load time and
-the override is dropped — the type still loads and falls back to the
-parent's model. Providers that fail to construct (missing
-credentials, unknown name) surface as task-tool errors so the model
-sees a clear diagnostic.
-
-Sub-agents NEVER see the `task` tool, even when their TOML config
-asks for it: the recursion guard strips it from every sub-agent's
-tool set. Each side-effecting tool the sub-agent invokes still goes
-through the same permission engine as the parent, so you keep
-fine-grained control after the umbrella "launch the sub-agent" prompt.
-
-Sub-agent runs are persisted as their own sessions with `kind =
-subagent` and a `parent_id` link back to the dispatching session.
-They are auditable and replayable via the standard `hygge sessions`
-plumbing. Tokens and cost accumulate on the sub-session row; the
-parent session's running totals are automatically rolled up via
-`PropagateTotals` so the TUI footer always shows the total spend
-across the entire dispatch tree.  Sessions created before T2.1
-keep their existing (un-rolled-up) totals — only new turns are
-propagated.  Per-sub-session breakdowns are visible in the Sessions
-modal (`/sessions`), which shows the per-row totals rather than
-the rolled-up figure.
-
-Use `hygge subagents list` to see the registered types and `hygge
-subagents show <name>` to inspect a single type's system prompt and
-tool allowlist.
-
-#### TUI experience
-
-When you invoke the `task` tool from inside the TUI, the sub-agent's
-live transcript appears as a nested collapsible block underneath the
-`task` tool call line in the message list.
-
-- **Collapsed by default.** The header reads
-  `▸ task[<type>] · <provider>/<model> · <state> · <elapsed> · <tokens> · $<cost>`
-  followed by the description quote. The model label always shows the
-  resolved provider+model — handy when a per-type override pins
-  something different from the parent's model.
-- **Toggle with `Ctrl+T`.** Expands or collapses the most recently
-  started sub-agent block. Hygge does not yet have cursor-based
-  message navigation; when it lands (v0.3), `Ctrl+T` will become a
-  per-block toggle keyed off the cursor.
-- **Live updates.** Streaming assistant text, tool calls, and tool
-  results appear in real time inside the expanded block, indented
-  with a `│` gutter so the nesting reads cleanly. Running cost and
-  token totals update on the header as the sub-agent works.
-- **Final state.** On completion the chevron flips, the header shows
-  `done` with the final cost/usage, and the elapsed-time tick stops.
-  When the sub-agent hit its iteration cap the header reads
-  `failed (iteration limit)` in the error colour.
-
-Sub-agent events are routed by session id, so blocks from a previous
-foreground session never leak into the current view.
-
-#### Following into a sub-session (T2.2)
-
-While viewing a sub-agent block you can "follow" the sub-session:
-
-- **`Ctrl+G`** — Follow into the most recently started sub-agent.
-  The foreground stack is pushed, the message list switches to the
-  sub-session's full transcript, and a breadcrumb appears above the
-  messages: `<root-label> › <sub-label>`.  When no sub-agents are
-  running or finished, a notice is shown and the key is a no-op.
-- **`Esc`** (while in a sub-session) — Pop the foreground stack and
-  return to the parent session.  At root depth, `Esc` has its
-  normal behaviour (clears the slash-command palette / no-op).
-
-The navigation stack supports arbitrary depth so if the recursion
-limit is ever relaxed, the stack will Just Work.  The Sessions modal
-(`/sessions`) **Enter** action is a stack *reset*: it replaces the
-entire stack with the chosen session (no breadcrumb).  Use `Ctrl+G`
-to follow into a sub-session; use the Sessions modal only to switch
-to an unrelated session.
-
-**Footer cost** always shows the ROOT session's rolled-up total,
-regardless of which level you are viewing.  The breadcrumb is hidden
-when you are at the root level (depth 1).
-
-### Project context (AGENTS.md / CLAUDE.md)
-
-Project-context files describe house rules, terminology, and
-conventions the model should always have in mind. Unlike skills,
-their contents are appended to the system prompt unconditionally on
-every turn. Hygge treats `AGENTS.md` and `CLAUDE.md` (and
-`CLAUDE.local.md`) as first-class equivalents so the same repo can
-be used by either tool without duplication.
-
-Hygge discovers context files across eight project-root layers, in
-precedence order (lowest first; all that exist are concatenated, none
-override each other):
-
-1. `~/.agents/AGENTS.md` — vendor-neutral, per-user.
-2. `~/.config/hygge/AGENTS.md` — hygge-native, per-user.
-3. `~/.claude/CLAUDE.md` — CLAUDE-format compat, per-user.
-4. `<project-root>/.agents/AGENTS.md` — vendor-neutral, per-project.
-5. `<project-root>/AGENTS.md` — conventional project root file.
-6. `<project-root>/AGENTS.local.md` — local AGENTS override (ignored from VCS).
-7. `<project-root>/CLAUDE.md` — CLAUDE-format compat at project root.
-8. `<project-root>/CLAUDE.local.md` — local CLAUDE override (ignored from VCS).
-
-The project-root walk-up stops at the first directory containing
-`AGENTS.md`, `CLAUDE.md`, `.git`, `.agents/`, or `.hygge/`, and never
-climbs into `$HOME`.
-
-**Subdirectory context (lazy):** subdirectory `AGENTS.md`, `CLAUDE.md`,
-and `CLAUDE.local.md` files are loaded automatically when the agent's
-tools (`read`, `write`, `edit`, `grep`, `glob`) touch a path inside that
-directory. The loader walks upward from each touched path toward the
-project root, picking up any context files in directories it has not
-already visited this session, and injects them into the system prompt
-of the NEXT provider turn only — they are never persisted into session
-history. Directories named `node_modules`, `vendor`, `.venv`,
-`__pycache__`, `dist`, `target`, `bin`, `build`, `.git`, `.agents`, and
-`.hygge` are walked through transparently but never contribute context.
-A session-wide cap (`MaxLazyContextFiles = 50`, `MaxLazyContextBytes =
-256 KiB`) bounds how much extra material can ride along; once a cap
-fires the loader disables itself for the rest of the session and logs
-a `slog.Warn`.
-
-Use:
-
-- `hygge context list` — tabular summary (source layer, path, bytes, lines).
-- `hygge context show` — print every loaded file, in precedence order, exactly as the system prompt sees it.
-- `hygge context paths` — one absolute path per line for shell pipelines.
-
-### Reasoning models
-
-Hygge exposes a single knob for reasoning / extended-thinking models
-that both Anthropic and OpenAI-family adapters translate into the
-appropriate wire format. The session-wide default lives under
-`[model]` in any config layer:
-
-```toml
 [model]
 provider = "anthropic"
 name = "claude-sonnet-4-5"
-reasoning = "medium"            # "" / "off" / "low" / "medium" / "high"
-# reasoning_budget = 12000      # optional explicit Anthropic token budget
-```
+reasoning = "medium" # "" | "off" | "low" | "medium" | "high"
 
-Override per run with the `--reasoning` flag:
-
-```sh
-hygge --reasoning high -p "Plan the migration from X to Y."
-```
-
-Adapter behaviour:
-
-- **Anthropic** — `claude-sonnet-4-5` and `claude-opus-4-5` support
-  extended thinking. `low` / `medium` / `high` map to a budget of
-  `2048` / `8192` / `16384` tokens unless `reasoning_budget` pins an
-  explicit value. The `max_tokens` default is raised so it sits at
-  least `budget + 1024` above the thinking budget. Models without
-  extended-thinking support silently ignore the field.
-- **OpenAI o-series** — `o1`, `o1-mini`, `o3`, `o3-mini`, `o4-mini`,
-  and any `reasoning-*` model are auto-detected by name prefix. The
-  request body switches to `max_completion_tokens`, drops
-  `temperature` entirely, and sends `reasoning_effort` when the knob
-  is `low` / `medium` / `high`. With `--reasoning off` on a
-  reasoning-class model, the field is omitted and the server picks
-  its default. Non-reasoning models silently ignore the knob.
-
-Reasoning tokens are billed (OpenAI counts them under
-`completion_tokens`) and propagated through `provider.Usage` and the
-running cost totals. Reasoning-summary chunks streamed by the o-series
-arrive as the same `thinking_delta` events the TUI already renders, so
-no extra UI is needed.
-
-The reasoning-model detection list is currently a hardcoded prefix
-matcher in `internal/provider/openaicompat`. When the models-catalog
-work lands the detection will move to a capability lookup; see
-`STATUS.md`.
-
-### Provider credentials
-
-- `hygge provider auth [name]` — save an API key for a provider. Reads
-  a single line from stdin when piped, or prompts interactively
-  (hidden input) when run from a TTY.
-- `hygge provider list` — show stored credentials with masked keys.
-- `hygge provider remove <name>` — delete a stored credential
-  (`-f` / `--no-confirm` skips the prompt).
-
-Credential precedence at startup:
-
-1. `model.options.api_key` in config (explicit override).
-2. The canonical `$<PROVIDER>_API_KEY` env var (e.g.
-   `ANTHROPIC_API_KEY`).
-3. The auth store entry for the configured provider.
-
-### MCP servers
-
-Hygge connects to [MCP](https://modelcontextprotocol.io) (Model Context
-Protocol) servers and exposes every tool they advertise to the agent,
-prefixed with the server's name (e.g. `github_create_issue`).
-
-Configure servers in `mcp.toml`, discovered through the same four-layer
-`.agents` search path as skills and AGENTS.md (later overrides
-earlier):
-
-1. `~/.agents/mcp.toml`
-2. `~/.config/hygge/mcp.toml`
-3. `<project>/.agents/mcp.toml`  (walk-up; stops at `.git` or `$HOME`)
-4. `<project>/.hygge/mcp.toml`   (walk-up; stops at `.git` or `$HOME`)
-
-Example:
-
-```toml
-[[servers]]
-name = "github"
-transport = "stdio"
-command = "mcp-server-github"
-args = ["--token", "$GITHUB_TOKEN"]
-env = { GITHUB_API_URL = "https://api.github.com" }
-
-[[servers]]
-name = "postgres"
-transport = "stdio"
-command = "mcp-server-postgres"
-args = ["postgres://localhost/mydb"]
-permission_category = "network"   # gate via the network category
-```
-
-`$VAR` / `${VAR}` references in `command`, `args`, `env`, and `dir` are
-interpolated at load time so secrets can come from the environment.
-
-#### Configuring an SSE MCP server
-
-For hosted MCP servers that speak the **SSE (Server-Sent Events)** HTTP
-transport (2024-11-05 spec), set `transport = "sse"` and provide a
-`url`.  Bearer tokens and other credentials go in the
-`[servers.headers]` table; values support `$VAR` / `${VAR}` expansion:
-
-```toml
-[[servers]]
-name = "linear"
-transport = "sse"
-url = "https://mcp.linear.app/sse"
-[servers.linear.headers]
-Authorization = "Bearer ${LINEAR_API_KEY}"
-
-[[servers]]
-name = "notion"
-transport = "sse"
-url = "https://mcp.notion.so/sse"
-[servers.notion.headers]
-Authorization = "Bearer ${NOTION_TOKEN}"
-```
-
-The SSE transport opens a long-lived GET connection to the server's SSE
-endpoint, waits for the `endpoint` event that names the POST URL, then
-routes each outgoing JSON-RPC request via HTTP POST to that URL.
-Server-initiated notifications arrive on the GET stream.  If the stream
-drops, the transport reconnects with exponential backoff (default:
-initial 500 ms, max 30 s, up to 5 attempts).
-
-#### Configuring a Streamable HTTP MCP server
-
-For hosted MCP servers that speak the **Streamable HTTP** transport
-(2025-03-26 spec, the current spec), set `transport = "http"` and
-provide a `url`.  This is the preferred transport for new servers — it
-is simpler to run behind a stateless load balancer and supports both
-immediate JSON responses and SSE-streamed responses from a single
-endpoint.
-
-```toml
-[[servers]]
-name = "github"
-transport = "http"
-url = "https://api.githubcopilot.com/mcp/"
-[servers.github.headers]
-Authorization = "Bearer ${GITHUB_PAT}"
-
-[[servers]]
-name = "sentry"
-transport = "http"
-url = "https://mcp.sentry.dev/mcp"
-[servers.sentry.headers]
-Authorization = "Bearer ${SENTRY_TOKEN}"
-
-# Some servers do not support the optional GET notifications stream.
-# Set open_notifications_stream = false to suppress the GET request
-# (otherwise the server may return 405 and log a warning).
-# [[servers]]
-# name = "myserver"
-# transport = "http"
-# url = "https://mcp.example.com/mcp"
-# open_notifications_stream = false
-```
-
-**Difference between SSE and Streamable HTTP:**
-
-| | SSE (`transport = "sse"`) | Streamable HTTP (`transport = "http"`) |
-|---|---|---|
-| Spec | 2024-11-05 (older) | 2025-03-26 (current, preferred) |
-| Handshake | Initial GET returns `endpoint` event | No pre-flight; session established by first POST |
-| Responses | Always SSE stream | JSON or SSE per-request |
-| Notifications | Via GET stream | Via optional long-lived GET |
-| Session | n/a | `Mcp-Session-Id` header |
-| Termination | Close connection | HTTP DELETE |
-
-Use `transport = "sse"` for servers that only implement the older spec
-(Linear, some older Notion integrations).  Use `transport = "http"` for
-new deployments (GitHub Copilot, Sentry, and any server built with the
-2025-03-26 SDK).
-
-Validation rules (both transports):
-- `transport = "sse"` or `transport = "http"` requires `url`.
-- `transport = "stdio"` requires `command`.
-- Mismatched fields (e.g. `command` on an HTTP server) log a warning and
-  are ignored.
-- `transport` defaults to `stdio` so existing configs work without
-  modification.
-
-Commands:
-
-- `hygge mcp list` — show configured servers and their boot-time
-  status (ready / failed / disabled).
-- `hygge mcp ping <name>` — spawn a temporary client and verify the
-  server responds (init + ping latency).
-- `hygge mcp tools [server]` — list every tool advertised by the
-  connected servers, optionally filtered to one.
-- `hygge mcp doctor` — walk every discovered `mcp.toml`, validate it,
-  and report issues.
-
-Permission gating: MCP tool calls go through the new `mcp` category
-(default: `ask`). Override per-server with `permission_category` in
-`mcp.toml` if a particular server is better gated as `shell`,
-`network`, `file.read`, or `file.write`.
-
-The `stdio`, `sse`, and `http` transports are supported. `http`
-(Streamable HTTP, 2025-03-26 spec) is preferred for new servers; `sse`
-(2024-11-05 spec) remains available for older deployments.
-
-## Slash commands
-
-Anything typed into the TUI input that starts with `/` is interpreted
-as a slash command instead of a chat message. An inline palette
-opens above the input, filtered live by what you've typed; use
-Up/Down to highlight, Tab to complete, Enter to run, Esc to
-dismiss.
-
-The built-in command set:
-
-| Command     | Effect                                           |
-|-------------|--------------------------------------------------|
-| `/help`     | List every registered command (built-in + user). `/help <name>` shows full detail. |
-| `/clear`    | Clear the rendered session history.              |
-| `/compact`  | Open the compaction confirmation modal (see Compaction below). |
-| `/compact --force` | Skip the modal and compact immediately (power-user path). |
-| `/cost`     | Show running session cost.                       |
-| `/sessions` | Open the sessions picker (rich UI lands in T1.2). |
-| `/fork`     | Fork the session at a message id (T1.2 will wire). |
-| `/model`    | No-arg: show current model. With `<provider>/<id>`: switch. |
-| `/reason`   | No-arg: show current reasoning depth. With `off|low|medium|high`: switch. |
-| `/version`  | Show the hygge version.                          |
-
-`/q` and `/quit` are intentionally NOT claimed — the existing
-keybinds (Ctrl+C) handle exit.
-
-### Defining your own commands
-
-Drop a `commands.toml` at one of the standard four discovery layers
-(`~/.agents`, `~/.config/hygge`, `<project>/.agents`,
-`<project>/.hygge`). Later layers override earlier same-named
-entries; user TOML can even override the built-ins if you want a
-custom `/compact` prompt.
-
-```toml
-[commands.review]
-description = "Review code for issues"
-prompt = """
-Review the following code for bugs, security issues, and
-improvements:
-
-{{code}}
-"""
-args = [
-  { name = "code", description = "code to review", required = true },
-]
-
-[commands.explain]
-description = "Explain a concept"
-prompt = "Explain {{topic}} in plain language."
-args = [
-  { name = "topic", description = "what to explain", required = true },
-]
-
-[commands.brief]
-description = "Quick TLDR of a file"
-prompt = "Summarise this file in 3 bullet points: {{tail}}"
-```
-
-Template rules:
-
-- `{{name}}` substitutes the matching arg by name.
-- `{{tail}}` is reserved and captures every remaining word after the
-  last named arg. With no `args` declared, `{{tail}}` receives the
-  entire input.
-- Whitespace splits arguments; wrap a value in double quotes to
-  include spaces (`/review "with spaces" rest`). Backslash escapes
-  the next character inside quotes.
-- A missing required arg produces a friendly notice and does not
-  send the message.
-- Unknown `{{names}}` are left literal at runtime (a load-time
-  warning surfaces in `~/.local/state/hygge/hygge.log`).
-
-Command names must match `[a-z][a-z0-9_-]*` and are case-sensitive.
-
-Inspect what's loaded with `hygge commands list` (`--source builtin`
-/ `user` / `project` to filter) and `hygge commands show <name>` for
-the full detail.
-
-## Compaction
-
-Session compaction summarises older messages into a 2-3 paragraph digest
-so the model's context window doesn't fill up on long sessions.
-
-### Confirmation flow
-
-`/compact` opens a confirmation modal showing:
-
-- Number of messages since the last compaction marker.
-- Current context usage (% of the model's window).
-- A reminder that compaction is destructive — the original messages are
-  replaced by the summary for future turns.
-
-Press `y` to confirm; `n` or `Esc` to cancel.
-
-`/compact --force` skips the modal and runs immediately — a power-user
-escape hatch for scripts or users who know what they're doing.
-
-### Threshold suggestion banner
-
-When context usage climbs above the configured threshold, a non-blocking
-advisory banner appears above the input:
-
-```
-⚠  Context usage at 84%. /compact to summarise older messages.  [Ctrl+X] dismiss
-```
-
-This fires **once per crossing** (not on every turn while above the
-threshold). After compaction completes, or after usage drops back below
-the threshold minus a 5-percentage-point hysteresis window and rises
-again, the banner may reappear for the next crossing.
-
-Dismiss it for the current crossing with **Ctrl+X**.
-
-### Configuration
-
-```toml
-[compaction]
-# threshold_pct is the percentage of the model's context window at
-# which the advisory suggestion banner appears.
-# 0 disables the suggestion entirely.  Default: 80.  Valid: 0-99.
-# Values ≥ 100 warn and reset to the default.
-threshold_pct = 80
-```
-
-### Visual feedback
-
-| Phase                 | What you see                                              |
-|-----------------------|-----------------------------------------------------------|
-| Threshold crossed     | Banner above input (dismissible with Ctrl+X).             |
-| `/compact` invoked    | Confirmation modal (y/n/Esc).                             |
-| Compaction running    | `⌛  Compacting N messages…` notice above input.          |
-| Compaction succeeded  | `✓  Compacted N messages → M tokens summary.  Marker …`  |
-| Compaction failed     | `✕  Compaction failed: <reason>.`                        |
-
-
-
-Hygge's model metadata — pricing, capabilities, context-window limits —
-is sourced from [models.dev](https://models.dev) through a unified
-catalog in `internal/catalog`. The catalog is the single source of
-truth: cost lookups, provider model lists (`ListModels`), and reasoning
-capability detection all flow through it.
-
-Three layers in the resolution cascade, in order:
-
-1. **Disk snapshot** at `$XDG_STATE_HOME/hygge/catalog.json` —
-   refreshed by `hygge catalog refresh`.
-2. **Embedded snapshot** compiled into the binary at build time.
-   ~270 KiB; covers the major providers (anthropic, openai,
-   openrouter, google, mistral, groq, deepseek, xai, …) and ~860
-   models.  Bedrock fallback so hygge always has a usable catalog,
-   even with no network and no on-disk cache.
-3. **Background refresh** kicked off on startup when the disk snapshot
-   is older than 7 days.  Runs in a goroutine; never blocks startup;
-   logs to `slog.Debug` on success and `slog.Warn` on failure.
-4. **Periodic refresh** — optional; configured via
-   `[catalog] refresh_interval` (see below).  Keeps a long-lived
-   hygge process up to date without a restart.
-
-Inspect or refresh the catalog from the CLI:
-
-```sh
-hygge catalog list                              # per-provider summary
-hygge catalog list anthropic                    # per-model table
-hygge catalog show anthropic/claude-sonnet-4-5  # all metadata
-hygge catalog refresh                           # pull a fresh snapshot
-```
-
-#### Periodic catalog refresh
-
-Add to `~/.config/hygge/config.toml` (or any config layer):
-
-```toml
 [catalog]
-refresh_interval = "24h"   # any Go duration string, e.g. "1h", "30m"
+refresh_interval = "24h"
 ```
 
-When set, hygge fetches a fresh catalog snapshot at that cadence in the
-background.  The refresh runs in a goroutine and never blocks the TUI.
-Failures are logged as `slog.Warn` and leave the existing snapshot
-intact.  The default is empty (disabled) — the one-shot startup refresh
-still fires when the disk snapshot is stale.
+`hygge config explain` shows the resolved value and source layer for every
+setting.
 
-The same catalog drives reasoning-class detection in the OpenAI-compat
-adapter: when models.dev advertises `reasoning: true` for a model, the
-adapter switches to the `max_completion_tokens` / `reasoning_effort`
-request shape automatically.  A hardcoded name-prefix matcher (o1-*,
-o3-*, o4-*, reasoning-*) remains as a fallback for brand-new ids the
-local catalog hasn't been refreshed for.
+## Project context, skills, and subagents
 
-The Anthropic adapter also consults the catalog before attaching the
-`thinking` block: if the catalog says a model does not support reasoning,
-the block is dropped with a `slog.Warn`.  Unknown models (not in the
-catalog) default to attaching the block so a stale catalog never silently
-regresses a user who is actually using a reasoning-capable model.
+Hygge loads project instructions from common agent files such as `AGENTS.md`,
+`AGENTS.local.md`, `CLAUDE.md`, and `CLAUDE.local.md`. Root files are included in
+the system prompt; subdirectory context files are loaded lazily when tools touch
+paths under those directories.
 
-## Hooks
+Skills are named Markdown procedures discoverable from `skills/` directories
+under user or project config layers. The assistant sees each skill's name and
+description, then loads the full body with the `skill` tool when needed.
 
-Hooks are external programs that gate or observe agent events.  They are
-configured via `hooks.toml` at the standard four discovery layers (same
-walk-up as skills and subagents).
+Subagents are configured in `subagents.toml` and invoked by the `task` tool for
+focused work. Subagent sessions are persisted, auditable, and can use per-type
+tool allowlists and model overrides.
 
-### Events
+## Tools and permissions
 
-| Event | When | Can deny? | Can modify? |
-|---|---|---|---|
-| `pre_tool` | After the permission gate, before tool execution | yes | tool input |
-| `post_tool` | After tool returns, before result is sent to model | no | tool result |
-| `pre_message` | Before the user message is persisted | yes | message text |
-| `post_message` | After the assistant message is committed | no | — (always async) |
+Built-in tools include filesystem reads/searches, edits, shell commands, skills,
+todos, and subagent dispatch. Read-only tools can run in parallel; side-effecting
+tools run serially and pass through permission checks.
 
-### TOML schema
+Permissions can be granted once, for the session, always, or denied. Project and
+user config can tune defaults, while hooks can add policy checks before or after
+tool and message events.
 
-```toml
-[hooks.policy-guard]
-description = "Block dangerous bash commands"
-events      = ["pre_tool"]
-command     = "/usr/local/bin/hygge-policy-check"
-args        = ["--strict"]
-timeout     = "5s"    # default; applies per invocation
-mode        = "sync"  # default; async only valid for post_* events
+## MCP, hooks, and plugins
 
-[hooks.policy-guard.env]
-POLICY_ENV = "strict"
+MCP servers are configured through `mcp.toml` and exposed as namespaced tools.
+Hygge supports stdio, SSE, and Streamable HTTP transports.
 
-[hooks.telemetry]
-description = "Ship tool-call results to observability"
-events      = ["post_tool", "post_message"]
-command     = "/usr/local/bin/hygge-telemetry"
-mode        = "async"   # fire-and-forget
+Hooks are external commands configured in `hooks.toml`. They can observe or gate
+events such as `pre_tool`, `post_tool`, `pre_message`, and `post_message`.
 
-[hooks.redact]
-description = "Mask credentials in tool output"
-events      = ["post_tool"]
-command     = "/usr/local/bin/hygge-redact"
-timeout     = "2s"
-```
+Plugins are Lua modules installed from local paths or GitHub repositories. They
+can register tools, hooks, slash commands, and subagent types through Hygge's Lua
+API.
 
-### Protocol
+## TUI basics
 
-The hook receives a JSON object on **stdin**:
-
-```json
-{
-  "event":      "pre_tool",
-  "session_id": "...",
-  "hook_name":  "policy-guard",
-  "pwd":        "/Users/alice/repo",
-  "tool_name":  "bash",
-  "tool_input": {"command": "rm -rf /tmp/old"}
-}
-```
-
-The hook writes a JSON **Action** to stdout (empty stdout = allow):
-
-```json
-{ "decision": "deny", "reason": "rm -rf is not allowed" }
-```
-
-Supported decisions:
-
-- `allow` (default / empty stdout) — proceed unchanged.
-- `deny` — block the event.  `reason` is surfaced as an error result.
-- `modify` — replace part of the payload before continuing.
-  - `modified_tool_input` for `pre_tool`.
-  - `modified_message` for `pre_message`.
-  - `modified_tool_result` (object with `is_error` + `content`) for `post_tool`.
-
-**Exit semantics**: a non-zero exit is treated as `deny`; stderr is the
-reason (capped to 1 KiB).  A hook that times out is treated as `deny`
-with reason "hook X timed out after Ys".  Malformed stdout JSON
-fails-open (allow + `slog.Warn`).
-
-### Sync vs async
-
-- `sync` (default) — the agent waits for Run to return before
-  continuing.  5 s default timeout; configurable per hook.
-- `async` — dispatched in a goroutine after the turn completes.
-  Only valid for `post_*` events.  `post_message` is always async.
-
-Async hooks use `context.Background` (they outlive the triggering
-request).  Up to 32 async hooks can be in-flight simultaneously; beyond
-that limit new dispatches are dropped with a `slog.Warn`.  On agent
-`Close()`, up to 2 s are spent waiting for in-flight async hooks.
-
-### CLI
-
-```sh
-hygge hooks list                  # name | source | events | mode | timeout
-hygge hooks list --event pre_tool # filter by event
-hygge hooks show <name>           # full detail
-```
-
-### Policy-guard example
-
-```sh
-cat > /usr/local/bin/hygge-policy-check <<'EOF'
-#!/bin/sh
-input=$(cat -)
-cmd=$(echo "$input" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))")
-case "$cmd" in
-  *"rm -rf"*)
-    echo '{"decision":"deny","reason":"rm -rf patterns are blocked by policy"}'
-    ;;
-esac
-EOF
-chmod +x /usr/local/bin/hygge-policy-check
-```
-
-Then in `.agents/hooks.toml`:
-
-```toml
-[hooks.policy]
-description = "Block rm -rf"
-events      = ["pre_tool"]
-command     = "/usr/local/bin/hygge-policy-check"
-```
-
-## Plugins
-
-Plugins extend hygge with custom tools, hooks, slash commands, and sub-agent types. They are portable Lua scripts that register into hygge's existing registries through a neovim-style `hygge.*` global module.
-
-### Declaring plugins in `config.toml`
-
-```toml
-[plugins]
-sources = [
-  "github:cfbender/hygge-policy-guard@v1.2.3",  # GitHub repo, pinned tag
-  "github:cfbender/hygge-policy-guard",           # default branch
-  "github:cfbender/hygge-policy-guard#main",      # explicit branch
-  "local:/Users/cfb/code/my-plugin",              # local dir (dev workflow)
-]
-
-# Per-plugin config: accessible inside the plugin via hygge.config
-[plugins.policy-guard]
-strict = true
-blocked_patterns = ["rm -rf", "sudo"]
-```
-
-### Lua API reference
-
-| Function | Description |
-|---|---|
-| `hygge.register_tool { name, description, input_schema, execute }` | Register a tool the model can invoke |
-| `hygge.register_hook(event, [opts], handler)` | Register a hook for `pre_tool`, `post_tool`, `pre_message`, `post_message` |
-| `hygge.register_command { name, description, args, execute }` | Register a `/name` slash command |
-| `hygge.register_subagent { name, description, system_prompt, tools, model }` | Register a sub-agent type |
-| `hygge.send_message(session_id, role, content)` | Inject a message (rate-limited: 10/turn/plugin) |
-| `hygge.notify(message, level)` | User-visible notification (`"info"` / `"warn"` / `"error"`) |
-| `hygge.log(level, message, fields)` | Structured log to slog with plugin name |
-| `hygge.exec(cmd, args, opts)` | Run a subprocess; returns `{ stdout, stderr, code }` |
-| `hygge.config` | Read-only table with `[plugins.<name>]` config |
-
-`exec` calls go through the permission engine under `CategoryShell`. Plugin tools default to a new `CategoryPlugin` permission category (ask-once-per-session).
-
-### Plugin layout
-
-**Single-file plugin** (simplest):
-
-```
-my-plugin/
-  plugin.lua     ← entry point; no manifest needed
-```
-
-**Directory plugin** with `plugin.toml`:
-
-```
-my-plugin/
-  plugin.toml    ← manifest
-  init.lua       ← entrypoint (matches `entrypoint` in plugin.toml)
-  lib/
-    helpers.lua
-```
-
-```toml
-# plugin.toml
-name        = "my-plugin"
-version     = "1.0.0"
-description = "Does something useful"
-entrypoint  = "init.lua"
-```
-
-### Example: policy-guard hook
-
-```lua
--- ~/.config/hygge/plugins-dev/policy.lua
-hygge.register_hook("pre_tool", function(event)
-    if event.tool_name == "bash" then
-        local input = event.tool_input or {}
-        local cmd = input.command or ""
-        for _, pat in ipairs(hygge.config.blocked_patterns or {}) do
-            if cmd:find(pat, 1, true) then
-                return {
-                    decision = "deny",
-                    reason   = "blocked pattern: " .. pat,
-                }
-            end
-        end
-    end
-    return { decision = "allow" }
-end)
-```
-
-```toml
-# config.toml
-[plugins]
-sources = ["local:~/.config/hygge/plugins-dev"]
-
-[plugins.policy]
-blocked_patterns = ["rm -rf", "sudo"]
-```
-
-### Distribution model
-
-Plugins are Lua scripts hosted in any git repository (GitHub, self-hosted, local path). Install via `hygge plugins install <source>`. Plugins are trusted on install — no per-use permission prompt.
-
-### Forward compatibility
-
-The `Loader` interface reserves room for a future **subprocess JSON-RPC** runtime (for plugins in any language that communicate via stdin/stdout JSON-RPC). This is architecturally planned for v0.4+ but not implemented in v0.3. `npm:` sources are similarly deferred.
-
-### Managing plugins
-
-```sh
-hygge plugins install github:cfbender/hygge-policy-guard  # install
-hygge plugins list                                          # list installed
-hygge plugins show policy-guard                             # show details
-hygge plugins update                                        # update all
-hygge plugins update policy-guard                           # update one
-hygge plugins remove policy-guard                           # uninstall
-```
-
-## Parallel tool execution
-
-Within a single turn, hygge can run multiple tool calls concurrently when the
-model issues several parallelizable calls at once (e.g. four `read` calls on
-different files, or `read + grep + glob`).
-
-### Which built-in tools opt in
-
-| Tool | Parallelizable | Reason |
-|------|:--------------:|--------|
-| `read` | ✓ | Pure filesystem read; no mutation |
-| `grep` | ✓ | Read-only scan |
-| `glob` | ✓ | Read-only enumeration |
-| `skill` | ✓ | In-memory registry lookup; no mutation |
-| `task` | ✓ | Each sub-agent runs in an isolated session |
-| `bash` | ✗ | Arbitrary shell side-effects |
-| `write` | ✗ | Filesystem mutation |
-| `edit` | ✗ | Filesystem mutation |
-
-### Execution policy
-
-1. All parallelizable calls in the turn form a **parallel batch** — every
-   goroutine is launched simultaneously, then `sync.WaitGroup.Wait()` drains
-   the batch.
-2. Non-parallelizable calls run **serially** after the batch completes, in
-   their original call order.
-3. Results are stitched back into the **model's original call order** before
-   being returned to the provider.
-4. A panic inside any parallel call is recovered; the slot receives an
-   `IsError` result and siblings continue to completion.
-
-### Plugin tools opt in
-
-Plugin tools default to `false` (serial) for safety.  Opt in from Lua:
-
-```lua
-hygge.register_tool {
-    name           = "search_repo",
-    description    = "Search the repo index",
-    parallelizable = true,   -- safe: read-only search
-    input_schema   = { ... },
-    execute = function(ctx, input)
-        -- ...
-    end,
-}
-```
-
-Note: even when `parallelizable = true`, the gopher-lua LState mutex
-serialises execution *within a single Lua plugin*.  Two different plugin
-tools from different plugins CAN run in parallel.
+- Type a prompt and press `Enter` to send.
+- Use `/` to open slash command completion.
+- Use `/compact` to summarize older session history.
+- Use `/model` and `/reason` to inspect or change runtime model settings.
+- Use the sessions UI to resume, switch, or inspect prior sessions.
+- Subagent transcripts render as nested, collapsible chat blocks.
 
 ## Development
 
 ```sh
-mise run test          # tests with -race
-mise run lint          # golangci-lint
-mise run precommit     # lint + test + build — run before every commit
+mise install
+mise run build       # compile ./bin/hygge
+mise run test        # go test ./... -race -count=1
+mise run lint        # golangci-lint run
+mise run precommit   # fix + lint + test + build
 ```
 
-See `SMOKE.md` for the manual ship-gate checklist.
+Release helper:
+
+```sh
+mise run bump -- patch
+mise run bump -- minor
+mise run bump -- major
+```
+
+The bump task increments `cmd/hygge/cli/cli.go`, commits, creates an annotated
+tag, and pushes the commit and tag.
 
 ## License
 
