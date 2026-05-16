@@ -137,11 +137,13 @@ func (t *writeTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCon
 
 	summary := fmt.Sprintf("wrote %d bytes to %s", len(a.Content), abs)
 	beforeLabel := abs + " (before)"
+	oldStart := 1
 	if !existed {
 		beforeLabel = "/dev/null"
+		oldStart = 0
 	}
 	return Result{
-		Content: toolResultWithDiff(summary, abs, beforeLabel, abs+" (after)", before, a.Content),
+		Content: toolResultWithDiff(summary, beforeLabel, abs+" (after)", oldStart, 1, before, a.Content),
 		Metadata: map[string]any{
 			"path":          abs,
 			"bytes_written": len(a.Content),

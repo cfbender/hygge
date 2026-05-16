@@ -1,7 +1,8 @@
 package components
 
 import (
-	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -10,6 +11,8 @@ import (
 )
 
 const defaultDiffPreviewLines = 12
+
+var hunkHeaderPattern = regexp.MustCompile(`@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@`)
 
 // DiffView renders unified-diff-like text with line-level add/delete styling.
 type DiffView struct {
@@ -42,10 +45,14 @@ func (d DiffView) View() string {
 	}
 	width = max(width, 1)
 
+	rows := diffRows(lines)
+	numW := diffLineNumberWidth(rows)
+	contentW := max(width-(numW*2)-5, 1)
+
 	styles := diffStyles(d.Theme)
 	var out []string
-	for _, line := range lines {
-		out = append(out, styleDiffLine(clipVisible(line, width), styles))
+	for _, row := range rows {
+		out = append(out, renderDiffRow(row, numW, contentW, styles))
 	}
 	if truncated {
 		out = append(out, styles.meta.Italic(true).Render("… diff truncated"))
@@ -53,45 +60,149 @@ func (d DiffView) View() string {
 	return strings.Join(out, "\n")
 }
 
+type diffRow struct {
+	oldLine int
+	newLine int
+	text    string
+	kind    diffRowKind
+}
+
+type diffRowKind int
+
+const (
+	diffRowBody diffRowKind = iota
+	diffRowAdd
+	diffRowDel
+	diffRowMeta
+)
+
+func diffRows(lines []string) []diffRow {
+	oldLine := 1
+	newLine := 1
+	inHunk := false
+	rows := make([]diffRow, 0, len(lines))
+	for _, line := range lines {
+		if oldStart, newStart, ok := parseHunkHeader(line); ok {
+			oldLine = oldStart
+			newLine = newStart
+			inHunk = true
+			rows = append(rows, diffRow{text: line, kind: diffRowMeta})
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			row := diffRow{newLine: newLine, text: line, kind: diffRowAdd}
+			newLine++
+			rows = append(rows, row)
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			row := diffRow{oldLine: oldLine, text: line, kind: diffRowDel}
+			oldLine++
+			rows = append(rows, row)
+		case isDiffMetaLine(line):
+			rows = append(rows, diffRow{text: line, kind: diffRowMeta})
+		case inHunk:
+			row := diffRow{oldLine: oldLine, newLine: newLine, text: line, kind: diffRowBody}
+			oldLine++
+			newLine++
+			rows = append(rows, row)
+		default:
+			rows = append(rows, diffRow{text: line, kind: diffRowBody})
+		}
+	}
+	return rows
+}
+
+func parseHunkHeader(line string) (int, int, bool) {
+	matches := hunkHeaderPattern.FindStringSubmatch(line)
+	if matches == nil {
+		return 0, 0, false
+	}
+	oldStart, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	newStart, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return 0, 0, false
+	}
+	return oldStart, newStart, true
+}
+
+func diffLineNumberWidth(rows []diffRow) int {
+	maxLine := 0
+	for _, row := range rows {
+		maxLine = max(maxLine, row.oldLine, row.newLine)
+	}
+	if maxLine <= 0 {
+		return 1
+	}
+	return len(strconv.Itoa(maxLine))
+}
+
+func renderDiffRow(row diffRow, numW, contentW int, s diffLineStyles) string {
+	oldNum := formatDiffLineNumber(row.oldLine, numW)
+	newNum := formatDiffLineNumber(row.newLine, numW)
+	gutter := s.gutter.Render(oldNum + " │ " + newNum + " │ ")
+	text := clipVisible(row.text, contentW)
+	switch row.kind {
+	case diffRowAdd:
+		return gutter + s.add.Render(text)
+	case diffRowDel:
+		return gutter + s.del.Render(text)
+	case diffRowMeta:
+		return gutter + s.meta.Render(text)
+	default:
+		return gutter + s.body.Render(text)
+	}
+}
+
+func formatDiffLineNumber(n, width int) string {
+	if n <= 0 {
+		return strings.Repeat(" ", width)
+	}
+	return padLeft(strconv.Itoa(n), width)
+}
+
+func padLeft(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-len(s)) + s
+}
+
 type diffLineStyles struct {
-	add  lipgloss.Style
-	del  lipgloss.Style
-	meta lipgloss.Style
-	body lipgloss.Style
+	add    lipgloss.Style
+	del    lipgloss.Style
+	meta   lipgloss.Style
+	body   lipgloss.Style
+	gutter lipgloss.Style
 }
 
 func diffStyles(t *theme.Theme) diffLineStyles {
 	if t == nil {
 		return diffLineStyles{
-			add:  lipgloss.NewStyle(),
-			del:  lipgloss.NewStyle(),
-			meta: lipgloss.NewStyle().Faint(true),
-			body: lipgloss.NewStyle(),
+			add:    lipgloss.NewStyle(),
+			del:    lipgloss.NewStyle(),
+			meta:   lipgloss.NewStyle().Faint(true),
+			body:   lipgloss.NewStyle(),
+			gutter: lipgloss.NewStyle().Faint(true),
 		}
 	}
 	return diffLineStyles{
-		add:  t.Style(theme.AtomCodeFg).Background(t.Style(theme.AtomDiffAddBg).GetBackground()),
-		del:  t.Style(theme.AtomCodeFg).Background(t.Style(theme.AtomDiffDelBg).GetBackground()),
-		meta: t.Style(theme.AtomMuted).Faint(true),
-		body: t.Style(theme.AtomCodeFg),
+		add:    t.Style(theme.AtomCodeFg).Background(t.Style(theme.AtomDiffAddBg).GetBackground()),
+		del:    t.Style(theme.AtomCodeFg).Background(t.Style(theme.AtomDiffDelBg).GetBackground()),
+		meta:   t.Style(theme.AtomMuted).Faint(true),
+		body:   t.Style(theme.AtomCodeFg),
+		gutter: t.Style(theme.AtomMuted).Faint(true),
 	}
 }
 
-func styleDiffLine(line string, s diffLineStyles) string {
-	switch {
-	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-		return s.add.Render(line)
-	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-		return s.del.Render(line)
-	case strings.HasPrefix(line, "@@"),
-		strings.HasPrefix(line, "diff --git"),
-		strings.HasPrefix(line, "index "),
-		strings.HasPrefix(line, "---"),
-		strings.HasPrefix(line, "+++"):
-		return s.meta.Render(line)
-	default:
-		return s.body.Render(line)
-	}
+func isDiffMetaLine(line string) bool {
+	return strings.HasPrefix(line, "@@") ||
+		strings.HasPrefix(line, "diff --git") ||
+		strings.HasPrefix(line, "index ") ||
+		strings.HasPrefix(line, "---") ||
+		strings.HasPrefix(line, "+++")
 }
 
 func looksLikeDiff(s string) bool {
@@ -107,46 +218,6 @@ func looksLikeDiff(s string) bool {
 	}
 	return (strings.Contains(s, "\n--- ") || strings.HasPrefix(s, "--- ")) &&
 		(strings.Contains(s, "\n+++ ") || strings.HasPrefix(s, "+++ "))
-}
-
-func editArgsDiff(args map[string]string) string {
-	oldText, hasOld := args["oldString"]
-	newText, hasNew := args["newString"]
-	if !hasOld || !hasNew || oldText == newText {
-		return ""
-	}
-	return beforeAfterDiff("old", "new", oldText, newText)
-}
-
-func writeArgsDiff(args map[string]string) string {
-	content, ok := args["content"]
-	if !ok || content == "" {
-		return ""
-	}
-	return beforeAfterDiff("old", "new", "", content)
-}
-
-func beforeAfterDiff(oldLabel, newLabel, oldText, newText string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "--- %s\n+++ %s\n@@\n", oldLabel, newLabel)
-	for _, line := range splitDiffText(oldText) {
-		b.WriteString("-")
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	for _, line := range splitDiffText(newText) {
-		b.WriteString("+")
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	return b.String()
-}
-
-func splitDiffText(s string) []string {
-	if s == "" {
-		return nil
-	}
-	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }
 
 func clipVisible(s string, width int) string {

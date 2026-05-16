@@ -1052,10 +1052,10 @@ func TestDiffView_StylesUnifiedDiff(t *testing.T) {
 	out := DiffView{
 		Width: 80,
 		Theme: theme.ShellTheme(),
-		Raw:   "--- a/main.go\n+++ b/main.go\n@@\n-old\n+new\n context",
+		Raw:   "--- a/main.go\n+++ b/main.go\n@@ -12,1 +12,1 @@\n-old\n+new",
 	}.View()
 	plain := stripANSI(out)
-	for _, want := range []string{"--- a/main.go", "+++ b/main.go", "@@", "-old", "+new", " context"} {
+	for _, want := range []string{"--- a/main.go", "+++ b/main.go", "@@ -12,1 +12,1 @@", "12 │    │ -old", "   │ 12 │ +new"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("diff view missing %q:\n%s", want, plain)
 		}
@@ -1075,16 +1075,37 @@ func TestToolGroup_RendersEditReturnedDiff(t *testing.T) {
 				Role:     RoleTool,
 				ToolName: "edit",
 				Target:   "main.go",
-				Raw:      "edited main.go: 1 replacement(s)\n--- main.go (before)\n+++ main.go (after)\n@@\n-fmt.Println(\"old\")\n+fmt.Println(\"new\")",
+				Raw:      "edited main.go: 1 replacement(s)\n--- main.go (before)\n+++ main.go (after)\n@@ -7,1 +7,1 @@\n-fmt.Println(\"old\")\n+fmt.Println(\"new\")",
 				Status:   ToolStatusCompleted,
 			},
 		},
 	}
 	plain := stripANSI(ml.View())
-	for _, want := range []string{"Edit", "main.go", "edited main.go", "--- main.go (before)", "+++ main.go (after)", `-fmt.Println("old")`, `+fmt.Println("new")`} {
+	for _, want := range []string{"Edit", "main.go", "edited main.go", "--- main.go (before)", "+++ main.go (after)", "7 │   │", "  │ 7 │", `-fmt.Println("old")`, `+fmt.Println("new")`} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("edit diff preview missing %q:\n%s", want, plain)
 		}
+	}
+}
+
+func TestToolGroup_DoesNotRenderSyntheticArgDiff(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleTool,
+				ToolName: "edit",
+				Target:   "main.go",
+				ToolArgs: []byte(`{"path":"main.go","oldString":"old","newString":"new"}`),
+				Status:   ToolStatusCompleted,
+			},
+		},
+	}
+	plain := stripANSI(ml.View())
+	if strings.Contains(plain, "--- old") || strings.Contains(plain, "+++ new") || strings.Contains(plain, "-old") {
+		t.Fatalf("tool group should not synthesize old/new arg diff without result content:\n%s", plain)
 	}
 }
 
@@ -1099,7 +1120,7 @@ func TestToolGroup_RendersBashDiffOutputAsDiff(t *testing.T) {
 				ToolName:  "bash",
 				ToolUseID: "tu-diff",
 				Target:    "git diff",
-				Raw:       "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@\n-old\n+new",
+				Raw:       "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-old\n+new",
 				Status:    ToolStatusCompleted,
 			},
 		},
