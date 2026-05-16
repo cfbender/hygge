@@ -798,7 +798,7 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 		Alignment:       bubble.AlignLeft,
 		HeaderLeft:      "",
 		HeaderRight:     "",
-		Body:            body,
+		Body:            "\n" + body,
 		Theme:           m.Theme,
 		AccentColor:     accentColor,
 		BackgroundColor: m.bubbleBackgroundColor(),
