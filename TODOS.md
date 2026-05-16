@@ -29,8 +29,5 @@
 
 - At this point, tag as v0.3.0 and push the tag as a release on github
 
-- [ ] **Refine system prompt**
-  Update the system prompt to reflect Hygge's current capabilities.
-
 - [ ] **Hygge smoking chimney animation**
   Add a smoking-chimney animation for Hygge branding/delight.
