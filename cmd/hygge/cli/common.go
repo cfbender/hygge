@@ -88,7 +88,7 @@ type appRuntime struct {
 	BaseSystemPrompt string
 	SystemPrompt     string
 	Pwd              string
-	// Plugins is the plugin registry (nil when no plugins are configured).
+	// Plugins is the plugin registry (nil only when registry construction fails).
 	Plugins *plugin.Registry
 	// PluginPM is the package manager used by the plugins registry.
 	// Exposed for CLI commands that need to inspect cache directories.
@@ -599,26 +599,28 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 
 	// Phase: plugin load
 	t0 = time.Now()
-	// Plugin registry: load all plugins declared in [plugins].sources.
-	// Failures are non-fatal per-plugin (LoadAll skips bad ones with a warn).
+	// Plugin registry: always create the host so `hygge plugins install` can
+	// load a first plugin before any [plugins].sources entry exists. Load all
+	// configured plugins when present; failures are non-fatal per-plugin
+	// (LoadAll skips bad ones with a warn).
 	var pluginReg *plugin.Registry
 	var pluginPM *plugin.PackageManager
-	if len(cfg.Plugins.Sources) > 0 {
-		pluginCacheDir := filepath.Join(xdgState, "hygge", "plugins")
-		pluginReg, err = plugin.NewRegistry(plugin.RegistryOptions{
-			CacheDir:      pluginCacheDir,
-			Tools:         tools,
-			Hooks:         hookReg,
-			Commands:      cmdReg,
-			Subagents:     subagentReg,
-			Permission:    permEngine,
-			PluginConfigs: cfg.RawPluginSettings(),
-			Pwd:           opts.Pwd,
-		})
-		if err != nil {
-			slog.Warn("cli: failed to create plugin registry; plugins disabled for this run", "err", err)
-		} else {
-			pluginPM = pluginReg.PM()
+	pluginCacheDir := filepath.Join(xdgState, "hygge", "plugins")
+	pluginReg, err = plugin.NewRegistry(plugin.RegistryOptions{
+		CacheDir:      pluginCacheDir,
+		Tools:         tools,
+		Hooks:         hookReg,
+		Commands:      cmdReg,
+		Subagents:     subagentReg,
+		Permission:    permEngine,
+		PluginConfigs: cfg.RawPluginSettings(),
+		Pwd:           opts.Pwd,
+	})
+	if err != nil {
+		slog.Warn("cli: failed to create plugin registry; plugins disabled for this run", "err", err)
+	} else {
+		pluginPM = pluginReg.PM()
+		if len(cfg.Plugins.Sources) > 0 {
 			pluginReg.LoadAll(context.Background(), cfg.Plugins.Sources)
 		}
 	}

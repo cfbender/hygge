@@ -94,3 +94,58 @@ func TestPluginsInstall_invalidURI(t *testing.T) {
 		t.Fatal("expected error for npm: URI")
 	}
 }
+
+func TestPluginsInstallWritesConfig(t *testing.T) {
+	home := hermeticHome(t)
+	source := "local:" + filepath.Join(testPluginsDir(t), "hello")
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "install", source})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".config", "hygge", "config.toml")) // #nosec G304 -- hermetic test path under t.TempDir
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "[plugins]") || !strings.Contains(got, source) {
+		t.Fatalf("config missing plugin source %q:\n%s", source, got)
+	}
+}
+
+func TestPluginsRemoveWritesConfig(t *testing.T) {
+	home := hermeticHome(t)
+	source := "local:" + filepath.Join(testPluginsDir(t), "hello")
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgBody := `[plugins]
+sources = ["` + source + `"]
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "remove", "hello"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(cfgDir, "config.toml")) // #nosec G304 -- hermetic test path under t.TempDir
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), source) {
+		t.Fatalf("config still contains removed source %q:\n%s", source, string(data))
+	}
+}
