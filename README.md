@@ -188,7 +188,9 @@ events such as `pre_tool`, `post_tool`, `pre_message`, and `post_message`.
 
 Plugins are Lua modules installed from local paths or GitHub repositories. They
 can register tools, hooks, slash commands, and subagent types through Hygge's Lua
-API.
+API. For example, [quorum](https://github.com/cfbender/quorum) uses the plugin
+system to add extra planning/review subagents that Hygge can fan out to from the
+same session.
 
 ## TUI basics
 
