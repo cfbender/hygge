@@ -208,3 +208,70 @@ name = "claude-sonnet-4-5"
 		t.Fatalf("model dropped: %#v", model)
 	}
 }
+
+func TestWritePluginSourcesPreservesPerPluginTables(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	input := `[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[plugins]
+sources = ["local:/old"]
+
+[plugins.policy]
+strict = true
+`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrote, err := WritePluginSources(WritePluginSourcesOptions{Provenance: Provenance{"plugins.sources": {{File: path}}}}, []string{"local:/old", "local:/new"})
+	if err != nil {
+		t.Fatalf("WritePluginSources: %v", err)
+	}
+	if wrote != path {
+		t.Fatalf("wrote %q, want %q", wrote, path)
+	}
+	m, err := loadTOMLFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugins := m["plugins"].(map[string]any)
+	sources := plugins["sources"].([]any)
+	if len(sources) != 2 || sources[0] != "local:/old" || sources[1] != "local:/new" {
+		t.Fatalf("sources = %#v", sources)
+	}
+	if plugins["policy"].(map[string]any)["strict"] != true {
+		t.Fatalf("per-plugin config dropped: %#v", plugins)
+	}
+	if m["model"].(map[string]any)["provider"] != "anthropic" {
+		t.Fatalf("unrelated config dropped: %#v", m)
+	}
+}
+
+func TestWritePluginSourcesCreatesUserConfigWhenNoRealProvenance(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	xdg := filepath.Join(home, ".config")
+	wrote, err := WritePluginSources(WritePluginSourcesOptions{
+		HomeDir:       home,
+		XDGConfigHome: xdg,
+		Provenance:    Provenance{"plugins.sources": {{File: "<env>"}}},
+	}, []string{"local:/plugin"})
+	if err != nil {
+		t.Fatalf("WritePluginSources: %v", err)
+	}
+	want := filepath.Join(xdg, "hygge", "config.toml")
+	if wrote != want {
+		t.Fatalf("target = %q, want %q", wrote, want)
+	}
+	m, err := loadTOMLFile(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := m["plugins"].(map[string]any)["sources"].([]any)
+	if len(sources) != 1 || sources[0] != "local:/plugin" {
+		t.Fatalf("sources = %#v", sources)
+	}
+}

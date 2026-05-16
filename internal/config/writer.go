@@ -27,6 +27,11 @@ type WriteProviderAPIKeyOptions = WriteModelOptions
 // theme selection. It shares the model writer's target-resolution inputs.
 type WriteThemeSelectionOptions = WriteModelOptions
 
+// WritePluginSourcesOptions controls the narrow config writer used by
+// `hygge plugins install/remove`. It shares the model writer's
+// target-resolution inputs.
+type WritePluginSourcesOptions = WriteModelOptions
+
 // WriteDefaultProfileOptions controls the narrow config writer used by
 // `hygge profile use`. It always writes the user config, not project config.
 type WriteDefaultProfileOptions = WriteModelOptions
@@ -191,6 +196,40 @@ func WriteDefaultProfile(opts WriteDefaultProfileOptions, profileName string) (s
 	return target, nil
 }
 
+// WritePluginSources persists [plugins].sources while preserving unrelated
+// config fields and per-plugin [plugins.<name>] tables. Target policy mirrors
+// the other narrow writers: update the winning real plugins.sources file when
+// known; otherwise create/update the user config.
+func WritePluginSources(opts WritePluginSourcesOptions, sources []string) (string, error) {
+	target := pluginSourcesWriteTarget(opts)
+	m := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
+		parsed, err := parseTOMLBytes(data)
+		if err != nil {
+			return target, &ParseError{File: target, Err: err}
+		}
+		m = parsed
+	} else if !os.IsNotExist(err) {
+		return target, fmt.Errorf("config: read plugin sources target: %w", err)
+	}
+
+	plugins, ok := m["plugins"].(map[string]any)
+	if !ok {
+		plugins = map[string]any{}
+		m["plugins"] = plugins
+	}
+	plugins["sources"] = append([]string(nil), sources...)
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return target, fmt.Errorf("config: encode plugin sources target: %w", err)
+	}
+	if err := atomicWriteConfig(target, buf.Bytes()); err != nil {
+		return target, fmt.Errorf("config: write plugin sources target: %w", err)
+	}
+	return target, nil
+}
+
 func providerAPIKeyWriteTarget(opts WriteProviderAPIKeyOptions) string {
 	for _, key := range []string{"model.options.api_key", "model.provider"} {
 		if path := lastRealSource(opts.Provenance[key]); path != "" {
@@ -214,6 +253,37 @@ func themeWriteTarget(opts WriteThemeSelectionOptions) string {
 		return path
 	}
 	return filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+}
+
+func pluginSourcesWriteTarget(opts WritePluginSourcesOptions) string {
+	if path := lastRealSource(opts.Provenance["plugins.sources"]); path != "" {
+		return path
+	}
+	return filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+}
+
+func atomicWriteConfig(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
 }
 
 func lastRealSource(sources []Source) string {

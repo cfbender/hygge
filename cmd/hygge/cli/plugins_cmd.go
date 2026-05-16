@@ -2,12 +2,12 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/plugin"
 )
 
@@ -315,11 +315,11 @@ func rewritePluginSources(rt *appRuntime, fn func([]string) []string) error {
 // config file.  This is deliberately minimal: we only touch the
 // [plugins].sources array, leaving all other keys intact via raw TOML editing.
 func writePluginSourcesToConfig(rt *appRuntime, sources []string) error {
-	_ = rt // reserved for config path resolution; currently writes to a known path
-	_ = sources
-	// TODO(v0.4): implement atomic config.toml rewrite.  For v0.3 we log
-	// a clear message instead of silently no-oping.
-	// The plugin is loaded in-memory; the user must manually edit config.toml
-	// to persist the change.  This is a known limitation documented in STATUS.md.
-	return fmt.Errorf("config rewrite not yet implemented: please manually add/remove the source in config.toml")
+	_, err := config.WritePluginSources(config.WritePluginSourcesOptions{
+		HomeDir:       rt.StateOpts.HomeDir,
+		XDGConfigHome: rt.XDGConfigHome,
+		Pwd:           rt.Pwd,
+		Provenance:    rt.Provenance,
+	}, sources)
+	return err
 }
