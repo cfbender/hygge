@@ -133,6 +133,7 @@ func TestShiftEnterInsertsInputNewline(t *testing.T) {
 func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
+	app.opts.Modes[app.modeIndex].Color = "5"
 
 	_, cmd := app.Update(tea.PasteMsg{Content: "alpha\nbravo\ncharlie"})
 	if cmd != nil {
@@ -143,8 +144,8 @@ func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	}
 	view := app.View().Content
 	chip := lipgloss.NewStyle().
-		Foreground(app.styles.Editor.AttachmentName.GetForeground()).
-		Background(app.styles.Editor.AttachmentName.GetBackground()).
+		Foreground(lipgloss.Color("0")).
+		Background(lipgloss.Color("5")).
 		Render("[ Pasted 3 lines ]")
 	if !strings.Contains(view, chip) {
 		t.Fatalf("paste marker missing from view:\n%s", view)

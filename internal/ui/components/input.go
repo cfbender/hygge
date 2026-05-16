@@ -46,11 +46,12 @@ var workingPlaceholders = []string{
 //   - Shift+Enter and Alt+Enter insert a newline.
 //   - Ctrl+C, Ctrl+L handled by the App.
 type Input struct {
-	Textarea textarea.Model
-	Styles   *styles.Styles
-	Theme    *theme.Theme // kept for gradual migration
-	Focused  bool
-	prevH    int // track height changes for layout recalc
+	Textarea         textarea.Model
+	Styles           *styles.Styles
+	Theme            *theme.Theme // kept for gradual migration
+	PasteMarkerStyle lipgloss.Style
+	Focused          bool
+	prevH            int // track height changes for layout recalc
 }
 
 // NewInput builds a configured textarea with dynamic height and custom prompts.
@@ -130,11 +131,8 @@ func (i *Input) HeightChanged() bool {
 // View renders the input area with a themed border.
 func (i *Input) View() string {
 	content := i.Textarea.View()
-	if i.Styles != nil {
-		chip := lipgloss.NewStyle().
-			Foreground(i.Styles.Editor.AttachmentName.GetForeground()).
-			Background(i.Styles.Editor.AttachmentName.GetBackground())
-		content = HighlightPastedInputMarkers(content, chip)
+	if i.PasteMarkerStyle.GetForeground() != nil || i.PasteMarkerStyle.GetBackground() != nil {
+		content = HighlightPastedInputMarkers(content, i.PasteMarkerStyle)
 	}
 	if i.Theme != nil {
 		content = HighlightMentions(content, i.Theme.Style(theme.AtomAccent))
