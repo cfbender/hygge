@@ -519,6 +519,20 @@ func readMessages(t *testing.T, st *store.Store, sessionID string) []*session.Me
 	return msgs
 }
 
+func waitForRoles(t *testing.T, st *store.Store, sessionID string, want []string) []string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var got []string
+	for time.Now().Before(deadline) {
+		got = roles(readMessages(t, st, sessionID))
+		if equalStrings(got, want) {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return got
+}
+
 // roles is a convenience to extract the role sequence from a slice of messages.
 func roles(msgs []*session.Message) []string {
 	out := make([]string, len(msgs))
@@ -1061,7 +1075,7 @@ func TestSend_ConcurrentDifferentSessions(t *testing.T) {
 	}
 }
 
-// 9. Serialised Sends on the same session: second waits for the first.
+// 9. Serialised Sends on the same session: second queues behind the first.
 func TestSend_SerialisedSameSession(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1089,9 +1103,9 @@ func TestSend_SerialisedSameSession(t *testing.T) {
 	}()
 	wg.Wait()
 
-	gotRoles := roles(readMessages(t, env.Store, env.sessionID))
 	// Two complete user→assistant pairs.
 	want := []string{"user", "assistant", "user", "assistant"}
+	gotRoles := waitForRoles(t, env.Store, env.sessionID, want)
 	if !equalStrings(gotRoles, want) {
 		t.Fatalf("want %v, got %v", want, gotRoles)
 	}

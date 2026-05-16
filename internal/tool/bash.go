@@ -191,13 +191,12 @@ func (t *bashTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 	go scanPipe(&wg, stdoutR, "stdout", appendOutput, publishLine)
 	go scanPipe(&wg, stderrR, "stderr", appendOutput, publishLine)
 
-	// Wait for the process and for both readers to drain.  Order matters:
-	// cmd.Wait blocks until the process exits AND its IO is fully read,
-	// so wg.Wait() before cmd.Wait() would deadlock on the readers (the
-	// pipes only close when the process exits).  cmd.Wait closes the
-	// pipes for us; then wg.Wait is non-blocking.
-	waitErr := cmd.Wait()
+	// Wait for both readers to drain before calling cmd.Wait. The os/exec
+	// StdoutPipe/StderrPipe contract explicitly requires reads to complete
+	// before Wait; calling Wait first can close the pipes early and drop short
+	// outputs on some platforms.
 	wg.Wait()
+	waitErr := cmd.Wait()
 
 	duration := nowFn().Sub(start)
 

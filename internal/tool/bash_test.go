@@ -167,8 +167,16 @@ func TestBash_StreamingProgress(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("IsError: %+v", res)
 	}
-	// Give the bus a moment to flush.
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		got := len(events)
+		mu.Unlock()
+		if got >= 3 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	sub.Unsubscribe()
 	<-done
 
