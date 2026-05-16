@@ -128,11 +128,11 @@ func sessionListPreview(text string) string {
 		return "-"
 	}
 	text = strings.Join(strings.Fields(text), " ")
-	const max = 48
-	if len(text) <= max {
+	const maxPreviewLen = 48
+	if len(text) <= maxPreviewLen {
 		return text
 	}
-	return text[:max-3] + "..."
+	return text[:maxPreviewLen-3] + "..."
 }
 
 // newSessionsShowCmd builds `hygge sessions show <id-prefix>`.

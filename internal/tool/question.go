@@ -18,13 +18,16 @@ type QuestionTool struct{}
 // NewQuestionTool constructs the interactive question tool.
 func NewQuestionTool() *QuestionTool { return &QuestionTool{} }
 
+// Name implements Tool.
 func (t *QuestionTool) Name() string { return "question" }
 
+// Description implements Tool.
 func (t *QuestionTool) Description() string {
 	return "Ask the user a multiple-choice question when you need a bounded decision before continuing. " +
 		"Provide concise options; the tool blocks until the user chooses or cancels."
 }
 
+// InputSchema implements Tool.
 func (t *QuestionTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
@@ -48,6 +51,7 @@ func (t *QuestionTool) InputSchema() map[string]any {
 	}
 }
 
+// Parallelizable implements Tool.
 func (t *QuestionTool) Parallelizable() bool { return false }
 
 type questionArgs struct {
@@ -55,6 +59,7 @@ type questionArgs struct {
 	Options  []string `json:"options"`
 }
 
+// Execute implements Tool.
 func (t *QuestionTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecContext) (Result, error) {
 	if ec.Bus == nil {
 		return Result{}, newExecutionFailed("question bus not configured", nil)
