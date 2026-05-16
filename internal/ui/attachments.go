@@ -24,6 +24,14 @@ type promptAttachment struct {
 }
 
 func loadPromptAttachment(path string) (promptAttachment, error) {
+	return loadPromptAttachmentWithLimit(path, maxPromptAttachmentTextBytes)
+}
+
+func loadMentionPromptAttachment(path string) (promptAttachment, error) {
+	return loadPromptAttachmentWithLimit(path, 0)
+}
+
+func loadPromptAttachmentWithLimit(path string, maxTextBytes int64) (promptAttachment, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return promptAttachment{}, fmt.Errorf("path is required")
@@ -64,8 +72,8 @@ func loadPromptAttachment(path string) (promptAttachment, error) {
 			}},
 		}, nil
 	}
-	if info.Size() > maxPromptAttachmentTextBytes {
-		return promptAttachment{}, fmt.Errorf("file is too large (%s); text attachments are limited to %s", formatBytes(info.Size()), formatBytes(maxPromptAttachmentTextBytes))
+	if maxTextBytes > 0 && info.Size() > maxTextBytes {
+		return promptAttachment{}, fmt.Errorf("file is too large (%s); text attachments are limited to %s", formatBytes(info.Size()), formatBytes(maxTextBytes))
 	}
 	data, err := os.ReadFile(abs) //nolint:gosec // intentional: user explicitly typed this local attachment path
 	if err != nil {
