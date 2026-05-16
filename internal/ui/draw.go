@@ -111,6 +111,7 @@ func (a *App) renderLeftColumn() string {
 
 	// Editor input (hidden when viewing a subagent transcript).
 	if !a.viewingSubagent() {
+		a.input.BorderColor = a.activeModeColor()
 		a.input.PasteMarkerStyle = a.pasteInputMarkerStyle()
 		sections = append(sections, a.input.View())
 	}

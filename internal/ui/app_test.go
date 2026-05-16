@@ -954,6 +954,18 @@ func TestPromptInputWidthFillsMainViewport(t *testing.T) {
 	}
 }
 
+func TestPromptInputBorderUsesModeColor(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.Modes[app.modeIndex].Color = "5"
+
+	view := app.View().Content
+	want := "\x1b[35m╭"
+	if !strings.Contains(view, want) {
+		t.Fatalf("input border should use active mode color; missing %q in:\n%s", want, view)
+	}
+}
+
 func TestLayoutChatFillsInputClampsAndFooterFixed(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
