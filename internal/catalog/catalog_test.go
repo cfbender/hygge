@@ -17,11 +17,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 )
 
-// boolPtr is a helper for the BackgroundRefresh tri-state option.
-//
-//go:fix inline
-func boolPtr(b bool) *bool { return new(b) }
-
 // ---------------------------------------------------------------------------
 // catwalk fixture helpers
 // ---------------------------------------------------------------------------

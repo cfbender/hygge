@@ -86,9 +86,6 @@ func newCatalogWithFixture(t *testing.T) *Catalog {
 	return NewCatalog(CatalogOptions{Catalog: cc})
 }
 
-//go:fix inline
-func boolPtr(b bool) *bool { return new(b) }
-
 func TestLookUp_HitFromFreshCatalog(t *testing.T) {
 	t.Parallel()
 	c := newCatalogWithFixture(t)
