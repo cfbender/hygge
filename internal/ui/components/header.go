@@ -18,7 +18,7 @@ type Header struct {
 	Version string
 }
 
-// View renders the header as a single line with gradient branding.
+// View renders the header as a padded three-row brand band.
 func (h Header) View() string {
 	if h.Width <= 0 || h.Styles == nil {
 		return ""
@@ -46,23 +46,13 @@ func (h Header) View() string {
 			Render(" " + h.Version)
 	}
 
-	// Build the header line: centered wordmark with optional version.
-	content := wordmark + version
-	contentW := lipgloss.Width(content)
-
-	// Center the content in the available width.
-	if contentW < h.Width {
-		pad := (h.Width - contentW) / 2
-		content = strings.Repeat(" ", pad) + content
-	}
-
-	// Pad to full width.
-	visible := lipgloss.Width(content)
-	if visible < h.Width {
-		content += strings.Repeat(" ", h.Width-visible)
-	}
-
-	return content
+	content := centerHeaderLine(wordmark+version, h.Width)
+	rule := s.Header.Separator.Render(strings.Repeat("─", max(h.Width-4, 0)))
+	return strings.Join([]string{
+		headerBandLine("", h.Width, s),
+		headerBandLine(content, h.Width, s),
+		headerBandLine(centerHeaderLine(rule, h.Width), h.Width, s),
+	}, "\n")
 }
 
 // CompactHeader renders a minimal one-line header for narrow terminals.
@@ -76,7 +66,7 @@ type CompactHeader struct {
 	Cost     string
 }
 
-// View renders the compact header.
+// View renders the compact header as the same three-row band with denser info.
 func (h CompactHeader) View() string {
 	if h.Width <= 0 || h.Styles == nil {
 		return ""
@@ -114,6 +104,29 @@ func (h CompactHeader) View() string {
 
 	// Fill gap between wordmark and info.
 	gap := max(h.Width-wordmarkW-rightW, 1)
+	content := fmt.Sprintf("%s%s%s", wordmark, strings.Repeat(" ", gap), right)
+	return strings.Join([]string{
+		headerBandLine("", h.Width, s),
+		headerBandLine(content, h.Width, s),
+		headerBandLine(s.Header.Separator.Render(strings.Repeat("─", h.Width)), h.Width, s),
+	}, "\n")
+}
 
-	return fmt.Sprintf("%s%s%s", wordmark, strings.Repeat(" ", gap), right)
+func centerHeaderLine(content string, width int) string {
+	contentW := lipgloss.Width(content)
+	if contentW >= width {
+		return content
+	}
+	return strings.Repeat(" ", (width-contentW)/2) + content
+}
+
+func headerBandLine(content string, width int, s *styles.Styles) string {
+	if width <= 0 {
+		return ""
+	}
+	visible := lipgloss.Width(content)
+	if visible < width {
+		content += strings.Repeat(" ", width-visible)
+	}
+	return s.Header.Wrapper.Width(width).Render(content)
 }

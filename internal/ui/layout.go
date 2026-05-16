@@ -36,7 +36,7 @@ const (
 	editorMinHeight     = 3
 	editorMaxHeight     = 8
 	footerHeight        = 1
-	headerHeight        = 1
+	headerHeight        = 3
 	chatBottomPadding   = 1 // breathing room between messages and editor
 
 )

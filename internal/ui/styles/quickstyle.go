@@ -125,7 +125,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Accent = base.Foreground(o.secondary)
 	s.Header.Separator = subtle
 	s.Header.Muted = muted
-	s.Header.Wrapper = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Header.Wrapper = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLeastVisible)
 
 	// Messages.
 	focusedBorder := lipgloss.Border{Left: "▌"}

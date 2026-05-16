@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] Header redesign - bolder, background color maybe?, more padding (3 rows)
-
 - At this point, tag as v0.3.0 and push the tag as a release on github
 
 - [ ] **Refine system prompt**
