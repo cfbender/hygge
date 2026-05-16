@@ -99,6 +99,11 @@ func (a *App) generateLayout(w, h int) uiLayout {
 	// 3–8 row box height; the chat segment below uses Fill(1) to absorb all
 	// remaining vertical space.
 	editorH := a.editorHeight()
+	footerH := footerHeight
+	if a.splashActive() {
+		editorH = 0
+		footerH = 0
+	}
 	pillsH := a.pillsHeight()
 	bannerH := a.bannerHeight()
 	noticeH := a.noticeHeight()
@@ -116,7 +121,7 @@ func (a *App) generateLayout(w, h int) uiLayout {
 	layout.Vertical(
 		layout.Fill(1),
 		layout.Len(editorH),
-		layout.Len(footerHeight),
+		layout.Len(footerH),
 	).WithFlex(layout.FlexStart).Split(chatAndFixedArea).Assign(&chatRect, &editorRect, &footerRect)
 
 	l.chat = chatRect

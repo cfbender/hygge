@@ -58,13 +58,17 @@ func TestColdStartEmptyState(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	out := app.View().Content
+	plain := ansiEscapeRE.ReplaceAllString(out, "")
 	// Sidebar: app name, project path (no session yet so no session title).
 	// Footer: agent identity.
 	// MessageList: empty-state welcome text.
-	for _, want := range []string{"Hygge", "~/proj", "ype a message", "│h│"} {
-		if !strings.Contains(out, want) {
+	for _, want := range []string{"Hygge", "~/proj", "Ask anything", "███████"} {
+		if !strings.Contains(plain, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
+	}
+	if strings.Contains(plain, "What's on your mind?") {
+		t.Errorf("cold-start splash should not render the bottom prompt; got:\n%s", out)
 	}
 	// "profile: work" was rendered by the old header bar; it is no longer shown.
 	if strings.Contains(out, "profile: work") {
@@ -969,6 +973,7 @@ func TestPromptInputBorderUsesModeColor(t *testing.T) {
 func TestLayoutChatFillsInputClampsAndFooterFixed(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
+	app.messages = []uiMessage{{Role: components.RoleUser, Raw: "hello"}}
 
 	const (
 		termW = 120
