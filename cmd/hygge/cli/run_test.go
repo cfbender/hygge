@@ -101,6 +101,18 @@ func TestRoot_NewFlagPresent(t *testing.T) {
 	}
 }
 
+// TestRoot_YoloFlagPresent confirms --yolo is wired on interactive entrypoints.
+func TestRoot_YoloFlagPresent(t *testing.T) {
+	root := NewRootCmd()
+	f := root.Flags().Lookup("yolo")
+	if f == nil {
+		t.Fatal("--yolo flag missing from root command")
+	}
+	if !strings.Contains(f.Usage, "non-secret") {
+		t.Errorf("--yolo usage should mention non-secret scope, got %q", f.Usage)
+	}
+}
+
 // TestContinueAndNewConflict errors when both --continue and --new are set.
 func TestContinueAndNewConflict(t *testing.T) {
 	hermeticHome(t)

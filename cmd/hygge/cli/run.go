@@ -63,6 +63,10 @@ var continueFlag bool
 // starts a fresh session even when resume_default = "continue".
 var newFlag bool
 
+// yoloFlag is set by --yolo on interactive TUI entry points. When true,
+// configurable permission checks are bypassed while secrets remain denied.
+var yoloFlag bool
+
 // init binds --resume, --reasoning, --continue, and --new.
 // Called from NewRootCmd via wireRunFlags below.
 func wireRunFlags(root *cobra.Command) {
@@ -70,6 +74,7 @@ func wireRunFlags(root *cobra.Command) {
 	root.Flags().StringVar(&reasoningFlag, "reasoning", "", "reasoning depth for the run: off | low | medium | high (overrides [model] reasoning)")
 	root.Flags().BoolVarP(&continueFlag, "continue", "c", false, "resume the most recent session for the current directory")
 	root.Flags().BoolVar(&newFlag, "new", false, "start a fresh session (overrides resume_default = continue)")
+	root.Flags().BoolVar(&yoloFlag, "yolo", false, "allow non-secret tool actions without prompting")
 }
 
 // runRun is the body of `hygge` (no subcommand).  Bootstraps the
@@ -96,6 +101,7 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		ProfileName:       rootFlags.Profile,
 		Pwd:               rootFlags.Pwd,
 		ReasoningOverride: reasoningFlag,
+		Yolo:              yoloFlag,
 		AsyncMCP:          true,
 	})
 	if err != nil {
@@ -191,6 +197,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		ModelName:     rt.Config.Model.Name,
 		ProfileName:   rt.Config.Profile,
 		Reasoning:     resolveReasoning(rt.Config, reasoningFlag),
+		Yolo:          rt.Permission != nil && rt.Permission.Yolo(),
 		Commands:      rt.Commands,
 		Subagents:     subagentMentions,
 		Version:       Version,
@@ -268,6 +275,10 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 				rt.Theme, _ = theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
 			}
 			return err
+		},
+		SetYolo: func(_ context.Context, enabled bool) error {
+			rt.Permission.SetYolo(enabled)
+			return nil
 		},
 	})
 	if err != nil {

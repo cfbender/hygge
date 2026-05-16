@@ -71,6 +71,9 @@ func applyTestOverrides(o bootstrapOptions) bootstrapOptions {
 	if o.ReasoningOverride == "" {
 		o.ReasoningOverride = testOverrides.ReasoningOverride
 	}
+	if !o.Yolo {
+		o.Yolo = testOverrides.Yolo
+	}
 	return o
 }
 

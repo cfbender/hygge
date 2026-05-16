@@ -160,6 +160,9 @@ type bootstrapOptions struct {
 	// used by interactive commands so slow external MCP processes never delay the
 	// first UI frame; inspection commands leave it false for synchronous status.
 	AsyncMCP bool
+	// Yolo bypasses configurable permission prompts/default denies while keeping
+	// hard-coded secrets denied.
+	Yolo bool
 	// FantasyModel injects a no-network language model for bootstrap tests. When
 	// nil, production resolves the configured provider/model through Fantasy.
 	FantasyModel fantasy.LanguageModel
@@ -381,6 +384,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Config: cfg,
 		State:  stateOpts,
 		Clock:  opts.Now,
+		Yolo:   opts.Yolo,
 	})
 	if err != nil {
 		_ = stOpen.Close()

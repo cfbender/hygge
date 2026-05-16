@@ -27,9 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Yolo mode**
-  Add a mode for reduced confirmations / more autonomous execution.
-
 - [ ] **Queued messages sticky at bottom**
   Keep queued messages sticky at the bottom and do not send them until the main thread has a break.
 

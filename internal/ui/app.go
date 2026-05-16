@@ -136,6 +136,10 @@ type AppOptions struct {
 	// edited prompt. Tests may inject this seam; production falls back to
 	// $VISUAL, then $EDITOR, then vi.
 	EditPrompt func(ctx context.Context, initial string) (string, error)
+	// Yolo bypasses configurable permission prompts/default denies while keeping
+	// the hard-coded secrets denylist active.
+	Yolo    bool
+	SetYolo func(ctx context.Context, enabled bool) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -921,6 +925,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.setEditedPrompt(m.text)
 		return a, nil
+
+	case yoloSwitchResult:
+		if m.err != nil {
+			return a, a.setNotice("yolo mode failed: " + m.err.Error())
+		}
+		a.opts.Yolo = m.enabled
+		if m.enabled {
+			return a, a.showToast("Yolo mode", "Enabled — secrets still protected")
+		}
+		return a, a.showToast("Yolo mode", "Disabled")
 
 	case sendStarted:
 		wasBusy := a.busy

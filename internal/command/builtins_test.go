@@ -20,6 +20,7 @@ func TestBuiltinSetIsLocked(t *testing.T) {
 		"sessions",
 		"theme",
 		"version",
+		"yolo",
 	}
 	r := New()
 	RegisterBuiltins(r)
