@@ -2485,17 +2485,12 @@ func (a *App) isForeground(sessionID string) bool {
 }
 
 // routeToSubagent reports whether sessionID matches a tracked sub-agent
-// state AND the user has NOT followed into that session (i.e. it is not
-// the current foreground).  When the user has pressed Ctrl+G to follow
-// into a sub-session, that sub-session's events flow into the primary
-// message path rather than the nested block path.
+// state. Sub-agent events must always update the SubagentState, even when the
+// user has followed into that sub-session: renderChatContent sources the
+// foreground subagent view from that state, while a.messages remains the parent
+// transcript.
 func (a *App) routeToSubagent(sessionID string) bool {
 	if sessionID == "" {
-		return false
-	}
-	// If this session is the current foreground (the user has followed
-	// into it), treat it as the primary path.
-	if a.isForeground(sessionID) {
 		return false
 	}
 	_, ok := a.subagents[sessionID]
