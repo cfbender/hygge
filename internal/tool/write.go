@@ -114,6 +114,15 @@ func (t *writeTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCon
 		return *denied, nil
 	}
 
+	before := ""
+	if existed {
+		data, err := os.ReadFile(abs) //nolint:gosec // permission-gated above
+		if err != nil {
+			return Result{}, newExecutionFailed(fmt.Sprintf("read %s", abs), err)
+		}
+		before = string(data)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil { //nolint:gosec // standard repo perms
 		return Result{}, newExecutionFailed(fmt.Sprintf("mkdir %s", filepath.Dir(abs)), err)
 	}
@@ -126,8 +135,13 @@ func (t *writeTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCon
 		t.reads.markRead(ec.SessionID, abs)
 	}
 
+	summary := fmt.Sprintf("wrote %d bytes to %s", len(a.Content), abs)
+	beforeLabel := abs + " (before)"
+	if !existed {
+		beforeLabel = "/dev/null"
+	}
 	return Result{
-		Content: fmt.Sprintf("wrote %d bytes to %s", len(a.Content), abs),
+		Content: toolResultWithDiff(summary, abs, beforeLabel, abs+" (after)", before, a.Content),
 		Metadata: map[string]any{
 			"path":          abs,
 			"bytes_written": len(a.Content),

@@ -180,8 +180,9 @@ func (t *editTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 		return Result{}, newExecutionFailed(fmt.Sprintf("write %s", abs), err)
 	}
 
+	summary := fmt.Sprintf("edited %s: %d replacement(s)", abs, replacements)
 	return Result{
-		Content: fmt.Sprintf("edited %s: %d replacement(s)", abs, replacements),
+		Content: toolResultWithDiff(summary, abs, abs+" (before)", abs+" (after)", a.OldString, a.NewString),
 		Metadata: map[string]any{
 			"path":          abs,
 			"replacements":  replacements,

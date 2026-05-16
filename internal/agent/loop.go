@@ -455,6 +455,7 @@ func (a *Agent) executeToolCalls(
 			MessageID:  asstMsg.ID,
 			ToolUseID:  p.ToolID,
 			ToolName:   p.ToolName,
+			Result:     toolResultBytes(result),
 			Err:        errString,
 			DurationMs: durMs,
 			At:         now(),
@@ -562,6 +563,13 @@ func (a *Agent) executeToolCalls(
 		})
 	}
 	return nil
+}
+
+func toolResultBytes(result tool.Result) []byte {
+	if result.IsError {
+		return nil
+	}
+	return []byte(result.Content)
 }
 
 // toolCallEvent is the agent's internal copy of a provider.EventToolUse.

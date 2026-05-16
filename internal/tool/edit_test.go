@@ -43,6 +43,11 @@ func TestEdit_HappyPath(t *testing.T) {
 	if res.Metadata["replacements"].(int) != 1 {
 		t.Errorf("replacements: %v", res.Metadata["replacements"])
 	}
+	for _, want := range []string{"edited ", "--- ", "+++ ", "-beta", "+BETA"} {
+		if !strings.Contains(res.Content, want) {
+			t.Errorf("result diff missing %q in:\n%s", want, res.Content)
+		}
+	}
 }
 
 func TestEdit_RefuseWithoutRead(t *testing.T) {
