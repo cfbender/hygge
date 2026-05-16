@@ -44,13 +44,11 @@ func TestNewIDs_ConcurrentSafe(t *testing.T) {
 	var wg sync.WaitGroup
 	out := make(chan string, goroutines*perG)
 	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range perG {
 				out <- NewMarkerID()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(out)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"charm.land/fantasy"
@@ -515,13 +516,13 @@ func extractFinalText(m *session.Message) string {
 	if m == nil {
 		return ""
 	}
-	var out string
+	var out strings.Builder
 	for _, p := range m.Parts {
 		if p.Kind == session.PartText {
-			out += p.Text
+			out.WriteString(p.Text)
 		}
 	}
-	return out
+	return out.String()
 }
 
 // buildSlug crafts a human-meaningful slug for the sub-session row.

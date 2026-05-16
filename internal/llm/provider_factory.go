@@ -164,8 +164,8 @@ func resolveAPIKey(providerID string, opts map[string]any) (string, error) {
 		if strings.HasPrefix(s, "op://") {
 			return "", fmt.Errorf("%w: %s", provider.ErrAuthOpRefUnsupported, s)
 		}
-		if strings.HasPrefix(s, "$") {
-			envName := strings.TrimPrefix(s, "$")
+		if after, ok0 := strings.CutPrefix(s, "$"); ok0 {
+			envName := after
 			if envName == "" {
 				return "", fmt.Errorf("%w: empty env reference", provider.ErrAuth)
 			}

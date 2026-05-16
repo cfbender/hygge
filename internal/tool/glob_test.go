@@ -185,7 +185,7 @@ func TestGlob_PermissionTarget(t *testing.T) {
 
 func TestGlob_TruncateMaxResults(t *testing.T) {
 	dir := t.TempDir()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		full := filepath.Join(dir, "f"+itoa(i)+".txt")
 		_ = os.WriteFile(full, []byte("x"), 0o644)
 	}

@@ -368,9 +368,7 @@ func TestConcurrencyStress(t *testing.T) {
 
 	// Subscriber churn goroutines.
 	for range subscribeGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					panics.Add(1)
@@ -385,7 +383,7 @@ func TestConcurrencyStress(t *testing.T) {
 				}
 				sub.Unsubscribe()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -476,13 +474,11 @@ func TestDroppedCounterNoRace(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 100 {
 				Publish(b, SessionStart{SessionID: "race"})
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

@@ -75,7 +75,7 @@ func newCatalogWithFixture(t *testing.T) *Catalog {
 		StateDir:          t.TempDir(),
 		HTTPClient:        srv.Client(),
 		BaseURL:           srv.URL,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
@@ -86,7 +86,8 @@ func newCatalogWithFixture(t *testing.T) *Catalog {
 	return NewCatalog(CatalogOptions{Catalog: cc})
 }
 
-func boolPtr(b bool) *bool { return &b }
+//go:fix inline
+func boolPtr(b bool) *bool { return new(b) }
 
 func TestLookUp_HitFromFreshCatalog(t *testing.T) {
 	t.Parallel()
@@ -131,7 +132,7 @@ func TestLookUp_EmbeddedFallbackHasAnthropicModels(t *testing.T) {
 		StateDir:          dir,
 		HTTPClient:        srv.Client(),
 		BaseURL:           srv.URL,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
@@ -221,7 +222,7 @@ func TestLookUp_StaleSnapshotReturnsFreshFalse(t *testing.T) {
 	cc1, err := catalog.Load(catalog.LoadOptions{
 		StateDir:          dir,
 		Source:            stubFetcher{},
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		Now:               func() time.Time { return now },
 	})
 	if err != nil {
@@ -234,7 +235,7 @@ func TestLookUp_StaleSnapshotReturnsFreshFalse(t *testing.T) {
 	cc2, err := catalog.Load(catalog.LoadOptions{
 		StateDir:          dir,
 		Source:            stubFetcher{err: errors.New("offline")},
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		Now:               func() time.Time { return stale },
 	})
 	if err != nil {

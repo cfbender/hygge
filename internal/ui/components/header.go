@@ -113,10 +113,7 @@ func (h CompactHeader) View() string {
 	wordmarkW := lipgloss.Width(wordmark)
 
 	// Fill gap between wordmark and info.
-	gap := h.Width - wordmarkW - rightW
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(h.Width-wordmarkW-rightW, 1)
 
 	return fmt.Sprintf("%s%s%s", wordmark, strings.Repeat(" ", gap), right)
 }

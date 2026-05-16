@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -61,14 +62,14 @@ func toWireMessages(msgs []session.Message, applyCache bool) (wire []wireMessage
 	}
 
 	if len(systemTexts) > 0 {
-		joined := ""
+		var joined strings.Builder
 		for i, s := range systemTexts {
 			if i > 0 {
-				joined += "\n\n"
+				joined.WriteString("\n\n")
 			}
-			joined += s
+			joined.WriteString(s)
 		}
-		sb := systemBlock{Type: "text", Text: joined}
+		sb := systemBlock{Type: "text", Text: joined.String()}
 		if applyCache {
 			sb.CacheControl = &cacheControl{Type: "ephemeral"}
 		}

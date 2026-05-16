@@ -179,7 +179,7 @@ func Subscribe[T any](b *Bus, opts SubscribeOptions) *Subscription[T] {
 		bufSize = DefaultBufferSize
 	}
 
-	typ := reflect.TypeOf((*T)(nil)).Elem()
+	typ := reflect.TypeFor[T]()
 	ch := make(chan T, bufSize)
 
 	entry := &subscriberEntry{
@@ -219,7 +219,7 @@ func Subscribe[T any](b *Bus, opts SubscribeOptions) *Subscription[T] {
 // included). Non-blocking: if a subscriber's channel is full, the event is
 // dropped for that subscriber and its Dropped counter is incremented.
 func Publish[T any](b *Bus, ev T) int {
-	typ := reflect.TypeOf((*T)(nil)).Elem()
+	typ := reflect.TypeFor[T]()
 
 	b.mu.Lock()
 	if b.closed {
@@ -254,7 +254,7 @@ func Publish[T any](b *Bus, ev T) int {
 // subscriberCount returns the number of active subscribers for type T.
 // This is an internal helper used by tests in the same package.
 func subscriberCount[T any](b *Bus) int {
-	typ := reflect.TypeOf((*T)(nil)).Elem()
+	typ := reflect.TypeFor[T]()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.subs[typ])

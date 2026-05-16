@@ -612,7 +612,6 @@ func TestSplitSlash(t *testing.T) {
 		{"/cmd   leading   trailing  ", "cmd", "leading   trailing  "},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.in, func(t *testing.T) {
 			t.Parallel()
 			n, b := splitSlash(c.in)

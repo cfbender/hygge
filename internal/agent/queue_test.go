@@ -79,11 +79,9 @@ func TestQueue_EnqueueWhileBusy(t *testing.T) {
 
 	// Start the first send; it blocks at the gate.
 	var firstDone sync.WaitGroup
-	firstDone.Add(1)
-	go func() {
-		defer firstDone.Done()
+	firstDone.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("first message"))
-	}()
+	})
 
 	// Give the goroutine time to start and mark the session active.
 	time.Sleep(30 * time.Millisecond)
@@ -131,11 +129,9 @@ func TestQueue_DequeueAfterCompletion(t *testing.T) {
 	ctx := context.Background()
 
 	var firstDone sync.WaitGroup
-	firstDone.Add(1)
-	go func() {
-		defer firstDone.Done()
+	firstDone.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("first"))
-	}()
+	})
 
 	time.Sleep(30 * time.Millisecond)
 
@@ -184,11 +180,9 @@ func TestQueue_ClearQueue(t *testing.T) {
 
 	// Start a blocking send.
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("active"))
-	}()
+	})
 	time.Sleep(30 * time.Millisecond)
 
 	// Enqueue two messages.
@@ -234,7 +228,7 @@ func TestQueue_ConcurrentEnqueue(t *testing.T) {
 	gate := make(chan struct{})
 	// Provide enough scripts for the active run + all queued.
 	var scripts []fakeScript
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		scripts = append(scripts, scriptText(fmt.Sprintf("reply%d", i), provider.Usage{}))
 	}
 	prov := newSlowProvider("fake", gate, scripts...)
@@ -243,18 +237,16 @@ func TestQueue_ConcurrentEnqueue(t *testing.T) {
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("active"))
-	}()
+	})
 	time.Sleep(30 * time.Millisecond)
 
 	// Five concurrent enqueues.
 	const n = 5
 	var enqueuers sync.WaitGroup
 	enqueuers.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer enqueuers.Done()
 			_, _ = a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i)))
@@ -286,11 +278,9 @@ func TestQueue_IsSessionBusy(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("hi"))
-	}()
+	})
 	time.Sleep(30 * time.Millisecond)
 
 	if !a.IsSessionBusy(env.sessionID) {
@@ -390,11 +380,9 @@ func TestQueue_QueueChangedEvents(t *testing.T) {
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("active"))
-	}()
+	})
 	time.Sleep(30 * time.Millisecond)
 
 	_, _ = a.Send(ctx, env.sessionID, userText("queued1"))
@@ -493,14 +481,12 @@ func TestQueue_QueuedSendCompletesAfterCallerCtxCancelled(t *testing.T) {
 	callerCtx, callerCancel := context.WithCancel(context.Background())
 
 	var firstDone sync.WaitGroup
-	firstDone.Add(1)
-	go func() {
-		defer firstDone.Done()
+	firstDone.Go(func() {
 		// This is goroutine #1 — it owns callerCtx and calls defer cancel()
 		// when Send returns (mirroring the UI's startSend goroutine).
 		defer callerCancel()
 		_, _ = a.Send(callerCtx, env.sessionID, userText("first"))
-	}()
+	})
 
 	// Give goroutine #1 time to mark the session active.
 	time.Sleep(30 * time.Millisecond)

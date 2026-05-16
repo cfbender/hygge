@@ -123,9 +123,7 @@ func TestSave_AtomicWrite(t *testing.T) {
 	errCh := make(chan error, iterations+1)
 
 	// Writer goroutine: repeatedly overwrites state.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iterations {
 			s := &State{ActiveProfile: "updated", RecentSessions: []string{"a", "b", "c"}}
 			_ = i
@@ -134,13 +132,11 @@ func TestSave_AtomicWrite(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Reader goroutines: each Load must succeed (file is either old or new valid JSON).
 	for range iterations {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			s, err := Load(o)
 			if err != nil {
 				errCh <- err
@@ -150,7 +146,7 @@ func TestSave_AtomicWrite(t *testing.T) {
 			if s.ActiveProfile != "initial" && s.ActiveProfile != "updated" {
 				errCh <- errors.New("unexpected ActiveProfile: " + s.ActiveProfile)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -791,16 +787,12 @@ func TestSave_RaceDetectorClean(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _ = Load(o)
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			_ = Save(&State{ActiveProfile: "race"}, o)
-		}()
+		})
 	}
 	wg.Wait()
 }

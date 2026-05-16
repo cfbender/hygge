@@ -71,8 +71,8 @@ func parseColor(atom Atom, s string) (Color, error) {
 	}
 
 	// inherit:<atom>
-	if strings.HasPrefix(s, "inherit:") {
-		target := strings.TrimPrefix(s, "inherit:")
+	if after, ok := strings.CutPrefix(s, "inherit:"); ok {
+		target := after
 		if target == "" {
 			return Color{}, &ErrInvalidColor{Atom: atom, Value: s}
 		}
@@ -80,8 +80,8 @@ func parseColor(atom Atom, s string) (Color, error) {
 	}
 
 	// ansi:N
-	if strings.HasPrefix(s, "ansi:") {
-		rest := strings.TrimPrefix(s, "ansi:")
+	if after, ok := strings.CutPrefix(s, "ansi:"); ok {
+		rest := after
 		if _, err := strconv.Atoi(rest); err != nil {
 			return Color{}, &ErrInvalidColor{Atom: atom, Value: s}
 		}

@@ -52,7 +52,7 @@ type Credential struct {
 	// OAuth shape:
 	AccessToken  string    `json:"access_token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at"`
 	// AccountID is the ChatGPT account ID extracted from the JWT.
 	// Used as the ChatGPT-Account-Id header for organization subscriptions.
 	AccountID string `json:"account_id,omitempty"`

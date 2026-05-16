@@ -46,7 +46,7 @@ func containsBackgroundSGR(s string) bool {
 		if strings.Contains(seq, "48;") || strings.Contains(seq, "48:") || strings.Contains(seq, "49") {
 			return true
 		}
-		for _, part := range strings.Split(seq, ";") {
+		for part := range strings.SplitSeq(seq, ";") {
 			if len(part) == 2 && part[0] == '4' && part[1] >= '0' && part[1] <= '7' {
 				return true
 			}
@@ -132,7 +132,7 @@ func TestBubble_MaxBodyHeight_Truncates(t *testing.T) {
 	plain := stripANSI(out)
 
 	// Lines 0–3 should appear (first 4 of 5 slots; slot 5 = indicator).
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if !strings.Contains(plain, "line"+itoa(i)) {
 			t.Errorf("expected line%d to be visible: %q", i, plain)
 		}

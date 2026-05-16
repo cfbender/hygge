@@ -75,10 +75,7 @@ func (p CommandPalette) View() string {
 		width = 60
 	}
 	// Allow a little headroom for the border + padding.
-	innerWidth := width - 4
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	innerWidth := max(width-4, 20)
 
 	if len(p.Matches) == 0 {
 		if p.QueryAfterSlash == "" {

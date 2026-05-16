@@ -18,7 +18,9 @@ import (
 )
 
 // boolPtr is a helper for the BackgroundRefresh tri-state option.
-func boolPtr(b bool) *bool { return &b }
+//
+//go:fix inline
+func boolPtr(b bool) *bool { return new(b) }
 
 // ---------------------------------------------------------------------------
 // catwalk fixture helpers
@@ -133,7 +135,7 @@ func TestLoad_FallsBackToEmbeddedWhenDiskMissing(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            &fakeFetcher{err: errors.New("offline")},
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		Now:               func() time.Time { return time.Unix(0, 0) },
 	})
 	if err != nil {
@@ -182,7 +184,7 @@ func TestLoad_PrefersDiskOverEmbedded(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          dir,
 		Source:            &fakeFetcher{err: errors.New("offline")},
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -208,7 +210,7 @@ func TestLoad_CorruptDiskFallsBackToEmbedded(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          dir,
 		Source:            &fakeFetcher{err: errors.New("offline")},
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -235,7 +237,7 @@ func TestLoad_V1DiskCacheRejected(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          dir,
 		Source:            &fakeFetcher{err: errors.New("offline")},
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -258,7 +260,7 @@ func TestRefresh_RoundTripsDisk(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          dir,
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		Now:               func() time.Time { return now },
 	})
 	if err != nil {
@@ -299,7 +301,7 @@ func TestRefresh_RoundTripsDisk(t *testing.T) {
 	c2, err := Load(LoadOptions{
 		StateDir:          dir,
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		Now:               func() time.Time { return now.Add(time.Hour) },
 	})
 	if err != nil {
@@ -332,7 +334,7 @@ func TestRefresh_ETagNotModified(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            fetcher,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -372,7 +374,7 @@ func TestLookup_HitMissAndCaseInsensitivity(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            freshFetcher(t),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -411,7 +413,7 @@ func TestModels_SortedAndProviderScoped(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            freshFetcher(t),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -544,7 +546,6 @@ func TestCatwalkFetcher_Success(t *testing.T) {
 func TestCatwalkFetcher_AppendsProvidersPathOnce(t *testing.T) {
 	t.Parallel()
 	for _, baseSuffix := range []string{"", "/"} {
-		baseSuffix := baseSuffix
 		t.Run("suffix="+baseSuffix, func(t *testing.T) {
 			t.Parallel()
 			paths := make(chan string, 1)
@@ -631,7 +632,7 @@ func TestBackgroundRefresh_StaleSnapshotKicksOff(t *testing.T) {
 	_, err := Load(LoadOptions{
 		StateDir:          dir,
 		Source:            f,
-		BackgroundRefresh: boolPtr(true),
+		BackgroundRefresh: new(true),
 		MaxStaleness:      time.Hour,
 		Now:               func() time.Time { return now },
 	})
@@ -654,7 +655,7 @@ func TestRefresh_SingleFlight(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -662,7 +663,7 @@ func TestRefresh_SingleFlight(t *testing.T) {
 	var wg sync.WaitGroup
 	const N = 6
 	wg.Add(N)
-	for i := 0; i < N; i++ {
+	for range N {
 		go func() {
 			defer wg.Done()
 			if _, err := c.Refresh(context.Background()); err != nil {
@@ -712,7 +713,7 @@ func TestLoad_IncompatibleDiskSnapshotFallsBackCleanly(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	c, err := Load(LoadOptions{StateDir: dir, BackgroundRefresh: boolPtr(false)})
+	c, err := Load(LoadOptions{StateDir: dir, BackgroundRefresh: new(false)})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -797,7 +798,7 @@ func TestProviders_Sorted(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            freshFetcher(t),
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -821,7 +822,7 @@ func TestLoaded_ReportsAgeAndSource(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		Now:               func() time.Time { return now },
 	})
 	if err != nil {
@@ -857,7 +858,7 @@ func TestPeriodicRefresh_TickerFiresAtInterval(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		RefreshInterval:   interval,
 	})
 	if err != nil {
@@ -890,7 +891,7 @@ func TestPeriodicRefresh_CloseStopsTicker(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		RefreshInterval:   interval,
 	})
 	if err != nil {
@@ -931,7 +932,7 @@ func TestPeriodicRefresh_ZeroIntervalNoTicker(t *testing.T) {
 	c, err := Load(LoadOptions{
 		StateDir:          tempStateDir(t),
 		Source:            f,
-		BackgroundRefresh: boolPtr(false),
+		BackgroundRefresh: new(false),
 		RefreshInterval:   0, // disabled
 	})
 	if err != nil {

@@ -126,10 +126,7 @@ func (b Bubble) View() string {
 	bubbleW := b.BubbleWidth
 	if bubbleW <= 0 {
 		// Auto: ~70% of parent, clamped between 40 and 100.
-		bubbleW = int(float64(width) * 0.70)
-		if bubbleW < 40 {
-			bubbleW = 40
-		}
+		bubbleW = max(int(float64(width)*0.70), 40)
 		if bubbleW > 100 {
 			bubbleW = 100
 		}
@@ -140,14 +137,8 @@ func (b Bubble) View() string {
 
 	// Inner content width = bubble width minus the one-cell side bar and
 	// horizontal content padding.
-	innerW := bubbleW - sideBarWidth
-	if innerW < 1 {
-		innerW = 1
-	}
-	contentW := innerW - horizontalPadding*2
-	if contentW < 1 {
-		contentW = 1
-	}
+	innerW := max(bubbleW-sideBarWidth, 1)
+	contentW := max(innerW-horizontalPadding*2, 1)
 
 	accentColor := b.resolveAccentColor()
 	backgroundColor := b.resolveBackgroundColor()
@@ -172,20 +163,14 @@ func (b Bubble) View() string {
 
 	// The actual rendered bubble width (should equal bubbleW after border).
 	composedW := lipgloss.Width(strings.SplitN(composed, "\n", 2)[0])
-	pad := width - composedW
-	if pad < 0 {
-		pad = 0
-	}
+	pad := max(width-composedW, 0)
 
 	// Pad EACH LINE so that every row of the output occupies exactly `width`
 	// terminal columns.  Appending spaces to the whole multi-line string only
 	// pads the last line, leaving interior lines shorter than `width`.
 	composedLines := strings.Split(composed, "\n")
 	paddedLines := make([]string, len(composedLines))
-	inset := outerInset
-	if pad < inset {
-		inset = pad
-	}
+	inset := min(pad, outerInset)
 	for i, line := range composedLines {
 		if b.Alignment == AlignRight {
 			paddedLines[i] = strings.Repeat(" ", pad-inset) + line + strings.Repeat(" ", inset)
@@ -244,8 +229,8 @@ func (b Bubble) composeInner(header, body string, contentW int, accentColor, bac
 		if bgOpen != "" {
 			line = reassertBackgroundAfterReset(line, bgOpen)
 		}
-		renderedLines := strings.Split(lineStyle.Render(line), "\n")
-		for _, rendered := range renderedLines {
+		renderedLines := strings.SplitSeq(lineStyle.Render(line), "\n")
+		for rendered := range renderedLines {
 			padded = append(padded,
 				padStyle.Render(strings.Repeat(" ", horizontalPadding))+
 					rendered+
@@ -270,18 +255,12 @@ func (b Bubble) renderTail(accentColor color.Color, pad, composedW, width int) s
 	if b.Alignment == AlignRight {
 		glyph := style.Render("◢")
 		glyphW := lipgloss.Width(glyph)
-		lineW := pad + composedW - glyphW
-		if lineW < 0 {
-			lineW = 0
-		}
+		lineW := max(pad+composedW-glyphW, 0)
 		return strings.Repeat(" ", lineW) + glyph
 	}
 	glyph := style.Render("◣")
 	glyphW := lipgloss.Width(glyph)
-	trailing := width - glyphW
-	if trailing < 0 {
-		trailing = 0
-	}
+	trailing := max(width-glyphW, 0)
 	return glyph + strings.Repeat(" ", trailing)
 }
 
@@ -401,10 +380,7 @@ func (b Bubble) renderHeader(innerW int, accentColor color.Color) string {
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(right)
 
-	gap := innerW - leftW - rightW
-	if gap < 2 {
-		gap = 2
-	}
+	gap := max(innerW-leftW-rightW, 2)
 
 	return left + strings.Repeat(" ", gap) + right
 }

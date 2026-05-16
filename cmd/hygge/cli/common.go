@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1052,9 +1053,7 @@ func resolveProviderOptionsFor(providerName string, cfg *config.Config, stateOpt
 	//    provider, its options come solely from credentials + the
 	//    adapter's own defaults.
 	if providerName == cfg.Model.Provider {
-		for k, v := range cfg.Model.Options {
-			merged[k] = v
-		}
+		maps.Copy(merged, cfg.Model.Options)
 		if v, ok := merged["api_key"]; ok {
 			if s, ok := v.(string); ok && s != "" {
 				slog.Debug("cli: api key from config", "provider", providerName, "key", maskKey(s))

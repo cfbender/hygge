@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -150,7 +150,5 @@ func decodeTOMLBytes(data []byte) (map[string]any, error) {
 
 // sortAtoms sorts a slice of Atom values lexicographically.
 func sortAtoms(atoms []Atom) {
-	sort.Slice(atoms, func(i, j int) bool {
-		return atoms[i] < atoms[j]
-	})
+	slices.Sort(atoms)
 }

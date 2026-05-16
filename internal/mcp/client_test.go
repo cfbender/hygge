@@ -427,7 +427,7 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 	const n = 4
 	results := make(chan string, n)
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			r, err := c.CallTool(context.Background(), "echo",
 				json.RawMessage(`{"i":`+itoa(i)+`}`))
@@ -445,7 +445,7 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 
 	// Server responds to each inbound request with the same i it
 	// received (round-trip identity).
-	for i := 0; i < n; i++ {
+	for range n {
 		req := <-srv.inbox
 		// Echo the arguments back in the result so we can verify.
 		var p CallToolParams
@@ -458,7 +458,7 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 	}
 
 	got := make(map[string]bool)
-	for i := 0; i < n; i++ {
+	for range n {
 		select {
 		case r := <-results:
 			got[r] = true

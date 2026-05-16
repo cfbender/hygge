@@ -208,7 +208,7 @@ func TestContextList_MultipleRootFiles(t *testing.T) {
 	}
 	// And must NOT contain the absolute root path in any row.
 	absRoot := root + string(filepath.Separator)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.Contains(line, "project/root") && strings.Contains(line, absRoot) {
 			t.Errorf("project/root row leaked absolute path:\n%s", line)
 		}

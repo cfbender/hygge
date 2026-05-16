@@ -112,10 +112,7 @@ func (i *Input) SetWidth(w int) {
 	if i.Styles != nil {
 		frame = 4 // border (1) + padding (1) on each side
 	}
-	inner := w - frame
-	if inner < 1 {
-		inner = 1
-	}
+	inner := max(w-frame, 1)
 	i.Textarea.SetWidth(inner)
 }
 

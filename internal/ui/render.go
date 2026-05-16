@@ -126,10 +126,7 @@ func (a *App) renderChatContent() string {
 	}
 
 	// Update viewport dimensions.
-	chatH := l.chat.Dy()
-	if chatH < 1 {
-		chatH = 1
-	}
+	chatH := max(l.chat.Dy(), 1)
 	a.msgViewport.SetWidth(l.leftW)
 	a.msgViewport.SetHeight(chatH)
 
@@ -272,11 +269,11 @@ func (a *App) renderQuitOverlay(w, h int) string {
 
 	var yesBtn, noBtn string
 	if a.quitSelectedNo {
-		yesBtn = normalStyle.Render("Yep!")
-		noBtn = selectedStyle.Render("Nope")
+		yesBtn = normalStyle.Render("yeah")
+		noBtn = selectedStyle.Render("nah")
 	} else {
-		yesBtn = selectedStyle.Render("Yep!")
-		noBtn = normalStyle.Render("Nope")
+		yesBtn = selectedStyle.Render("yeah")
+		noBtn = normalStyle.Render("nah")
 	}
 	btnSep := lipgloss.NewStyle().Background(boxBg).Render(" ")
 	buttonRow := yesBtn + btnSep + noBtn
@@ -286,24 +283,15 @@ func (a *App) renderQuitOverlay(w, h int) string {
 	qText := question
 	qW := lipgloss.Width(qText)
 	bW := lipgloss.Width(buttonRow)
-	innerW := qW
-	if bW > innerW {
-		innerW = bW
-	}
+	innerW := max(bW, qW)
 
 	// Center the button row within the inner width.
-	btnPad := (innerW - bW) / 2
-	if btnPad < 0 {
-		btnPad = 0
-	}
+	btnPad := max((innerW-bW)/2, 0)
 	bgPad := lipgloss.NewStyle().Background(boxBg)
 	centeredButtons := bgPad.Render(strings.Repeat(" ", btnPad)) + buttonRow + bgPad.Render(strings.Repeat(" ", innerW-bW-btnPad))
 
 	// Center the question too.
-	qPad := (innerW - qW) / 2
-	if qPad < 0 {
-		qPad = 0
-	}
+	qPad := max((innerW-qW)/2, 0)
 	qStyle := lipgloss.NewStyle().Foreground(textFg).Background(boxBg)
 	centeredQ := bgPad.Render(strings.Repeat(" ", qPad)) + qStyle.Render(qText) + bgPad.Render(strings.Repeat(" ", innerW-qW-qPad))
 
@@ -332,7 +320,7 @@ func (a *App) renderQuitOverlay(w, h int) string {
 	for range padTop {
 		lines = append(lines, "")
 	}
-	for _, line := range strings.Split(box, "\n") {
+	for line := range strings.SplitSeq(box, "\n") {
 		lines = append(lines, strings.Repeat(" ", padLeft)+line)
 	}
 	return strings.Join(lines, "\n")

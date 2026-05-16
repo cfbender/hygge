@@ -61,6 +61,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -451,10 +452,10 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	}
 
 	// Extract text from the user parts for the pre_message hook.
-	var userText string
+	var userText strings.Builder
 	for _, p := range userParts {
 		if p.Kind == session.PartText {
-			userText += p.Text
+			userText.WriteString(p.Text)
 		}
 	}
 
@@ -467,7 +468,7 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 			SessionID: sessionID,
 			HookName:  "pre_message",
 			Pwd:       pwd,
-			Message:   userText,
+			Message:   userText.String(),
 		}
 		out, dec, denier, reason, warns := a.opts.Hooks.RunPre(ctx, hook.EventPreMessage, hookIn)
 		logHookWarns(warns)
@@ -475,7 +476,7 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 			return nil, fmt.Errorf("agent: pre_message hook %q denied: %s", denier, reason)
 		}
 		// Use the (possibly modified) message from the hook output.
-		if out.Message != "" && out.Message != userText {
+		if out.Message != "" && out.Message != userText.String() {
 			userParts = replaceTextParts(userParts, out.Message)
 		}
 	}

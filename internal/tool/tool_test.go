@@ -160,18 +160,16 @@ func TestRegistry_AsProviderTools(t *testing.T) {
 func TestRegistry_ConcurrentReads(t *testing.T) {
 	t.Helper()
 	r := NewRegistry()
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_ = r.Register(newStub("t" + string(rune('a'+i))))
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			_ = r.All()
 			_, _ = r.Get("ta")
 			_ = r.AsProviderTools()
-		}()
+		})
 	}
 	wg.Wait()
 }

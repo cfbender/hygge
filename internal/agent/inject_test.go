@@ -72,7 +72,7 @@ func TestInjectMessage_cap(t *testing.T) {
 	const injectCap = maxPluginInjectsPerTurn
 
 	// Inject exactly cap messages — should all succeed.
-	for i := 0; i < injectCap; i++ {
+	for i := range injectCap {
 		if err := ag.InjectMessage(ctx, "test-plugin", env.sessionID, "user", "msg"); err != nil {
 			t.Fatalf("InjectMessage #%d: %v", i, err)
 		}
@@ -94,7 +94,7 @@ func TestInjectMessage_reset(t *testing.T) {
 	ctx := context.Background()
 	const injectCap = maxPluginInjectsPerTurn
 
-	for i := 0; i < injectCap; i++ {
+	for i := range injectCap {
 		if err := ag.InjectMessage(ctx, "test-plugin", env.sessionID, "user", "msg"); err != nil {
 			t.Fatalf("InjectMessage #%d: %v", i, err)
 		}

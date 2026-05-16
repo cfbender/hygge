@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,9 +80,7 @@ func (c *optsCapture) factory(opts map[string]any) (provider.Provider, error) {
 	// Shallow-copy so subsequent bootstrap mutations cannot taint the
 	// captured value.
 	cp := make(map[string]any, len(opts))
-	for k, v := range opts {
-		cp[k] = v
-	}
+	maps.Copy(cp, opts)
 	c.last = cp
 	c.mu.Unlock()
 	return fakeProvider{}, nil
@@ -94,9 +93,7 @@ func (c *optsCapture) snapshot() map[string]any {
 		return nil
 	}
 	cp := make(map[string]any, len(c.last))
-	for k, v := range c.last {
-		cp[k] = v
-	}
+	maps.Copy(cp, c.last)
 	return cp
 }
 

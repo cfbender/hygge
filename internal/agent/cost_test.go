@@ -174,7 +174,7 @@ func TestCompact_PublishesStartedCompleted(t *testing.T) {
 	)
 	a := env.newAgent(prov)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
 			t.Fatalf("Send %d: %v", i, err)
 		}
@@ -247,7 +247,7 @@ func TestCompact_UsesFantasySummaryWhenConfigured(t *testing.T) {
 	prov := newFakeProvider("fake")
 	fantasyModel := &fakeFantasyModel{provider: "fake", model: "fake-model", text: "fantasy compact summary", usage: fantasy.Usage{InputTokens: 42, OutputTokens: 7}}
 	a := env.newAgent(prov, func(o *Options) { o.FantasyModel = fantasyModel })
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := env.Store.AppendMessage(ctx, env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: userText(fmt.Sprintf("q%d", i))}); err != nil {
 			t.Fatalf("append user %d: %v", i, err)
 		}
@@ -287,7 +287,7 @@ func TestCompact_PublishesStartedFailed(t *testing.T) {
 		scriptText("a3", provider.Usage{InputTokens: 1, OutputTokens: 1}),
 	)
 	a := env.newAgent(seeder)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
 			t.Fatalf("Send %d: %v", i, err)
 		}
@@ -486,7 +486,7 @@ func TestThreshold_RefiresAfterCompaction(t *testing.T) {
 		o.CompactionThresholdPct = 80
 	})
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
 			t.Fatalf("Send %d: %v", i, err)
 		}

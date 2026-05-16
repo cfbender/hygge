@@ -57,11 +57,11 @@ func TestStdioTransport_EnvAllowlist(t *testing.T) {
 	env := mergeEnv(stdioEnvAllowlist, map[string]string{"GITHUB_TOKEN": "abc"})
 	gotKeys := make(map[string]string, len(env))
 	for _, kv := range env {
-		eq := strings.IndexByte(kv, '=')
-		if eq < 0 {
+		before, after, ok := strings.Cut(kv, "=")
+		if !ok {
 			continue
 		}
-		gotKeys[kv[:eq]] = kv[eq+1:]
+		gotKeys[before] = after
 	}
 	if _, leaked := gotKeys["HYGGE_MCP_TEST_LEAK"]; leaked {
 		t.Fatalf("non-allowlisted env var leaked: %v", gotKeys)
@@ -132,7 +132,6 @@ func TestStdioTransport_ServerLabel(t *testing.T) {
 		{"with-args", StdioOptions{Command: "mcp-server-github", Args: []string{"--token", "xyz"}}, "mcp-server-github --token"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tr := NewStdio(tc.opts)
@@ -192,12 +191,10 @@ func TestRingBuffer_ConcurrentWrites(t *testing.T) {
 	t.Parallel()
 	rb := newRingBuffer(1024)
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			mustWrite(t, rb, bytes.Repeat([]byte("x"), 50))
-		}()
+		})
 	}
 	wg.Wait()
 	// Size <= cap, length is a multiple of 50.
