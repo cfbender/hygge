@@ -22,3 +22,7 @@
 
 - Refactor and split out internal/ui/app.go
 
+## UX
+
+- Update title using small_model on first message (add small model config if not available already) or when topic changes (expose tool call for this)
+

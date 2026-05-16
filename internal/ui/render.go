@@ -17,6 +17,15 @@ import (
 // delta, resize, theme switch).
 func (a *App) invalidateMsgCache() {
 	a.msgCacheValid = false
+	a.msgCacheStreamingDirty = false
+}
+
+func (a *App) invalidateMsgCacheForStreamingDelta() {
+	if a.userScrolled && a.msgCacheValid {
+		a.msgCacheStreamingDirty = true
+		return
+	}
+	a.invalidateMsgCache()
 }
 
 // renderChatContent produces the string content for the chat viewport.
@@ -57,15 +66,13 @@ func (a *App) renderChatContent() string {
 	needsRebuild := !a.msgCacheValid ||
 		a.msgCacheW != l.leftW ||
 		a.msgCacheLen != len(visibleMessages) ||
+		(!a.userScrolled && a.msgCacheStreamingDirty) ||
 		now.Sub(a.msgCacheTime) > 30*time.Second
 
-	// Always rebuild when streaming (content changes intra-message).
-	if !needsRebuild && len(visibleMessages) > 0 {
-		last := visibleMessages[len(visibleMessages)-1]
-		if last.IsStreaming {
-			needsRebuild = true
-		}
-	}
+	// Streaming deltas mutate existing messages and explicitly invalidate the
+	// cache via handleBusEvent/append helpers. Do not rebuild solely because the
+	// tail is streaming: during scroll frames that would re-render the entire
+	// transcript even when no new bytes arrived.
 
 	if needsRebuild {
 		ml := components.MessageList{
@@ -81,6 +88,7 @@ func (a *App) renderChatContent() string {
 		}
 		a.msgCache, a.subagentHitZones, a.toolHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
+		a.msgCacheStreamingDirty = false
 		a.msgCacheW = l.leftW
 		a.msgCacheLen = len(visibleMessages)
 		a.msgCacheTime = now
@@ -148,6 +156,7 @@ func (a *App) renderSidebarContent() string {
 		MaxTokens:    a.maxTok,
 		PctUsed:      a.pctUsed,
 		CostUSD:      a.costDollars,
+		BilledTokens: a.billedTok,
 		MCPs:         a.opts.MCPStatuses,
 		ProjectPath:  a.collapsedProjectPath(),
 		GitBranch:    a.gitBranch(),

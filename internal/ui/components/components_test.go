@@ -745,8 +745,10 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 		Height:       30,
 		SessionTitle: "fix the auth bug",
 		UsedTokens:   97229,
+		MaxTokens:    1_000_000,
 		PctUsed:      0.10,
 		CostUSD:      0.0042,
+		BilledTokens: 123456,
 		MCPs: []SidebarMCPStatus{
 			{Name: "server-a", Ready: true, ToolCount: 3},
 			{Name: "server-b", Ready: false},
@@ -765,10 +767,10 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 	if !strings.Contains(plain, "fix the auth bug") {
 		t.Errorf("sidebar missing session title; got:\n%s", plain)
 	}
-	// Context section.
-	for _, want := range []string{"Context", "97,229 tokens", "10% used", "$0.0042"} {
+	// Usage and context sections.
+	for _, want := range []string{"Usage", "123,456 billed", "$0.0042", "Context", "97,229 tokens", "10% used"} {
 		if !strings.Contains(plain, want) {
-			t.Errorf("sidebar missing context %q; got:\n%s", want, plain)
+			t.Errorf("sidebar missing usage/context %q; got:\n%s", want, plain)
 		}
 	}
 	// MCPs section.
@@ -821,18 +823,16 @@ func TestSidebar_NoMCPs_ShowsNone(t *testing.T) {
 	}
 }
 
-func TestSidebar_HidesContextWhenZero(t *testing.T) {
+func TestSidebar_HidesUsageAndContextWhenZero(t *testing.T) {
 	t.Parallel()
 	sb := Sidebar{
-		Width:      32,
-		Height:     20,
-		UsedTokens: 0,
-		CostUSD:    0,
-		Theme:      theme.ShellTheme(),
+		Width:  32,
+		Height: 20,
+		Theme:  theme.ShellTheme(),
 	}
 	out := stripANSI(sb.View())
-	if strings.Contains(out, "Context") {
-		t.Errorf("sidebar should not show Context section when tokens=0 and cost=0; got:\n%s", out)
+	if strings.Contains(out, "Context") || strings.Contains(out, "Usage") {
+		t.Errorf("sidebar should not show Usage/Context sections when usage is zero; got:\n%s", out)
 	}
 }
 

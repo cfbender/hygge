@@ -249,6 +249,76 @@ func TestCtrlEEditorExpandsPastedMarkers(t *testing.T) {
 	}
 }
 
+func seedLargeStreamingChat(t *testing.T, app *App) {
+	t.Helper()
+	for i := 0; i < 80; i++ {
+		app.messages = append(app.messages, uiMessage{
+			Role: components.RoleAssistant,
+			Raw:  strings.Repeat("history line\n", 4),
+		})
+	}
+	app.messages = append(app.messages, uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         "streaming response",
+		IsStreaming: true,
+	})
+}
+
+func TestRenderChatContent_StreamingTailUsesCacheWithoutNewDelta(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	seedLargeStreamingChat(t, app)
+
+	_ = app.renderChatContent()
+	if !app.msgCacheValid {
+		t.Fatal("expected initial render to populate message cache")
+	}
+	cached := app.msgCache
+	cachedAt := app.msgCacheTime
+	advanced := cachedAt.Add(time.Second)
+	app.opts.Now = func() time.Time { return advanced }
+	app.userScrolled = true
+	app.msgViewport.PageUp()
+
+	_ = app.renderChatContent()
+	if app.msgCache != cached {
+		t.Fatal("scroll render rebuilt message cache despite unchanged streaming content")
+	}
+	if !app.msgCacheTime.Equal(cachedAt) {
+		t.Fatalf("cache timestamp changed on scroll render: got %s want %s", app.msgCacheTime, cachedAt)
+	}
+}
+
+func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	seedLargeStreamingChat(t, app)
+
+	_ = app.renderChatContent()
+	baseline := app.msgCache
+	app.userScrolled = true
+	app.msgViewport.PageUp()
+	app.appendAssistantDelta(" more")
+	app.invalidateMsgCacheForStreamingDelta()
+
+	_ = app.renderChatContent()
+	if app.msgCache != baseline {
+		t.Fatal("scrolled streaming delta rebuilt full message cache")
+	}
+	if !app.msgCacheStreamingDirty {
+		t.Fatal("expected streaming dirty flag while rerender is deferred")
+	}
+
+	app.userScrolled = false
+	_ = app.renderChatContent()
+	if app.msgCache == baseline {
+		t.Fatal("returning to bottom did not render deferred streaming delta")
+	}
+	if app.msgCacheStreamingDirty {
+		t.Fatal("streaming dirty flag should clear after rebuild")
+	}
+}
+
 func TestScrollBarDragScrollsChatViewport(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
@@ -876,10 +946,23 @@ func TestContextUsageUpdatesSidebar(t *testing.T) {
 	app, _ := newTestApp(t)
 	app.Handle(bus.ContextUsageUpdated{UsedTokens: 50, MaxTokens: 100, PctUsed: 0.5})
 	out := app.View().Content
-	// Context usage is now shown in the sidebar as "50% used" (sidebar is
+	// Context usage is shown in the sidebar as "50% used" (sidebar is
 	// visible because the test window is 100 columns wide).
 	if !strings.Contains(out, "50% used") {
 		t.Errorf("expected '50%% used' in sidebar after context update, got:\n%s", out)
+	}
+}
+
+func TestContextUsageUnknownLimitDoesNotShowZeroPercent(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Handle(bus.ContextUsageUpdated{UsedTokens: 334})
+	out := app.View().Content
+	if !strings.Contains(out, "limit unknown") {
+		t.Errorf("expected unknown context limit in sidebar, got:\n%s", out)
+	}
+	if strings.Contains(out, "0% used") {
+		t.Errorf("unknown context limit should not render as 0%% used:\n%s", out)
 	}
 }
 
@@ -1145,10 +1228,12 @@ func TestRendererWidthNarrowTerminalNoSidebar(t *testing.T) {
 func TestCostUpdatesSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
-	app.Handle(bus.CostUpdated{DollarsTotal: 0.1234})
+	app.Handle(bus.CostUpdated{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 25, DollarsTotal: 0.1234})
 	out := app.View().Content
-	if !strings.Contains(out, "$0.1234") {
-		t.Errorf("expected updated cost in sidebar, got:\n%s", out)
+	for _, want := range []string{"Usage", "175 billed", "$0.1234"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in sidebar, got:\n%s", want, out)
+		}
 	}
 }
 

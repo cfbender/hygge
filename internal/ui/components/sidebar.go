@@ -84,11 +84,12 @@ type Sidebar struct {
 	// Empty means no active session — the section is omitted entirely.
 	SessionTitle string
 
-	// Context data.
-	UsedTokens int64
-	MaxTokens  int64
-	PctUsed    float64
-	CostUSD    float64
+	// Usage and context data.
+	UsedTokens   int64
+	MaxTokens    int64
+	PctUsed      float64
+	CostUSD      float64
+	BilledTokens int64
 
 	// MCPs is the list of configured MCP server statuses.
 	MCPs []SidebarMCPStatus
@@ -140,15 +141,31 @@ func (s Sidebar) View() string {
 		lines = append(lines, "")
 	}
 
+	// ── Usage section ─────────────────────────────────────────────────────
+	if s.BilledTokens > 0 || s.CostUSD > 0 {
+		lines = append(lines, sectionStyle.Render(sidebarTruncate("Usage", innerW)))
+		if s.BilledTokens > 0 {
+			lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
+				sidebarTruncate(formatTokens(s.BilledTokens)+" billed", innerW)))
+		}
+		if s.CostUSD > 0 {
+			lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
+				sidebarTruncate(fmt.Sprintf("$%.4f", s.CostUSD), innerW)))
+		}
+		lines = append(lines, "")
+	}
+
 	// ── Context section ───────────────────────────────────────────────────
-	if s.UsedTokens > 0 || s.CostUSD > 0 {
+	if s.UsedTokens > 0 {
 		lines = append(lines, sectionStyle.Render(sidebarTruncate("Context", innerW)))
 		lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
 			sidebarTruncate(formatTokens(s.UsedTokens)+" tokens", innerW)))
+		pct := "limit unknown"
+		if s.MaxTokens > 0 {
+			pct = fmt.Sprintf("%d%% used", int(s.PctUsed*100))
+		}
 		lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
-			sidebarTruncate(fmt.Sprintf("%d%% used", int(s.PctUsed*100)), innerW)))
-		lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
-			sidebarTruncate(fmt.Sprintf("$%.4f", s.CostUSD), innerW)))
+			sidebarTruncate(pct, innerW)))
 		lines = append(lines, "")
 	}
 

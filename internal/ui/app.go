@@ -277,13 +277,14 @@ type App struct {
 	// msgCache holds the pre-rendered message list content. Invalidated when
 	// messages change (append, stream delta, resize). This avoids re-rendering
 	// all messages on every frame — only the viewport scroll position changes.
-	msgCache         string
-	msgCacheValid    bool
-	msgCacheW        int       // width at which cache was rendered
-	msgCacheLen      int       // message count at which cache was rendered
-	msgCacheTime     time.Time // time at which cache was rendered (for relative timestamps)
-	subagentHitZones []components.SubagentHitZone
-	toolHitZones     []components.ToolHitZone
+	msgCache               string
+	msgCacheValid          bool
+	msgCacheStreamingDirty bool      // streaming tail changed while user was scrolled away
+	msgCacheW              int       // width at which cache was rendered
+	msgCacheLen            int       // message count at which cache was rendered
+	msgCacheTime           time.Time // time at which cache was rendered (for relative timestamps)
+	subagentHitZones       []components.SubagentHitZone
+	toolHitZones           []components.ToolHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
@@ -316,6 +317,7 @@ type App struct {
 
 	// cost / context state
 	costDollars float64
+	billedTok   int64
 	usedTok     int64
 	maxTok      int64
 	pctUsed     float64
@@ -1784,8 +1786,15 @@ func (a *App) ensureSession(ctx context.Context) (string, error) {
 // when the limit was hit by a sub-agent) are always routed to the
 // primary path on the assumption they describe the active focus.
 func (a *App) handleBusEvent(ev any) tea.Cmd {
-	// Invalidate the message render cache — any bus event may mutate messages.
-	a.invalidateMsgCache()
+	// Most bus events may mutate visible messages/chrome. Streaming deltas are
+	// special-cased so users can scroll through large histories smoothly while
+	// the assistant is still producing text.
+	switch ev.(type) {
+	case bus.AssistantTextDelta, bus.AssistantThinkingDelta:
+		// Invalidated in the specific handlers below.
+	default:
+		a.invalidateMsgCache()
+	}
 
 	switch e := ev.(type) {
 
@@ -1798,6 +1807,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 	case bus.AssistantTextDelta:
 		if a.routeToSubagent(e.SessionID) {
 			a.appendSubagentDelta(e.SessionID, e.Text)
+			a.invalidateMsgCacheForStreamingDelta()
 			return nil
 		}
 		if !a.isForeground(e.SessionID) {
@@ -1806,6 +1816,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// Finalize any trailing streaming thinking block before appending text.
 		a.finalizeTrailingThinking()
 		a.appendAssistantDelta(e.Text)
+		a.invalidateMsgCacheForStreamingDelta()
 
 	case bus.AssistantThinkingDelta:
 		if a.routeToSubagent(e.SessionID) {
@@ -1816,6 +1827,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		a.appendThinkingDelta(e.Text)
+		a.invalidateMsgCacheForStreamingDelta()
 
 	case bus.MessageAppended:
 		if a.routeToSubagent(e.SessionID) {
@@ -1895,6 +1907,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		rootID := a.rootSessionID()
 		if rootID == "" || e.SessionID == rootID {
 			a.costDollars = e.DollarsTotal
+			a.billedTok = e.InputTokens + e.OutputTokens + e.CacheReadTokens + e.CacheWriteTokens
 		}
 
 	case bus.ContextUsageUpdated:
