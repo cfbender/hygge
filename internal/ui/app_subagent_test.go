@@ -217,6 +217,48 @@ func TestSubagentViewBashClickExpandsOutput(t *testing.T) {
 	}
 }
 
+func TestForegroundSubagentEventsStayInSubagentTranscript(t *testing.T) {
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", ToolUseID: "parent-tu", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "parent-tu",
+		Type:            "general",
+		Description:     "inspect logs",
+		Model:           "anthropic/claude-haiku-4-5",
+		At:              time.Now(),
+	})
+	parentLen := len(app.messages)
+
+	app.pushForeground("sub-1")
+	app.Handle(bus.AssistantTextDelta{SessionID: "sub-1", Text: "working inside subagent"})
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "sub-1",
+		ToolName:  "bash",
+		ToolUseID: "bash-tu",
+		Args:      []byte(`{"command":"pwd"}`),
+	})
+
+	if len(app.messages) != parentLen {
+		t.Fatalf("parent transcript len = %d, want %d; subagent events leaked into parent", len(app.messages), parentLen)
+	}
+	st := app.subagents["sub-1"]
+	if st == nil {
+		t.Fatal("subagent state missing")
+	}
+	if len(st.Messages) != 2 {
+		t.Fatalf("subagent transcript len = %d, want 2", len(st.Messages))
+	}
+	if st.Messages[0].Role != components.RoleAssistant || !strings.Contains(st.Messages[0].Raw, "working inside subagent") {
+		t.Fatalf("assistant delta not routed to subagent transcript: %+v", st.Messages[0])
+	}
+	if st.Messages[1].Role != components.RoleTool || st.Messages[1].ToolUseID != "bash-tu" {
+		t.Fatalf("tool request not routed to subagent transcript: %+v", st.Messages[1])
+	}
+}
+
 func TestSubagentIterationLimitMarksFailed(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
