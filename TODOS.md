@@ -36,7 +36,7 @@
 - [ ] **Multi-line paste visibility**
   Pasting multi-line content currently hides it from view; keep pasted content visible or provide a clear collapsed preview.
 
-- [ ] **Input box width styling**
+- [x] **Input box width styling**
   Fix prompt input styling so it does not stretch overly wide.
 
 - [ ] **Slash commands as modal popup**
@@ -71,5 +71,3 @@
 
 - [ ] Text alignment and bubble fill
   Text should take up the width of the bubble before wrapping.
-
-- [ ] Footer with mode selector and model info should be sticky on scroll (remove "% scrolled" indicator)

@@ -32,13 +32,36 @@ type uiLayout struct {
 const (
 	sidebarMinTermWidth = 110
 	sidebarFixedWidth   = 40
+	contentWidthRatio   = 0.80
 	editorMinHeight     = 3
-	editorMaxHeight     = 15
+	editorMaxHeight     = 8
 	footerHeight        = 1
 	headerHeight        = 1
 	chatBottomPadding   = 1 // breathing room between messages and editor
 
 )
+
+func sidebarWidthForTerminal(w int) int {
+	if w >= sidebarMinTermWidth {
+		return sidebarFixedWidth
+	}
+	return 0
+}
+
+func msgContentWidthForLeft(leftW int) int {
+	w := int(float64(leftW)*contentWidthRatio) - 3
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+func inputWidthForLeft(leftW int) int {
+	if leftW < 1 {
+		return 1
+	}
+	return leftW
+}
 
 // generateLayout computes all screen regions from the terminal dimensions
 // and dynamic element heights.
@@ -56,56 +79,49 @@ func (a *App) generateLayout(w, h int) uiLayout {
 		overlay: area,
 	}
 
-	// Sidebar: hidden on narrow terminals.
-	if w >= sidebarMinTermWidth {
-		l.sidebarW = sidebarFixedWidth
-		l.compact = false
-	} else {
-		l.sidebarW = 0
-		l.compact = true
-	}
-	l.leftW = w - l.sidebarW
+	// Horizontal split: the main viewport fills remaining space; the sidebar is
+	// fixed width when visible and zero width on narrow terminals.
+	l.sidebarW = sidebarWidthForTerminal(w)
+	var mainArea, sidebarArea image.Rectangle
+	layout.Horizontal(
+		layout.Fill(1),
+		layout.Len(l.sidebarW),
+	).WithFlex(layout.FlexStart).Split(area).Assign(&mainArea, &sidebarArea)
+
+	l.compact = l.sidebarW == 0
+	l.leftW = mainArea.Dx()
+	l.sidebar = sidebarArea
 
 	// Content wrap width: 80% of left column minus padding.
-	l.msgContentW = int(float64(l.leftW)*0.80) - 3
-	if l.msgContentW < 1 {
-		l.msgContentW = 1
-	}
+	l.msgContentW = msgContentWidthForLeft(l.leftW)
 
-	// Compute dynamic heights.
+	// Compute dynamic chrome heights. The editor is clamped to its desired
+	// 3–8 row box height; the chat segment below uses Fill(1) to absorb all
+	// remaining vertical space.
 	editorH := a.editorHeight()
 	pillsH := a.pillsHeight()
 	bannerH := a.bannerHeight()
 	noticeH := a.noticeHeight()
 	paletteH := a.paletteHeight()
 
-	// Chrome = everything except the chat viewport.
-	chromeH := headerHeight + editorH + footerHeight + chatBottomPadding + pillsH + bannerH + noticeH + paletteH
-
-	chatH := h - chromeH
-	if chatH < 1 {
-		chatH = 1
-	}
-
 	// Vertical split: chat | [banner] | [palette] | editor | [pills] | [notice] | footer
 	// We use the layout engine for the main left column.
 	var chatRect, editorRect, footerRect image.Rectangle
-	leftArea := image.Rect(0, 0, l.leftW, h)
+	chatAndFixedArea := mainArea
+	chatAndFixedArea.Max.Y = chatAndFixedArea.Min.Y + h - headerHeight - chatBottomPadding - pillsH - bannerH - noticeH - paletteH
+	if chatAndFixedArea.Dy() < 1 {
+		chatAndFixedArea.Max.Y = chatAndFixedArea.Min.Y + 1
+	}
 
 	layout.Vertical(
-		layout.Len(chatH),
+		layout.Fill(1),
 		layout.Len(editorH),
-		layout.Fill(1), // footer gets remaining
-	).Split(leftArea).Assign(&chatRect, &editorRect, &footerRect)
+		layout.Len(footerHeight),
+	).WithFlex(layout.FlexStart).Split(chatAndFixedArea).Assign(&chatRect, &editorRect, &footerRect)
 
 	l.chat = chatRect
 	l.editor = editorRect
 	l.footer = footerRect
-
-	// Sidebar occupies the right column, full height.
-	if l.sidebarW > 0 {
-		l.sidebar = image.Rect(l.leftW, 0, w, h)
-	}
 
 	return l
 }
@@ -119,6 +135,12 @@ func (a *App) editorHeight() int {
 	h := a.input.Textarea.Height()
 	if a.styles != nil {
 		h += 2 // border top + bottom
+	}
+	if h < editorMinHeight {
+		return editorMinHeight
+	}
+	if h > editorMaxHeight {
+		return editorMaxHeight
 	}
 	return h
 }

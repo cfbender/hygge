@@ -694,6 +694,13 @@ func (a *App) View() tea.View {
 		h = 24
 	}
 
+	// Keep the editor width in sync before layout so wrapped input content can
+	// contribute the correct dynamic height.
+	if !a.viewingSubagent() {
+		leftW := w - sidebarWidthForTerminal(w)
+		a.input.SetWidth(inputWidthForLeft(leftW))
+	}
+
 	// Recompute layout regions for the current dimensions.
 	a.layout = a.generateLayout(w, h)
 	a.msgColW = a.layout.msgContentW
@@ -732,19 +739,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = m.Height
 		a.invalidateMsgCache()
 		// Compute the left column width accounting for the sidebar.
-		const sidebarMinWidth = 100
-		const sidebarFixedWidth = 32
-		sidebarW := 0
-		if m.Width >= sidebarMinWidth {
-			sidebarW = sidebarFixedWidth
-		}
+		sidebarW := sidebarWidthForTerminal(m.Width)
 		leftW := m.Width - sidebarW
-		// glamour word-wrap = bubble content width = 80% of leftW minus side bar + padding.
-		a.msgColW = int(float64(leftW)*0.80) - 3
-		if a.msgColW < 1 {
-			a.msgColW = 1
-		}
-		a.input.SetWidth(leftW - 2) // border padding
+		// glamour word-wrap = bubble content width minus bubble chrome.
+		a.msgColW = msgContentWidthForLeft(leftW)
+		a.input.SetWidth(inputWidthForLeft(leftW))
 		a.msgViewport.SetWidth(leftW)
 		// Height is recomputed per-frame in View(); set a sane default here
 		// so the viewport is usable before the first full render.
@@ -1041,6 +1040,12 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	if k.Code == tea.KeyEnter && (k.Mod.Contains(tea.ModShift) || k.Mod.Contains(tea.ModAlt)) {
+		if a.viewingSubagent() {
+			return a, nil
+		}
+		return a.insertInputNewline()
+	}
 
 	switch k.String() {
 	case "ctrl+c":
@@ -1089,9 +1094,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if a.viewingSubagent() {
 			return a, nil
 		}
-		// Alt+Enter inserts a newline; we differentiate by Alt flag below.
+		// Alt+Enter inserts a newline; route by key code/modifier so
+		// terminal-specific string rendering cannot accidentally submit it.
 		if k.Mod.Contains(tea.ModAlt) {
-			break // fall through to textarea.Update so it inserts a newline
+			return a.insertInputNewline()
 		}
 		text := strings.TrimSpace(a.input.Value())
 		if text == "" {
@@ -1235,6 +1241,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	return a.updateInputKey(k)
+}
+
+func (a *App) updateInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	before := a.input.Value()
 	a.input.Textarea, cmd = a.input.Textarea.Update(k)
@@ -1244,6 +1254,17 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.slashPaletteDismissed = false
 	}
 	return a, cmd
+}
+
+func (a *App) insertInputNewline() (tea.Model, tea.Cmd) {
+	before := a.input.Value()
+	a.input.Textarea.InsertString("\n")
+	if a.input.Value() != before {
+		a.history.Reset()
+		a.paletteHighlight = -1
+		a.slashPaletteDismissed = false
+	}
+	return a, nil
 }
 
 // handleModalKey routes keys to the permission modal.

@@ -11,8 +11,11 @@ import (
 )
 
 const (
-	inputMinHeight = 3
-	inputMaxHeight = 15
+	inputMinBoxHeight = 3
+	inputMaxBoxHeight = 8
+	inputFrameHeight  = 2
+	inputMinTextRows  = inputMinBoxHeight - inputFrameHeight
+	inputMaxTextRows  = inputMaxBoxHeight - inputFrameHeight
 )
 
 // readyPlaceholders are shown when the agent is idle.
@@ -40,7 +43,7 @@ var workingPlaceholders = []string{
 //
 // Keybind contract:
 //   - Enter submits (handled by the App, not the textarea).
-//   - Alt+Enter inserts a newline.
+//   - Shift+Enter and Alt+Enter insert a newline.
 //   - Ctrl+C, Ctrl+L handled by the App.
 type Input struct {
 	Textarea textarea.Model
@@ -57,11 +60,13 @@ func NewInput(t *theme.Theme) *Input {
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 
-	// Dynamic height: grows with content, bounded.
+	// Dynamic height: grows with content, bounded so the styled input box is
+	// 3–8 terminal rows including its border.
 	ta.DynamicHeight = true
-	ta.MinHeight = inputMinHeight
-	ta.MaxHeight = inputMaxHeight
-	ta.SetHeight(inputMinHeight)
+	ta.MinHeight = inputMinTextRows
+	ta.MaxHeight = inputMaxTextRows
+	ta.MaxContentHeight = 10_000
+	ta.SetHeight(inputMinTextRows)
 
 	// Apply theme-aware styles.
 	if t != nil {
@@ -78,7 +83,7 @@ func NewInput(t *theme.Theme) *Input {
 		Textarea: ta,
 		Theme:    t,
 		Focused:  true,
-		prevH:    inputMinHeight,
+		prevH:    inputMinTextRows,
 	}
 }
 
