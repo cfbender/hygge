@@ -231,6 +231,8 @@ type App struct {
 
 	// lastEscAt records when Esc was last pressed for double-Esc detection.
 	lastEscAt time.Time
+	// quitSelectedNo tracks which button is selected in the quit overlay.
+	quitSelectedNo bool
 
 	// expandedTools tracks which tool results are fully expanded (not truncated).
 	expandedTools map[string]bool
@@ -1014,8 +1016,19 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			switch k.String() {
 			case "y", "Y", "ctrl+c":
 				return a, tea.Quit
-			default:
+			case "n", "N", "esc":
 				a.closeOverlay(overlayQuit)
+				return a, nil
+			case "left", "right", "tab", "h", "l":
+				a.quitSelectedNo = !a.quitSelectedNo
+				return a, nil
+			case "enter", " ":
+				if !a.quitSelectedNo {
+					return a, tea.Quit
+				}
+				a.closeOverlay(overlayQuit)
+				return a, nil
+			default:
 				return a, nil
 			}
 		}
@@ -1030,6 +1043,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if a.overlays.Has(overlayQuit) {
 			return a, tea.Quit
 		}
+		a.quitSelectedNo = true // default to "No" (safe choice)
 		a.openOverlay(overlayQuit)
 		return a, nil
 	case "ctrl+l":
@@ -3672,6 +3686,7 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 					ToolName:  p.ToolName,
 					ToolUseID: p.ToolID,
 					Target:    target,
+					ToolArgs:  p.ToolInput,
 					Raw:       raw,
 					IsError:   isError,
 					Status:    hydratedStatus,

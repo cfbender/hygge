@@ -708,9 +708,11 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 	targetStyle := m.muted()
 
+	muted := m.muted()
+	collapseLimit := 4
+
 	var rows []string
 	for _, msg := range items {
-		// Build rich label like the gutter: ✱ Grep "pat" in path (N matches)
 		label := toolGroupLabel(msg, nameStyle, targetStyle)
 
 		statusTxt := toolStatusText(msg.Status, m.Theme)
@@ -725,11 +727,32 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 			label += " " + statusTxt
 		}
 
-		// Truncate to fit.
 		if lipgloss.Width(label) > innerW {
 			label = truncateTarget(label, innerW)
 		}
 		rows = append(rows, label)
+
+		// Show truncated output for bash/grep/glob when completed.
+		if !msg.IsStreaming && msg.Raw != "" && msg.Raw != "(running…)" {
+			expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
+			bodyLines := strings.Split(strings.TrimRight(msg.Raw, "\n"), "\n")
+			if expanded {
+				for _, line := range bodyLines {
+					rows = append(rows, muted.Render("  "+line))
+				}
+			} else if len(bodyLines) > collapseLimit {
+				for _, line := range bodyLines[:collapseLimit] {
+					rows = append(rows, muted.Render("  "+line))
+				}
+				extra := len(bodyLines) - collapseLimit
+				hint := muted.Italic(true).Render(fmt.Sprintf("  [+%d more — Ctrl+E to expand]", extra))
+				rows = append(rows, hint)
+			} else {
+				for _, line := range bodyLines {
+					rows = append(rows, muted.Render("  "+line))
+				}
+			}
+		}
 	}
 	body := strings.Join(rows, "\n")
 

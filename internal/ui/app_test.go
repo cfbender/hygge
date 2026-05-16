@@ -182,8 +182,9 @@ func TestToolCallDisplay(t *testing.T) {
 	if strings.Contains(out, "▌tool: read") {
 		t.Errorf("tool view must not contain old gutter '▌tool: read'; got:\n%s", out)
 	}
-	if strings.Contains(out, "line1") {
-		t.Errorf("tool view must not render raw body in tool-group bubble; got:\n%s", out)
+	// Tool output should now be shown inline (collapsed).
+	if !strings.Contains(out, "line1") {
+		t.Errorf("tool view should show tool output inline; got:\n%s", out)
 	}
 }
 

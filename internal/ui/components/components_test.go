@@ -79,9 +79,9 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	if !strings.Contains(out, "somefile.go") {
 		t.Errorf("expected target 'somefile.go' in output:\n%s", out)
 	}
-	// The raw body lines must NOT appear (tool-group bubble omits body content).
-	if strings.Contains(out, "line0") {
-		t.Errorf("expected raw body lines to be absent from tool-group bubble, found in:\n%s", out)
+	// Tool output is now shown inline — first few lines should appear.
+	if !strings.Contains(out, "line0") {
+		t.Errorf("expected tool output lines in tool-group bubble; got:\n%s", out)
 	}
 }
 

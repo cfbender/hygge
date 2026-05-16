@@ -243,21 +243,46 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 	return ""
 }
 
-// renderQuitOverlay renders a centered "Are you sure you want to quit?" dialog.
+// renderQuitOverlay renders a centered quit confirmation dialog with
+// selectable Yes/No buttons.
 func (a *App) renderQuitOverlay(w, h int) string {
 	question := "Are you sure you want to quit?"
-	buttons := "  [y] Yes   [n] No  "
+
+	// Render buttons with selection highlight.
+	selectedStyle := lipgloss.NewStyle().
+		Bold(true).
+		Padding(0, 3).
+		Background(lipgloss.Color("#C75B7A")).
+		Foreground(lipgloss.Color("#180810"))
+	normalStyle := lipgloss.NewStyle().
+		Padding(0, 3).
+		Faint(true)
+
+	var yesBtn, noBtn string
+	if a.quitSelectedNo {
+		yesBtn = normalStyle.Render("Yep!")
+		noBtn = selectedStyle.Render("Nope")
+	} else {
+		yesBtn = selectedStyle.Render("Yep!")
+		noBtn = normalStyle.Render("Nope")
+	}
+	buttons := yesBtn + "  " + noBtn
 
 	boxStyle := lipgloss.NewStyle().
-		Padding(1, 3).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#C75B7A"))
+		Padding(1, 3)
 
 	if a.styles != nil {
-		boxStyle = boxStyle.Background(a.styles.BubbleBg)
+		boxStyle = boxStyle.
+			Background(a.styles.BubbleBg).
+			Foreground(a.styles.Background)
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Center, question, "", buttons)
+	qStyle := lipgloss.NewStyle()
+	if a.styles != nil {
+		qStyle = qStyle.Foreground(lipgloss.Color("#DDD3C7"))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Center, qStyle.Render(question), "", buttons)
 	box := boxStyle.Render(content)
 
 	boxW := lipgloss.Width(box)

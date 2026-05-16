@@ -195,7 +195,7 @@ func (s Sidebar) View() string {
 		BorderForeground(borderFg).
 		PaddingLeft(1).
 		PaddingRight(1).
-		Width(s.Width - 1)
+		Width(s.Width)
 	bgOpen := ""
 	if bg := s.sidebarBackgroundColor(); bg != nil {
 		borderStyle = borderStyle.Background(bg)
