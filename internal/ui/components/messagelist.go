@@ -642,6 +642,9 @@ func (m MessageList) renderMarker(msg UIMessage) string {
 		width = emptyStateMaxWidth
 	}
 	innerW := max(width-4, 1) // rounded border (2) + horizontal padding (2)
+	if msg.IsStreaming {
+		return m.renderWorkingMarker(msg, innerW)
+	}
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -666,6 +669,37 @@ func (m MessageList) renderMarker(msg UIMessage) string {
 	}
 
 	inner := labelStyle.Render(header) + "\n" + bodyStyle.Render(body)
+	return borderStyle.Render(inner)
+}
+
+func (m MessageList) renderWorkingMarker(msg UIMessage, innerW int) string {
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		Width(innerW + 2)
+	labelStyle := lipgloss.NewStyle().Bold(true)
+	bodyStyle := lipgloss.NewStyle().Width(innerW)
+	animStyle := lipgloss.NewStyle().Width(innerW)
+	if m.Theme != nil {
+		borderStyle = borderStyle.BorderForeground(m.Theme.Style(theme.AtomAccent).GetForeground())
+		labelStyle = m.Theme.Style(theme.AtomAccent).Bold(true)
+		bodyStyle = m.Theme.Style(theme.AtomMuted).Width(innerW)
+		animStyle = m.Theme.Style(theme.AtomWarn).Width(innerW)
+	}
+
+	header := "── compaction · crunching ──"
+	if lipgloss.Width(header) > innerW {
+		header = truncate(header, innerW)
+	}
+	body := msg.MarkerSummary
+	if body == "" {
+		body = "Crunching conversation history into a compact context summary…"
+	}
+	frame := msg.Raw
+	if frame == "" {
+		frame = "▰▰▰▱▱▱"
+	}
+	inner := labelStyle.Render(header) + "\n" + bodyStyle.Render(body) + "\n" + animStyle.Render(frame)
 	return borderStyle.Render(inner)
 }
 

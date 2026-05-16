@@ -89,6 +89,9 @@ func (a *App) renderChatContent() string {
 			visibleMessages = st.Messages
 		}
 	}
+	if a.compactionInFlight && foreID == rootID {
+		visibleMessages = append(append([]uiMessage(nil), visibleMessages...), a.compactionWorkingMessage())
+	}
 
 	// Check if the cache is still valid. Invalidate every 30 seconds
 	// so relative timestamps stay fresh.
@@ -373,14 +376,6 @@ func (a *App) renderChromeContent() string {
 		}
 		sections = append(sections, style.Render(a.notice))
 	}
-	if a.compactionInFlight {
-		style := lipgloss.NewStyle()
-		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(theme.AtomMuted)
-		}
-		sections = append(sections, style.Render(fmt.Sprintf("⌛  Compacting %d messages…", a.compactionInFlightCount)))
-	}
-
 	if a.compactionToast != "" {
 		style := lipgloss.NewStyle()
 		if a.opts.Theme != nil {
@@ -390,6 +385,30 @@ func (a *App) renderChromeContent() string {
 	}
 
 	return strings.Join(sections, "\n")
+}
+
+func (a *App) compactionWorkingMessage() uiMessage {
+	frame := "▰▰▰▱▱▱"
+	if a.compactionAnim != nil {
+		frame = a.compactionAnim.Render()
+	}
+	return uiMessage{
+		Role:              components.RoleMarker,
+		IsStreaming:       true,
+		Raw:               frame,
+		MarkerSummary:     compactionWorkingSummary(a.compactionInFlightCount),
+		MarkerTokensSaved: 0,
+	}
+}
+
+func compactionWorkingSummary(count int) string {
+	if count == 1 {
+		return "Crunching 1 message into a compact context summary…"
+	}
+	if count <= 0 {
+		return "Crunching conversation history into a compact context summary…"
+	}
+	return fmt.Sprintf("Crunching %d messages into a compact context summary…", count)
 }
 
 // renderCompletionPalette produces the active slash-command or @-mention

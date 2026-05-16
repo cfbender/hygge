@@ -421,6 +421,9 @@ type App struct {
 	// compactionInFlightCount is the number of messages being compacted,
 	// carried from CompactionStarted so the Completed toast can display it.
 	compactionInFlightCount int
+	// compactionAnim is the transient chat-block animation shown while a
+	// compaction run is building its summary.
+	compactionAnim *anim.Anim
 
 	// compactionToast is the post-compaction result message shown for 5s.
 	// Empty means no toast is showing.
@@ -820,6 +823,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.workingVerbTick()
 
 	case anim.StepMsg:
+		if a.compactionAnim != nil {
+			updated, cmd := a.compactionAnim.Update(m)
+			if cmd != nil {
+				a.compactionAnim = updated
+				a.invalidateMsgCache()
+				return a, cmd
+			}
+		}
 		// Route to the matching sub-agent anim.  The anims are keyed by
 		// SubSessionID, but StepMsg.ID is the anim's own internal id.
 		// Search the map to find the right anim.  If the sub-agent has
@@ -866,6 +877,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compactionCompleteMsg:
 		a.compactionInFlight = false
 		a.compactionInFlightCount = 0
+		a.compactionAnim = nil
+		a.invalidateMsgCache()
 		if m.Err != nil {
 			a.compactionToast = fmt.Sprintf("✕  Compaction failed: %s", m.Err.Error())
 		} else {
@@ -1985,6 +1998,14 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		a.compactionInFlight = true
 		a.compactionInFlightCount = e.MessagesToCompact
+		a.compactionAnim = anim.New(anim.Settings{
+			Width:    14,
+			Theme:    a.opts.Theme,
+			GradFrom: theme.AtomWarn,
+			GradTo:   theme.AtomAccent,
+		})
+		a.invalidateMsgCache()
+		return a.compactionAnim.Start()
 
 	case bus.CompactionCompleted:
 		if !a.isForeground(e.SessionID) {

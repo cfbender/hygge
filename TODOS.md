@@ -27,8 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] compaction change from notice above input to compaction block with crunching animation while working
-
 - [ ] Splash screen with animated ASCII art logo and centered prompt box, with tips below (ie. ctrl + e to open prompt in external editor, ctrl + t to cycle model reasoning level, tab to switch mode)
 
 - [ ] Configure default profile in user config
