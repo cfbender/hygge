@@ -8,7 +8,7 @@ import (
 // the expected Parallelizable() value as documented in the package doc.
 //
 //	read, grep, glob, skill, task → true  (read-only / isolated)
-//	bash, write, edit             → false (state-mutating)
+//	bash, write, edit, question   → false (state-mutating or user-blocking)
 func TestParallelizable_BuiltinMapping(t *testing.T) {
 	rt := newReadTracker()
 
@@ -23,6 +23,7 @@ func TestParallelizable_BuiltinMapping(t *testing.T) {
 		{"bash", newBashTool(), false},
 		{"write", newWriteTool(rt), false},
 		{"edit", newEditTool(rt), false},
+		{"question", NewQuestionTool(), false},
 		{"skill", NewSkillTool(nil), true},
 		// SubagentTool requires a runner; use NewSubagentTool with nil runner — only
 		// Parallelizable() is called, no Execute.

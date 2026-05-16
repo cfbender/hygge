@@ -306,10 +306,11 @@ type App struct {
 	scrollDragActive     bool
 	scrollDragThumbDelta int
 
-	// permission state
-	pendingPerms []components.PermissionRequest // FIFO queue
-	modalToast   string                         // transient message inside the modal
-	overlays     overlayStack                   // typed topmost-first dialog routing foundation
+	// modal prompt state
+	pendingPerms     []components.PermissionRequest // FIFO queue
+	pendingQuestions []components.QuestionRequest   // FIFO queue
+	modalToast       string                         // transient message inside the modal
+	overlays         overlayStack                   // typed topmost-first dialog routing foundation
 
 	// status state
 	busy        bool
@@ -640,6 +641,8 @@ func (a *App) bridge() {
 	subCtx := bus.Subscribe[bus.ContextUsageUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 64})
 	subPerm := bus.Subscribe[bus.PermissionAsked](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subPermReplied := bus.Subscribe[bus.PermissionReplied](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
+	subQuestion := bus.Subscribe[bus.QuestionAsked](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
+	subQuestionAnswered := bus.Subscribe[bus.QuestionAnswered](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subMCPStatus := bus.Subscribe[bus.MCPStatusUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subIter := bus.Subscribe[bus.IterationLimitReached](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subSubStart := bus.Subscribe[bus.SubagentStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
@@ -669,6 +672,8 @@ func (a *App) bridge() {
 	go forward(subCtx.C(), a.busCh, stop, subCtx.Unsubscribe)
 	go forward(subPerm.C(), a.busCh, stop, subPerm.Unsubscribe)
 	go forward(subPermReplied.C(), a.busCh, stop, subPermReplied.Unsubscribe)
+	go forward(subQuestion.C(), a.busCh, stop, subQuestion.Unsubscribe)
+	go forward(subQuestionAnswered.C(), a.busCh, stop, subQuestionAnswered.Unsubscribe)
 	go forward(subMCPStatus.C(), a.busCh, stop, subMCPStatus.Unsubscribe)
 	go forward(subIter.C(), a.busCh, stop, subIter.Unsubscribe)
 	go forward(subSubStart.C(), a.busCh, stop, subSubStart.Unsubscribe)
@@ -1132,6 +1137,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch top {
 		case overlayPermission:
 			return a.handleModalKey(k)
+		case overlayQuestion:
+			return a.handleQuestionModalKey(k)
 		case overlaySessions:
 			return a.handleSessionsModalKey(k)
 		case overlayCompactConfirm:
@@ -1517,6 +1524,49 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return a, nil
+}
+
+func (a *App) handleQuestionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if len(a.pendingQuestions) == 0 {
+		return a, nil
+	}
+	current := a.pendingQuestions[0]
+	reply := func(answerID, answer string, canceled bool) tea.Cmd {
+		return func() tea.Msg {
+			bus.Publish(a.opts.Bus, bus.QuestionAnswered{
+				RequestID: current.RequestID,
+				AnswerID:  answerID,
+				Answer:    answer,
+				Canceled:  canceled,
+				At:        a.opts.Now(),
+			})
+			return nil
+		}
+	}
+	dismiss := func() {
+		a.pendingQuestions = a.pendingQuestions[1:]
+		a.syncQuestionOverlay()
+		a.updateInputFocus()
+	}
+
+	if k.String() == "esc" {
+		dismiss()
+		return a, reply("", "", true)
+	}
+	if len(k.Text) != 1 {
+		return a, nil
+	}
+	ch := k.Text[0]
+	if ch < '1' || ch > '9' {
+		return a, nil
+	}
+	idx := int(ch - '1')
+	if idx < 0 || idx >= len(current.Options) {
+		return a, nil
+	}
+	opt := current.Options[idx]
+	dismiss()
+	return a, reply(opt.ID, opt.Label, false)
 }
 
 // startSend launches a goroutine that calls Agent.Send and returns a tea.Cmd
@@ -1979,6 +2029,36 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 				components.ToolStatusCancelled,
 			)
 		}
+
+	case bus.QuestionAsked:
+		opts := make([]components.QuestionOption, 0, len(e.Options))
+		for _, opt := range e.Options {
+			opts = append(opts, components.QuestionOption{ID: opt.ID, Label: opt.Label})
+		}
+		a.pendingQuestions = append(a.pendingQuestions, components.QuestionRequest{
+			RequestID: e.RequestID,
+			ToolName:  e.ToolName,
+			Question:  e.Question,
+			Options:   opts,
+		})
+		a.syncQuestionOverlay()
+		a.updateInputFocus()
+		a.maybeNotify(notify.Notification{
+			Title:   "Hygge is waiting…",
+			Message: e.Question,
+		}, "permission_ask")
+
+	case bus.QuestionAnswered:
+		// The key handler normally removes the active prompt before publishing the
+		// answer. This handles replies from tests or future non-TUI frontends.
+		for i, q := range a.pendingQuestions {
+			if q.RequestID == e.RequestID {
+				a.pendingQuestions = append(a.pendingQuestions[:i], a.pendingQuestions[i+1:]...)
+				break
+			}
+		}
+		a.syncQuestionOverlay()
+		a.updateInputFocus()
 
 	case bus.MCPStatusUpdated:
 		a.upsertMCPStatus(components.SidebarMCPStatus{
@@ -3211,6 +3291,7 @@ func (a *App) updateInputFocus() {
 
 func (a *App) anyOverlayOpen() bool {
 	a.syncPermissionOverlay()
+	a.syncQuestionOverlay()
 	return a.overlays.Open()
 }
 
@@ -3231,6 +3312,14 @@ func (a *App) syncPermissionOverlay() {
 		return
 	}
 	a.overlays.Remove(overlayPermission)
+}
+
+func (a *App) syncQuestionOverlay() {
+	if len(a.pendingQuestions) > 0 {
+		a.overlays.Push(overlayQuestion)
+		return
+	}
+	a.overlays.Remove(overlayQuestion)
 }
 
 func (a *App) syncActiveModal() {
