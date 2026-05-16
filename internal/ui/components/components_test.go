@@ -508,8 +508,8 @@ func TestInputBuildsAndReports(t *testing.T) {
 
 // ── Phase 3: tool-call grouping and subagent bubble wrap ────────────────────
 
-// TestToolGroupBubble_ThreeCallGroup verifies three consecutive non-task tool
-// calls render as a single side-bar bubble with one row each.
+// TestToolGroupBubble_ThreeCallGroup verifies compact tools still group while
+// bash renders as its own side-bar bubble.
 func TestToolGroupBubble_ThreeCallGroup(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
@@ -536,11 +536,60 @@ func TestToolGroupBubble_ThreeCallGroup(t *testing.T) {
 	if strings.Contains(out, "▌tool:") {
 		t.Errorf("tool group must not contain '▌tool:' gutter; got:\n%s", out)
 	}
-	// All three tools in a single group → output has exactly one bubble
-	// (one pair of \n\n-separated blocks, not three separate ones).
+	// read+grep are grouped, while bash renders as a standalone block.
 	blocks := strings.Split(strings.TrimSpace(out), "\n\n")
-	if len(blocks) != 1 {
-		t.Errorf("expected 1 bubble block for 3 grouped tool calls, got %d blocks", len(blocks))
+	if len(blocks) != 2 {
+		t.Errorf("expected compact read+grep block plus standalone bash block, got %d blocks", len(blocks))
+	}
+}
+
+func TestToolGroupBubble_BashEditWriteAreStandaloneBlocks(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "main.go"},
+			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-1", Target: "go test ./...", Raw: "ok"},
+			{Role: RoleTool, ToolName: "edit", ToolUseID: "edit-1", Target: "main.go"},
+			{Role: RoleTool, ToolName: "write", ToolUseID: "write-1", Target: "main.go"},
+			{Role: RoleTool, ToolName: "grep", Target: "TODO"},
+		},
+	}
+
+	chunks := ml.buildChunks()
+	if len(chunks) != 5 {
+		t.Fatalf("expected read, bash, edit, write, grep to render as 5 blocks, got %d", len(chunks))
+	}
+	for i, chunk := range chunks {
+		if chunk.kind != chunkToolGroup || len(chunk.group) != 1 {
+			t.Fatalf("chunk %d = kind %v len %d, want single tool-group block", i, chunk.kind, len(chunk.group))
+		}
+	}
+}
+
+func TestToolGroupBubble_StandaloneBashHitZonesDoNotShareCombinedBlock(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "main.go"},
+			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-1", Target: "go test ./...", Raw: "line 1\nline 2\nline 3\nline 4\nline 5"},
+			{Role: RoleTool, ToolName: "grep", Target: "TODO"},
+			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-2", Target: "go vet ./...", Raw: "ok"},
+		},
+	}
+
+	_, _, zones := ml.ViewWithHitZones()
+	if len(zones) != 2 {
+		t.Fatalf("expected one hit zone per standalone bash block, got %d", len(zones))
+	}
+	if zones[0].ToolUseID != "bash-1" || zones[1].ToolUseID != "bash-2" {
+		t.Fatalf("unexpected bash hit zones: %+v", zones)
+	}
+	if zones[0].StartLine == zones[1].StartLine || zones[0].EndLine >= zones[1].StartLine {
+		t.Fatalf("bash hit zones should be distinct non-overlapping blocks: %+v", zones)
 	}
 }
 
