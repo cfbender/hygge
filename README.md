@@ -192,6 +192,15 @@ API. For example, [quorum](https://github.com/cfbender/quorum) uses the plugin
 system to add extra planning/review subagents that Hygge can fan out to from the
 same session.
 
+When developing a Lua plugin, initialize editor support with:
+
+```sh
+hygge plugins dev init
+```
+
+For an existing plugin, run `hygge plugins types install` to add Hygge's LuaLS
+type definitions and avoid editor diagnostics for the `hygge` plugin API.
+
 ## TUI basics
 
 - Type a prompt and press `Enter` to send.
