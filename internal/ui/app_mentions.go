@@ -155,10 +155,7 @@ func (a *App) moveMentionHighlight(delta int) bool {
 		a.mentionHighlight = -1
 		return false
 	}
-	hi := max(a.mentionHighlight, 0) + delta
-	if hi < 0 {
-		hi = 0
-	}
+	hi := max(max(a.mentionHighlight, 0)+delta, 0)
 	if hi >= len(matches) {
 		hi = len(matches) - 1
 	}

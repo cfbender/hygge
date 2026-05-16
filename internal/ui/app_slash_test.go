@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,25 @@ func typeInto(app *App, s string) {
 	for _, r := range s {
 		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
+}
+
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func plainViewLines(app *App) []string {
+	return strings.Split(ansiEscapeRE.ReplaceAllString(app.View().Content, ""), "\n")
+}
+
+func lineIndexContaining(lines []string, needle string) int {
+	for i, line := range lines {
+		if strings.Contains(line, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func editorTextLine(app *App) int {
+	return app.height - footerHeight - app.editorHeight() + 1
 }
 
 func TestSlashCommandModelOpensDialog(t *testing.T) {
@@ -228,6 +248,21 @@ func TestSlashCommandPaletteShowsForSlashBuffer(t *testing.T) {
 	}
 	if !strings.Contains(view, "/cost") {
 		t.Errorf("palette should show /cost for /co buffer:\n%s", view)
+	}
+}
+
+func TestSlashCommandPaletteOverlaysChatWithoutMovingEditor(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/co")
+
+	lines := plainViewLines(app)
+	wantInputLine := editorTextLine(app)
+	if got := lineIndexContaining(lines, "┃ /co"); got != wantInputLine {
+		t.Fatalf("input line = %d, want %d; palette should overlay chat without moving editor:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	}
+	if got := lineIndexContaining(lines, "/compact"); got == -1 || got >= wantInputLine {
+		t.Fatalf("palette line = %d, want it above input line %d:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
 	}
 }
 
