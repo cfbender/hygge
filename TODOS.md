@@ -89,3 +89,5 @@
 
 - [ ] Text alignment and bubble fill
   Text should take up the width of the bubble before wrapping.
+
+- [ ] Footer with mode selector and model info should be sticky on scroll (remove "% scrolled" indicator)
