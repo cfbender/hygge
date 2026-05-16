@@ -15,11 +15,6 @@ import (
 	"github.com/cfbender/hygge/internal/llm"
 )
 
-// boolPtr returns a pointer to b.
-//
-//go:fix inline
-func boolPtr(b bool) *bool { return new(b) }
-
 // ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------

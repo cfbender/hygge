@@ -1,8 +1,10 @@
 package ui
 
-import "slices"
+import (
+	"slices"
 
-import "github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/command"
+)
 
 type overlayKind string
 
