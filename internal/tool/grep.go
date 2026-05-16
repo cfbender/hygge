@@ -381,7 +381,7 @@ func splitRgLine(s string) (path string, line int, text string, ok bool) {
 	}
 	path = before
 	rest := after
-	before, after, ok0 := strings.Cut(rest, ":")
+	before, after, ok0 = strings.Cut(rest, ":")
 	if !ok0 {
 		return "", 0, "", false
 	}
