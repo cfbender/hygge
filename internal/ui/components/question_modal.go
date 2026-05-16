@@ -32,6 +32,7 @@ type QuestionModal struct {
 	Request QuestionRequest
 }
 
+// View renders the modal centered in a Width×Height box.
 func (m QuestionModal) View() string {
 	width := m.Width
 	if width <= 0 {
