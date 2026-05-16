@@ -1,4 +1,4 @@
-# Hygge
+# Hygge *H(Y)OO-gə*
 
 Hygge is a terminal AI coding assistant built in Go. It provides a local-first
 Bubble Tea TUI, streaming model responses, persistent SQLite sessions, tools,
