@@ -237,7 +237,7 @@ func (a *App) promptAttachmentsForMentions(text string) ([]promptAttachment, err
 		if _, ok := seen[abs]; ok {
 			continue
 		}
-		att, err := loadPromptAttachment(abs)
+		att, err := loadMentionPromptAttachment(abs)
 		if err != nil {
 			return nil, err
 		}

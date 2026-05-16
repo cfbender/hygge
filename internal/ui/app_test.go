@@ -286,6 +286,30 @@ func TestAtFileMentionAddsFileToPromptContext(t *testing.T) {
 	}
 }
 
+func TestAtFileMentionAllowsLargeTextFileContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "large.txt")
+	largeContent := strings.Repeat("x", maxPromptAttachmentTextBytes+1)
+	if err := os.WriteFile(path, []byte(largeContent), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	attachments, err := (&App{opts: AppOptions{ProjectDir: dir}}).promptAttachmentsForMentions("read @large.txt")
+	if err != nil {
+		t.Fatalf("promptAttachmentsForMentions: %v", err)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("attachments len = %d, want 1", len(attachments))
+	}
+	if !strings.Contains(attachments[0].Parts[0].Text, largeContent) {
+		t.Fatal("large mentioned file content was not attached")
+	}
+
+	if _, err := loadPromptAttachment(path); err == nil {
+		t.Fatal("/attach path should still enforce text size limit")
+	}
+}
+
 func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
