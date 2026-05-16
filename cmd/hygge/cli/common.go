@@ -427,6 +427,19 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 			return nil, fmt.Errorf("cli: build fantasy model: %w", err)
 		}
 	}
+	var titleFantasyModel fantasy.LanguageModel
+	if opts.FantasyModel == nil && cfg.Model.SmallModel != "" {
+		smallProvider := cfg.Model.SmallProvider
+		if smallProvider == "" {
+			smallProvider = cfg.Model.Provider
+		}
+		resolved, err := llm.ResolveProviderModel(ctx, smallProvider, cfg.Model.SmallModel, modelOpts, catSrc)
+		if err != nil {
+			slog.Warn("cli: failed to resolve small title model; using active model", "provider", smallProvider, "model", cfg.Model.SmallModel, "err", err)
+		} else {
+			titleFantasyModel = resolved.Model
+		}
+	}
 
 	catalog := cost.NewCatalog(cost.CatalogOptions{
 		Catalog: catSrc,
@@ -629,20 +642,21 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// Phase: bus init / agent loop wiring
 	t0 = time.Now()
 	ag, err := agent.New(agent.Options{
-		Bus:           b,
-		Store:         stOpen,
-		Provider:      prv,
-		FantasyModel:  fantasyResolved.Model,
-		Permission:    permEngine,
-		Tools:         tools,
-		Catalog:       catalog,
-		Pwd:           opts.Pwd,
-		ContextWindow: contextWindow,
-		SystemPrompt:  sysPrompt,
-		Now:           opts.Now,
-		LazyContext:   lazyTracker,
-		Reasoning:     resolveReasoning(cfg, opts.ReasoningOverride),
-		Hooks:         hookReg,
+		Bus:               b,
+		Store:             stOpen,
+		Provider:          prv,
+		FantasyModel:      fantasyResolved.Model,
+		TitleFantasyModel: titleFantasyModel,
+		Permission:        permEngine,
+		Tools:             tools,
+		Catalog:           catalog,
+		Pwd:               opts.Pwd,
+		ContextWindow:     contextWindow,
+		SystemPrompt:      sysPrompt,
+		Now:               opts.Now,
+		LazyContext:       lazyTracker,
+		Reasoning:         resolveReasoning(cfg, opts.ReasoningOverride),
+		Hooks:             hookReg,
 	})
 	if err != nil {
 		permEngine.Close()

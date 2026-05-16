@@ -193,9 +193,11 @@ type CompactionConfig struct {
 
 // ModelConfig holds model selection and provider-specific knobs.
 type ModelConfig struct {
-	Provider string         `mapstructure:"provider"`
-	Name     string         `mapstructure:"name"`
-	Options  map[string]any `mapstructure:"options"`
+	Provider      string         `mapstructure:"provider"`
+	Name          string         `mapstructure:"name"`
+	SmallProvider string         `mapstructure:"small_provider"`
+	SmallModel    string         `mapstructure:"small_model"`
+	Options       map[string]any `mapstructure:"options"`
 	// Reasoning is the session-default reasoning knob.  Allowed
 	// values: "" / "off" (no reasoning), "low", "medium", "high".
 	// Invalid values are reset to "" with a warning at load time so

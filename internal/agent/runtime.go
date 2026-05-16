@@ -17,14 +17,17 @@ import (
 // compatibility surface for UI/CLI callers, while Runtime decides which
 // turn runner to use and how Fantasy tools are adapted from tool.Registry.
 type Runtime struct {
-	model fantasy.LanguageModel
-	tools *tool.Registry
+	model              fantasy.LanguageModel
+	titleModel         fantasy.LanguageModel
+	titleModelExplicit bool
+	tools              *tool.Registry
 }
 
 // RuntimeOptions configures Runtime.
 type RuntimeOptions struct {
-	Model fantasy.LanguageModel
-	Tools *tool.Registry
+	Model      fantasy.LanguageModel
+	TitleModel fantasy.LanguageModel
+	Tools      *tool.Registry
 	// MaxIterations is accepted for legacy construction compatibility. Fantasy
 	// active turns are intentionally uncapped; cancellation is context-driven.
 	MaxIterations int
@@ -33,7 +36,8 @@ type RuntimeOptions struct {
 // NewRuntime constructs the turn runtime. Tools may be nil only in tests that
 // do not execute turns; Agent.New validates the production path first.
 func NewRuntime(opts RuntimeOptions) *Runtime {
-	return &Runtime{model: opts.Model, tools: opts.Tools}
+	titleModel := opts.TitleModel
+	return &Runtime{model: opts.Model, titleModel: titleModel, titleModelExplicit: titleModel != nil, tools: opts.Tools}
 }
 
 // SetModel replaces the Fantasy language model used to create future agents.
@@ -45,6 +49,9 @@ func (r *Runtime) SetModel(model fantasy.LanguageModel) {
 		return
 	}
 	r.model = model
+	if !r.titleModelExplicit {
+		r.titleModel = model
+	}
 }
 
 func (r *Runtime) hasFantasyModel() bool {
@@ -57,6 +64,14 @@ func (r *Runtime) newFantasyAgent(tools []fantasy.AgentTool) fantasy.Agent {
 
 func (r *Runtime) newInternalAgent() fantasy.Agent {
 	return fantasy.NewAgent(r.model, fantasy.WithTools())
+}
+
+func (r *Runtime) newTitleAgent() fantasy.Agent {
+	model := r.titleModel
+	if model == nil {
+		model = r.model
+	}
+	return fantasy.NewAgent(model, fantasy.WithTools())
 }
 
 // Summarize runs a no-tool Fantasy agent for internal conversation compaction.
@@ -96,7 +111,7 @@ func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens in
 		return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
 	}
 	maxOutputTokens := int64(maxTokens)
-	res, err := r.newInternalAgent().Generate(ctx, fantasy.AgentCall{Messages: []fantasy.Message{
+	res, err := r.newTitleAgent().Generate(ctx, fantasy.AgentCall{Messages: []fantasy.Message{
 		fantasy.NewSystemMessage("Generate a concise session title. Return only the title."),
 		fantasy.NewUserMessage(prompt),
 	}, MaxOutputTokens: &maxOutputTokens})

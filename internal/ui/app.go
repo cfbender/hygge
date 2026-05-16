@@ -487,6 +487,9 @@ type App struct {
 	// bus.MessageAppended for the root session so View() never calls
 	// Store.GetSession synchronously on the render goroutine.
 	sessionTitle string
+	// titleGeneration tracks sessions with an in-flight model-generated title so
+	// repeated MessageAppended events do not schedule duplicate rename attempts.
+	titleGeneration map[string]bool
 
 	// focused tracks terminal focus state.  true means the terminal window
 	// is focused (user is looking at it); false means it is blurred.
@@ -911,6 +914,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.sessionsModal.Cursor >= filtered && filtered > 0 {
 			a.sessionsModal.Cursor = filtered - 1
 		}
+		return a, nil
+
+	case sessionTitleGeneratedMsg:
+		delete(a.titleGeneration, m.sessionID)
+		if m.err != nil || m.title == "" || m.sessionID != a.rootSessionID() {
+			return a, nil
+		}
+		a.sessionTitle = m.title
 		return a, nil
 
 	case switchSessionMsg:
@@ -1843,14 +1854,18 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// FirstMessagePreview in the store.  We call loadSessionTitle here
 		// (on the Update goroutine, not the render goroutine) so
 		// sidebarSessionTitle() stays cheap.
+		var titleCmd tea.Cmd
 		if e.SessionID == a.rootSessionID() {
 			a.sessionTitle = a.loadSessionTitle(e.SessionID)
+			if e.Role == string(session.RoleUser) {
+				titleCmd = a.maybeGenerateSessionTitle(e.SessionID)
+			}
 		}
 		// Finalize any trailing thinking block when the message is committed.
 		a.finalizeTrailingThinking()
 		if e.Role == string(session.RoleUser) {
 			a.appendPersistedUserMessage(e.MessageID)
-			return nil
+			return titleCmd
 		}
 		a.flushAssistantStream(e.Role, e.MessageID)
 
