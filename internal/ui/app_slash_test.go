@@ -368,6 +368,12 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	if app.opts.ModelName != "gpt-5" {
 		t.Errorf("ModelName = %q, want gpt-5", app.opts.ModelName)
 	}
+	if app.notice != "" {
+		t.Fatalf("notice = %q, want toast notification", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Model switched" || app.toast.body != "Using openrouter/gpt-5" {
+		t.Fatalf("toast = %+v, want model switched toast", app.toast)
+	}
 }
 
 func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testing.T) {
