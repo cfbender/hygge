@@ -85,8 +85,4 @@ bubble/sidebar UI.
 - On stream errors, flush partial assistant state before returning.
 - Runtime model switches affect future sends; config persistence is additive.
 
-## Useful docs
-
-- `docs/architecture/catwalk-fantasy.md` — target runtime architecture.
-- `docs/agents/ui-v2-gotchas.md` — Bubble Tea/Lip Gloss v2 gotchas.
 - `TODOS.md` — current completed work and follow-up backlog.
