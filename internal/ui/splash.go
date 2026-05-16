@@ -40,10 +40,11 @@ func (a *App) renderSplashContent() string {
 	input := a.input.View()
 	a.input.Textarea.Placeholder = placeholder
 
+	smoke := a.renderSplashSmoke()
 	logo := a.renderSplashLogo()
 	tip := a.splashTipStyle().Render("• Tip") + a.splashMutedStyle().Render("  Ctrl+E opens this prompt in your external editor")
 
-	content := strings.Join([]string{logo, input, tip}, "\n\n")
+	content := strings.Join([]string{smoke, logo, input, tip}, "\n")
 	content = centerBlock(w, content)
 	padTop := max((h-lipgloss.Height(content))/2, 0)
 	content = strings.Repeat("\n", padTop) + content
@@ -66,6 +67,20 @@ func (a *App) renderSplashLogo() string {
 	}
 	frame := frames[a.splashFrame()%len(frames)]
 	return a.splashLogoStyle().Render(frame)
+}
+
+func (a *App) renderSplashSmoke() string {
+	frames := []string{
+		"      (  )       \n    (    )       \n      ┌─┐        ",
+		"    (    )       \n       (  )      \n      ┌─┐        ",
+		"       (  )      \n     (    )      \n      ┌─┐        ",
+		"     (    )      \n        (  )     \n      ┌─┐        ",
+	}
+	style := a.splashMutedStyle()
+	if a.opts.Theme != nil {
+		style = a.opts.Theme.Style(theme.AtomMuted).Italic(true)
+	}
+	return style.Render(frames[a.splashFrame()%len(frames)])
 }
 
 func (a *App) splashLogoStyle() lipgloss.Style {

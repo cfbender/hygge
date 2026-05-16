@@ -100,6 +100,21 @@ func TestTypingKeepsSplashInputCentered(t *testing.T) {
 	}
 }
 
+func TestSplashSmokeAnimates(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	first := ansiEscapeRE.ReplaceAllString(app.renderSplashSmoke(), "")
+	if !strings.Contains(first, "┌─┐") || !strings.Contains(first, "(  )") {
+		t.Fatalf("splash smoke should render chimney and smoke:\n%s", first)
+	}
+
+	app.spinnerTick = splashFrameSlowdown
+	second := ansiEscapeRE.ReplaceAllString(app.renderSplashSmoke(), "")
+	if first == second {
+		t.Fatalf("splash smoke should change between frames:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
 func TestUserSubmitClearsInputAndStartsSend(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
