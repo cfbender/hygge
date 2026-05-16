@@ -27,12 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Expandable bash tool output**
-  Bash tool blocks should show truncated output with click/keyboard affordance to expand.
-
-- [ ] **Refine system prompt**
-  Update the system prompt to reflect Hygge's current capabilities.
-
 - [ ] **Yolo mode**
   Add a mode for reduced confirmations / more autonomous execution.
 
@@ -60,3 +54,6 @@
 - [ ] Layout shift on glamourization after message finishes streaming
 
 - [ ] Header redesign - bolder, background color maybe?, more padding (3 rows)
+
+- [ ] **Refine system prompt**
+  Update the system prompt to reflect Hygge's current capabilities.
