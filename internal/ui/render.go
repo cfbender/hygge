@@ -278,7 +278,8 @@ func (a *App) renderQuitOverlay(w, h int) string {
 		yesBtn = selectedStyle.Render("Yep!")
 		noBtn = normalStyle.Render("Nope")
 	}
-	buttonRow := yesBtn + " " + noBtn
+	btnSep := lipgloss.NewStyle().Background(boxBg).Render(" ")
+	buttonRow := yesBtn + btnSep + noBtn
 
 	// Build content manually to avoid JoinVertical centering artifacts.
 	// Ensure every line has the box background.
