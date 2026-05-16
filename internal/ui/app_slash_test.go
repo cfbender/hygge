@@ -920,17 +920,36 @@ func TestCompactionBanner_DismissedByCtrlX(t *testing.T) {
 	}
 }
 
-// TestCompactionInFlight_ShowsNotice verifies that setting compactionInFlight
-// causes the "Compacting N messages…" notice to render.
-func TestCompactionInFlight_ShowsNotice(t *testing.T) {
+// TestCompactionInFlight_ShowsChatBlock verifies that active compaction renders
+// as a transient message-list block instead of a chrome notice above the input.
+func TestCompactionInFlight_ShowsChatBlock(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	app.compactionInFlight = true
 	app.compactionInFlightCount = 42
 
 	view := app.View().Content
-	if !strings.Contains(view, "Compacting 42 messages") {
-		t.Errorf("in-flight notice missing from view:\n%s", view)
+	if !strings.Contains(view, "Crunching 42 messages") {
+		t.Errorf("in-flight compaction block missing from view:\n%s", view)
+	}
+	if strings.Contains(view, "⌛  Compacting") {
+		t.Errorf("in-flight compaction should not render as chrome notice:\n%s", view)
+	}
+}
+
+func TestCompactionStartedCreatesCrunchingAnimation(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	cmd := app.handleBusEvent(bus.CompactionStarted{SessionID: app.foregroundID(), MessagesToCompact: 7})
+	if cmd == nil {
+		t.Fatal("expected compaction animation command")
+	}
+	if !app.compactionInFlight || app.compactionInFlightCount != 7 || app.compactionAnim == nil {
+		t.Fatalf("compaction state = inFlight:%v count:%d anim:%v", app.compactionInFlight, app.compactionInFlightCount, app.compactionAnim)
+	}
+	view := app.View().Content
+	if !strings.Contains(view, "compaction · crunching") || !strings.Contains(view, "Crunching 7 messages") {
+		t.Fatalf("compaction working block missing:\n%s", view)
 	}
 }
 

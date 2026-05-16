@@ -68,7 +68,7 @@ type switchSessionMsg struct {
 }
 
 // --- Compaction messages ----------------------------------------------------
-// Internal messages for the compaction modal, banner, and in-flight notice.
+// Internal messages for the compaction modal, banner, and in-flight block.
 
 // compactionRunMsg fires when the user accepts the compaction modal.
 // The App handles it by calling Agent.Compact asynchronously.
@@ -77,7 +77,7 @@ type compactionRunMsg struct {
 }
 
 // compactionCompleteMsg fires when Agent.Compact returns (success or fail).
-// Used to clear the "compacting…" in-flight notice and show the toast.
+// Used to clear the in-flight compaction block and show the toast.
 type compactionCompleteMsg struct {
 	// Err is non-nil on failure.
 	Err error

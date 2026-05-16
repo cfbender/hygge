@@ -175,9 +175,6 @@ func (a *App) noticeHeight() int {
 	if a.notice != "" {
 		h++
 	}
-	if a.compactionInFlight {
-		h++
-	}
 	if a.compactionToast != "" {
 		h++
 	}
