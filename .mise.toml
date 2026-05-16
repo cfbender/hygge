@@ -33,3 +33,7 @@ run = ["mise run fix", "mise run lint", "mise run test", "mise run build"]
 [tasks.fix]
 description = "Run linters with auto-fix enabled"
 run = "go fix ./..."
+
+[tasks.bump]
+description = "Bump major/minor/patch version, commit, tag, and push"
+run = "bash ./scripts/bump.sh $@"
