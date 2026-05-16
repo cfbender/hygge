@@ -102,7 +102,6 @@ func (a *App) generateLayout(w, h int) uiLayout {
 	footerH := footerHeight
 	if a.splashActive() {
 		editorH = 0
-		footerH = 0
 	}
 	pillsH := a.pillsHeight()
 	bannerH := a.bannerHeight()

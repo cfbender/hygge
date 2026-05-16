@@ -62,10 +62,13 @@ func TestColdStartEmptyState(t *testing.T) {
 	// Sidebar: app name, project path (no session yet so no session title).
 	// Footer: agent identity.
 	// MessageList: empty-state welcome text.
-	for _, want := range []string{"Hygge", "~/proj", "Ask anything", "███████"} {
+	for _, want := range []string{"Hygge", "~/proj", "Ask anything", "███████", "General", "claude-sonnet-4-5"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
+	}
+	if strings.Contains(plain, "tab  switch mode") || strings.Contains(plain, "ctrl+p  commands") {
+		t.Errorf("cold-start splash should not render duplicate shortcut line; got:\n%s", out)
 	}
 	if strings.Contains(plain, "What's on your mind?") {
 		t.Errorf("cold-start splash should not render the bottom prompt; got:\n%s", out)

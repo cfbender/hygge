@@ -101,6 +101,7 @@ func (a *App) renderLeftColumn() string {
 	// Chat viewport.
 	sections = append(sections, a.renderChatContent())
 	if a.splashActive() {
+		sections = append(sections, a.renderFooterContent())
 		return strings.Join(sections, "\n")
 	}
 
