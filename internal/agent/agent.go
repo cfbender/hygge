@@ -303,9 +303,10 @@ func (a *Agent) SetSystemPrompt(prompt string) error {
 	return nil
 }
 
-// GenerateTitle returns a concise title for prompt using the configured
-// internal title model (or the active Fantasy model when no small title model is
-// configured). It does not mutate store state; callers own persistence.
+// GenerateTitle returns a concise, display-ready title for prompt using the
+// configured internal title model (or the active Fantasy model when no small
+// title model is configured). It does not mutate store state; callers own
+// persistence.
 func (a *Agent) GenerateTitle(ctx context.Context, prompt string) (string, error) {
 	if a == nil || a.runtime == nil {
 		return "", fmt.Errorf("agent: GenerateTitle: runtime is not configured")
@@ -313,8 +314,107 @@ func (a *Agent) GenerateTitle(ctx context.Context, prompt string) (string, error
 	if a.isClosed() {
 		return "", ErrClosed
 	}
-	title, _, err := a.runtime.GenerateTitle(ctx, prompt, 24)
+	messages := []titleMessage{{role: "User", content: prompt}}
+	title, err := a.generateTitleFromMessages(ctx, "", messages, false)
 	return title, err
+}
+
+// RefreshSessionTitle asks the title model whether sessionID's current slug
+// still describes the recent conversation. If the topic has changed, it writes a
+// new formatted slug and returns changed=true. A KEEP response is a no-op.
+func (a *Agent) RefreshSessionTitle(ctx context.Context, sessionID string) (title string, changed bool, err error) {
+	if a == nil || a.runtime == nil {
+		return "", false, fmt.Errorf("agent: RefreshSessionTitle: runtime is not configured")
+	}
+	if a.isClosed() {
+		return "", false, ErrClosed
+	}
+	if a.opts.Store == nil {
+		return "", false, fmt.Errorf("agent: RefreshSessionTitle: store is not configured")
+	}
+	sess, err := a.opts.Store.GetSession(ctx, sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	msgs, err := a.opts.Store.MessagesForSession(ctx, sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	messages := titleMessagesFromSession(msgs)
+	currentTitle := sess.Slug
+	currentCopiesPrompt := titleCopiesUserMessage(currentTitle, messages)
+	if currentCopiesPrompt {
+		currentTitle = ""
+	}
+	input := titlePrompt(currentTitle, messages)
+	if input == "" {
+		return sess.Slug, false, nil
+	}
+	proposed, _, err := a.runtime.GenerateTitle(ctx, input, 32)
+	if err != nil {
+		return "", false, err
+	}
+	proposed = cleanModelTitle(proposed)
+	if proposed == "" || strings.EqualFold(proposed, "KEEP") {
+		if currentCopiesPrompt {
+			proposed, err = a.repairCopiedTitle(ctx, "", messages, sess.Slug)
+			if err != nil {
+				return "", false, err
+			}
+			if proposed == "" || strings.EqualFold(proposed, "KEEP") || titleCopiesUserMessage(proposed, messages) {
+				return sess.Slug, false, nil
+			}
+		} else {
+			return sess.Slug, false, nil
+		}
+	}
+	if titleCopiesUserMessage(proposed, messages) {
+		proposed, err = a.repairCopiedTitle(ctx, currentTitle, messages, proposed)
+		if err != nil {
+			return "", false, err
+		}
+		if proposed == "" || strings.EqualFold(proposed, "KEEP") || titleCopiesUserMessage(proposed, messages) {
+			return sess.Slug, false, nil
+		}
+	}
+	if strings.EqualFold(proposed, sess.Slug) {
+		return sess.Slug, false, nil
+	}
+	if err := a.opts.Store.RenameSession(ctx, sessionID, proposed); err != nil {
+		return "", false, err
+	}
+	return proposed, true, nil
+}
+
+func (a *Agent) generateTitleFromMessages(ctx context.Context, currentTitle string, messages []titleMessage, allowKeep bool) (string, error) {
+	input := titlePrompt(currentTitle, messages)
+	if input == "" {
+		return "", nil
+	}
+	proposed, _, err := a.runtime.GenerateTitle(ctx, input, 32)
+	if err != nil {
+		return "", err
+	}
+	proposed = cleanModelTitle(proposed)
+	if proposed == "" || (!allowKeep && strings.EqualFold(proposed, "KEEP")) {
+		return "", nil
+	}
+	if titleCopiesUserMessage(proposed, messages) {
+		return a.repairCopiedTitle(ctx, currentTitle, messages, proposed)
+	}
+	return proposed, nil
+}
+
+func (a *Agent) repairCopiedTitle(ctx context.Context, currentTitle string, messages []titleMessage, rejected string) (string, error) {
+	input := titleRepairPrompt(currentTitle, messages, rejected)
+	if input == "" {
+		return "", nil
+	}
+	proposed, _, err := a.runtime.GenerateTitle(ctx, input, 32)
+	if err != nil {
+		return "", err
+	}
+	return cleanModelTitle(proposed), nil
 }
 
 func (a *Agent) activeModel() session.ModelRef {

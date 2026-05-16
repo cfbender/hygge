@@ -103,16 +103,15 @@ func (r *Runtime) Summarize(ctx context.Context, messages []fantasy.Message, max
 	return strings.TrimSpace(summary), usageFromFantasy(res.TotalUsage), nil
 }
 
-// GenerateTitle is the narrow no-tool seam for future model-generated session
-// titles/slugs. Hygge currently displays FirstMessagePreview or a user-edited
-// Slug, so this is intentionally not wired into UI/store mutation yet.
+// GenerateTitle is the narrow no-tool seam for model-generated session titles.
+// Callers decide whether to persist the returned title or treat KEEP as a no-op.
 func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens int) (string, provider.Usage, error) {
 	if !r.hasFantasyModel() {
 		return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
 	}
 	maxOutputTokens := int64(maxTokens)
 	res, err := r.newTitleAgent().Generate(ctx, fantasy.AgentCall{Messages: []fantasy.Message{
-		fantasy.NewSystemMessage("Generate a concise session title. Return only the title."),
+		fantasy.NewSystemMessage("Follow the user's title-formatting instructions exactly."),
 		fantasy.NewUserMessage(prompt),
 	}, MaxOutputTokens: &maxOutputTokens})
 	if err != nil {
@@ -130,8 +129,17 @@ func (r *Runtime) buildFantasyTools(opts fantasyToolOptions) []fantasy.AgentTool
 	}
 	tools := r.tools.All()
 	out := make([]fantasy.AgentTool, 0, len(tools))
+	hasRenameSession := false
 	for _, t := range tools {
+		if t.Name() == renameSessionToolName {
+			hasRenameSession = true
+		}
 		out = append(out, &fantasyTool{t: t, opts: opts})
+	}
+	if !hasRenameSession && opts.agent != nil {
+		if titleTool := opts.agent.titleTool(opts.sessionID); titleTool != nil {
+			out = append(out, titleTool)
+		}
 	}
 	return out
 }
