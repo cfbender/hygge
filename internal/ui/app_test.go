@@ -222,6 +222,70 @@ func TestAtMentionPaletteOverlaysChatWithoutMovingEditor(t *testing.T) {
 	}
 }
 
+func TestAtFileMentionAddsFileToPromptContext(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "docs", "notes.md")
+	if err := os.WriteFile(path, []byte("important context\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	b := bus.New()
+	t.Cleanup(func() { b.Close() })
+
+	partsCh := make(chan []session.Part, 1)
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    dir,
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		Now:           func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		partsCh <- parts
+		return nil, nil
+	}
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	for _, r := range "read @docs/notes.md " {
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	_ = cmd()
+
+	select {
+	case parts := <-partsCh:
+		if len(parts) != 2 {
+			t.Fatalf("sent %d parts, want text plus attachment: %+v", len(parts), parts)
+		}
+		if got := parts[0].Text; got != "read @docs/notes.md" {
+			t.Fatalf("prompt text = %q", got)
+		}
+		if !strings.Contains(parts[1].Text, "Attached file: "+path) || !strings.Contains(parts[1].Text, "important context") {
+			t.Fatalf("attachment part missing file context: %#v", parts[1].Text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent send did not receive parts")
+	}
+}
+
 func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)

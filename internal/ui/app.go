@@ -1071,6 +1071,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		a.input.Reset()
 		a.slashPaletteDismissed = false
+		a.mentionDismissed = false
 		return a, nil
 	case "ctrl+x":
 		// Dismiss the compaction threshold-suggestion banner for this crossing.
@@ -1134,12 +1135,17 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.slashPaletteDismissed = false
 			return a, a.runSlashCommand(text)
 		}
+		mentionAttachments, err := a.promptAttachmentsForMentions(text)
+		if err != nil {
+			return a, a.setNotice("mention: " + err.Error())
+		}
 		a.history.Add(text)
 		a.input.Reset()
 		a.slashPaletteDismissed = false
+		a.mentionDismissed = false
 		// Resume auto-scroll when the user sends a message.
 		a.userScrolled = false
-		return a, a.startSend(text)
+		return a, a.startSend(text, mentionAttachments...)
 	case "pgup":
 		// Scroll message list up one page; pause auto-scroll.
 		if !a.msgViewport.AtTop() {
@@ -1376,8 +1382,9 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 //
 // In tests that do not wire a *tea.Program, sendOutOfBand is a no-op; tests
 // drive sendCompleted manually via app.Update(sendCompleted{...}).
-func (a *App) startSend(text string) tea.Cmd {
+func (a *App) startSend(text string, mentionAttachments ...promptAttachment) tea.Cmd {
 	attachments := append([]promptAttachment(nil), a.pendingAttachments...)
+	attachments = appendUniquePromptAttachments(attachments, mentionAttachments...)
 	a.pendingAttachments = nil
 	if a.opts.Agent == nil && a.testAgentSendFn == nil {
 		// No agent wired up — useful for tests that just want to verify

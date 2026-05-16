@@ -101,3 +101,22 @@ func attachmentParts(text string, attachments []promptAttachment) []session.Part
 	}
 	return parts
 }
+
+func appendUniquePromptAttachments(dst []promptAttachment, src ...promptAttachment) []promptAttachment {
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	for _, att := range dst {
+		if att.Path != "" {
+			seen[att.Path] = struct{}{}
+		}
+	}
+	for _, att := range src {
+		if att.Path != "" {
+			if _, ok := seen[att.Path]; ok {
+				continue
+			}
+			seen[att.Path] = struct{}{}
+		}
+		dst = append(dst, att)
+	}
+	return dst
+}
