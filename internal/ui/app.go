@@ -2903,27 +2903,42 @@ func (a *App) appendAssistantDelta(text string) {
 	})
 }
 
-// flushAssistantStream marks the most recent assistant message as final and
-// renders it through glamour.  The messageID parameter is used to look up
-// token/cost/duration data from the store when available.
+// flushAssistantStream marks the current assistant message as final and renders
+// it through glamour.  The messageID parameter is used to reconcile the live
+// stream with the authoritative persisted message when available.
 func (a *App) flushAssistantStream(role, messageID string) {
 	if role != "assistant" {
 		return
 	}
-	n := len(a.messages)
-	if n == 0 {
+	persisted, hasPersisted := a.persistedAssistantUIMessage(messageID)
+	if hasPersisted {
+		persisted.AgentType = a.ActiveModeName()
+		persisted.ModelName = a.opts.ModelName
+		persisted.ModeColor = a.activeModeColor()
+		persisted.FinalMarkdown = renderMarkdown(a.ensureRenderer(), persisted.Raw)
+	}
+	idx := a.currentAssistantMessageIndex()
+	if idx < 0 {
+		if hasPersisted {
+			a.insertPersistedAssistantMessage(persisted)
+		}
 		return
 	}
-	last := &a.messages[n-1]
-	if last.Role != components.RoleAssistant {
-		return
-	}
+	last := &a.messages[idx]
 	last.IsStreaming = false
 	last.Timestamp = a.opts.Now()
+	if hasPersisted {
+		last.Raw = persisted.Raw
+		last.Thinking = persisted.Thinking
+		last.Timestamp = persisted.Timestamp
+		last.OutputTokens = persisted.OutputTokens
+		last.CostUSD = persisted.CostUSD
+		last.DurationMs = persisted.DurationMs
+	}
 	last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.Raw)
 
 	// Populate token/cost/duration from store if available.
-	if a.opts.Store != nil && messageID != "" {
+	if !hasPersisted && a.opts.Store != nil && messageID != "" {
 		if msg, err := a.opts.Store.GetMessage(a.ctx, messageID); err == nil && msg != nil {
 			last.OutputTokens = msg.OutputTokens
 			last.CostUSD = msg.CostUSD
@@ -2933,6 +2948,45 @@ func (a *App) flushAssistantStream(role, messageID string) {
 			}
 		}
 	}
+}
+
+func (a *App) currentAssistantMessageIndex() int {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == components.RoleAssistant && a.messages[i].IsStreaming {
+			return i
+		}
+	}
+	if n := len(a.messages); n > 0 && a.messages[n-1].Role == components.RoleAssistant {
+		return n - 1
+	}
+	return -1
+}
+
+func (a *App) insertPersistedAssistantMessage(msg uiMessage) {
+	insertAt := len(a.messages)
+	for insertAt > 0 && a.messages[insertAt-1].Role == components.RoleTool {
+		insertAt--
+	}
+	a.messages = append(a.messages, uiMessage{})
+	copy(a.messages[insertAt+1:], a.messages[insertAt:])
+	a.messages[insertAt] = msg
+}
+
+func (a *App) persistedAssistantUIMessage(messageID string) (uiMessage, bool) {
+	if a.opts.Store == nil || messageID == "" {
+		return uiMessage{}, false
+	}
+	msg, err := a.opts.Store.GetMessage(a.ctx, messageID)
+	if err != nil || msg == nil || msg.Role != session.RoleAssistant {
+		return uiMessage{}, false
+	}
+	entries := uiEntriesFromStoreMessage(msg, map[string]session.Part{}, map[string]struct{}{})
+	for _, entry := range entries {
+		if entry.Role == components.RoleAssistant {
+			return entry, true
+		}
+	}
+	return uiMessage{}, false
 }
 
 // updateLastTool finds the most recent streaming tool entry with a matching
