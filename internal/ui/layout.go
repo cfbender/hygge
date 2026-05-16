@@ -100,8 +100,10 @@ func (a *App) generateLayout(w, h int) uiLayout {
 	// remaining vertical space.
 	editorH := a.editorHeight()
 	footerH := footerHeight
+	bottomPadding := chatBottomPadding
 	if a.splashActive() {
 		editorH = 0
+		bottomPadding = 0
 	}
 	pillsH := a.pillsHeight()
 	bannerH := a.bannerHeight()
@@ -112,7 +114,7 @@ func (a *App) generateLayout(w, h int) uiLayout {
 	// We use the layout engine for the main left column.
 	var chatRect, editorRect, footerRect image.Rectangle
 	chatAndFixedArea := mainArea
-	chatAndFixedArea.Max.Y = chatAndFixedArea.Min.Y + h - headerHeight - chatBottomPadding - pillsH - bannerH - noticeH - paletteH
+	chatAndFixedArea.Max.Y = chatAndFixedArea.Min.Y + h - headerHeight - bottomPadding - pillsH - bannerH - noticeH - paletteH
 	if chatAndFixedArea.Dy() < 1 {
 		chatAndFixedArea.Max.Y = chatAndFixedArea.Min.Y + 1
 	}

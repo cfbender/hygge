@@ -16,7 +16,6 @@ func (a *App) splashActive() bool {
 		!a.compactionInFlight &&
 		a.notice == "" &&
 		a.compactionToast == "" &&
-		a.input.Value() == "" &&
 		len(a.pendingAttachments) == 0 &&
 		len(a.messages) == 0 &&
 		a.queueCount == 0 &&

@@ -70,12 +70,33 @@ func TestColdStartEmptyState(t *testing.T) {
 	if strings.Contains(plain, "tab  switch mode") || strings.Contains(plain, "ctrl+p  commands") {
 		t.Errorf("cold-start splash should not render duplicate shortcut line; got:\n%s", out)
 	}
+	lines := strings.Split(strings.TrimRight(plain, "\n"), "\n")
+	lastLine := lines[len(lines)-1]
+	if !strings.Contains(lastLine, "General") || !strings.Contains(lastLine, "Anthropic") {
+		t.Errorf("footer should remain pinned to bottom line during splash, got last line %q in:\n%s", lastLine, out)
+	}
 	if strings.Contains(plain, "What's on your mind?") {
 		t.Errorf("cold-start splash should not render the bottom prompt; got:\n%s", out)
 	}
 	// "profile: work" was rendered by the old header bar; it is no longer shown.
 	if strings.Contains(out, "profile: work") {
 		t.Errorf("profile token should not appear after header bar removal; got:\n%s", out)
+	}
+}
+
+func TestTypingKeepsSplashInputCentered(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	typeInto(app, "j")
+	out := app.View().Content
+	plain := ansiEscapeRE.ReplaceAllString(out, "")
+	for _, want := range []string{"███████", "Ctrl+E opens this prompt", "j"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("typing should keep splash prompt visible; missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(plain, "Type a message to get started") || strings.Contains(plain, "│h│ │y│ │g│") {
+		t.Fatalf("typing should not reveal the old component empty state:\n%s", out)
 	}
 }
 
@@ -457,12 +478,12 @@ func TestAtMentionPaletteOverlaysChatWithoutMovingEditor(t *testing.T) {
 	typeInto(app, "ask @sea")
 
 	lines := plainViewLines(app)
-	wantInputLine := editorTextLine(app)
-	if got := lineIndexContaining(lines, "┃ ask @sea"); got != wantInputLine {
-		t.Fatalf("input line = %d, want %d; mention palette should overlay chat without moving editor:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	inputLine := lineIndexContaining(lines, "┃ ask @sea")
+	if inputLine == -1 {
+		t.Fatalf("splash input line missing; mention palette should keep input visible:\n%s", strings.Join(lines, "\n"))
 	}
-	if got := lineIndexContaining(lines, "@agent:search"); got == -1 || got >= wantInputLine {
-		t.Fatalf("mention palette line = %d, want it above input line %d:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	if got := lineIndexContaining(lines, "@agent:search"); got == -1 {
+		t.Fatalf("mention palette missing for splash input line %d:\n%s", inputLine, strings.Join(lines, "\n"))
 	}
 }
 
@@ -557,6 +578,7 @@ func TestAtFileMentionAllowsLargeTextFileContext(t *testing.T) {
 func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
+	app.messages = []uiMessage{{Role: components.RoleUser, Raw: "hello"}}
 
 	for range 10 {
 		app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})

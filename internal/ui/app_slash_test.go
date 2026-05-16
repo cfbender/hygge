@@ -76,10 +76,6 @@ func lineIndexContaining(lines []string, needle string) int {
 	return -1
 }
 
-func editorTextLine(app *App) int {
-	return app.height - footerHeight - app.editorHeight() + 1
-}
-
 func TestSlashCommandModelOpensDialog(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
@@ -289,12 +285,12 @@ func TestSlashCommandPaletteOverlaysChatWithoutMovingEditor(t *testing.T) {
 	typeInto(app, "/co")
 
 	lines := plainViewLines(app)
-	wantInputLine := editorTextLine(app)
-	if got := lineIndexContaining(lines, "┃ /co"); got != wantInputLine {
-		t.Fatalf("input line = %d, want %d; palette should overlay chat without moving editor:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	inputLine := lineIndexContaining(lines, "┃ /co")
+	if inputLine == -1 {
+		t.Fatalf("splash input line missing; palette should keep input visible:\n%s", strings.Join(lines, "\n"))
 	}
-	if got := lineIndexContaining(lines, "/compact"); got == -1 || got >= wantInputLine {
-		t.Fatalf("palette line = %d, want it above input line %d:\n%s", got, wantInputLine, strings.Join(lines, "\n"))
+	if got := lineIndexContaining(lines, "/compact"); got == -1 {
+		t.Fatalf("palette missing for splash input line %d:\n%s", inputLine, strings.Join(lines, "\n"))
 	}
 }
 

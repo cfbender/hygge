@@ -143,37 +143,23 @@ func TestMessageListEmpty(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
 	out := ml.View()
-	// Splash empty state: animated logo, prompt box, and shortcut tips.
-	for _, want := range []string{"│h│", "Type a message", "ctrl+e", "ctrl+t", "tab"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("empty state missing %q in:\n%s", want, out)
-		}
+	if out != "" {
+		t.Errorf("empty message list should render blank; got:\n%s", out)
 	}
-	// Old "no messages" placeholder must no longer appear.
+	// Old placeholders must no longer appear; the App owns the splash screen.
 	if strings.Contains(out, "no messages") {
 		t.Errorf("empty state should not contain old placeholder text; got:\n%s", out)
 	}
 }
 
-// TestMessageListEmptyState_NoMessagesShowsWelcome verifies the empty state
-// is shown only when Messages is nil/empty.
-func TestMessageListEmptyState_NoMessagesShowsWelcome(t *testing.T) {
+func TestMessageListEmptyState_NoMessagesStaysBlank(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
 	out := ml.View()
-	if !strings.Contains(out, "│h│ │y│ │g│ │g│ │e│") {
-		t.Errorf("empty state must contain Hygge ASCII logo; got:\n%s", out)
-	}
-}
-
-func TestMessageListEmptyState_AnimatesLogo(t *testing.T) {
-	t.Parallel()
-	ml := MessageList{Width: 80, Theme: theme.ShellTheme(), EmptyFrame: 0}
-	first := ml.View()
-	ml.EmptyFrame = 1
-	second := ml.View()
-	if first == second {
-		t.Fatalf("empty-state splash should animate across frames")
+	for _, unexpected := range []string{"│h│", "Type a message", "ctrl+e", "tab"} {
+		if strings.Contains(out, unexpected) {
+			t.Errorf("message-list empty state should not contain %q; got:\n%s", unexpected, out)
+		}
 	}
 }
 
