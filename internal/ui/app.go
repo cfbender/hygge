@@ -132,6 +132,10 @@ type AppOptions struct {
 	ThemeNames []string
 	LoadTheme  func(ctx context.Context, name string) (*theme.Theme, error)
 	SaveTheme  func(ctx context.Context, name string) error
+	// EditPrompt opens the current prompt in an external editor and returns the
+	// edited prompt. Tests may inject this seam; production falls back to
+	// $VISUAL, then $EDITOR, then vi.
+	EditPrompt func(ctx context.Context, initial string) (string, error)
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -911,6 +915,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.showToast("Theme switched", "Using "+m.name)
 
+	case promptEditorFinishedMsg:
+		if m.err != nil {
+			return a, a.setNotice("editor: " + m.err.Error())
+		}
+		a.setEditedPrompt(m.text)
+		return a, nil
+
 	case sendStarted:
 		wasBusy := a.busy
 		a.busy = true
@@ -1128,6 +1139,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a, a.showToast("Reasoning", label)
 	case "ctrl+g":
 		return a, a.followIntoLatestSubagent()
+	case "ctrl+e":
+		if a.viewingSubagent() {
+			return a, nil
+		}
+		return a, a.openPromptEditorCmd()
 	case "enter":
 		if a.viewingSubagent() {
 			return a, nil

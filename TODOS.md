@@ -33,9 +33,6 @@
 - [ ] **Refine system prompt**
   Update the system prompt to reflect Hygge's current capabilities.
 
-- [ ] **`Ctrl+E` external prompt editor**
-  Add a shortcut to edit the current prompt in an external editor.
-
 - [ ] **Yolo mode**
   Add a mode for reduced confirmations / more autonomous execution.
 
