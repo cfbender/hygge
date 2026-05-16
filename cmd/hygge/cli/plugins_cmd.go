@@ -2,7 +2,11 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -23,6 +27,8 @@ func newPluginsCmd() *cobra.Command {
 		newPluginsInstallCmd(),
 		newPluginsRemoveCmd(),
 		newPluginsUpdateCmd(),
+		newPluginsTypesCmd(),
+		newPluginsDevCmd(),
 	)
 	return root
 }
@@ -276,6 +282,252 @@ func newPluginsUpdateCmd() *cobra.Command {
 			return updateErr
 		},
 	}
+}
+
+// newPluginsTypesCmd builds `hygge plugins types` helper commands for LuaLS.
+func newPluginsTypesCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "types",
+		Short: "Install Lua plugin editor type stubs",
+	}
+
+	var force bool
+	install := &cobra.Command{
+		Use:   "install [dir]",
+		Short: "Install LuaLS definitions into a plugin project",
+		Long: `Install Hygge's LuaLS/LuaCATS definition file into a plugin project.
+
+The command writes .hygge/types/hygge.lua and creates .luarc.json when it does
+not already exist. Use --force to replace an existing .luarc.json with Hygge's
+default LuaLS settings.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := resolvePluginDevDir(args)
+			if err != nil {
+				return die(cmd, "%s", err)
+			}
+			result, err := installPluginTypes(dir, force)
+			if err != nil {
+				return die(cmd, "install plugin types: %s", err)
+			}
+
+			printf(out(cmd), "installed LuaLS types: %s\n", result.TypesPath)
+			if result.LuaRCWritten {
+				printf(out(cmd), "wrote LuaLS config: %s\n", result.LuaRCPath)
+			} else {
+				printf(out(cmd), "left existing LuaLS config unchanged: %s\n", result.LuaRCPath)
+			}
+			return nil
+		},
+	}
+	install.Flags().BoolVar(&force, "force", false, "replace an existing .luarc.json")
+
+	root.AddCommand(install)
+	return root
+}
+
+// newPluginsDevCmd builds `hygge plugins dev` helper commands.
+func newPluginsDevCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "dev",
+		Short: "Scaffold Lua plugin development files",
+	}
+
+	var force bool
+	initCmd := &cobra.Command{
+		Use:   "init [dir]",
+		Short: "Initialize a local Lua plugin project",
+		Long: `Initialize a local Lua plugin project without requiring the Hygge source tree.
+
+The command creates plugin.lua, plugin.toml, .hygge/types/hygge.lua, and
+.luarc.json. Existing files are preserved unless --force is set.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := resolvePluginDevDir(args)
+			if err != nil {
+				return die(cmd, "%s", err)
+			}
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return die(cmd, "create plugin directory: %s", err)
+			}
+
+			if err := writePluginScaffold(dir, force); err != nil {
+				return die(cmd, "initialize plugin scaffold: %s", err)
+			}
+			result, err := installPluginTypes(dir, force)
+			if err != nil {
+				return die(cmd, "install plugin types: %s", err)
+			}
+
+			printf(out(cmd), "initialized plugin project: %s\n", dir)
+			printf(out(cmd), "installed LuaLS types: %s\n", result.TypesPath)
+			if !result.LuaRCWritten {
+				printf(out(cmd), "left existing LuaLS config unchanged: %s\n", result.LuaRCPath)
+			}
+			return nil
+		},
+	}
+	initCmd.Flags().BoolVar(&force, "force", false, "replace existing scaffold files and .luarc.json")
+
+	root.AddCommand(initCmd)
+	return root
+}
+
+type pluginTypesInstallResult struct {
+	TypesPath    string
+	LuaRCPath    string
+	LuaRCWritten bool
+}
+
+func resolvePluginDevDir(args []string) (string, error) {
+	dir := ""
+	if len(args) > 0 {
+		dir = args[0]
+	}
+	if dir == "" {
+		dir = rootFlags.Pwd
+	}
+	if dir == "" && testOverrides != nil {
+		dir = testOverrides.Pwd
+	}
+	if dir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		dir = wd
+	}
+	if !filepath.IsAbs(dir) {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		dir = abs
+	}
+	return dir, nil
+}
+
+func installPluginTypes(dir string, force bool) (pluginTypesInstallResult, error) {
+	typesDir := filepath.Join(dir, ".hygge", "types")
+	if err := os.MkdirAll(typesDir, 0o750); err != nil {
+		return pluginTypesInstallResult{}, err
+	}
+
+	typesPath := filepath.Join(typesDir, "hygge.lua")
+	if err := os.WriteFile(typesPath, plugin.LuaLSTypeStub(), 0o600); err != nil {
+		return pluginTypesInstallResult{}, err
+	}
+
+	luarcPath := filepath.Join(dir, ".luarc.json")
+	wroteLuaRC, err := writeFileUnlessExists(luarcPath, defaultLuaRC(), force)
+	if err != nil {
+		return pluginTypesInstallResult{}, err
+	}
+
+	return pluginTypesInstallResult{
+		TypesPath:    typesPath,
+		LuaRCPath:    luarcPath,
+		LuaRCWritten: wroteLuaRC,
+	}, nil
+}
+
+func writePluginScaffold(dir string, force bool) error {
+	if _, err := writeFileUnlessExists(filepath.Join(dir, "plugin.toml"), []byte(defaultPluginManifest(dir)), force); err != nil {
+		return err
+	}
+	if _, err := writeFileUnlessExists(filepath.Join(dir, "plugin.lua"), []byte(defaultPluginLua()), force); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeFileUnlessExists(path string, data []byte, force bool) (bool, error) {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			return false, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func defaultLuaRC() []byte {
+	settings := map[string]any{
+		"runtime.version":           "Lua 5.1",
+		"diagnostics.globals":       []string{"hygge"},
+		"workspace.library":         []string{".hygge/types"},
+		"workspace.checkThirdParty": false,
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	return append(data, '\n')
+}
+
+func defaultPluginManifest(dir string) string {
+	return `name = "` + defaultPluginName(dir) + `"
+version = "0.1.0"
+description = "A Hygge Lua plugin"
+entrypoint = "plugin.lua"
+`
+}
+
+func defaultPluginLua() string {
+	return `-- Hygge Lua plugin entrypoint.
+
+hygge.register_tool {
+    name = "hello_world",
+    description = "Returns a friendly greeting.",
+    input_schema = {
+        type = "object",
+        properties = {
+            name = { type = "string" },
+        },
+    },
+    execute = function(ctx, input)
+        local who = "World"
+        if input and input.name then
+            who = input.name
+        end
+        return { content = "Hello, " .. who .. "!" }
+    end,
+}
+`
+}
+
+func defaultPluginName(dir string) string {
+	name := strings.ToLower(filepath.Base(filepath.Clean(dir)))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
+		if valid {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	outName := strings.Trim(b.String(), "-")
+	if outName == "" {
+		return "plugin"
+	}
+	first := outName[0]
+	if first < 'a' || first > 'z' {
+		return "plugin-" + outName
+	}
+	return outName
 }
 
 // addPluginSource rewrites config.toml to append a source URI to
