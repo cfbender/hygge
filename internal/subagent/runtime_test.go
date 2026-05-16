@@ -555,6 +555,13 @@ func TestRun_PublishesSubagentStartedAndCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	subSess, err := env.store.GetSession(context.Background(), res.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession subagent: %v", err)
+	}
+	if subSess.ParentToolUseID != "tool_use_z" {
+		t.Fatalf("ParentToolUseID: got %q want %q", subSess.ParentToolUseID, "tool_use_z")
+	}
 
 	select {
 	case ev := <-startedSub.C():

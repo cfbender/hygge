@@ -97,6 +97,7 @@ type Session struct {
 	ID                  string
 	ParentID            string // "" = root session
 	ForkMessageID       string // "" if no parent
+	ParentToolUseID     string // subagent sessions: parent task tool_use_id
 	Slug                string
 	ProjectDir          string
 	Model               ModelRef
@@ -183,12 +184,13 @@ type TodoSummary struct {
 // NewSession is the input to Store.CreateSession.  ID, CreatedAt, UpdatedAt
 // are assigned by the Store.
 type NewSession struct {
-	ProjectDir    string
-	Model         ModelRef
-	Slug          string // optional
-	ParentID      string // optional; "" = root session
-	ForkMessageID string // required when ParentID is set AND Kind != KindSubagent
-	Kind          Kind   // empty defaults to KindPrimary
+	ProjectDir      string
+	Model           ModelRef
+	Slug            string // optional
+	ParentID        string // optional; "" = root session
+	ForkMessageID   string // required when ParentID is set AND Kind != KindSubagent
+	ParentToolUseID string // optional; subagent parent task tool_use_id
+	Kind            Kind   // empty defaults to KindPrimary
 }
 
 // NewMessage is the input to Store.AppendMessage.  ID and CreatedAt are

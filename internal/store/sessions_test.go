@@ -95,6 +95,32 @@ func TestCreateSession_SubagentSkipsForkMessageRequirement(t *testing.T) {
 	}
 }
 
+func TestCreateSession_SubagentPersistsParentToolUseID(t *testing.T) {
+	s := newTestStore(t)
+	parent := mustCreateSession(t, s, "/p")
+	sub, err := s.CreateSession(t.Context(), session.NewSession{
+		ProjectDir:      "/p",
+		Model:           sampleModel(),
+		ParentID:        parent.ID,
+		ParentToolUseID: "toolu_123",
+		Kind:            session.KindSubagent,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sub.ParentToolUseID != "toolu_123" {
+		t.Fatalf("created ParentToolUseID: got %q", sub.ParentToolUseID)
+	}
+
+	got, err := s.GetSession(t.Context(), sub.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.ParentToolUseID != "toolu_123" {
+		t.Fatalf("loaded ParentToolUseID: got %q", got.ParentToolUseID)
+	}
+}
+
 func TestCreateSession_RejectsUnknownKind(t *testing.T) {
 	s := newTestStore(t)
 	_, err := s.CreateSession(t.Context(), session.NewSession{

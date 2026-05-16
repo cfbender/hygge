@@ -345,11 +345,12 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 	// from a tool_use into a fresh conversation.
 	subModel := session.ModelRef{Provider: runProvider.Name(), Name: runModelName}
 	sub, err := r.store.CreateSession(ctx, session.NewSession{
-		ProjectDir: parent.ProjectDir,
-		Model:      subModel,
-		ParentID:   in.ParentSessionID,
-		Kind:       session.KindSubagent,
-		Slug:       buildSlug(in.Type, in.Description, in.ParentToolUseID),
+		ProjectDir:      parent.ProjectDir,
+		Model:           subModel,
+		ParentID:        in.ParentSessionID,
+		ParentToolUseID: in.ParentToolUseID,
+		Kind:            session.KindSubagent,
+		Slug:            buildSlug(in.Type, in.Description, in.ParentToolUseID),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("subagent: Run: create sub-session: %w", err)
