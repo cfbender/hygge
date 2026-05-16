@@ -275,8 +275,9 @@ type SubagentHitZone struct {
 }
 
 // View renders all messages joined with a blank line between them.
-// The pre-pass groups consecutive non-task RoleTool entries into a single
-// tool-calls bubble; task tool calls and all other roles render individually.
+// The pre-pass groups consecutive compact RoleTool entries into a single
+// tool-calls bubble. Bash, edit, and write tools render as standalone tool
+// blocks so expandable output and large file diffs have their own hit zone.
 func (m MessageList) View() string {
 	content, _, _ := m.ViewWithHitZones()
 	return content
@@ -362,17 +363,24 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 }
 
 // buildChunks walks m.Messages and produces a slice of renderChunks.
-// Consecutive non-task RoleTool entries are folded into a chunkToolGroup.
-// subagent tool calls and all other roles become chunkSingle entries.
+// Consecutive compact RoleTool entries are folded into a chunkToolGroup.
+// Bash, edit, and write tools become one-item chunkToolGroups, and subagent
+// tool calls plus all other roles become chunkSingle entries.
 func (m MessageList) buildChunks() []renderChunk {
 	chunks := make([]renderChunk, 0, len(m.Messages))
 	i := 0
 	for i < len(m.Messages) {
 		msg := m.Messages[i]
-		if isNonSubagentTool(msg) {
-			// Collect run of consecutive non-subagent tool calls.
+		if isStandaloneToolBlock(msg) {
+			chunks = append(chunks, renderChunk{
+				kind:  chunkToolGroup,
+				group: m.Messages[i : i+1],
+			})
+			i++
+		} else if isCompactToolBlock(msg) {
+			// Collect run of consecutive compact tool calls.
 			j := i + 1
-			for j < len(m.Messages) && isNonSubagentTool(m.Messages[j]) {
+			for j < len(m.Messages) && isCompactToolBlock(m.Messages[j]) {
 				j++
 			}
 			chunks = append(chunks, renderChunk{
@@ -391,9 +399,25 @@ func (m MessageList) buildChunks() []renderChunk {
 	return chunks
 }
 
-// isNonSubagentTool reports whether msg is a RoleTool entry that is NOT "subagent".
-func isNonSubagentTool(msg UIMessage) bool {
-	return msg.Role == RoleTool && msg.ToolName != "subagent"
+// isCompactToolBlock reports whether msg is a RoleTool entry that can share a
+// grouped tool bubble with adjacent compact tools.
+func isCompactToolBlock(msg UIMessage) bool {
+	return msg.Role == RoleTool && msg.ToolName != "subagent" && !isStandaloneToolBlock(msg)
+}
+
+// isStandaloneToolBlock reports whether a tool should always render in its own
+// tool bubble. These tools can carry expandable output or file diffs where a
+// shared block makes click targeting ambiguous.
+func isStandaloneToolBlock(msg UIMessage) bool {
+	if msg.Role != RoleTool {
+		return false
+	}
+	switch strings.ToLower(msg.ToolName) {
+	case "bash", "edit", "write":
+		return true
+	default:
+		return false
+	}
 }
 
 // renderOne renders a single message with its gutter, plus any nested
