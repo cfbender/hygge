@@ -100,6 +100,9 @@ func (a *App) renderLeftColumn() string {
 
 	// Chat viewport.
 	sections = append(sections, a.renderChatContent())
+	if a.splashActive() {
+		return strings.Join(sections, "\n")
+	}
 
 	// Breathing room between messages and editor.
 	sections = append(sections, "")
@@ -113,6 +116,7 @@ func (a *App) renderLeftColumn() string {
 	if !a.viewingSubagent() {
 		a.input.BorderColor = a.activeModeColor()
 		a.input.PasteMarkerStyle = a.pasteInputMarkerStyle()
+		a.input.VerticalPadding = 0
 		sections = append(sections, a.input.View())
 	}
 

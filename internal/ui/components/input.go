@@ -42,6 +42,7 @@ type Input struct {
 	Theme            *theme.Theme // kept for gradual migration
 	PasteMarkerStyle lipgloss.Style
 	BorderColor      color.Color
+	VerticalPadding  int
 	Focused          bool
 	prevH            int // track height changes for layout recalc
 }
@@ -133,7 +134,7 @@ func (i *Input) View() string {
 		return content
 	}
 
-	style := lipgloss.NewStyle().Padding(0, 1)
+	style := lipgloss.NewStyle().Padding(max(i.VerticalPadding, 0), 1)
 
 	if i.Focused {
 		borderColor := i.BorderColor

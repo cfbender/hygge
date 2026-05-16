@@ -69,6 +69,9 @@ func (a *App) invalidateMsgCache() {
 // only scroll position changes between frames during mouse/keyboard scrolling.
 func (a *App) renderChatContent() string {
 	l := a.layout
+	if a.splashActive() {
+		return a.renderSplashContent()
+	}
 
 	// Breadcrumb: moved to footer in subagent view, not shown at top.
 	breadcrumb := ""
