@@ -138,18 +138,22 @@ func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("multi-line paste should be handled locally, got cmd %T", cmd)
 	}
-	if got, want := app.input.Value(), "[ Pasted 3 lines ]"; got != want {
+	if got, want := app.input.Value(), "[ Pasted 3 lines ] "; got != want {
 		t.Fatalf("input after paste = %q, want %q", got, want)
 	}
 	view := app.View().Content
-	if !strings.Contains(view, "[ Pasted 3 lines ]") {
+	chip := lipgloss.NewStyle().
+		Foreground(app.styles.Editor.AttachmentName.GetForeground()).
+		Background(app.styles.Editor.AttachmentName.GetBackground()).
+		Render("[ Pasted 3 lines ]")
+	if !strings.Contains(view, chip) {
 		t.Fatalf("paste marker missing from view:\n%s", view)
 	}
 	if strings.Contains(view, "bravo") {
 		t.Fatalf("raw pasted middle line should not be visible in editor:\n%s", view)
 	}
 
-	typeInto(app, " summarize")
+	typeInto(app, "summarize")
 	_, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected send command")
@@ -164,6 +168,41 @@ func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 	}
 	if len(app.pastedInputBlocks) != 0 {
 		t.Fatalf("pasted blocks not cleared after send: %+v", app.pastedInputBlocks)
+	}
+}
+
+func TestMultiLinePasteMarkerBackspacesAsSingleChip(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Update(tea.PasteMsg{Content: "alpha\nbravo\ncharlie"})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if got, want := app.input.Value(), "[ Pasted 3 lines ]"; got != want {
+		t.Fatalf("first backspace should remove trailing paste space, got %q want %q", got, want)
+	}
+	if len(app.pastedInputBlocks) != 1 {
+		t.Fatalf("first backspace should keep paste block: %+v", app.pastedInputBlocks)
+	}
+
+	app.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if got := app.input.Value(); got != "" {
+		t.Fatalf("second backspace should remove whole paste chip, got %q", got)
+	}
+	if len(app.pastedInputBlocks) != 0 {
+		t.Fatalf("paste block should be removed: %+v", app.pastedInputBlocks)
+	}
+}
+
+func TestMultiLinePasteMarkerCannotBeEditedInternally(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Update(tea.PasteMsg{Content: "alpha\nbravo\ncharlie"})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	app.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	app.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
+	if got, want := app.input.Value(), "X[ Pasted 3 lines ] "; got != want {
+		t.Fatalf("typing after moving left should land before chip, got %q want %q", got, want)
 	}
 }
 
