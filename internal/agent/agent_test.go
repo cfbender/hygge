@@ -106,6 +106,7 @@ type fakeFantasyModel struct {
 	provider      string
 	model         string
 	text          string
+	generateTexts []string
 	usage         fantasy.Usage
 	stream        []fantasy.StreamPart
 	streamBatches [][]fantasy.StreamPart
@@ -125,7 +126,14 @@ func (f *fakeFantasyModel) Generate(_ context.Context, call fantasy.Call) (*fant
 	if f.generateErr != nil {
 		return nil, f.generateErr
 	}
-	return &fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: f.text}}, Usage: f.usage}, nil
+	f.mu.Lock()
+	text := f.text
+	if len(f.generateTexts) > 0 {
+		text = f.generateTexts[0]
+		f.generateTexts = f.generateTexts[1:]
+	}
+	f.mu.Unlock()
+	return &fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: text}}, Usage: f.usage}, nil
 }
 
 func (f *fakeFantasyModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
@@ -165,7 +173,16 @@ func (f *fakeFantasyModel) Model() string    { return f.model }
 
 func TestAgentGenerateTitleUsesTitleFantasyModel(t *testing.T) {
 	env := newTestEnv(t)
+	var gotPrompt string
 	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Fix auth flow"}
+	titleModel.onGenerate = func(call fantasy.Call) {
+		msgs := call.Prompt
+		if len(msgs) >= 2 && len(msgs[1].Content) > 0 {
+			if text, ok := msgs[1].Content[0].(fantasy.TextPart); ok {
+				gotPrompt = text.Text
+			}
+		}
+	}
 	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
 		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
 		opts.TitleFantasyModel = titleModel
@@ -177,6 +194,149 @@ func TestAgentGenerateTitleUsesTitleFantasyModel(t *testing.T) {
 	}
 	if title != "Fix auth flow" {
 		t.Fatalf("title = %q", title)
+	}
+	if titleModel.calls.Load() != 1 {
+		t.Fatalf("title model calls = %d, want 1", titleModel.calls.Load())
+	}
+	if !strings.Contains(gotPrompt, "Commands overview") || !strings.Contains(gotPrompt, "Current title: (none)") {
+		t.Fatalf("title prompt missing formatting instructions/current title:\n%s", gotPrompt)
+	}
+}
+
+func TestAgentRefreshSessionTitlePersistsFormattedSlug(t *testing.T) {
+	env := newTestEnv(t)
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Commands overview"}
+	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
+		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+		opts.TitleFantasyModel = titleModel
+	})
+	if _, err := env.Store.AppendMessage(t.Context(), env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "generate a high level overview of / commands in this project"}}}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	title, changed, err := ag.RefreshSessionTitle(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("RefreshSessionTitle: %v", err)
+	}
+	if !changed || title != "Commands overview" {
+		t.Fatalf("title=%q changed=%v, want Commands overview/true", title, changed)
+	}
+	sess, err := env.Store.GetSession(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Slug != "Commands overview" {
+		t.Fatalf("Slug = %q, want Commands overview", sess.Slug)
+	}
+}
+
+func TestAgentRefreshSessionTitleRepromptsWhenModelEchoesPrompt(t *testing.T) {
+	env := newTestEnv(t)
+	prompt := "generate a high level overview of / commands here"
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", generateTexts: []string{prompt, "Commands overview"}}
+	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
+		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+		opts.TitleFantasyModel = titleModel
+	})
+	if _, err := env.Store.AppendMessage(t.Context(), env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: prompt}}}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	title, changed, err := ag.RefreshSessionTitle(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("RefreshSessionTitle: %v", err)
+	}
+	if !changed || title != "Commands overview" {
+		t.Fatalf("title=%q changed=%v, want Commands overview/true", title, changed)
+	}
+	sess, err := env.Store.GetSession(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Slug != "Commands overview" {
+		t.Fatalf("Slug = %q, want Commands overview", sess.Slug)
+	}
+	if titleModel.calls.Load() != 2 {
+		t.Fatalf("title model calls = %d, want initial + repair", titleModel.calls.Load())
+	}
+}
+
+func TestAgentRefreshSessionTitleRepromptsWhenVerbatimSlugGetsKeep(t *testing.T) {
+	env := newTestEnv(t)
+	prompt := "generate a high level overview of / commands here"
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", generateTexts: []string{"KEEP", "Commands overview"}}
+	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
+		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+		opts.TitleFantasyModel = titleModel
+	})
+	if err := env.Store.RenameSession(t.Context(), env.sessionID, prompt); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+	if _, err := env.Store.AppendMessage(t.Context(), env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: prompt}}}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	title, changed, err := ag.RefreshSessionTitle(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("RefreshSessionTitle: %v", err)
+	}
+	if !changed || title != "Commands overview" {
+		t.Fatalf("title=%q changed=%v, want Commands overview/true", title, changed)
+	}
+}
+
+func TestAgentRefreshSessionTitleKeepsCurrentSlug(t *testing.T) {
+	env := newTestEnv(t)
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "KEEP"}
+	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
+		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+		opts.TitleFantasyModel = titleModel
+	})
+	if err := env.Store.RenameSession(t.Context(), env.sessionID, "Commands overview"); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+	if _, err := env.Store.AppendMessage(t.Context(), env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "explain the command registry"}}}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	title, changed, err := ag.RefreshSessionTitle(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("RefreshSessionTitle: %v", err)
+	}
+	if changed || title != "Commands overview" {
+		t.Fatalf("title=%q changed=%v, want existing title/false", title, changed)
+	}
+}
+
+func TestSend_FantasyRenameSessionToolUsesTitleModel(t *testing.T) {
+	env := newTestEnv(t)
+	mainModel := &fakeFantasyModel{provider: "fake", model: "large", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeToolCall, ID: "tu-title", ToolCallName: renameSessionToolName, ToolCallInput: `{"topic":"overview of slash commands"}`},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "renamed"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	titleModel := &fakeFantasyModel{provider: "fake", model: "small", text: "Commands overview"}
+	ag := env.newAgent(newFakeProvider("fake"), func(opts *Options) {
+		opts.FantasyModel = mainModel
+		opts.TitleFantasyModel = titleModel
+	})
+
+	if _, err := ag.Send(t.Context(), env.sessionID, userText("topic changed")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	sess, err := env.Store.GetSession(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Slug != "Commands overview" {
+		t.Fatalf("Slug = %q, want Commands overview", sess.Slug)
 	}
 	if titleModel.calls.Load() != 1 {
 		t.Fatalf("title model calls = %d, want 1", titleModel.calls.Load())

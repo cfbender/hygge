@@ -84,6 +84,30 @@ func TestColdStartEmptyState(t *testing.T) {
 	}
 }
 
+func TestLoadSessionTitlePrefersGeneratedSlugOverFirstPreview(t *testing.T) {
+	app, st, _ := newTestAppWithStore(t, []session.NewMessage{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "generate a high level overview of / commands in this project"}}},
+	})
+	if err := st.RenameSession(t.Context(), app.rootSessionID(), "Commands overview"); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+
+	if got := app.loadSessionTitle(app.rootSessionID()); got != "Commands overview" {
+		t.Fatalf("loadSessionTitle = %q, want generated slug", got)
+	}
+}
+
+func TestLoadSessionTitleDoesNotUseFirstPreviewAsTitle(t *testing.T) {
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "generate a high level overview of / commands here"}}},
+	})
+
+	got := app.loadSessionTitle(app.rootSessionID())
+	if got == "generate a high level overview of / commands here" || got == "Commands overview" {
+		t.Fatalf("loadSessionTitle = %q, want only persisted model slug or short id", got)
+	}
+}
+
 func TestTypingKeepsSplashInputCentered(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
