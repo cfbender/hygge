@@ -43,6 +43,9 @@ func TestRunNoArgsBuildsAppAndSkipsTea(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	if out.Len() > 0 {
+		t.Fatalf("expected no startup output, got:\n%s", out.String())
+	}
 }
 
 func TestResumeWithSeed(t *testing.T) {
@@ -388,7 +391,7 @@ func TestSetupTUILog_DefaultIsDebug(t *testing.T) {
 	dir := t.TempDir()
 	rt := minimalRuntime(dir)
 
-	closer := setupTUILog(rt)
+	closer := setupTUILog(rt.StateOpts)
 	if closer == nil {
 		t.Fatal("expected non-nil closer")
 	}
@@ -412,7 +415,7 @@ func TestSetupTUILog_InfoSuppressesDebug(t *testing.T) {
 	dir := t.TempDir()
 	rt := minimalRuntime(dir)
 
-	closer := setupTUILog(rt)
+	closer := setupTUILog(rt.StateOpts)
 	if closer == nil {
 		t.Fatal("expected non-nil closer")
 	}
@@ -442,7 +445,7 @@ func TestSetupTUILog_CaseInsensitive(t *testing.T) {
 			dir := t.TempDir()
 			rt := minimalRuntime(dir)
 
-			closer := setupTUILog(rt)
+			closer := setupTUILog(rt.StateOpts)
 			if closer == nil {
 				t.Fatal("expected non-nil closer")
 			}
@@ -472,7 +475,7 @@ func TestSetupTUILog_UnknownValueFallsBackToDebug(t *testing.T) {
 	dir := t.TempDir()
 	rt := minimalRuntime(dir)
 
-	closer := setupTUILog(rt)
+	closer := setupTUILog(rt.StateOpts)
 	if closer == nil {
 		t.Fatal("expected non-nil closer")
 	}
