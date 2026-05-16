@@ -130,6 +130,12 @@ func (i *Input) HeightChanged() bool {
 // View renders the input area with a themed border.
 func (i *Input) View() string {
 	content := i.Textarea.View()
+	if i.Styles != nil {
+		chip := lipgloss.NewStyle().
+			Foreground(i.Styles.Editor.AttachmentName.GetForeground()).
+			Background(i.Styles.Editor.AttachmentName.GetBackground())
+		content = HighlightPastedInputMarkers(content, chip)
+	}
 	if i.Theme != nil {
 		content = HighlightMentions(content, i.Theme.Style(theme.AtomAccent))
 	}

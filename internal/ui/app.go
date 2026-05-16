@@ -1294,6 +1294,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) updateInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if a.handleAtomicPasteEdit(k) {
+		return a, nil
+	}
 	var cmd tea.Cmd
 	before := a.input.Value()
 	a.input.Textarea, cmd = a.input.Textarea.Update(k)
@@ -1304,6 +1307,7 @@ func (a *App) updateInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.mentionHighlight = -1
 		a.mentionDismissed = false
 	}
+	a.keepCursorOutsidePastedMarkers(k)
 	return a, cmd
 }
 
