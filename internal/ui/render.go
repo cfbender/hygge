@@ -237,8 +237,49 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 		a.themeModal.Width = w
 		a.themeModal.Height = h
 		return a.themeModal.View()
+	case overlayQuit:
+		return a.renderQuitOverlay(w, h)
 	}
 	return ""
+}
+
+// renderQuitOverlay renders a centered "Are you sure you want to quit?" dialog.
+func (a *App) renderQuitOverlay(w, h int) string {
+	question := "Are you sure you want to quit?"
+	buttons := "  [y] Yes   [n] No  "
+
+	boxStyle := lipgloss.NewStyle().
+		Padding(1, 3).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#C75B7A"))
+
+	if a.styles != nil {
+		boxStyle = boxStyle.Background(a.styles.BubbleBg)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Center, question, "", buttons)
+	box := boxStyle.Render(content)
+
+	boxW := lipgloss.Width(box)
+	boxH := lipgloss.Height(box)
+
+	padLeft := (w - boxW) / 2
+	padTop := (h - boxH) / 2
+	if padLeft < 0 {
+		padLeft = 0
+	}
+	if padTop < 0 {
+		padTop = 0
+	}
+
+	var lines []string
+	for range padTop {
+		lines = append(lines, "")
+	}
+	for _, line := range strings.Split(box, "\n") {
+		lines = append(lines, strings.Repeat(" ", padLeft)+line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderChromeContent produces the "chrome" elements between chat and footer:

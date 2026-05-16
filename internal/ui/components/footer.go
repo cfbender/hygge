@@ -47,15 +47,15 @@ func (f Footer) View() string {
 
 	muted := f.muted()
 
-	// Left side: [spinner] + mode indicator or agent type.
+	// Left side: mode indicator or agent type + [spinner].
 	var left []string
-	if f.Busy && f.SpinnerView != "" {
-		left = append(left, f.SpinnerView)
-	}
 	if f.ModeIndicator != "" {
 		left = append(left, f.ModeIndicator)
 	} else {
 		left = append(left, muted.Render(agentType))
+	}
+	if f.Busy && f.SpinnerView != "" {
+		left = append(left, f.SpinnerView)
 	}
 
 	// Right side: model + provider + reasoning.

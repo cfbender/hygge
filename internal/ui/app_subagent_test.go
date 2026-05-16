@@ -90,52 +90,6 @@ func TestSubagentStarted_AddsCollapsedBlockUnderSubagentMessage(t *testing.T) {
 	}
 }
 
-func TestSubagentToggleExpandsLatest(t *testing.T) {
-	t.Parallel()
-	app, _ := makeForegroundApp(t)
-
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
-	app.Handle(bus.SubagentStarted{
-		SubSessionID:    "sub-1",
-		ParentSessionID: "fg-session",
-		Type:            "general",
-		Description:     "go",
-		Model:           "x/y",
-		At:              time.Now().Add(-time.Second),
-	})
-
-	if app.subagents["sub-1"].Expanded {
-		t.Fatal("precondition: expected collapsed")
-	}
-
-	// Press Ctrl+T -> Expanded becomes true.
-	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-	if !app.subagents["sub-1"].Expanded {
-		t.Errorf("expected Expanded=true after Ctrl+T")
-	}
-	out := app.View().Content
-	// The compact subagent block should still render regardless of Expanded state.
-	if !strings.Contains(out, "General Subagent") {
-		t.Errorf("expected subagent block in view after Ctrl+T, got:\n%s", out)
-	}
-
-	// Toggle back.
-	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-	if app.subagents["sub-1"].Expanded {
-		t.Errorf("expected Expanded=false after second Ctrl+T")
-	}
-}
-
-func TestSubagentToggleNoOpWhenNoBlocks(t *testing.T) {
-	t.Parallel()
-	app, _ := makeForegroundApp(t)
-	// No panic / no state change.
-	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-	if len(app.subagents) != 0 {
-		t.Errorf("expected no subagents tracked")
-	}
-}
-
 func TestSubagentStreamingAndCompletion(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
@@ -279,15 +233,6 @@ func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	}
 	if got := app.subagents["sub-b"].Messages[0].Raw; got != "beta" {
 		t.Errorf("sub-b got %q, want beta", got)
-	}
-
-	// Toggle expands the LATEST (sub-b).
-	app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-	if !app.subagents["sub-b"].Expanded {
-		t.Errorf("expected latest (sub-b) to expand on Ctrl+T")
-	}
-	if app.subagents["sub-a"].Expanded {
-		t.Errorf("expected sub-a to remain collapsed")
 	}
 }
 

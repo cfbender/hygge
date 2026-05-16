@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -51,6 +52,11 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			}
 		}
 		a.drawSidebar(scr, l.sidebar)
+	}
+
+	// Draw scroll bar on the left edge of the sidebar (or right edge of chat).
+	if l.sidebarW > 0 && a.userScrolled && !a.msgViewport.AtBottom() {
+		a.drawScrollBar(scr, l.sidebar.Min.X, headerHeight, l.chat.Dy())
 	}
 
 	// Apply text selection highlight (reverse video on selected cells).
@@ -105,6 +111,37 @@ func (a *App) renderLeftColumn() string {
 	sections = append(sections, a.renderFooterContent())
 
 	return strings.Join(sections, "\n")
+}
+
+// drawScrollBar renders a thin scroll position indicator on a single column.
+func (a *App) drawScrollBar(scr uv.Screen, x, startY, height int) {
+	if height < 3 {
+		return
+	}
+	pct := a.msgViewport.ScrollPercent()
+	thumbH := max(1, height/5)
+	trackH := height - thumbH
+	thumbY := startY + int(float64(trackH)*pct)
+
+	var trackColor, thumbColor color.Color
+	if a.styles != nil {
+		trackColor = a.styles.Background
+		thumbColor = a.styles.WorkingLabelColor
+	}
+
+	for y := startY; y < startY+height; y++ {
+		content := "│"
+		fg := trackColor
+		if y >= thumbY && y < thumbY+thumbH {
+			content = "┃"
+			fg = thumbColor
+		}
+		scr.SetCell(x, y, &uv.Cell{
+			Content: content,
+			Style:   uv.Style{Fg: fg},
+			Width:   1,
+		})
+	}
 }
 
 // drawSidebar renders the right-side panel.
