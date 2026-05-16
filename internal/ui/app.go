@@ -888,7 +888,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.openOverlay(overlayAPIKey)
 			return a, a.setNotice("API key save failed for " + m.provider + ": " + m.err.Error())
 		}
-		return a, a.setNotice("API key saved for " + m.provider)
+		return a, a.showToast("API key saved", "Provider: "+m.provider)
 
 	case modeSwitchResult:
 		if m.err != nil {
@@ -909,7 +909,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.saveErr != nil {
 			return a, a.setNotice("theme applied for this session but save failed: " + m.saveErr.Error())
 		}
-		return a, a.setNotice("theme switched and saved: " + m.name)
+		return a, a.showToast("Theme switched", "Using "+m.name)
 
 	case sendStarted:
 		wasBusy := a.busy
@@ -1234,7 +1234,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				a.opts.Agent.ClearQueue(rootID)
 			}
 			a.lastEscAt = time.Time{}
-			return a, a.setNotice("interrupted")
+			return a, a.showToast("Interrupted", "Stopped current turn")
 		}
 		a.lastEscAt = now
 		if !a.busy {
@@ -3250,9 +3250,9 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 		// Start the bus bridge now that we have a concrete "start fresh" intent.
 		if a.opts.SessionID == "" && a.opts.OpenSessionsModalOnStart {
 			a.bridge()
-			return tea.Batch(a.listenBus(), a.setNotice("starting a new session"))
+			return tea.Batch(a.listenBus(), a.showToast("New session", "Starting fresh"))
 		}
-		return a.setNotice("starting a new session")
+		return a.showToast("New session", "Starting fresh")
 
 	case components.SwitchSessionAction:
 		a.closeOverlay(overlaySessions)
@@ -3310,9 +3310,9 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 		noticeID = id[:8]
 	}
 	if id == "" {
-		cmds = append(cmds, a.setNotice("foreground cleared; next input creates a new session"))
+		cmds = append(cmds, a.showToast("Session cleared", "Next input creates a new session"))
 	} else {
-		cmds = append(cmds, a.setNotice(fmt.Sprintf("switched to session %s", noticeID)))
+		cmds = append(cmds, a.showToast("Session switched", "Using "+noticeID))
 	}
 	return tea.Batch(cmds...)
 }

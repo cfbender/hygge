@@ -135,8 +135,11 @@ func TestAPIKeyDialogMasksSavesAndRefreshesCurrentProvider(t *testing.T) {
 	if got := strings.Join(switched, ","); got != "anthropic/claude-sonnet-4-5" {
 		t.Fatalf("switched = %q", got)
 	}
-	if strings.Contains(app.notice, "sk-fake-dialog") || app.notice != "API key saved for anthropic" {
-		t.Fatalf("notice = %q", app.notice)
+	if strings.Contains(app.notice, "sk-fake-dialog") || app.notice != "" {
+		t.Fatalf("notice = %q, want toast notification", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "API key saved" || app.toast.body != "Provider: anthropic" {
+		t.Fatalf("toast = %+v, want API key saved toast", app.toast)
 	}
 }
 
@@ -401,6 +404,18 @@ func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testi
 	}
 	if !strings.Contains(app.notice, "save failed") || !strings.Contains(app.notice, "permission denied") {
 		t.Fatalf("notice = %q, want save failure", app.notice)
+	}
+}
+
+func TestThemeSwitchResultShowsToast(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.Update(themeSwitchResult{name: "shell", theme: theme.ShellTheme()})
+	if app.notice != "" {
+		t.Fatalf("notice = %q, want toast notification", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Theme switched" || app.toast.body != "Using shell" {
+		t.Fatalf("toast = %+v, want theme switched toast", app.toast)
 	}
 }
 
