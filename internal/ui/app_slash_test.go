@@ -185,6 +185,34 @@ func TestModelDialogFilterNarrowsList(t *testing.T) {
 	}
 }
 
+func TestModelDialogOnlyShowsConfiguredProviders(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	providers := app.opts.Catalog.Source().Providers()
+	hasUnconfiguredProvider := false
+	for _, provider := range providers {
+		if provider != app.opts.ModelProvider {
+			hasUnconfiguredProvider = true
+			break
+		}
+	}
+	if !hasUnconfiguredProvider {
+		t.Fatalf("test catalog providers = %v, want at least one provider besides %q", providers, app.opts.ModelProvider)
+	}
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	filtered := app.modelModal.Filtered()
+	if len(filtered) == 0 {
+		t.Fatal("expected configured provider models")
+	}
+	for _, opt := range filtered {
+		if opt.Provider != app.opts.ModelProvider {
+			t.Fatalf("model dialog provider = %q, want only %q", opt.Provider, app.opts.ModelProvider)
+		}
+	}
+}
+
 func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
@@ -200,10 +228,10 @@ func TestModelDialogNavigationSelectionUpdatesState(t *testing.T) {
 	}
 	typeInto(app, "/model")
 	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	typeInto(app, "gpt-5")
+	typeInto(app, "claude")
 	filtered := app.modelModal.Filtered()
 	if len(filtered) == 0 {
-		t.Fatal("expected gpt-5 model in embedded catalog")
+		t.Fatal("expected anthropic model in embedded catalog")
 	}
 	app.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
 	app.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})

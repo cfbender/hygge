@@ -2982,13 +2982,30 @@ func (a *App) catalogModelOptions() []components.ModelOption {
 	}
 	src := a.opts.Catalog.Source()
 	providers := src.Providers()
+	configured := a.configuredModelProviders()
 	out := make([]components.ModelOption, 0)
 	for _, providerID := range providers {
+		if len(configured) > 0 && !configured[providerID] {
+			continue
+		}
 		for _, entry := range src.Models(providerID) {
 			out = append(out, components.ModelOption{Provider: providerID, Entry: entry})
 		}
 	}
 	return out
+}
+
+func (a *App) configuredModelProviders() map[string]bool {
+	configured := make(map[string]bool)
+	if provider := strings.TrimSpace(a.opts.ModelProvider); provider != "" {
+		configured[provider] = true
+	}
+	for _, mode := range a.opts.Modes {
+		if provider := strings.TrimSpace(mode.Provider); provider != "" {
+			configured[provider] = true
+		}
+	}
+	return configured
 }
 
 func (a *App) handleModelModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

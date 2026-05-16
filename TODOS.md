@@ -27,9 +27,6 @@
 
 ## UI / interaction polish
 
-- [ ] **Model selector only shows configured providers**
-  Limit selectable models to providers configured by the user.
-
 - [ ] **Diff view component**
   Add a diff view for displaying diffs and edit-tool changes; reference Crush's diff view behavior (eg. if it looks like a diff , show a diff)
 
