@@ -267,7 +267,8 @@ func (a *App) renderQuitOverlay(w, h int) string {
 		Foreground(selectedFg)
 	normalStyle := lipgloss.NewStyle().
 		Padding(0, 3).
-		Foreground(normalFg)
+		Foreground(normalFg).
+		Background(boxBg)
 
 	var yesBtn, noBtn string
 	if a.quitSelectedNo {
