@@ -106,6 +106,9 @@ type Options struct {
 	// fantasy.Agent.Stream. Provider remains required for name/model metadata
 	// and legacy test seams.
 	FantasyModel fantasy.LanguageModel
+	// TitleFantasyModel, when non-nil, is used for cheap internal session-title
+	// generation. Nil falls back to FantasyModel.
+	TitleFantasyModel fantasy.LanguageModel
 	// Permission is the permission engine the tools call into.  Required.
 	Permission *permission.Engine
 	// Tools is the registry of callable tools.  Required.
@@ -248,6 +251,7 @@ func New(opts Options) (*Agent, error) {
 	}
 	a.runtime = NewRuntime(RuntimeOptions{
 		Model:         opts.FantasyModel,
+		TitleModel:    opts.TitleFantasyModel,
 		Tools:         opts.Tools,
 		MaxIterations: opts.MaxIterations,
 	})
@@ -297,6 +301,20 @@ func (a *Agent) SetSystemPrompt(prompt string) error {
 	}
 	a.opts.SystemPrompt = prompt
 	return nil
+}
+
+// GenerateTitle returns a concise title for prompt using the configured
+// internal title model (or the active Fantasy model when no small title model is
+// configured). It does not mutate store state; callers own persistence.
+func (a *Agent) GenerateTitle(ctx context.Context, prompt string) (string, error) {
+	if a == nil || a.runtime == nil {
+		return "", fmt.Errorf("agent: GenerateTitle: runtime is not configured")
+	}
+	if a.isClosed() {
+		return "", ErrClosed
+	}
+	title, _, err := a.runtime.GenerateTitle(ctx, prompt, 24)
+	return title, err
 }
 
 func (a *Agent) activeModel() session.ModelRef {

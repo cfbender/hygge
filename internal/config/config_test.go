@@ -100,6 +100,8 @@ func TestLoad_UserConfigOverridesDefaults(t *testing.T) {
 [model]
 provider = "openai"
 name = "gpt-4o"
+small_provider = "openai"
+small_model = "gpt-4o-mini"
 
 [permission]
 shell = "deny"
@@ -115,6 +117,9 @@ shell = "deny"
 	}
 	if cfg.Model.Name != "gpt-4o" {
 		t.Errorf("model.name: got %q, want gpt-4o", cfg.Model.Name)
+	}
+	if cfg.Model.SmallProvider != "openai" || cfg.Model.SmallModel != "gpt-4o-mini" {
+		t.Errorf("model small config: got %q/%q", cfg.Model.SmallProvider, cfg.Model.SmallModel)
 	}
 	if cfg.Permission.Shell != PermDeny {
 		t.Errorf("permission.shell: got %q, want deny", cfg.Permission.Shell)

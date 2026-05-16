@@ -163,6 +163,26 @@ func (f *fakeFantasyModel) StreamObject(context.Context, fantasy.ObjectCall) (fa
 func (f *fakeFantasyModel) Provider() string { return f.provider }
 func (f *fakeFantasyModel) Model() string    { return f.model }
 
+func TestAgentGenerateTitleUsesTitleFantasyModel(t *testing.T) {
+	env := newTestEnv(t)
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Fix auth flow"}
+	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
+		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+		opts.TitleFantasyModel = titleModel
+	})
+
+	title, err := ag.GenerateTitle(t.Context(), "please fix the login redirect")
+	if err != nil {
+		t.Fatalf("GenerateTitle: %v", err)
+	}
+	if title != "Fix auth flow" {
+		t.Fatalf("title = %q", title)
+	}
+	if titleModel.calls.Load() != 1 {
+		t.Fatalf("title model calls = %d, want 1", titleModel.calls.Load())
+	}
+}
+
 type fakeScript struct {
 	events []provider.Event
 	// initErr, if non-nil, is returned from Stream itself (Stream returns
