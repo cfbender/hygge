@@ -654,7 +654,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		})
 	}
 
-	slog.Info("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
+	slog.Debug("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
 
 	rt = &appRuntime{
 		Config:          cfg,
