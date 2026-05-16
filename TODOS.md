@@ -50,6 +50,10 @@
 
 - [ ] /new command for new session. alias /clear to this as well and remove /clear's current functionality
 
+- [ ] compaction summary box breaks out of viewport
+
+- [ ] compaction change from notice above input to compaction block with crunching animation while working
+
 - [ ] **Hygge smoking chimney animation**
   Add a smoking-chimney animation for Hygge branding/delight.
 
