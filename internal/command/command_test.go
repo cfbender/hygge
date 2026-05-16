@@ -171,7 +171,7 @@ func TestBuiltinHelpListsEverything(t *testing.T) {
 	if out.OpenModal != ModalHelp {
 		t.Errorf("OpenModal = %q, want %q", out.OpenModal, ModalHelp)
 	}
-	for _, name := range []string{"help", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "version"} {
+	for _, name := range []string{"help", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "yolo", "version"} {
 		if !strings.Contains(out.Notice, "/"+name) {
 			t.Errorf("/help notice missing /%s:\n%s", name, out.Notice)
 		}
@@ -355,6 +355,38 @@ func TestBuiltinOutcomes(t *testing.T) {
 			check: func(t *testing.T, o Outcome) {
 				if len(o.Updates) != 0 {
 					t.Errorf("invalid level should not produce updates, got %v", o.Updates)
+				}
+			},
+		},
+		{
+			name:    "yolo-toggle",
+			cmdName: "yolo",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateYolo]; got != "toggle" {
+					t.Errorf("Updates[yolo]=%q, want toggle", got)
+				}
+			},
+		},
+		{
+			name:    "yolo-on",
+			cmdName: "yolo",
+			input:   "ON",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateYolo]; got != "on" {
+					t.Errorf("Updates[yolo]=%q, want on", got)
+				}
+			},
+		},
+		{
+			name:    "yolo-invalid",
+			cmdName: "yolo",
+			input:   "forever",
+			check: func(t *testing.T, o Outcome) {
+				if len(o.Updates) != 0 {
+					t.Errorf("invalid yolo state should not produce updates, got %v", o.Updates)
+				}
+				if !strings.Contains(o.Notice, "expected") {
+					t.Errorf("expected hint notice, got %q", o.Notice)
 				}
 			},
 		},

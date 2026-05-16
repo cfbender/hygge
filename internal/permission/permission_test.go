@@ -150,6 +150,46 @@ func TestAsk_SecretsDenylist_BeatsConfigAllow(t *testing.T) {
 	}
 }
 
+func TestYolo_AllowsNonSecretRequestsWithoutPrompt(t *testing.T) {
+	e, b, _ := newEngine(t, testConfig(config.PermDeny, config.PermDeny, config.PermDeny, config.PermDeny))
+	e.SetYolo(true)
+	askedSub := bus.Subscribe[bus.PermissionAsked](b, bus.SubscribeOptions{BufferSize: 4})
+	defer askedSub.Unsubscribe()
+
+	d, err := e.Ask(context.Background(), Request{Category: CategoryShell, Target: "rm -rf build"})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if d.Action != ActionAllow || d.Reason != "yolo mode" {
+		t.Fatalf("decision = %+v, want yolo allow", d)
+	}
+	select {
+	case asked := <-askedSub.C():
+		t.Fatalf("PermissionAsked published in yolo mode: %+v", asked)
+	default:
+	}
+}
+
+func TestYolo_StillDeniesSecrets(t *testing.T) {
+	e, b, _ := newEngine(t, testConfig(config.PermAllow, config.PermAllow, config.PermAllow, config.PermAllow))
+	e.SetYolo(true)
+	askedSub := bus.Subscribe[bus.PermissionAsked](b, bus.SubscribeOptions{BufferSize: 4})
+	defer askedSub.Unsubscribe()
+
+	d, err := e.Ask(context.Background(), Request{Category: CategoryFileRead, Target: "/repo/.env"})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if d.Action != ActionDeny || !strings.Contains(d.Reason, "secrets-denylist") {
+		t.Fatalf("decision = %+v, want secrets deny", d)
+	}
+	select {
+	case asked := <-askedSub.C():
+		t.Fatalf("PermissionAsked published for yolo secret deny: %+v", asked)
+	default:
+	}
+}
+
 // --- 10: Ask path with a fake responder -------------------------------------
 
 func TestAsk_FlowsThroughBus(t *testing.T) {

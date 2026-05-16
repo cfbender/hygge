@@ -188,6 +188,8 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		if name != "" {
 			return a.switchThemeCmd(name)
 		}
+	case command.UpdateYolo:
+		return a.switchYoloCmd(value)
 	case command.UpdateReasoning:
 		switch value {
 		case "off", "low", "medium", "high":
@@ -240,6 +242,33 @@ type modelSwitchResult struct {
 	model    string
 	err      error
 	saveErr  error
+}
+
+type yoloSwitchResult struct {
+	enabled bool
+	err     error
+}
+
+func (a *App) switchYoloCmd(value string) tea.Cmd {
+	enabled := a.opts.Yolo
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on":
+		enabled = true
+	case "off":
+		enabled = false
+	case "", "toggle":
+		enabled = !enabled
+	default:
+		return a.setNotice(`/yolo: expected "on", "off", or "toggle"`)
+	}
+	return func() tea.Msg {
+		if a.opts.SetYolo != nil {
+			if err := a.opts.SetYolo(a.ctx, enabled); err != nil {
+				return yoloSwitchResult{enabled: enabled, err: err}
+			}
+		}
+		return yoloSwitchResult{enabled: enabled}
+	}
 }
 
 func (a *App) switchModelCmd(providerName, modelName string) tea.Cmd {

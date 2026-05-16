@@ -168,6 +168,10 @@ type EngineOptions struct {
 	// published bus events and for AllowRule timestamps.  Defaults to
 	// [time.Now].
 	Clock func() time.Time
+
+	// Yolo bypasses configurable permission checks while preserving the
+	// hard-coded secrets denylist.
+	Yolo bool
 }
 
 // SecretsDenylist is the hard-coded list of globs that block file.read and
@@ -201,8 +205,9 @@ type Engine struct {
 
 	matcher *Matcher
 
-	mu           sync.RWMutex // guards closed and sessionCache
+	mu           sync.RWMutex // guards closed, yolo, and sessionCache
 	closed       bool
+	yolo         bool
 	sessionCache map[sessionCacheKey]Decision
 }
 
@@ -239,8 +244,28 @@ func New(opts EngineOptions) (*Engine, error) {
 		stateOpts:    opts.State,
 		clock:        clock,
 		matcher:      matcher,
+		yolo:         opts.Yolo,
 		sessionCache: make(map[sessionCacheKey]Decision),
 	}, nil
+}
+
+// SetYolo toggles yolo mode for subsequent permission checks. Yolo mode
+// allows all non-secret requests without prompting, but still denies targets
+// matched by the hard-coded secrets denylist.
+func (e *Engine) SetYolo(enabled bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	e.yolo = enabled
+}
+
+// Yolo reports whether yolo mode is currently enabled.
+func (e *Engine) Yolo() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return !e.closed && e.yolo
 }
 
 // buildRules assembles the full ordered rule set for the engine.  The order
@@ -305,11 +330,19 @@ func (e *Engine) Close() {
 // subscription is closed before a reply arrives, Ask returns [ErrBusClosed].
 func (e *Engine) Ask(ctx context.Context, req Request) (Decision, error) {
 	e.mu.RLock()
-	if e.closed {
-		e.mu.RUnlock()
+	closed := e.closed
+	yolo := e.yolo
+	e.mu.RUnlock()
+	if closed {
 		return Decision{}, ErrEngineClosed
 	}
-	e.mu.RUnlock()
+
+	if yolo {
+		if rule := secretDenyRule(req); rule != nil {
+			return Decision{Action: ActionDeny, Scope: ScopeOnce, Reason: reasonFromRule(rule)}, nil
+		}
+		return Decision{Action: ActionAllow, Scope: ScopeOnce, Reason: "yolo mode"}, nil
+	}
 
 	action, rule := e.matcher.Match(req)
 
@@ -335,6 +368,18 @@ func (e *Engine) Ask(ctx context.Context, req Request) (Decision, error) {
 	default:
 		return Decision{}, fmt.Errorf("permission: unknown action %q from matcher", action)
 	}
+}
+
+func secretDenyRule(req Request) *Rule {
+	if req.Category != CategoryFileRead && req.Category != CategoryFileWrite {
+		return nil
+	}
+	for _, pat := range SecretsDenylist {
+		if patternMatches(pat, req.Category, req.Target) {
+			return &Rule{Category: req.Category, Pattern: pat, Action: ActionDeny, Source: "secrets-denylist"}
+		}
+	}
+	return nil
 }
 
 // askUser publishes a PermissionAsked event and waits for the matching

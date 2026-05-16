@@ -41,6 +41,7 @@ func builtinCommands() []Command {
 		&themeCmd{},
 		&apiKeyCmd{},
 		&reasonCmd{},
+		&yoloCmd{},
 		&versionCmd{},
 	}
 }
@@ -401,6 +402,29 @@ func (*reasonCmd) Execute(_ context.Context, app App, input string) (Outcome, er
 		Updates: map[string]string{UpdateReasoning: level},
 		Notice:  fmt.Sprintf("reasoning set to %s", level),
 	}, nil
+}
+
+// --- /yolo ----------------------------------------------------------------
+
+type yoloCmd struct{}
+
+func (*yoloCmd) Name() string        { return "yolo" }
+func (*yoloCmd) Description() string { return "Toggle yolo mode (allow non-secret tool actions)" }
+func (*yoloCmd) Source() string      { return "builtin" }
+func (*yoloCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "state", Description: "on | off | toggle", Required: false}}
+}
+func (*yoloCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	state := strings.ToLower(strings.TrimSpace(input))
+	if state == "" {
+		state = "toggle"
+	}
+	switch state {
+	case "on", "off", "toggle":
+		return Outcome{Updates: map[string]string{UpdateYolo: state}}, nil
+	default:
+		return Outcome{Notice: `/yolo: expected "on", "off", or "toggle"`}, nil
+	}
 }
 
 // --- /version -------------------------------------------------------------

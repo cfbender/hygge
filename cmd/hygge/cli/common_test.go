@@ -189,6 +189,20 @@ func TestBootstrapBuildsAllComponents(t *testing.T) {
 	}
 }
 
+func TestBootstrapYoloEnablesPermissionBypass(t *testing.T) {
+	hermeticHome(t)
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{Yolo: true})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if rt.Permission == nil || !rt.Permission.Yolo() {
+		t.Fatal("permission engine yolo mode not enabled")
+	}
+}
+
 func TestFantasyModelResolverDoesNotReuseParentAfterConfigChange(t *testing.T) {
 	cfg := &config.Config{Model: config.ModelConfig{
 		Provider: "test-provider",

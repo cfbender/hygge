@@ -80,6 +80,10 @@ const (
 
 	// UpdateTheme asks the TUI to load and persist a theme by name.
 	UpdateTheme = "theme"
+
+	// UpdateYolo asks the TUI to toggle reduced-confirmation mode.
+	// Value: "on" | "off" | "toggle".
+	UpdateYolo = "yolo"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].

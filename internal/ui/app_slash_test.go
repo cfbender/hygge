@@ -419,6 +419,59 @@ func TestThemeSwitchResultShowsToast(t *testing.T) {
 	}
 }
 
+func TestSlashCommandYoloTogglesPermissionMode(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	var states []bool
+	app.opts.SetYolo = func(_ context.Context, enabled bool) error {
+		states = append(states, enabled)
+		return nil
+	}
+
+	typeInto(app, "/yolo")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected yolo cmd")
+	}
+	app.Update(cmd())
+
+	if got := strings.Trim(strings.Join(boolStrings(states), ","), ","); got != "true" {
+		t.Fatalf("SetYolo states = %q, want true", got)
+	}
+	if !app.opts.Yolo {
+		t.Fatal("app yolo flag not enabled")
+	}
+	if app.toast == nil || app.toast.title != "Yolo mode" || !strings.Contains(app.toast.body, "Enabled") {
+		t.Fatalf("toast = %+v, want yolo enabled toast", app.toast)
+	}
+
+	typeInto(app, "/yolo off")
+	_, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected yolo off cmd")
+	}
+	app.Update(cmd())
+
+	if got := strings.Trim(strings.Join(boolStrings(states), ","), ","); got != "true,false" {
+		t.Fatalf("SetYolo states = %q, want true,false", got)
+	}
+	if app.opts.Yolo {
+		t.Fatal("app yolo flag still enabled")
+	}
+}
+
+func boolStrings(values []bool) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v {
+			out = append(out, "true")
+		} else {
+			out = append(out, "false")
+		}
+	}
+	return out
+}
+
 func runSlashTestCmd(app *App, cmd tea.Cmd) {
 	msg := cmd()
 	if batch, ok := msg.(tea.BatchMsg); ok {
