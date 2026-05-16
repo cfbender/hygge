@@ -881,7 +881,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.saveErr != nil {
 			return a, a.setNotice("model switched for this session but save failed: " + m.saveErr.Error())
 		}
-		return a, a.setNotice("model switched and saved: " + m.provider + "/" + m.model)
+		return a, a.showToast("Model switched", "Using "+m.provider+"/"+m.model)
 
 	case apiKeySaveResult:
 		if m.err != nil {
