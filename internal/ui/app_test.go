@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
@@ -101,6 +102,48 @@ func TestUserSubmitClearsInputAndStartsSend(t *testing.T) {
 	app.Update(sendStarted{UserInput: "hello"})
 	if !app.busy {
 		t.Errorf("expected busy=true after sendStarted")
+	}
+}
+
+func TestShiftEnterInsertsInputNewline(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	for _, r := range "hello" {
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	if cmd != nil {
+		t.Errorf("Shift+Enter should edit input without submitting; got cmd %T", cmd)
+	}
+	for _, r := range "world" {
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got, want := app.input.Value(), "hello\nworld"; got != want {
+		t.Errorf("input value = %q, want %q", got, want)
+	}
+	if app.busy {
+		t.Error("Shift+Enter should not start a send")
+	}
+}
+
+func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	for line := 0; line < 10; line++ {
+		app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+		app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	}
+
+	wantInnerRows := editorMaxHeight - 2
+	if got := app.input.Textarea.Height(); got != wantInnerRows {
+		t.Errorf("textarea height = %d, want %d inner text rows", got, wantInnerRows)
+	}
+	l := app.generateLayout(120, 30)
+	if got := l.editor.Dy(); got != editorMaxHeight {
+		t.Errorf("editor box height = %d, want %d rows", got, editorMaxHeight)
 	}
 }
 
@@ -422,8 +465,8 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 
 // TestRendererWidthRespectsSidebar verifies that the glamour renderer is built
 // at the bubble inner width, not the full terminal or left-column width.
-// On a 250-column terminal with a 32-column sidebar, leftW = 218, and the
-// bubble content width = int(218*0.80)-3 = 171.  This regression test covers
+// On a 250-column terminal with a 40-column sidebar, leftW = 210, and the
+// bubble content width = int(210*0.80)-3 = 165.  This regression test covers
 // the bug where ensureRenderer used a.width (or leftW) instead of the bubble
 // inner width, causing markdown lines to overflow the bubble and expand it
 // to ~97% of the left column.
@@ -431,12 +474,12 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
-	// Wide terminal: sidebar is 32 cols, leftW = 250 - 32 = 218.
-	// Bubble content = int(218*0.80)-3 = 171.
+	// Wide terminal: sidebar is 40 cols, leftW = 250 - 40 = 210.
+	// Bubble content = int(210*0.80)-3 = 165.
 	const termW = 250
-	const sidebarW = 32
-	leftW := termW - sidebarW                     // 218
-	wantRendererW := int(float64(leftW)*0.80) - 3 // 171
+	const sidebarW = sidebarFixedWidth
+	leftW := termW - sidebarW
+	wantRendererW := msgContentWidthForLeft(leftW)
 	app.Update(tea.WindowSizeMsg{Width: termW, Height: 40})
 
 	// Trigger a renderer build via a stream-complete event.
@@ -457,15 +500,113 @@ func TestRendererWidthRespectsSidebar(t *testing.T) {
 	}
 }
 
+func TestPromptInputWidthFillsMainViewport(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	const termW = 250
+	leftW := termW - sidebarFixedWidth
+	app.Update(tea.WindowSizeMsg{Width: termW, Height: 40})
+
+	gotInputW := lipgloss.Width(app.input.View())
+	if gotInputW != leftW {
+		t.Errorf("input view width = %d, want %d (full main viewport width)", gotInputW, leftW)
+	}
+}
+
+func TestLayoutChatFillsInputClampsAndFooterFixed(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	const (
+		termW = 120
+		termH = 30
+	)
+
+	for _, tt := range []struct {
+		name        string
+		inputRows   int
+		wantEditorH int
+	}{
+		{name: "minimum", inputRows: 1, wantEditorH: editorMinHeight},
+		{name: "maximum", inputRows: 99, wantEditorH: editorMaxHeight},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app.input.Textarea.SetHeight(tt.inputRows)
+			l := app.generateLayout(termW, termH)
+
+			if got := l.editor.Dy(); got != tt.wantEditorH {
+				t.Errorf("editor height = %d, want %d", got, tt.wantEditorH)
+			}
+			if got := l.footer.Dy(); got != footerHeight {
+				t.Errorf("footer height = %d, want %d", got, footerHeight)
+			}
+
+			wantChatH := termH - headerHeight - chatBottomPadding - tt.wantEditorH - footerHeight
+			if got := l.chat.Dy(); got != wantChatH {
+				t.Errorf("chat height = %d, want %d", got, wantChatH)
+			}
+		})
+	}
+}
+
+func TestLayoutMainViewportFillsAroundFixedSidebar(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	t.Run("wide terminal", func(t *testing.T) {
+		const (
+			termW = 140
+			termH = 30
+		)
+		l := app.generateLayout(termW, termH)
+
+		if got := l.sidebar.Dx(); got != sidebarFixedWidth {
+			t.Errorf("sidebar width = %d, want %d", got, sidebarFixedWidth)
+		}
+		wantMainW := termW - sidebarFixedWidth
+		if got := l.leftW; got != wantMainW {
+			t.Errorf("main width = %d, want %d", got, wantMainW)
+		}
+		if got := l.chat.Dx(); got != wantMainW {
+			t.Errorf("chat width = %d, want %d", got, wantMainW)
+		}
+		if got := l.sidebar.Min.X; got != wantMainW {
+			t.Errorf("sidebar starts at x=%d, want %d", got, wantMainW)
+		}
+	})
+
+	t.Run("narrow terminal", func(t *testing.T) {
+		const (
+			termW = 100
+			termH = 30
+		)
+		l := app.generateLayout(termW, termH)
+
+		if !l.compact {
+			t.Error("layout should be compact when sidebar is hidden")
+		}
+		if got := l.sidebar.Dx(); got != 0 {
+			t.Errorf("sidebar width = %d, want 0", got)
+		}
+		if got := l.leftW; got != termW {
+			t.Errorf("main width = %d, want %d", got, termW)
+		}
+		if got := l.chat.Dx(); got != termW {
+			t.Errorf("chat width = %d, want %d", got, termW)
+		}
+	})
+}
+
 // TestRendererWidthNarrowTerminalNoSidebar verifies that on a narrow terminal
-// (< 100 cols) where the sidebar is hidden, the renderer is built at the
+// where the sidebar is hidden, the renderer is built at the
 // bubble content width for the full terminal width (int(termW*0.80)-3).
 func TestRendererWidthNarrowTerminalNoSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
 	termW := 80
-	wantRendererW := int(float64(termW)*0.80) - 3 // 61
+	wantRendererW := msgContentWidthForLeft(termW) // 61
 	app.Update(tea.WindowSizeMsg{Width: termW, Height: 24})
 
 	app.Handle(bus.AssistantTextDelta{Text: "hello"})
