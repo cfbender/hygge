@@ -871,7 +871,7 @@ func TestPermissionModalStacks(t *testing.T) {
 	}
 }
 
-func TestContextUsageUpdatesHeader(t *testing.T) {
+func TestContextUsageUpdatesSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.ContextUsageUpdated{UsedTokens: 50, MaxTokens: 100, PctUsed: 0.5})
@@ -1142,13 +1142,13 @@ func TestRendererWidthNarrowTerminalNoSidebar(t *testing.T) {
 	}
 }
 
-func TestCostUpdatesHeader(t *testing.T) {
+func TestCostUpdatesSidebar(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 	app.Handle(bus.CostUpdated{DollarsTotal: 0.1234})
 	out := app.View().Content
 	if !strings.Contains(out, "$0.1234") {
-		t.Errorf("expected updated cost in header, got:\n%s", out)
+		t.Errorf("expected updated cost in sidebar, got:\n%s", out)
 	}
 }
 

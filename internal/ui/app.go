@@ -85,17 +85,17 @@ type AppOptions struct {
 	// the compaction modal to display usage info.  0 means unknown.
 	ContextWindow int64
 
-	// Version is the application version string for the header bar (e.g. "v0.4").
+	// Version is the application version string shown in persistent chrome (e.g. "v0.4").
 	// Empty string hides the version.
 	Version string
 
-	// NerdFonts controls whether nerd-font glyphs are used in the header bar.
+	// NerdFonts controls whether nerd-font glyphs are used in persistent chrome.
 	// When true, the git-branch glyph (U+EAFC) is used; otherwise ":branch".
 	// Default false; callers should set this from config.UI.NerdFonts.
 	NerdFonts bool
 
 	// HomeDir is the user's home directory, used for tilde-collapsing the
-	// project path in the header bar.  Empty → no collapse.
+	// project path in persistent chrome. Empty → no collapse.
 	HomeDir string
 
 	// OnSessionCreated, if non-nil, is invoked after the App lazily
@@ -2159,12 +2159,11 @@ func (a *App) subagentAtScreen(screenX, screenY int) string {
 	}
 
 	// The left column content flow is:
-	//   header (headerHeight=1 row)
 	//   [breadcrumb + "\n" if present]  <- outside viewport
 	//   viewport content (chatH rows)
 	//   ...rest...
 	//
-	// The viewport content starts at screen row = headerHeight + breadcrumb rows.
+	// The viewport content starts at screen row = breadcrumb rows.
 	// The breadcrumb is rendered above the viewport View() output in renderChatContent.
 	viewportTop := headerHeight
 	breadcrumbLines := 0

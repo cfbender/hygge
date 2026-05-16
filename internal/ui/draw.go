@@ -68,12 +68,12 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Apply text selection highlight (reverse video on selected cells).
 	a.applyHighlight(scr, area)
 
-	// Toast notification floats below the header in the top-left.
+	// Toast notification floats at the top-left.
 	if toastStr := a.renderToast(); toastStr != "" {
 		toastW := lipgloss.Width(toastStr)
 		toastH := lipgloss.Height(toastStr)
 		toastArea := area
-		toastArea.Min.Y = area.Min.Y + headerHeight
+		toastArea.Min.Y = area.Min.Y
 		toastArea.Max.Y = toastArea.Min.Y + toastH
 		toastArea.Max.X = toastArea.Min.X + toastW
 		uv.NewStyledString(toastStr).Draw(scr, toastArea)
@@ -92,11 +92,6 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // content string for the left column.
 func (a *App) renderLeftColumn() string {
 	var sections []string
-
-	// Branded header bar.
-	if header := a.renderHeaderContent(); header != "" {
-		sections = append(sections, header)
-	}
 
 	// Chat viewport.
 	sections = append(sections, a.renderChatContent())
