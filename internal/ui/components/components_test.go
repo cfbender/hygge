@@ -496,6 +496,36 @@ func TestToolGroupBubble_SingleCall(t *testing.T) {
 	}
 }
 
+func TestToolGroupBubble_HasTopPaddingInsideBlock(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read", Target: "/etc/hosts"},
+		},
+	}
+	out := stripANSI(ml.View())
+	lines := strings.Split(out, "\n")
+	readLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "✱ Read") {
+			readLine = i
+			break
+		}
+	}
+	if readLine < 0 {
+		t.Fatalf("tool block missing Read label in:\n%s", out)
+	}
+	if readLine == 0 {
+		t.Fatalf("tool label rendered on first row without top padding:\n%s", out)
+	}
+	paddingLine := strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(lines[readLine-1], " "), "▌"))
+	if paddingLine != "" {
+		t.Errorf("line above tool label should be empty bubble padding, got %q in:\n%s", lines[readLine-1], out)
+	}
+}
+
 // TestToolGroupBubble_ErrorToolStyling verifies that a tool with IsError set
 // renders the "— error" suffix.
 func TestToolGroupBubble_ErrorToolStyling(t *testing.T) {
@@ -550,12 +580,6 @@ func TestToolGroupBubble_InterleavedWithTask(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("interleaved output missing %q in:\n%s", want, out)
 		}
-	}
-
-	// There should be 3 bubble blocks (two tool groups + subagent bubble).
-	blocks := strings.Split(strings.TrimSpace(out), "\n\n")
-	if len(blocks) != 3 {
-		t.Errorf("expected 3 bubble blocks for read+grep / task / bash, got %d:\n%s", len(blocks), out)
 	}
 
 	// Chronological order: read/grep before task, task before bash.
