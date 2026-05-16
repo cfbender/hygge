@@ -1696,6 +1696,28 @@ func TestQueueChanged_UpdatesPlaceholder(t *testing.T) {
 	}
 }
 
+func TestQueueChanged_RendersQueuedPromptsNearInput(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	app.Update(sendStarted{UserInput: "first"})
+	app.Handle(bus.QueueChanged{SessionID: "", Count: 2, Prompts: []string{"queued one", "queued two"}})
+
+	out := app.View().Content
+	inputIndex := strings.Index(out, "╭")
+	queuedIndex := strings.Index(out, "1. queued one")
+	if queuedIndex < 0 {
+		t.Fatalf("queued prompt missing from sticky bottom chrome:\n%s", out)
+	}
+	if inputIndex < 0 {
+		t.Fatalf("input border missing from view:\n%s", out)
+	}
+	if queuedIndex > inputIndex {
+		t.Fatalf("queued prompt should render above input, got queued index %d after input index %d", queuedIndex, inputIndex)
+	}
+}
+
 // TestQueueChanged_ClearQueue verifies that a QueueChanged event with
 // Count=0 clears the queued indicator.
 func TestQueueChanged_ClearQueue(t *testing.T) {

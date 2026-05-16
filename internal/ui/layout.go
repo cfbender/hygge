@@ -147,10 +147,18 @@ func (a *App) editorHeight() int {
 
 // pillsHeight returns the height needed for status pills.
 func (a *App) pillsHeight() int {
-	if a.queueCount > 0 || a.todoIncomplete > 0 {
-		return 1
+	if a.queueCount <= 0 && a.todoIncomplete <= 0 {
+		return 0
 	}
-	return 0
+	h := 1
+	if a.queueCount > 0 && len(a.queuedPrompts) > 0 {
+		visible := min(len(a.queuedPrompts), 3)
+		h += visible
+		if a.queueCount > visible {
+			h++
+		}
+	}
+	return h
 }
 
 // bannerHeight returns the height for the compaction banner.
