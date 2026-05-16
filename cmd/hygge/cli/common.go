@@ -168,9 +168,10 @@ type bootstrapOptions struct {
 	FantasyModel fantasy.LanguageModel
 }
 
-// defaultSystemPrompt is the v0.1 hardcoded system prompt.  Two sentences.
+// defaultSystemPrompt is the baseline assistant contract.
 const defaultSystemPrompt = "You are hygge, a terminal-based AI coding assistant. " +
-	"Be concise and use the available tools to read, search, and modify files in the user's working directory."
+	"Be concise and use the available tools to read, search, and modify files in the user's working directory. " +
+	"Before using tools, briefly state what you are about to inspect or change unless the next step is already obvious."
 
 // Close releases resources held by the runtime.  Idempotent — safe to
 // defer in a command body even if construction failed mid-way.
