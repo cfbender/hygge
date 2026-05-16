@@ -2,27 +2,26 @@
 
 ## Plugin host
 
-- [ ] **`hygge plugins install` / `plugins remove` should rewrite `config.toml`**
+- [x] **`hygge plugins install` / `plugins remove` should rewrite `config.toml`**
   Today install/remove fetches/deletes but doesn't update the config so the plugin actually loads on next launch.
 
-- [ ] **`hygge plugins update` hot-swap**
+- [x] **`hygge plugins update` hot-swap**
   Currently requires restart. Needs `UnregisterAll(pluginName)` across the tool / command / hook / slash registries with owner-tagging on registrations (already plumbed; just no API yet).
 
 ## Storage / data model
 
-- [ ] **Migration: add `parent_tool_use_id TEXT` column to sessions**
+- [x] **Migration: add `parent_tool_use_id TEXT` column to sessions**
   Subagent hydration currently parses `[toolUseID]` out of the session slug via `extractToolUseIDFromSlug`. Brittle if `buildSlug` format ever changes. A proper column makes the link exact.
 
 ## Testing / hermeticity
 
-- [ ] **Extract `GitRunner` interface on `PackageManager` for test injection**
+- [x] **Extract `GitRunner` interface on `PackageManager` for test injection**
   Today `internal/plugin/pkgmgr.go` defensively neuters git credential helpers via env vars and `gitCommand` wrapping. The new `internal/state/git_numstat.go` also shells out to git. Extracting a shared `GitRunner` interface lets both inject a fake — no real `git` invocation, no keychain prompts.
 
 ## Code
 
-- Refactor and split out internal/ui/app.go
+- [x] Refactor and split out internal/ui/app.go
 
 ## UX
 
-- Update title using small_model on first message (add small model config if not available already) or when topic changes (expose tool call for this)
-
+- [x] Update title using small_model on first message (add small model config if not available already) or when topic changes (expose tool call for this)
