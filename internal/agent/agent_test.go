@@ -147,6 +147,23 @@ func (f *fakeFantasyModel) Stream(_ context.Context, call fantasy.Call) (fantasy
 		stream = f.streamBatches[0]
 		f.streamBatches = f.streamBatches[1:]
 	}
+	// When the test only configured `text`/`generateTexts` (the Generate path),
+	// synthesize a minimal stream so the same fake serves Stream callers.
+	if len(stream) == 0 {
+		text := f.text
+		if len(f.generateTexts) > 0 {
+			text = f.generateTexts[0]
+			f.generateTexts = f.generateTexts[1:]
+		}
+		if text != "" {
+			stream = []fantasy.StreamPart{
+				{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+				{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: text},
+				{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+				{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: f.usage},
+			}
+		}
+	}
 	f.mu.Unlock()
 	return func(yield func(fantasy.StreamPart) bool) {
 		for _, part := range stream {
@@ -175,7 +192,7 @@ func TestAgentGenerateTitleUsesTitleFantasyModel(t *testing.T) {
 	env := newTestEnv(t)
 	var gotPrompt string
 	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Fix auth flow"}
-	titleModel.onGenerate = func(call fantasy.Call) {
+	titleModel.onStream = func(call fantasy.Call) {
 		msgs := call.Prompt
 		if len(msgs) >= 2 && len(msgs[1].Content) > 0 {
 			if text, ok := msgs[1].Content[0].(fantasy.TextPart); ok {
@@ -305,6 +322,104 @@ func TestAgentRefreshSessionTitleKeepsCurrentSlug(t *testing.T) {
 	}
 	if changed || title != "Commands overview" {
 		t.Fatalf("title=%q changed=%v, want existing title/false", title, changed)
+	}
+}
+
+func TestAgentRefreshSessionTitlePublishesEvent(t *testing.T) {
+	env := newTestEnv(t)
+	events, drain := collectEvents[bus.SessionTitleUpdated](t, env.Bus, 4)
+	_ = events
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Commands overview"}
+	ag := env.newAgent(newFakeProvider("test"), func(opts *Options) {
+		opts.FantasyModel = &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+		opts.TitleFantasyModel = titleModel
+	})
+	if _, err := env.Store.AppendMessage(t.Context(), env.sessionID, session.NewMessage{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "generate a high level overview of / commands in this project"}}}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	if _, _, err := ag.RefreshSessionTitle(t.Context(), env.sessionID); err != nil {
+		t.Fatalf("RefreshSessionTitle: %v", err)
+	}
+	// Give the bus goroutine a moment to flush.
+	time.Sleep(50 * time.Millisecond)
+	got := drain()
+	if len(got) != 1 {
+		t.Fatalf("SessionTitleUpdated events = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].Title != "Commands overview" || got[0].Source != "generated" || got[0].SessionID != env.sessionID {
+		t.Fatalf("event = %+v", got[0])
+	}
+}
+
+func TestAgentSeedPreviewTitleOnFirstUserMessage(t *testing.T) {
+	env := newTestEnv(t)
+	events, drain := collectEvents[bus.SessionTitleUpdated](t, env.Bus, 4)
+	_ = events
+	// Use a streaming model that yields a short reply so Send completes.
+	mainModel := &fakeFantasyModel{provider: "fake", model: "large", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "ack"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	titleModel := &fakeFantasyModel{provider: "fake", model: "small", text: "Commands overview"}
+	ag := env.newAgent(newFakeProvider("fake"), func(opts *Options) {
+		opts.FantasyModel = mainModel
+		opts.TitleFantasyModel = titleModel
+	})
+
+	const prompt = "fix the click to expand on bash tool blocks"
+	if _, err := ag.Send(t.Context(), env.sessionID, userText(prompt)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	sess, err := env.Store.GetSession(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Slug == "" {
+		t.Fatalf("slug not set after Send")
+	}
+	time.Sleep(50 * time.Millisecond)
+	got := drain()
+	if len(got) == 0 {
+		t.Fatalf("expected at least one SessionTitleUpdated event")
+	}
+	if got[0].Source != "preview" {
+		t.Fatalf("first event Source = %q, want preview: %+v", got[0].Source, got[0])
+	}
+	if got[0].Title != prompt {
+		t.Fatalf("preview title = %q, want %q", got[0].Title, prompt)
+	}
+}
+
+func TestAgentDoesNotOverwriteExistingSlug(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.Store.RenameSession(t.Context(), env.sessionID, "Existing title"); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+	mainModel := &fakeFantasyModel{provider: "fake", model: "large", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "ack"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	ag := env.newAgent(newFakeProvider("fake"), func(opts *Options) {
+		opts.FantasyModel = mainModel
+	})
+	if _, err := ag.Send(t.Context(), env.sessionID, userText("new question")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	sess, err := env.Store.GetSession(t.Context(), env.sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Slug != "Existing title" {
+		t.Fatalf("slug overwritten: %q", sess.Slug)
 	}
 }
 

@@ -22,6 +22,25 @@ type SessionEnd struct {
 	At time.Time
 }
 
+// SessionTitleUpdated fires when a session's display title (slug) changes.
+// Subscribers (e.g. the UI sidebar) react to update their cached title without
+// re-reading the session row from the store.
+type SessionTitleUpdated struct {
+	// SessionID is the session whose title changed.
+	SessionID string
+	// Title is the new display title (also the session's Slug column).
+	Title string
+	// Source identifies which path produced the title:
+	//   - "preview"   — initial copy of the user's first message, before
+	//                   the title model has run.
+	//   - "generated" — produced by the small title model (RefreshSessionTitle).
+	//   - "tool"      — produced by the rename_session tool.
+	Source string
+	// At is the wall-clock time the title was changed.
+	// Populated by the caller; the bus does not set this field.
+	At time.Time
+}
+
 // MessageAppended fires after a message is persisted to a session.
 type MessageAppended struct {
 	// SessionID is the session the message was appended to.

@@ -652,6 +652,7 @@ func (a *App) bridge() {
 	subTodoChanged := bus.Subscribe[bus.TodoChanged](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
 	subTurnStarted := bus.Subscribe[bus.TurnStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subTurnDone := bus.Subscribe[bus.TurnCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
+	subTitle := bus.Subscribe[bus.SessionTitleUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 
 	stop := a.ctx.Done()
 
@@ -680,6 +681,7 @@ func (a *App) bridge() {
 	go forward(subTodoChanged.C(), a.busCh, stop, subTodoChanged.Unsubscribe)
 	go forward(subTurnStarted.C(), a.busCh, stop, subTurnStarted.Unsubscribe)
 	go forward(subTurnDone.C(), a.busCh, stop, subTurnDone.Unsubscribe)
+	go forward(subTitle.C(), a.busCh, stop, subTitle.Unsubscribe)
 }
 
 // forward pumps a single typed subscription channel into the shared any
@@ -917,11 +919,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case sessionTitleGeneratedMsg:
+		// The title cache is updated by the bus.SessionTitleUpdated handler;
+		// this message only clears the in-flight tracking so the next user
+		// message can schedule another refresh.
 		delete(a.titleGeneration, m.sessionID)
-		if m.err != nil || m.title == "" || m.sessionID != a.rootSessionID() {
-			return a, nil
-		}
-		a.sessionTitle = m.title
 		return a, nil
 
 	case switchSessionMsg:
@@ -2151,6 +2152,18 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			a.input.SetBusy(false, "")
 			return a.maybeRefreshSessionTitle(e.SessionID)
 		}
+
+	case bus.SessionTitleUpdated:
+		// Title changes come from the agent (preview seed, model-generated
+		// summary, or the rename_session tool). Update the sidebar cache
+		// when the event matches the active root session.
+		if e.SessionID != a.rootSessionID() {
+			return nil
+		}
+		if strings.TrimSpace(e.Title) == "" {
+			return nil
+		}
+		a.sessionTitle = e.Title
 	}
 	return nil
 }
