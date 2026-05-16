@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -125,6 +127,62 @@ func TestShiftEnterInsertsInputNewline(t *testing.T) {
 	}
 	if app.busy {
 		t.Error("Shift+Enter should not start a send")
+	}
+}
+
+func TestAtMentionPaletteCompletesFilesAndSubagents(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "ui"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "ui", "app.go"), []byte("package ui\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	b := bus.New()
+	app, err := New(AppOptions{
+		Bus:           b,
+		Theme:         theme.ShellTheme(),
+		ProjectDir:    dir,
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		Subagents: []MentionSubagent{{
+			Name:        "search",
+			Description: "Search the codebase",
+		}},
+		Now: func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	for _, r := range "ask @sea" {
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if view := app.View().Content; !strings.Contains(view, "@agent:search") {
+		t.Fatalf("mention palette missing subagent candidate:\n%s", view)
+	}
+	app.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got, want := app.input.Value(), "ask @agent:search "; got != want {
+		t.Fatalf("subagent mention completion = %q, want %q", got, want)
+	}
+
+	app.input.Textarea.SetValue("")
+	for _, r := range "open @app" {
+		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if view := app.View().Content; !strings.Contains(view, "@internal/ui/app.go") {
+		t.Fatalf("mention palette missing file candidate:\n%s", view)
+	}
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got, want := app.input.Value(), "open @internal/ui/app.go "; got != want {
+		t.Fatalf("file mention completion = %q, want %q", got, want)
 	}
 }
 

@@ -30,9 +30,6 @@
 
 ## UI / interaction polish
 
-- [ ] **`@` mentions for files and subagents**
-  Support mention-style insertion/selection for repository files and available subagents.
-
 - [ ] **Multi-line paste visibility**
   Pasting multi-line content currently hides it from view; keep pasted content visible or provide a clear collapsed preview.
 
