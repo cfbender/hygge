@@ -27,10 +27,9 @@
 
 ## UI / interaction polish
 
-- [ ] Text alignment and bubble fill
-  Text should take up the width of the bubble before wrapping.
-
 - [ ] /new command for new session. alias /clear to this as well and remove /clear's current functionality
+
+- [ ] click and drag scrollbar handle to scroll
 
 - [ ] compaction summary box breaks out of viewport
 
@@ -53,4 +52,3 @@
 
 - [ ] **Hygge smoking chimney animation**
   Add a smoking-chimney animation for Hygge branding/delight.
-
