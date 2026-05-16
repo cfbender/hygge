@@ -283,22 +283,25 @@ hygge.log("debug", "test log message", { key = "value" })
 }
 
 // TestRegistry_update_local verifies that Update on a local source is a no-op
-// for the fetch step.  Note: re-loading the plugin after update will fail if
-// the plugin registered tools/hooks that are already in the registries — this
-// is a known v0.3 limitation (unregister support deferred to v0.4).
+// for the fetch step and hot-swaps any existing plugin registrations before
+// reloading.
 func TestRegistry_update_local(t *testing.T) {
-	reg, _, _, _, _ := buildTestRegistry(t)
+	reg, toolReg, _, _, _ := buildTestRegistry(t)
 
 	dir := testdataDir(t)
-	src := "local:" + dir + "/notify"
+	src := "local:" + dir + "/hello"
 	if err := reg.Install(context.Background(), src); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
+	if _, ok := toolReg.Get("hello_world"); !ok {
+		t.Fatal("hello_world not registered before update")
+	}
 
-	// The notify plugin registers nothing, so re-loading won't conflict.
-	// Update should succeed.
-	if err := reg.Update(context.Background(), "notify"); err != nil {
+	if err := reg.Update(context.Background(), "hello"); err != nil {
 		t.Errorf("Update(local): unexpected error: %v", err)
+	}
+	if _, ok := toolReg.Get("hello_world"); !ok {
+		t.Fatal("hello_world not registered after update")
 	}
 }
 

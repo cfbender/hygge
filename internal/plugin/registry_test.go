@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/plugin"
 )
 
@@ -59,7 +60,7 @@ func TestRegistry_duplicateInstall(t *testing.T) {
 
 // TestRegistry_remove verifies that removing a plugin closes it.
 func TestRegistry_remove(t *testing.T) {
-	reg, _, _, _, _ := buildTestRegistry(t)
+	reg, toolReg, hookReg, cmdReg, subReg := buildTestRegistry(t)
 
 	dir := testdataDir(t)
 	src := "local:" + dir + "/hello"
@@ -67,12 +68,27 @@ func TestRegistry_remove(t *testing.T) {
 	if err := reg.Install(context.Background(), src); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
+	if _, ok := toolReg.Get("hello_world"); !ok {
+		t.Fatal("hello_world not registered before Remove")
+	}
 	if err := reg.Remove(context.Background(), "hello"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
 	if _, ok := reg.Get("hello"); ok {
 		t.Error("plugin 'hello' still present after Remove")
+	}
+	if _, ok := toolReg.Get("hello_world"); ok {
+		t.Error("tool 'hello_world' still registered after Remove")
+	}
+	if len(hookReg.For(hook.EventPreTool)) != 0 {
+		t.Error("pre_tool hook still registered after Remove")
+	}
+	if _, ok := cmdReg.Get("greet"); ok {
+		t.Error("command 'greet' still registered after Remove")
+	}
+	if _, ok := subReg.Get("pluginagent"); ok {
+		t.Error("subagent 'pluginagent' still registered after Remove")
 	}
 }
 

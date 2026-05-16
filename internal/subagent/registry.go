@@ -291,6 +291,25 @@ func (r *Registry) Register(t Type) error {
 	return nil
 }
 
+// Unregister removes the sub-agent type registered under name. It is a no-op
+// when the name is not present.
+func (r *Registry) Unregister(name string) {
+	if r == nil {
+		return
+	}
+	if _, ok := r.byName[name]; !ok {
+		return
+	}
+	delete(r.byName, name)
+	out := r.types[:0]
+	for _, existing := range r.types {
+		if existing.Name != name {
+			out = append(out, existing)
+		}
+	}
+	r.types = out
+}
+
 // List returns every registered type, sorted by Name.  The returned
 // slice is a fresh copy; mutating it does not affect the registry.
 func (r *Registry) List() []Type {

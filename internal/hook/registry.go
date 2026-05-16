@@ -59,6 +59,27 @@ func (r *Registry) Register(h Hook) error {
 	return nil
 }
 
+// Unregister removes hooks with the given name from every event list. It is a
+// no-op when the name is not present.
+func (r *Registry) Unregister(name string) {
+	if r == nil {
+		return
+	}
+	for ev, hooks := range r.hooks {
+		out := hooks[:0]
+		for _, h := range hooks {
+			if h.Name() != name {
+				out = append(out, h)
+			}
+		}
+		if len(out) == 0 {
+			delete(r.hooks, ev)
+			continue
+		}
+		r.hooks[ev] = out
+	}
+}
+
 // For returns the hooks registered for event, in registration order.
 func (r *Registry) For(event Event) []Hook {
 	if r == nil {

@@ -51,6 +51,14 @@ func (r *Registry) Register(t Tool) error {
 	return nil
 }
 
+// Unregister removes the tool registered under name. It is a no-op when the
+// name is not present.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 // Get returns the tool registered under name and true, or (nil, false) if
 // no such tool exists.
 func (r *Registry) Get(name string) (Tool, bool) {
