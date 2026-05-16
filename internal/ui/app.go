@@ -2873,16 +2873,19 @@ func (a *App) appendAssistantDelta(text string) {
 		last := &a.messages[n-1]
 		if last.Role == components.RoleAssistant && last.IsStreaming {
 			last.Raw += text
+			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.Raw)
 			return
 		}
 	}
+	raw := text
 	a.messages = append(a.messages, uiMessage{
-		Role:        components.RoleAssistant,
-		Raw:         text,
-		IsStreaming: true,
-		AgentType:   a.ActiveModeName(),
-		ModelName:   a.opts.ModelName,
-		ModeColor:   a.activeModeColor(),
+		Role:          components.RoleAssistant,
+		Raw:           raw,
+		FinalMarkdown: renderMarkdown(a.ensureRenderer(), raw),
+		IsStreaming:   true,
+		AgentType:     a.ActiveModeName(),
+		ModelName:     a.opts.ModelName,
+		ModeColor:     a.activeModeColor(),
 	})
 }
 
@@ -3013,7 +3016,7 @@ func (a *App) rerenderFinalMarkdownMessages() {
 	}
 	for i := range a.messages {
 		msg := &a.messages[i]
-		if msg.IsStreaming || msg.Raw == "" {
+		if msg.Raw == "" {
 			continue
 		}
 		switch msg.Role {

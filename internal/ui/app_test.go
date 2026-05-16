@@ -614,6 +614,30 @@ func TestStreamingAssistantText(t *testing.T) {
 	}
 }
 
+func TestStreamingAssistantMarkdownRendersBeforeFinalize(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.AssistantTextDelta{Text: "# heading\n\nbody"})
+	if !app.messages[0].IsStreaming {
+		t.Fatal("expected assistant message to still be streaming")
+	}
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("expected streaming assistant markdown to be rendered")
+	}
+	before := app.View().Content
+	plainBefore := ansiEscapeRE.ReplaceAllString(before, "")
+	if strings.Contains(plainBefore, "# heading") {
+		t.Fatalf("streaming view should already use markdown rendering, got:\n%s", before)
+	}
+
+	app.Handle(bus.MessageAppended{Role: "assistant", MessageID: "m1"})
+	after := app.View().Content
+	if got, want := lipgloss.Height(after), lipgloss.Height(before); got != want {
+		t.Fatalf("finalizing markdown changed view height: got %d, want %d\nbefore:\n%s\nafter:\n%s", got, want, before, after)
+	}
+}
+
 func TestFinalCommitRendersMarkdown(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
