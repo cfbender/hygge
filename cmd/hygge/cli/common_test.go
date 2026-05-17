@@ -190,6 +190,39 @@ func TestBootstrapBuildsAllComponents(t *testing.T) {
 	}
 }
 
+func TestBootstrapAutoloadsPluginDirectories(t *testing.T) {
+	home := hermeticHome(t)
+
+	plugins := []struct {
+		root string
+		name string
+	}{
+		{root: filepath.Join(home, ".config", "hygge", "plugins"), name: "xonsh"},
+		{root: filepath.Join(home, ".hygge", "plugins"), name: "project"},
+	}
+	for _, p := range plugins {
+		dir := filepath.Join(p.root, p.name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir plugin dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "plugin.lua"), []byte("hygge.log('info', 'loaded')\n"), 0o600); err != nil {
+			t.Fatalf("write plugin.lua: %v", err)
+		}
+	}
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	for _, want := range []string{"xonsh", "project"} {
+		if _, ok := rt.Plugins.Get(want); !ok {
+			t.Fatalf("autoloaded plugin %q not loaded", want)
+		}
+	}
+}
+
 func TestBootstrapFreshInstallWithoutProviderAuthShowsSetupMessage(t *testing.T) {
 	home := t.TempDir()
 	for _, providerName := range knownProviders() {
