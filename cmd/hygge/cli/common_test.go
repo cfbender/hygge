@@ -534,6 +534,11 @@ func TestDefaultSystemPromptGuidesToolNarration(t *testing.T) {
 			t.Fatalf("defaultSystemPrompt missing %q:\n%s", want, defaultSystemPrompt)
 		}
 	}
+	for _, want := range []string{"<hygge_system_contract>", "<instruction_precedence>", "<memory_policy>", "<untrusted_context_policy>", "irreversible actions"} {
+		if !strings.Contains(defaultSystemPrompt, want) {
+			t.Fatalf("defaultSystemPrompt missing hardened section/detail %q:\n%s", want, defaultSystemPrompt)
+		}
+	}
 }
 
 // TestBootstrap_AgentsMDAppearsInSystemPrompt verifies that an
