@@ -9,7 +9,7 @@ UI chrome.
 
 ## Install
 
-Requires Go 1.26 or newer.
+Requires Go 1.26.3 or newer.
 
 ```sh
 go install github.com/cfbender/hygge@latest
@@ -24,8 +24,8 @@ mise install go:github.com/cfbender/hygge@latest
 For a pinned release:
 
 ```sh
-go install github.com/cfbender/hygge@v0.3.3
-mise install go:github.com/cfbender/hygge@v0.3.3
+go install github.com/cfbender/hygge@v0.5.0
+mise install go:github.com/cfbender/hygge@v0.5.0
 ```
 
 ## Quick start
@@ -33,9 +33,11 @@ mise install go:github.com/cfbender/hygge@v0.3.3
 Set an API key for your provider, then launch Hygge from a project directory:
 
 ```sh
-export ANTHROPIC_API_KEY=...
+hygge provider auth anthropic
 hygge
 ```
+
+Environment variables such as `ANTHROPIC_API_KEY` also work.
 
 Or build from source:
 
@@ -55,8 +57,9 @@ mise run build
 - Runs model tool calls through built-in tools, plugins, and MCP servers.
 - Gates side effects with permissions, project config, hooks, and yolo-mode
   boundaries.
-- Supports slash commands, subagents, skills, project context files, profiles,
-  themes, model switching, reasoning settings, and session resume.
+- Supports slash commands, subagents, skills, memories, prompt attachments,
+  project context files, profiles, themes, model switching, reasoning settings,
+  session forking, and session resume.
 
 ## Common commands
 
@@ -66,6 +69,7 @@ hygge --continue              # resume the most recent session for this cwd
 hygge --new                   # force a fresh session
 hygge resume [id-prefix]      # resume a session
 hygge sessions list           # list sessions
+hygge sessions show <id>      # inspect a session
 hygge sessions delete <id>    # soft-delete a session
 hygge version                 # print version and platform info
 ```
@@ -75,12 +79,18 @@ Configuration and discovery:
 ```sh
 hygge config explain [key]
 hygge profile list
+hygge profile show [name]
 hygge profile use <name>
 hygge provider auth [name]
 hygge provider list
+hygge provider remove <name>
 hygge catalog list [provider]
 hygge catalog show <provider>/<model>
 hygge catalog refresh
+hygge context list
+hygge context paths
+hygge context show
+hygge theme show
 ```
 
 Runtime extensions:
@@ -97,11 +107,14 @@ hygge hooks list
 hygge hooks show <name>
 hygge mcp list
 hygge mcp tools [server]
+hygge mcp ping <server>
 hygge mcp doctor
 hygge plugins list
+hygge plugins show <name>
 hygge plugins install <source>
 hygge plugins update [name]
 hygge plugins remove <name>
+hygge plugins types install
 ```
 
 ## Configuration
@@ -144,7 +157,7 @@ resume_default = "continue" # "new" | "continue" | "ask"
 [model]
 provider = "anthropic"
 name = "claude-sonnet-4-5"
-reasoning = "medium" # "" | "off" | "low" | "medium" | "high"
+reasoning = "medium" # "off" | "low" | "medium" | "high"
 
 [catalog]
 refresh_interval = "24h"
@@ -165,14 +178,15 @@ under user or project config layers. The assistant sees each skill's name and
 description, then loads the full body with the `skill` tool when needed.
 
 Subagents are configured in `subagents.toml` and invoked by the `task` tool for
-focused work. Subagent sessions are persisted, auditable, and can use per-type
-tool allowlists and model overrides.
+focused work. Subagent sessions are persisted, auditable, can use per-type tool
+allowlists and model overrides, and can be referenced from the prompt with
+`@agent:<name>` mentions.
 
 ## Tools and permissions
 
 Built-in tools include filesystem reads/searches, edits, shell commands, skills,
-todos, and subagent dispatch. Read-only tools can run in parallel; side-effecting
-tools run serially and pass through permission checks.
+todos, memories, and subagent dispatch. Read-only tools can run in parallel;
+side-effecting tools run serially and pass through permission checks.
 
 Permissions can be granted once, for the session, always, or denied. Project and
 user config can tune defaults, while hooks can add policy checks before or after
@@ -207,10 +221,23 @@ type definitions and avoid editor diagnostics for the `hygge` plugin API.
 
 - Type a prompt and press `Enter` to send.
 - Use `/` to open slash command completion.
+- Use `@` to mention repository files or `@agent:<name>` subagents. Mentioned
+  files are attached to the next prompt as context.
+- Use `/attach` to attach files manually and `/attachments clear` to clear the
+  pending attachment set.
 - Use `/compact` to summarize older session history.
-- Use `/model` and `/reason` to inspect or change runtime model settings.
+- Use `/model` and `/reason` to inspect or change runtime model settings;
+  `Ctrl+T` cycles reasoning levels.
+- Use `/memory`, `/remember`, and `/forget` to inspect, save, or delete durable
+  facts.
+- Use `/fork` to branch a session from the latest user message or a specific
+  message ID.
+- Press `Ctrl+E` to edit the current prompt in `$VISUAL` or `$EDITOR`.
+- Use `Esc` to dismiss popovers or leave a subagent view. While a turn is busy,
+  `Esc` clears queued prompts and a quick double-`Esc` interrupts the run.
 - Use the sessions UI to resume, switch, or inspect prior sessions.
-- Subagent transcripts render as nested, collapsible chat blocks.
+- Subagent transcripts render as nested, collapsible chat blocks; `Ctrl+G`
+  follows into the latest subagent transcript.
 
 ## Development
 
@@ -231,7 +258,8 @@ mise run bump -- major
 ```
 
 The bump task increments `cmd/hygge/cli/cli.go`, commits, creates an annotated
-tag, and pushes the commit and tag.
+tag, and pushes the commit and tag. Use it only when intentionally cutting a
+release.
 
 ## License
 
