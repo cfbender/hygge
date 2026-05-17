@@ -27,7 +27,7 @@ func TestResult_ZeroValueIsHarmless(t *testing.T) {
 	// (e.g. when Run returns early).  Confirm every field reads
 	// without panicking and reads as the documented zero.
 	var r Result
-	if r.SessionID != "" || r.FinalText != "" || r.HitIterLimit {
+	if r.SessionID != "" || r.FinalText != "" {
 		t.Fatalf("Result zero value is not zero: %+v", r)
 	}
 	if r.Cost.USD != 0 {

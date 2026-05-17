@@ -98,34 +98,6 @@ func TestSubagentBlockRunningNoToolsPlaceholder(t *testing.T) {
 	}
 }
 
-// TestSubagentBlockFailedState verifies the FAILED (HitIterLimit) layout.
-func TestSubagentBlockFailedState(t *testing.T) {
-	t.Parallel()
-	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	end := start.Add(4*time.Second + 200*time.Millisecond)
-	st := &SubagentState{
-		SubSessionID: "sub-1",
-		Type:         "general",
-		Description:  "ping test",
-		StartedAt:    start,
-		EndedAt:      end,
-		HitIterLimit: true,
-		Cost:         0.0042,
-	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
-	for _, want := range []string{
-		"General Subagent \u2014 ping test",
-		"failed (iteration limit)",
-		"4.2s",
-		"$0.0042",
-		"ctrl+g",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("FAILED view missing %q in:\n%s", want, out)
-		}
-	}
-}
-
 // TestSubagentBlockEmptyDescriptionFallback verifies no em-dash when no description.
 func TestSubagentBlockEmptyDescriptionFallback(t *testing.T) {
 	t.Parallel()

@@ -249,67 +249,17 @@ const compactionSystemPrompt = "Summarize the following conversation in 2-3 para
 	"preserving all decisions, file paths, and outstanding tasks. " +
 	"Be concrete; do not editorialize."
 
-// generateCompactionSummary calls the no-tool Fantasy internal agent when a
-// Fantasy model is configured, otherwise falls back to the legacy provider test
-// seam. Summary usage is stored on the compaction marker for saved-token UX;
-// it is not added to per-session cost totals, matching the pre-migration
-// accounting behavior for background summarization.
+// generateCompactionSummary calls the no-tool Fantasy internal agent. Summary
+// usage is stored on the compaction marker for saved-token UX; it is not added
+// to per-session cost totals, matching the existing accounting behavior for
+// background summarization.
 func (a *Agent) generateCompactionSummary(
-	ctx context.Context, modelName string, msgs []*session.Message,
+	ctx context.Context, _ string, msgs []*session.Message,
 ) (string, provider.Usage, error) {
-	values := make([]session.Message, 0, len(msgs))
-	for _, m := range msgs {
-		if m == nil {
-			continue
-		}
-		values = append(values, *m)
-	}
 	if a.runtime != nil && a.runtime.hasFantasyModel() {
 		fmsgs := append([]fantasy.Message{fantasy.NewSystemMessage(compactionSystemPrompt)}, toFantasyMessages(msgs, nil, "", nil, nil)...)
 		fmsgs = append(fmsgs, fantasy.NewUserMessage("Summarize the conversation above."))
 		return a.runtime.Summarize(ctx, fmsgs, a.opts.CompactionMaxTokens)
 	}
-
-	req := provider.Request{
-		ModelName: modelName,
-		Messages:  values,
-		System:    compactionSystemPrompt,
-		MaxTokens: a.opts.CompactionMaxTokens,
-		// Tools intentionally empty: the model must not call a tool
-		// while summarising.
-	}
-
-	ch, err := a.opts.Provider.Stream(ctx, req)
-	if err != nil {
-		return "", provider.Usage{}, err
-	}
-
-	var (
-		text      []byte
-		lastUsage provider.Usage
-	)
-	for {
-		select {
-		case <-ctx.Done():
-			go discardStream(ch)
-			return "", provider.Usage{}, ctx.Err()
-		case ev, ok := <-ch:
-			if !ok {
-				return string(text), lastUsage, nil
-			}
-			switch ev.Type {
-			case provider.EventTextDelta:
-				text = append(text, ev.Text...)
-			case provider.EventUsage, provider.EventMessageStart:
-				if ev.Usage.InputTokens != 0 || ev.Usage.OutputTokens != 0 {
-					lastUsage = ev.Usage
-				}
-			case provider.EventError:
-				return "", provider.Usage{}, ev.Err
-			case provider.EventDone:
-				// Continue draining until the channel closes so
-				// the adapter's goroutine can exit cleanly.
-			}
-		}
-	}
+	return "", provider.Usage{}, fmt.Errorf("agent: fantasy model is not configured")
 }

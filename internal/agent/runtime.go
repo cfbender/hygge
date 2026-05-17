@@ -29,9 +29,6 @@ type RuntimeOptions struct {
 	Model      fantasy.LanguageModel
 	TitleModel fantasy.LanguageModel
 	Tools      *tool.Registry
-	// MaxIterations is accepted for legacy construction compatibility. Fantasy
-	// active turns are intentionally uncapped; cancellation is context-driven.
-	MaxIterations int
 }
 
 // NewRuntime constructs the turn runtime. Tools may be nil only in tests that
@@ -57,10 +54,6 @@ func (r *Runtime) SetModel(model fantasy.LanguageModel) {
 
 func (r *Runtime) hasFantasyModel() bool {
 	return r != nil && r.model != nil
-}
-
-func (r *Runtime) newFantasyAgent(tools []fantasy.AgentTool) fantasy.Agent {
-	return fantasy.NewAgent(r.model, fantasy.WithTools(tools...))
 }
 
 func (r *Runtime) newInternalAgent() fantasy.Agent {
@@ -192,5 +185,5 @@ func (s *SessionAgent) RunTurn(ctx context.Context, sessionID, modelName string)
 	if s.runtime != nil && s.runtime.hasFantasyModel() {
 		return s.agent.runFantasyLoop(ctx, sessionID, modelName)
 	}
-	return s.agent.runLegacyLoop(ctx, sessionID, modelName)
+	return nil, fmt.Errorf("agent: fantasy model is not configured")
 }

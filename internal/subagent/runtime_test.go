@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"charm.land/fantasy"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
@@ -33,6 +36,65 @@ type fakeProvider struct {
 	mu      sync.Mutex
 	scripts []fakeScript
 	calls   atomic.Int32
+}
+
+type providerFantasyModel struct {
+	provider provider.Provider
+	model    string
+}
+
+func (m *providerFantasyModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return nil, fmt.Errorf("providerFantasyModel: Generate not implemented")
+}
+
+func (m *providerFantasyModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	ch, err := m.provider.Stream(ctx, provider.Request{ModelName: m.model})
+	if err != nil {
+		return nil, err
+	}
+	var parts []fantasy.StreamPart
+	sawTool := false
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventTextDelta:
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: ev.Text})
+		case provider.EventToolUse:
+			sawTool = true
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeToolCall, ID: ev.ToolID, ToolCallName: ev.ToolName, ToolCallInput: string(ev.ToolInput)})
+		case provider.EventError:
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: ev.Err})
+		case provider.EventDone:
+			finish := fantasy.FinishReasonStop
+			if sawTool {
+				finish = fantasy.FinishReasonToolCalls
+			}
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: finish})
+		}
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		for _, part := range parts {
+			if !yield(part) {
+				return
+			}
+		}
+	}, nil
+}
+
+func (m *providerFantasyModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, fmt.Errorf("providerFantasyModel: GenerateObject not implemented")
+}
+
+func (m *providerFantasyModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, fmt.Errorf("providerFantasyModel: StreamObject not implemented")
+}
+
+func (m *providerFantasyModel) Provider() string { return m.provider.Name() }
+func (m *providerFantasyModel) Model() string    { return m.model }
+
+func fantasyResolverFor(prov provider.Provider) FantasyModelResolver {
+	return func(_ context.Context, _ string, model string) (fantasy.LanguageModel, error) {
+		return &providerFantasyModel{provider: prov, model: model}, nil
+	}
 }
 
 type fakeScript struct {
@@ -222,16 +284,17 @@ func (e *runnerEnv) newRunner(reg *Registry, prov provider.Provider) *Runner {
 		}
 	}
 	r, err := NewRunner(RunnerOptions{
-		Bus:           e.bus,
-		Store:         e.store,
-		Provider:      prov,
-		Permission:    e.perm,
-		Catalog:       e.catalog,
-		Registry:      reg,
-		ParentTools:   e.parentTools,
-		Pwd:           e.pwd,
-		ContextWindow: 0,
-		Now:           time.Now,
+		Bus:                  e.bus,
+		Store:                e.store,
+		Provider:             prov,
+		Permission:           e.perm,
+		Catalog:              e.catalog,
+		Registry:             reg,
+		ParentTools:          e.parentTools,
+		Pwd:                  e.pwd,
+		ContextWindow:        0,
+		FantasyModelResolver: fantasyResolverFor(prov),
+		Now:                  time.Now,
 	})
 	if err != nil {
 		e.t.Fatalf("NewRunner: %v", err)
@@ -261,9 +324,6 @@ func TestRun_FinalText(t *testing.T) {
 	}
 	if res.SessionID == "" {
 		t.Fatal("SessionID should be set")
-	}
-	if res.HitIterLimit {
-		t.Fatal("should not have hit iteration limit")
 	}
 }
 
@@ -405,20 +465,9 @@ func (r *recordingTool) Execute(_ context.Context, _ json.RawMessage, _ tool.Exe
 	return tool.Result{Content: "should not have been called"}, nil
 }
 
-// ---------- iteration-limit path -------------------------------------------
-
-func TestRun_HitIterationLimit(t *testing.T) {
+func TestRun_MissingFantasyModelFailsClearly(t *testing.T) {
 	env := newRunnerEnv(t)
-	// Always emit a tool-use so the loop never terminates.  Use the
-	// read tool against a non-existent file; the IsError result
-	// is fed back to the model and we loop again.
-	scripts := make([]fakeScript, 6)
-	for i := range scripts {
-		scripts[i] = scriptToolUse(t, fmt.Sprintf("tu%d", i), "read", map[string]any{
-			"file_path": filepath.Join(env.pwd, "nope.txt"),
-		})
-	}
-	prov := newFakeProvider(scripts...)
+	prov := newFakeProvider(scriptText("unused"))
 
 	reg, err := Load(LoadOptions{
 		HomeDir:      t.TempDir(),
@@ -428,35 +477,28 @@ func TestRun_HitIterationLimit(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	r, err := NewRunner(RunnerOptions{
-		Bus:           env.bus,
-		Store:         env.store,
-		Provider:      prov,
-		Permission:    env.perm,
-		Catalog:       env.catalog,
-		Registry:      reg,
-		ParentTools:   env.parentTools,
-		Pwd:           env.pwd,
-		MaxIterations: 3, // tight cap so we don't burn forever
+		Bus:         env.bus,
+		Store:       env.store,
+		Provider:    prov,
+		Permission:  env.perm,
+		Catalog:     env.catalog,
+		Registry:    reg,
+		ParentTools: env.parentTools,
+		Pwd:         env.pwd,
 	})
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
 
-	res, err := r.Run(context.Background(), RunInput{
+	_, err = r.Run(context.Background(), RunInput{
 		ParentSessionID: env.parentSessID,
 		Type:            "general",
 		Description:     "loop",
 		Prompt:          "loop forever",
 		ModelName:       "fake-model",
 	})
-	if err != nil {
-		t.Fatalf("Run: %v (expected nil even on iteration limit)", err)
-	}
-	if !res.HitIterLimit {
-		t.Fatal("expected HitIterLimit=true")
-	}
-	if res.FinalText == "" {
-		t.Fatal("FinalText should contain the abort note")
+	if err == nil || !strings.Contains(err.Error(), "fantasy model is not configured") {
+		t.Fatalf("want missing fantasy model error, got %v", err)
 	}
 }
 
@@ -592,9 +634,6 @@ func TestRun_PublishesSubagentStartedAndCompleted(t *testing.T) {
 		if ev.SubSessionID != res.SessionID {
 			t.Fatalf("Completed.SubSessionID mismatch")
 		}
-		if ev.HitIterLimit {
-			t.Fatal("Completed.HitIterLimit should be false")
-		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for SubagentCompleted")
 	}
@@ -721,6 +760,12 @@ func TestRun_ModelOverride_RoutesToResolverProvider(t *testing.T) {
 		ParentTools:      env.parentTools,
 		Pwd:              env.pwd,
 		ProviderResolver: resolver,
+		FantasyModelResolver: func(_ context.Context, providerName, model string) (fantasy.LanguageModel, error) {
+			if providerName == "alt" {
+				return &providerFantasyModel{provider: altProv, model: model}, nil
+			}
+			return &providerFantasyModel{provider: parentProv, model: model}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
@@ -774,15 +819,16 @@ func TestRun_NoModelOverride_UsesParentProvider(t *testing.T) {
 	}
 
 	r, err := NewRunner(RunnerOptions{
-		Bus:              env.bus,
-		Store:            env.store,
-		Provider:         parentProv,
-		Permission:       env.perm,
-		Catalog:          env.catalog,
-		Registry:         mustLoad(t),
-		ParentTools:      env.parentTools,
-		Pwd:              env.pwd,
-		ProviderResolver: resolver,
+		Bus:                  env.bus,
+		Store:                env.store,
+		Provider:             parentProv,
+		Permission:           env.perm,
+		Catalog:              env.catalog,
+		Registry:             mustLoad(t),
+		ParentTools:          env.parentTools,
+		Pwd:                  env.pwd,
+		ProviderResolver:     resolver,
+		FantasyModelResolver: fantasyResolverFor(parentProv),
 	})
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
@@ -823,15 +869,16 @@ func TestRun_ResolverError_Surfaces(t *testing.T) {
 
 	reg := loadRegistryWithModel(t, "fancy", "alt/cool-model")
 	r, err := NewRunner(RunnerOptions{
-		Bus:              env.bus,
-		Store:            env.store,
-		Provider:         parentProv,
-		Permission:       env.perm,
-		Catalog:          env.catalog,
-		Registry:         reg,
-		ParentTools:      env.parentTools,
-		Pwd:              env.pwd,
-		ProviderResolver: resolver,
+		Bus:                  env.bus,
+		Store:                env.store,
+		Provider:             parentProv,
+		Permission:           env.perm,
+		Catalog:              env.catalog,
+		Registry:             reg,
+		ParentTools:          env.parentTools,
+		Pwd:                  env.pwd,
+		ProviderResolver:     resolver,
+		FantasyModelResolver: fantasyResolverFor(parentProv),
 	})
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
@@ -885,15 +932,16 @@ func TestRun_MalformedStoredModel_FallsBackToParent(t *testing.T) {
 	}
 
 	r, err := NewRunner(RunnerOptions{
-		Bus:              env.bus,
-		Store:            env.store,
-		Provider:         parentProv,
-		Permission:       env.perm,
-		Catalog:          env.catalog,
-		Registry:         reg,
-		ParentTools:      env.parentTools,
-		Pwd:              env.pwd,
-		ProviderResolver: resolver,
+		Bus:                  env.bus,
+		Store:                env.store,
+		Provider:             parentProv,
+		Permission:           env.perm,
+		Catalog:              env.catalog,
+		Registry:             reg,
+		ParentTools:          env.parentTools,
+		Pwd:                  env.pwd,
+		ProviderResolver:     resolver,
+		FantasyModelResolver: fantasyResolverFor(parentProv),
 	})
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
@@ -934,6 +982,7 @@ func TestRun_OverrideWithoutResolver_UsesParent(t *testing.T) {
 		ParentTools: env.parentTools,
 		Pwd:         env.pwd,
 		// ProviderResolver: nil (deliberate)
+		FantasyModelResolver: fantasyResolverFor(parentProv),
 	})
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)

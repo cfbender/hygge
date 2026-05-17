@@ -137,9 +137,4 @@ type Result struct {
 
 	// Duration is the wall-clock time the Run call took, end to end.
 	Duration time.Duration
-
-	// HitIterLimit is true when the sub-agent loop terminated because
-	// it hit the configured iteration cap rather than producing a
-	// final answer.
-	HitIterLimit bool
 }

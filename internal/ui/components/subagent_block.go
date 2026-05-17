@@ -23,8 +23,7 @@ import (
 //   - Updated as the sub-session's events flow through (text deltas,
 //     tool calls, cost updates).  Caller appends to Messages and
 //     overwrites Cost / InputTokens / OutputTokens.
-//   - Finalised when bus.SubagentCompleted arrives.  EndedAt is set;
-//     HitIterLimit toggles the subtitle to "failed".
+//   - Finalised when bus.SubagentCompleted arrives. EndedAt is set.
 type SubagentState struct {
 	// SubSessionID is the sub-session's id; the map key in App.
 	SubSessionID string
@@ -54,11 +53,6 @@ type SubagentState struct {
 	// EndedAt is the zero value while the sub-agent is still running.
 	StartedAt time.Time
 	EndedAt   time.Time
-
-	// HitIterLimit is true after a Completed event reports the
-	// sub-agent loop hit its iteration cap.  Renders as
-	// "failed (iteration limit)" instead of the normal subtitle.
-	HitIterLimit bool
 
 	// Cost / InputTokens / OutputTokens are running totals tagged
 	// to the sub-session.  Stage C derives these from
@@ -174,18 +168,6 @@ func (b SubagentBlock) heading() string {
 // subtitle renders the state-appropriate second line.
 func (b SubagentBlock) subtitle() string {
 	switch {
-	case b.State.HitIterLimit:
-		// FAILED state.
-		parts := []string{"failed (iteration limit)"}
-		elapsed := b.elapsed()
-		if elapsed > 0 {
-			parts = append(parts, formatElapsed(elapsed))
-		}
-		if b.State.Cost > 0 {
-			parts = append(parts, formatDollars(b.State.Cost))
-		}
-		return b.errorStyle().Render(strings.Join(parts, " \u00b7 "))
-
 	case b.State.IsRunning():
 		// RUNNING state: anim + latest tool label.
 		animStr := b.animStr()
@@ -277,9 +259,6 @@ func (b SubagentBlock) headingStyle() lipgloss.Style {
 	if b.State.IsRunning() {
 		return b.Theme.Style(theme.AtomAccent).Bold(true)
 	}
-	if b.State.HitIterLimit {
-		return b.Theme.Style(theme.AtomError).Bold(true)
-	}
 	return b.Theme.Style(theme.AtomPrimary).Bold(true)
 }
 
@@ -296,14 +275,6 @@ func (b SubagentBlock) muted() lipgloss.Style {
 		return b.Theme.Style(theme.AtomPrimary)
 	}
 	return b.Theme.Style(theme.AtomMuted)
-}
-
-// errorStyle returns the error style for the FAILED subtitle.
-func (b SubagentBlock) errorStyle() lipgloss.Style {
-	if b.Theme == nil {
-		return lipgloss.NewStyle()
-	}
-	return b.Theme.Style(theme.AtomError)
 }
 
 // keyStyle returns a slightly-highlighted style for keybinding text.

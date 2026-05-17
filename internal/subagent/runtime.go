@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,11 +18,6 @@ import (
 	"github.com/cfbender/hygge/internal/tool"
 )
 
-// defaultMaxIterations mirrors agent.defaultMaxIterations (25).  We
-// keep our own constant so the sub-agent's iteration cap is decoupled
-// from the parent's even though Stage A always uses the same value.
-const defaultMaxIterations = 25
-
 // Runner is the entry point for invoking a sub-agent.  One Runner is
 // constructed per CLI bootstrap and shared across all `task` tool
 // invocations.  Safe for concurrent calls.
@@ -39,7 +33,6 @@ type Runner struct {
 	fantasyModel  FantasyModelResolver
 	pwd           string
 	contextWindow int64
-	maxIter       int
 	now           func() time.Time
 }
 
@@ -72,10 +65,6 @@ type RunnerOptions struct {
 	// pct-used math.  Zero is legal: the loop just skips PctUsed.
 	ContextWindow int64
 
-	// MaxIterations bounds the sub-agent loop.  Zero means
-	// defaultMaxIterations (25).
-	MaxIterations int
-
 	// ProviderResolver, when non-nil, is consulted whenever a
 	// [Type.Model] override is set on the requested type.  The
 	// resolver returns the provider to use and the bare model id to
@@ -89,9 +78,7 @@ type RunnerOptions struct {
 	ProviderResolver ProviderResolver
 
 	// FantasyModelResolver returns the Fantasy language model for the resolved
-	// provider/model pair.  When nil, sub-agents use the legacy provider stream;
-	// production bootstrap wires this so parent and sub-agent turns share the
-	// same model/tool runtime path.
+	// provider/model pair.  It is required because sub-agent turns are Fantasy-only.
 	FantasyModelResolver FantasyModelResolver
 
 	// Now is an injectable clock for bus events and durations.
@@ -123,9 +110,6 @@ func NewRunner(opts RunnerOptions) (*Runner, error) {
 	if opts.ParentTools == nil {
 		return nil, fmt.Errorf("subagent: NewRunner: ParentTools is required")
 	}
-	if opts.MaxIterations <= 0 {
-		opts.MaxIterations = defaultMaxIterations
-	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -141,7 +125,6 @@ func NewRunner(opts RunnerOptions) (*Runner, error) {
 		fantasyModel:  opts.FantasyModelResolver,
 		pwd:           opts.Pwd,
 		contextWindow: opts.ContextWindow,
-		maxIter:       opts.MaxIterations,
 		now:           opts.Now,
 	}, nil
 }
@@ -195,12 +178,11 @@ func (a toolAdapter) Run(ctx context.Context, in tool.SubagentRunInput) (tool.Su
 		ModelName:       in.ModelName,
 	})
 	out := tool.SubagentResult{
-		SessionID:    res.SessionID,
-		FinalText:    res.FinalText,
-		Usage:        res.Usage,
-		CostUSD:      res.Cost.USD,
-		Duration:     res.Duration,
-		HitIterLimit: res.HitIterLimit,
+		SessionID: res.SessionID,
+		FinalText: res.FinalText,
+		Usage:     res.Usage,
+		CostUSD:   res.Cost.USD,
+		Duration:  res.Duration,
 	}
 	return out, err
 }
@@ -250,9 +232,6 @@ type RunInput struct {
 //   - A failure inside the embedded agent loop returns the wrapped
 //     error AND a partially-populated Result.SessionID so the caller
 //     can link to the audit trail.  The sub-session is NOT deleted.
-//   - Hitting the iteration limit returns nil error with
-//     Result.HitIterLimit set and Result.FinalText carrying the
-//     agent's abort note.
 func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 	if r == nil {
 		return Result{}, fmt.Errorf("subagent: Run: nil runner")
@@ -321,6 +300,9 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		}
 		runFantasyModel = lm
 	}
+	if runFantasyModel == nil {
+		return Result{}, fmt.Errorf("subagent: Run: fantasy model is not configured")
+	}
 
 	subTools := r.buildToolRegistry(t)
 
@@ -380,7 +362,6 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		Tools:         subTools,
 		Catalog:       r.catalog,
 		SystemPrompt:  t.SystemPrompt,
-		MaxIterations: r.maxIter,
 		Pwd:           r.pwd,
 		Now:           r.now,
 		ContextWindow: r.contextWindow,
@@ -403,8 +384,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		{Kind: session.PartText, Text: in.Prompt},
 	})
 
-	hitLimit := errors.Is(sendErr, agent.ErrIterationLimit)
-	if sendErr != nil && !hitLimit {
+	if sendErr != nil {
 		// Real failure: surface it.  Sub-session messages (whatever
 		// was committed before the error) remain in place.
 		res := Result{
@@ -422,12 +402,11 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 	finalText := extractFinalText(finalMsg)
 
 	res := Result{
-		SessionID:    sub.ID,
-		FinalText:    finalText,
-		Usage:        usage,
-		Cost:         money,
-		Duration:     r.now().Sub(startedAt),
-		HitIterLimit: hitLimit,
+		SessionID: sub.ID,
+		FinalText: finalText,
+		Usage:     usage,
+		Cost:      money,
+		Duration:  r.now().Sub(startedAt),
 	}
 	r.publishCompleted(sub.ID, in.ParentSessionID, t.Name, in.Description, startedAt, res)
 	return res, nil
@@ -504,7 +483,6 @@ func (r *Runner) publishCompleted(
 		Description:     description,
 		DurationMs:      r.now().Sub(startedAt).Milliseconds(),
 		CostUSD:         res.Cost.USD,
-		HitIterLimit:    res.HitIterLimit,
 		At:              r.now(),
 	})
 }

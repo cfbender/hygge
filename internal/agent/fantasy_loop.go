@@ -37,6 +37,18 @@ type fantasyToolOptions struct {
 	beforeRun func() error
 }
 
+type turnFantasyModel struct {
+	fantasy.LanguageModel
+	beforeStream func(fantasy.Call) fantasy.Call
+}
+
+func (m turnFantasyModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if m.beforeStream != nil {
+		call = m.beforeStream(call)
+	}
+	return m.LanguageModel.Stream(ctx, call)
+}
+
 func (f *fantasyTool) Info() fantasy.ToolInfo {
 	params, required := fantasyToolSchema(f.t.InputSchema())
 	return fantasy.ToolInfo{Name: f.t.Name(), Description: f.t.Description(), Parameters: params, Required: required, Parallel: f.t.Parallelizable()}
@@ -94,6 +106,7 @@ func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.T
 	}
 	args := json.RawMessage(call.Input)
 	a := f.opts.agent
+	a.collectLazyContext(f.opts.sessionID, f.opts.pwd, &session.Message{Parts: []session.Part{{Kind: session.PartToolUse, ToolID: call.ID, ToolName: call.Name, ToolInput: args}}})
 	bus.Publish(a.opts.Bus, bus.ToolCallRequested{SessionID: f.opts.sessionID, MessageID: msgID, ToolUseID: call.ID, ToolName: call.Name, Args: append([]byte(nil), args...), At: a.opts.Now()})
 
 	toolInput := args
@@ -112,7 +125,14 @@ func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.T
 	}
 
 	started := time.Now()
-	res, err := f.t.Execute(ctx, toolInput, tool.ExecContext{SessionID: f.opts.sessionID, Pwd: a.opts.Pwd, Bus: a.opts.Bus, Permission: a.opts.Permission, ToolUseID: call.ID, MessageID: msgID, ModelName: f.opts.modelName, Now: a.opts.Now})
+	res, err := func() (res tool.Result, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("tool panic: %v", r)
+			}
+		}()
+		return f.t.Execute(ctx, toolInput, tool.ExecContext{SessionID: f.opts.sessionID, Pwd: a.opts.Pwd, Bus: a.opts.Bus, Permission: a.opts.Permission, ToolUseID: call.ID, MessageID: msgID, ModelName: f.opts.modelName, Now: a.opts.Now})
+	}()
 	if err != nil {
 		res = tool.Result{IsError: true, Content: err.Error()}
 	}
@@ -210,8 +230,39 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		bus.Publish(a.opts.Bus, bus.MessageAppended{SessionID: sessionID, MessageID: msg.ID, Role: string(session.RoleAssistant), At: a.opts.Now()})
 		return nil
 	}
-	ftools := a.runtime.buildFantasyTools(fantasyToolOptions{agent: a, sessionID: sessionID, messageID: func() string { mu.Lock(); defer mu.Unlock(); return currentID }, modelName: modelName, pwd: pwd, beforeRun: func() error { mu.Lock(); u := pendingUsage; mu.Unlock(); return appendAssistant(u) }})
-	ag := a.runtime.newFantasyAgent(ftools)
+	ftools := a.runtime.buildFantasyTools(fantasyToolOptions{agent: a, sessionID: sessionID, messageID: func() string { mu.Lock(); defer mu.Unlock(); return currentID }, modelName: modelName, pwd: pwd, beforeRun: func() error {
+		mu.Lock()
+		u := pendingUsage
+		mu.Unlock()
+		if err := appendAssistant(u); err != nil {
+			return err
+		}
+		mu.Lock()
+		toolMsg := final
+		mu.Unlock()
+		a.collectLazyContext(sessionID, pwd, toolMsg)
+		return nil
+	}})
+	turnModel := turnFantasyModel{LanguageModel: a.runtime.model, beforeStream: func(call fantasy.Call) fantasy.Call {
+		lazy := a.drainPendingLazy(sessionID)
+		additions := a.drainPendingSystemAdditions(sessionID)
+		if len(lazy) == 0 && len(additions) == 0 {
+			return call
+		}
+		extra := composeSystemPrompt("", nil, lazy, additions)
+		if strings.TrimSpace(extra) == "" {
+			return call
+		}
+		for i := range call.Prompt {
+			if call.Prompt[i].Role == fantasy.MessageRoleSystem {
+				call.Prompt[i].Content = append(call.Prompt[i].Content, fantasy.TextPart{Text: "\n\n" + extra})
+				return call
+			}
+		}
+		call.Prompt = append([]fantasy.Message{fantasy.NewSystemMessage(extra)}, call.Prompt...)
+		return call
+	}}
+	ag := fantasy.NewAgent(turnModel, fantasy.WithTools(ftools...))
 	call := fantasy.AgentStreamCall{Messages: fmsgs,
 		OnTextDelta: func(_ string, delta string) error {
 			mu.Lock()
@@ -261,6 +312,7 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			return nil
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			a.collectLazyContext(sessionID, pwd, &session.Message{Parts: []session.Part{{Kind: session.PartToolUse, ToolID: tc.ToolCallID, ToolName: tc.ToolName, ToolInput: []byte(tc.Input)}}})
 			mu.Lock()
 			event := toolCallEvent{ID: tc.ToolCallID, Name: tc.ToolName, Input: []byte(tc.Input)}
 			activeToolCalls[tc.ToolCallID] = event
@@ -279,6 +331,10 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			if len(step.Content.ToolCalls()) == 0 {
 				return appendAssistant(u)
 			}
+			mu.Lock()
+			toolMsg := final
+			mu.Unlock()
+			a.collectLazyContext(sessionID, pwd, toolMsg)
 			// Tool-call steps are persisted by beforeRun -> appendAssistant(u),
 			// which also records usage. Do not record the same step again here.
 			mu.Lock()

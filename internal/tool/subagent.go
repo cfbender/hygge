@@ -53,18 +53,16 @@ type SubagentRunInput struct {
 // SubagentResult mirrors internal/subagent.Result with the subset of
 // fields the subagent tool surfaces in its Metadata.
 type SubagentResult struct {
-	SessionID    string
-	FinalText    string
-	Usage        provider.Usage
-	CostUSD      float64
-	Duration     time.Duration
-	HitIterLimit bool
+	SessionID string
+	FinalText string
+	Usage     provider.Usage
+	CostUSD   float64
+	Duration  time.Duration
 }
 
 // SubagentTool dispatches a mission to a registered sub-agent type.  The
-// tool blocks until the sub-agent finishes (success, iteration-limit
-// abort, or hard error) and returns the sub-agent's final assistant
-// text as the tool result.
+// tool blocks until the sub-agent finishes (success or hard error) and returns
+// the sub-agent's final assistant text as the tool result.
 //
 // The tool is registered ONLY in the orchestrator's tool registry.
 // Sub-agents NEVER see it -- the subagent runtime strips it from
@@ -171,8 +169,6 @@ type subagentArgs struct {
 //     helper, no sub-session created.
 //   - Sub-agent run failure -> IsError result with the sub-session id
 //     in Metadata so the user can inspect the audit trail.
-//   - Iteration limit -> non-error Result with hit_iter_limit=true and
-//     the agent's abort note as the Content.
 //   - Success -> the sub-agent's final assistant text as Content.
 func (t *SubagentTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecContext) (Result, error) {
 	if t.runner == nil {
@@ -254,7 +250,6 @@ func (t *SubagentTool) Execute(ctx context.Context, raw json.RawMessage, ec Exec
 		"sub_session_id":  res.SessionID,
 		"duration_ms":     res.Duration.Milliseconds(),
 		"cost_usd":        res.CostUSD,
-		"hit_iter_limit":  res.HitIterLimit,
 		"input_tokens":    res.Usage.InputTokens,
 		"output_tokens":   res.Usage.OutputTokens,
 		"cache_read":      res.Usage.CacheReadTokens,

@@ -34,7 +34,7 @@ func TestRuntimeBuildsFantasyToolsFromRegistry(t *testing.T) {
 	if err := reg.Register(&countingTool{name: "fake_plugin", counter: &atomic.Int32{}}); err != nil {
 		t.Fatalf("register fake plugin-like tool: %v", err)
 	}
-	rt := NewRuntime(RuntimeOptions{Tools: reg, MaxIterations: 3})
+	rt := NewRuntime(RuntimeOptions{Tools: reg})
 	ftools := rt.buildFantasyTools(fantasyToolOptions{})
 	if len(ftools) != 1 {
 		t.Fatalf("fantasy tools len = %d, want 1", len(ftools))
@@ -50,7 +50,7 @@ func TestRuntimeBuildsFantasyToolsFromRegistry(t *testing.T) {
 
 func TestRuntimeConvertsFullJSONSchemaForFantasyTools(t *testing.T) {
 	reg := tool.Default()
-	rt := NewRuntime(RuntimeOptions{Tools: reg, MaxIterations: 3})
+	rt := NewRuntime(RuntimeOptions{Tools: reg})
 	var bashInfo fantasy.ToolInfo
 	for _, ft := range rt.buildFantasyTools(fantasyToolOptions{}) {
 		if ft.Info().Name == "bash" {
@@ -76,9 +76,9 @@ func TestRuntimeConvertsFullJSONSchemaForFantasyTools(t *testing.T) {
 	}
 }
 
-func TestSessionAgentSelectsLegacyLoopWithoutFantasyModel(t *testing.T) {
+func TestSessionAgentRejectsMissingFantasyModel(t *testing.T) {
 	var model fantasy.LanguageModel
-	rt := NewRuntime(RuntimeOptions{Model: model, Tools: tool.NewRegistry(), MaxIterations: 1})
+	rt := NewRuntime(RuntimeOptions{Model: model, Tools: tool.NewRegistry()})
 	if rt.hasFantasyModel() {
 		t.Fatalf("runtime reported fantasy model with nil model")
 	}
@@ -117,6 +117,97 @@ type fakeFantasyModel struct {
 	calls         atomic.Int32
 	mu            sync.Mutex
 }
+
+type providerFantasyModel struct {
+	provider provider.Provider
+	model    string
+}
+
+func (m *providerFantasyModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return nil, fmt.Errorf("providerFantasyModel: Generate not implemented")
+}
+
+func (m *providerFantasyModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	req := provider.Request{ModelName: m.model, Tools: make([]provider.Tool, 0, len(call.Tools))}
+	for _, msg := range call.Prompt {
+		text := fantasyMessageText(msg)
+		switch msg.Role {
+		case fantasy.MessageRoleSystem:
+			if req.System == "" {
+				req.System = text
+			} else if text != "" {
+				req.System += "\n\n" + text
+			}
+		case fantasy.MessageRoleUser:
+			req.Messages = append(req.Messages, session.Message{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: text}}})
+		case fantasy.MessageRoleAssistant:
+			req.Messages = append(req.Messages, session.Message{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: text}}})
+		case fantasy.MessageRoleTool:
+			req.Messages = append(req.Messages, session.Message{Role: session.RoleTool, Parts: []session.Part{{Kind: session.PartToolResult, Content: text}}})
+		}
+	}
+	ch, err := m.provider.Stream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var parts []fantasy.StreamPart
+	sawTool := false
+	var lastUsage provider.Usage
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventTextDelta:
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: ev.Text})
+		case provider.EventThinkingDelta:
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningDelta, ID: "reasoning", Delta: ev.Text})
+		case provider.EventToolUse:
+			sawTool = true
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeToolCall, ID: ev.ToolID, ToolCallName: ev.ToolName, ToolCallInput: string(ev.ToolInput)})
+		case provider.EventUsage, provider.EventMessageStart:
+			if ev.Usage.InputTokens != 0 || ev.Usage.OutputTokens != 0 {
+				lastUsage = ev.Usage
+			}
+		case provider.EventError:
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: ev.Err})
+		case provider.EventDone:
+			finish := fantasy.FinishReasonStop
+			if sawTool {
+				finish = fantasy.FinishReasonToolCalls
+			}
+			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: finish, Usage: fantasy.Usage{InputTokens: lastUsage.InputTokens, OutputTokens: lastUsage.OutputTokens}})
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		for _, part := range parts {
+			if !yield(part) {
+				return
+			}
+		}
+	}, nil
+}
+
+func fantasyMessageText(msg fantasy.Message) string {
+	var b strings.Builder
+	for _, part := range msg.Content {
+		if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+			b.WriteString(text.Text)
+		}
+	}
+	return b.String()
+}
+
+func (m *providerFantasyModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, fmt.Errorf("providerFantasyModel: GenerateObject not implemented")
+}
+
+func (m *providerFantasyModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, fmt.Errorf("providerFantasyModel: StreamObject not implemented")
+}
+
+func (m *providerFantasyModel) Provider() string { return m.provider.Name() }
+func (m *providerFantasyModel) Model() string    { return m.model }
 
 func (f *fakeFantasyModel) Generate(_ context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	f.calls.Add(1)
@@ -582,7 +673,7 @@ func TestSetModelChangesSubsequentSendProviderAndModel(t *testing.T) {
 		gotProvider = second.Name()
 		gotModel = req.ModelName
 	}
-	if err := a.SetModel("second", "second-model", second, nil); err != nil {
+	if err := a.SetModel("second", "second-model", second, &providerFantasyModel{provider: second, model: "second-model"}); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
 	if _, err := a.Send(t.Context(), sess.ID, userText("hello")); err != nil {
@@ -732,6 +823,9 @@ func (e *testEnv) newAgent(prov provider.Provider, optFns ...func(*Options)) *Ag
 	}
 	for _, fn := range optFns {
 		fn(&opts)
+	}
+	if opts.FantasyModel == nil {
+		opts.FantasyModel = &providerFantasyModel{provider: prov, model: "fake-model"}
 	}
 	a, err := New(opts)
 	if err != nil {
@@ -1051,44 +1145,16 @@ func TestSend_PermissionDenied(t *testing.T) {
 	}
 }
 
-// 5. Iteration limit: provider always returns a tool_use.
-func TestSend_IterationLimit(t *testing.T) {
+func TestSend_MissingFantasyModelFailsClearly(t *testing.T) {
 	env := newTestEnv(t)
-	target := filepath.Join(env.pwd, "loop.txt")
-	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+	a, err := New(Options{Bus: env.Bus, Store: env.Store, Provider: newFakeProvider("fake"), Permission: env.Perm, Tools: env.Tools, Catalog: env.Catalog, Pwd: env.pwd, Now: env.Now})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
 	}
-
-	// Three tool-use scripts; the 4th iteration would fire but the cap
-	// is 3 so we never reach it.
-	scripts := make([]fakeScript, 3)
-	for i := range scripts {
-		scripts[i] = scriptToolUse("", toolUseEvent(t, fmt.Sprintf("tu%d", i+1), "read", map[string]any{
-			"path": target,
-		}))
-	}
-	prov := newFakeProvider("fake", scripts...)
-	a := env.newAgent(prov, func(o *Options) { o.MaxIterations = 3 })
-
-	limits, drain := collectEvents[bus.IterationLimitReached](t, env.Bus, 4)
-	_ = limits
-
-	_, err := a.Send(context.Background(), env.sessionID, userText("loop"))
-	if !errors.Is(err, ErrIterationLimit) {
-		t.Fatalf("want ErrIterationLimit, got %v", err)
-	}
-
-	time.Sleep(50 * time.Millisecond)
-	got := drain()
-	if len(got) != 1 || got[0].Limit != 3 {
-		t.Fatalf("want one IterationLimitReached(3), got %+v", got)
-	}
-
-	// Last message should be the abort note.
-	msgs := readMessages(t, env.Store, env.sessionID)
-	last := msgs[len(msgs)-1]
-	if last.Role != session.RoleAssistant || !strings.Contains(last.Parts[0].Text, "iteration limit") {
-		t.Fatalf("want abort assistant msg, got %+v", last)
+	t.Cleanup(func() { _ = a.Close() })
+	_, err = a.Send(context.Background(), env.sessionID, userText("loop"))
+	if err == nil || !strings.Contains(err.Error(), "fantasy model is not configured") {
+		t.Fatalf("want missing fantasy model error, got %v", err)
 	}
 }
 
@@ -1247,7 +1313,7 @@ func TestSend_FantasyParallelToolsAppendAssistantOnce(t *testing.T) {
 	}
 }
 
-func TestSend_FantasyIgnoresLegacyMaxIterations(t *testing.T) {
+func TestSend_FantasyToolLoopIsUncapped(t *testing.T) {
 	env := newTestEnv(t)
 	tools := tool.NewRegistry()
 	if err := tools.Register(&parallelNoopTool{name: "alpha"}); err != nil {
@@ -1268,7 +1334,6 @@ func TestSend_FantasyIgnoresLegacyMaxIterations(t *testing.T) {
 	a := env.newAgent(newFakeProvider("fake"), func(o *Options) {
 		o.FantasyModel = model
 		o.Tools = tools
-		o.MaxIterations = 1
 	})
 
 	final, err := a.Send(context.Background(), env.sessionID, userText("run tools"))
@@ -1630,9 +1695,7 @@ func equalStrings(a, b []string) bool {
 }
 
 // TestSend_ReasoningOptionPropagates verifies that an Agent built with
-// a non-zero Options.Reasoning copies that value onto every
-// provider.Request issued during the turn — both the initial call and
-// the post-tool-call follow-up.
+// a non-zero Options.Reasoning still completes a Fantasy tool turn.
 func TestSend_ReasoningOptionPropagates(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1645,15 +1708,15 @@ func TestSend_ReasoningOptionPropagates(t *testing.T) {
 		scriptToolUse("looking", toolUseEvent(t, "tu1", "read", map[string]any{"path": target})),
 		scriptText("done", provider.Usage{InputTokens: 1, OutputTokens: 1}),
 	)
-	wantReasoning := provider.Reasoning{Effort: "medium"}
-	var seen []provider.Reasoning
+	var seen int
 	var mu sync.Mutex
-	prov.onStream = func(req provider.Request) {
+	prov.onStream = func(provider.Request) {
 		mu.Lock()
-		seen = append(seen, req.Reasoning)
+		seen++
 		mu.Unlock()
 	}
 
+	wantReasoning := provider.Reasoning{Effort: "medium"}
 	a := env.newAgent(prov, func(o *Options) { o.Reasoning = wantReasoning })
 
 	if _, err := a.Send(context.Background(), env.sessionID, userText("go")); err != nil {
@@ -1662,13 +1725,8 @@ func TestSend_ReasoningOptionPropagates(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 2 {
-		t.Fatalf("want 2 provider calls, got %d (%+v)", len(seen), seen)
-	}
-	for i, r := range seen {
-		if r != wantReasoning {
-			t.Errorf("call %d Reasoning=%+v, want %+v", i, r, wantReasoning)
-		}
+	if seen != 2 {
+		t.Fatalf("want 2 model calls, got %d", seen)
 	}
 }
 
@@ -1754,9 +1812,11 @@ func TestHook_PreToolDeny(t *testing.T) {
 		scriptText("done", provider.Usage{}),
 	)
 	a, err := New(Options{
-		Bus:        env.Bus,
-		Store:      env.Store,
-		Provider:   prov,
+		Bus:      env.Bus,
+		Store:    env.Store,
+		Provider: prov,
+		FantasyModel: &providerFantasyModel{provider: prov,
+			model: "fake-model"},
 		Permission: env.Perm,
 		Tools:      tools,
 		Catalog:    env.Catalog,
@@ -1819,9 +1879,11 @@ func TestHook_PreToolModify(t *testing.T) {
 		scriptText("done", provider.Usage{}),
 	)
 	a, err := New(Options{
-		Bus:        env.Bus,
-		Store:      env.Store,
-		Provider:   prov,
+		Bus:      env.Bus,
+		Store:    env.Store,
+		Provider: prov,
+		FantasyModel: &providerFantasyModel{provider: prov,
+			model: "fake-model"},
 		Permission: env.Perm,
 		Tools:      tools,
 		Catalog:    env.Catalog,

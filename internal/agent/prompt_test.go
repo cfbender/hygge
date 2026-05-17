@@ -5,136 +5,90 @@ import (
 	"testing"
 
 	"github.com/cfbender/hygge/internal/agentsmd"
-	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 )
 
-func TestBuildRequest_NoMarker(t *testing.T) {
-	msgs := []*session.Message{
-		{ID: "m1", Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hi"}}},
-	}
-	req := buildRequest(msgs, nil, "be nice", nil, "model-x", nil, nil, nil, provider.Reasoning{})
-	if req.System != "be nice" {
-		t.Fatalf("want unmodified system, got %q", req.System)
-	}
-	if len(req.Messages) != 1 || req.Messages[0].ID != "m1" {
-		t.Fatalf("messages not forwarded: %+v", req.Messages)
-	}
-	if req.ModelName != "model-x" {
-		t.Fatalf("model name not forwarded: %q", req.ModelName)
+func TestComposeSystemPrompt_NoMarker(t *testing.T) {
+	sys := composeSystemPrompt("be nice", nil, nil, nil)
+	if sys != "be nice" {
+		t.Fatalf("want unmodified system, got %q", sys)
 	}
 }
 
-func TestBuildRequest_WithMarker(t *testing.T) {
+func TestComposeSystemPrompt_WithMarker(t *testing.T) {
 	marker := &session.Marker{Summary: "we discussed widgets"}
-	req := buildRequest(nil, marker, "be nice", nil, "", nil, nil, nil, provider.Reasoning{})
-	if !strings.Contains(req.System, "be nice") {
-		t.Fatalf("want original system in result, got %q", req.System)
+	sys := composeSystemPrompt("be nice", marker, nil, nil)
+	if !strings.Contains(sys, "be nice") {
+		t.Fatalf("want original system in result, got %q", sys)
 	}
-	if !strings.Contains(req.System, markerPrefix+"we discussed widgets") {
-		t.Fatalf("want marker summary in system, got %q", req.System)
+	if !strings.Contains(sys, markerPrefix+"we discussed widgets") {
+		t.Fatalf("want marker summary in system, got %q", sys)
 	}
 }
 
-func TestBuildRequest_MarkerAloneWhenNoSystemPrompt(t *testing.T) {
+func TestComposeSystemPrompt_MarkerAloneWhenNoSystemPrompt(t *testing.T) {
 	marker := &session.Marker{Summary: "we discussed widgets"}
-	req := buildRequest(nil, marker, "", nil, "", nil, nil, nil, provider.Reasoning{})
-	if req.System != markerPrefix+"we discussed widgets" {
-		t.Fatalf("unexpected system: %q", req.System)
+	sys := composeSystemPrompt("", marker, nil, nil)
+	if sys != markerPrefix+"we discussed widgets" {
+		t.Fatalf("unexpected system: %q", sys)
 	}
 }
 
-func TestBuildRequest_EmptyMarkerSummaryIgnored(t *testing.T) {
+func TestComposeSystemPrompt_EmptyMarkerSummaryIgnored(t *testing.T) {
 	marker := &session.Marker{Summary: "   "}
-	req := buildRequest(nil, marker, "system", nil, "", nil, nil, nil, provider.Reasoning{})
-	if req.System != "system" {
-		t.Fatalf("want unmodified system for empty marker, got %q", req.System)
+	sys := composeSystemPrompt("system", marker, nil, nil)
+	if sys != "system" {
+		t.Fatalf("want unmodified system for empty marker, got %q", sys)
 	}
 }
 
-func TestBuildRequest_NilMessagesAreSkipped(t *testing.T) {
-	msgs := []*session.Message{
-		nil,
-		{ID: "m1", Role: session.RoleUser},
-		nil,
-	}
-	req := buildRequest(msgs, nil, "", nil, "", nil, nil, nil, provider.Reasoning{})
-	if len(req.Messages) != 1 || req.Messages[0].ID != "m1" {
-		t.Fatalf("nil filter broken: %+v", req.Messages)
-	}
-}
-
-// TestBuildRequest_ForwardsTools tests that tools pass through.
-func TestBuildRequest_ForwardsTools(t *testing.T) {
-	tools := []provider.Tool{{Name: "read"}, {Name: "write"}}
-	req := buildRequest(nil, nil, "", tools, "", nil, nil, nil, provider.Reasoning{})
-	if len(req.Tools) != 2 {
-		t.Fatalf("tools not forwarded: %+v", req.Tools)
-	}
-}
-
-// TestBuildRequest_ForwardsReasoning verifies the typed Reasoning
-// argument lands on the resulting Request verbatim.  The adapters do
-// the wire-format translation; buildRequest's job is just to plumb
-// the value through unchanged.
-func TestBuildRequest_ForwardsReasoning(t *testing.T) {
-	r := provider.Reasoning{Effort: "high", BudgetTokens: 12000}
-	req := buildRequest(nil, nil, "", nil, "", nil, nil, nil, r)
-	if req.Reasoning != r {
-		t.Errorf("Reasoning not forwarded verbatim: got %+v want %+v", req.Reasoning, r)
-	}
-}
-
-// TestBuildRequest_WithLazyBlocks verifies lazy-loaded subdir context
+// TestComposeSystemPrompt_WithLazyBlocks verifies lazy-loaded subdir context
 // is appended to the system prompt under the dedicated header.
-func TestBuildRequest_WithLazyBlocks(t *testing.T) {
+func TestComposeSystemPrompt_WithLazyBlocks(t *testing.T) {
 	blocks := []agentsmd.Block{
 		{Path: "/r/p/AGENTS.md", RelPath: "p/AGENTS.md", Source: agentsmd.SourceProjectSubdir, Content: "subdir rules"},
 	}
-	req := buildRequest(nil, nil, "base", nil, "", nil, blocks, nil, provider.Reasoning{})
-	if !strings.Contains(req.System, "base") {
-		t.Fatalf("base prompt missing: %q", req.System)
+	sys := composeSystemPrompt("base", nil, blocks, nil)
+	if !strings.Contains(sys, "base") {
+		t.Fatalf("base prompt missing: %q", sys)
 	}
-	if !strings.Contains(req.System, "## Additional project context (loaded for this turn)") {
-		t.Fatalf("lazy header missing: %q", req.System)
+	if !strings.Contains(sys, "## Additional project context (loaded for this turn)") {
+		t.Fatalf("lazy header missing: %q", sys)
 	}
-	if !strings.Contains(req.System, "subdir rules") {
-		t.Fatalf("lazy content missing: %q", req.System)
+	if !strings.Contains(sys, "subdir rules") {
+		t.Fatalf("lazy content missing: %q", sys)
 	}
 }
 
-// TestBuildRequest_WithHookSystemPromptAdditions verifies hook-provided
+// TestComposeSystemPrompt_WithHookSystemPromptAdditions verifies hook-provided
 // context is appended to the system prompt without becoming a visible message.
-func TestBuildRequest_WithHookSystemPromptAdditions(t *testing.T) {
-	req := buildRequest(nil, nil, "base", nil, "", nil, nil, []string{"plugin context"}, provider.Reasoning{})
-	if !strings.Contains(req.System, "base") {
-		t.Fatalf("base prompt missing: %q", req.System)
+func TestComposeSystemPrompt_WithHookSystemPromptAdditions(t *testing.T) {
+	sys := composeSystemPrompt("base", nil, nil, []string{"plugin context"})
+	if !strings.Contains(sys, "base") {
+		t.Fatalf("base prompt missing: %q", sys)
 	}
-	if !strings.Contains(req.System, "## Additional hook context (loaded for this turn)") {
-		t.Fatalf("hook header missing: %q", req.System)
+	if !strings.Contains(sys, "## Additional hook context (loaded for this turn)") {
+		t.Fatalf("hook header missing: %q", sys)
 	}
-	if !strings.Contains(req.System, "plugin context") {
-		t.Fatalf("hook context missing: %q", req.System)
-	}
-	if len(req.Messages) != 0 {
-		t.Fatalf("hook context should not create messages: %+v", req.Messages)
+	if !strings.Contains(sys, "plugin context") {
+		t.Fatalf("hook context missing: %q", sys)
 	}
 }
 
-// TestBuildRequest_LazyBlocksAfterMarker verifies the assembly order
+// TestComposeSystemPrompt_LazyBlocksAfterMarker verifies the assembly order
 // when both a marker summary and lazy blocks are present.
-func TestBuildRequest_LazyBlocksAfterMarker(t *testing.T) {
+func TestComposeSystemPrompt_LazyBlocksAfterMarker(t *testing.T) {
 	marker := &session.Marker{Summary: "earlier we talked"}
 	blocks := []agentsmd.Block{
 		{Path: "/r/p/AGENTS.md", RelPath: "p/AGENTS.md", Source: agentsmd.SourceProjectSubdir, Content: "subdir rules"},
 	}
-	req := buildRequest(nil, marker, "base", nil, "", nil, blocks, nil, provider.Reasoning{})
-	markerIdx := strings.Index(req.System, markerPrefix)
-	lazyIdx := strings.Index(req.System, "## Additional project context")
+	sys := composeSystemPrompt("base", marker, blocks, nil)
+	markerIdx := strings.Index(sys, markerPrefix)
+	lazyIdx := strings.Index(sys, "## Additional project context")
 	if markerIdx < 0 || lazyIdx < 0 {
-		t.Fatalf("missing marker or lazy section: %q", req.System)
+		t.Fatalf("missing marker or lazy section: %q", sys)
 	}
 	if markerIdx >= lazyIdx {
-		t.Fatalf("want marker before lazy, got marker=%d lazy=%d in %q", markerIdx, lazyIdx, req.System)
+		t.Fatalf("want marker before lazy, got marker=%d lazy=%d in %q", markerIdx, lazyIdx, sys)
 	}
 }
