@@ -252,8 +252,16 @@ func (a *App) rememberSessionMemoryCmd(value string) tea.Cmd {
 			return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("%s memory unavailable", scope)} }
 		}
 		return func() tea.Msg {
+			var warning string
+			if scope == session.MemoryScopeProject && a.opts.ProjectMemoryGitignoreWarning != nil {
+				var err error
+				warning, err = a.opts.ProjectMemoryGitignoreWarning(a.ctx)
+				if err != nil {
+					return rememberSessionMemoryMsg{err: err}
+				}
+			}
 			_, err := a.opts.RememberMemory(a.ctx, scope, content)
-			return rememberSessionMemoryMsg{content: content, err: err}
+			return rememberSessionMemoryMsg{content: content, warning: warning, err: err}
 		}
 	}
 	if a.opts.Store == nil {

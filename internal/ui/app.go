@@ -133,9 +133,12 @@ type AppOptions struct {
 	SaveAPIKey func(ctx context.Context, providerName, apiKey string) error
 	// RememberMemory persists project/global memory. Session memory uses Store.
 	RememberMemory func(ctx context.Context, scope session.MemoryScope, content string) (*session.Memory, error)
-	ThemeNames     []string
-	LoadTheme      func(ctx context.Context, name string) (*theme.Theme, error)
-	SaveTheme      func(ctx context.Context, name string) error
+	// ProjectMemoryGitignoreWarning returns a warning before the first project memory
+	// write when .hygge/ may become untracked.
+	ProjectMemoryGitignoreWarning func(ctx context.Context) (string, error)
+	ThemeNames                    []string
+	LoadTheme                     func(ctx context.Context, name string) (*theme.Theme, error)
+	SaveTheme                     func(ctx context.Context, name string) error
 	// EditPrompt opens the current prompt in an external editor and returns the
 	// edited prompt. Tests may inject this seam; production falls back to
 	// $VISUAL, then $EDITOR, then vi.
@@ -923,8 +926,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(body) > 80 {
 			body = body[:80] + "…"
 		}
+		title := "Memory saved"
+		if m.warning != "" {
+			title = "Project memory saved"
+			body = m.warning
+		}
 		a.notice = ""
-		return a, a.showToast("Memory saved", body)
+		return a, a.showToast(title, body)
 
 	case sessionsLoadedMsg:
 		// Sessions loaded (or reloaded after rename/delete).
