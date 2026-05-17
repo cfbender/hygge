@@ -133,6 +133,8 @@ type AppOptions struct {
 	SaveAPIKey func(ctx context.Context, providerName, apiKey string) error
 	// RememberMemory persists project/global memory. Session memory uses Store.
 	RememberMemory func(ctx context.Context, scope session.MemoryScope, content string) (*session.Memory, error)
+	// ForgetMemory deletes project/global memory. Session memory uses Store.
+	ForgetMemory func(ctx context.Context, scope session.MemoryScope, memoryID string) (*session.Memory, error)
 	// ProjectMemoryGitignoreWarning returns a warning before the first project memory
 	// write when .hygge/ may become untracked.
 	ProjectMemoryGitignoreWarning func(ctx context.Context) (string, error)
@@ -933,6 +935,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.notice = ""
 		return a, a.showToast(title, body)
+
+	case forgetMemoryMsg:
+		if m.err != nil {
+			a.notice = ""
+			return a, a.showToast("Memory not forgotten", m.err.Error())
+		}
+		a.notice = ""
+		return a, a.showToast("Memory forgotten", m.memoryID)
 
 	case sessionsLoadedMsg:
 		// Sessions loaded (or reloaded after rename/delete).

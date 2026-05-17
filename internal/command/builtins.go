@@ -44,6 +44,7 @@ func builtinCommands() []Command {
 		&reasonCmd{},
 		&yoloCmd{},
 		&rememberCmd{},
+		&forgetCmd{},
 		&versionCmd{},
 	}
 }
@@ -454,6 +455,31 @@ func (*rememberCmd) Execute(_ context.Context, _ App, input string) (Outcome, er
 }
 
 func parseRememberInput(input string) (string, string) {
+	return parseMemoryScopedInput(input)
+}
+
+// --- /forget ---------------------------------------------------------------
+
+type forgetCmd struct{}
+
+func (*forgetCmd) Name() string        { return "forget" }
+func (*forgetCmd) Description() string { return "Forget a remembered fact by memory ID" }
+func (*forgetCmd) Source() string      { return "builtin" }
+func (*forgetCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "memory_id", Description: "memory ID to forget", Required: true}}
+}
+func (*forgetCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	scope, memoryID := parseForgetInput(input)
+	return Outcome{
+		Updates: map[string]string{UpdateForgetMemory: string(scope) + "\n" + memoryID},
+	}, nil
+}
+
+func parseForgetInput(input string) (string, string) {
+	return parseMemoryScopedInput(input)
+}
+
+func parseMemoryScopedInput(input string) (string, string) {
 	input = strings.TrimSpace(input)
 	for _, scope := range []string{"session", "project", "global"} {
 		flag := "--" + scope

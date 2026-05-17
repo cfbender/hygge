@@ -13,6 +13,7 @@ func TestBuiltinSetIsLocked(t *testing.T) {
 		"clear",
 		"compact",
 		"cost",
+		"forget",
 		"fork",
 		"help",
 		"model",

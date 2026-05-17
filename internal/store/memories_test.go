@@ -1,10 +1,12 @@
 package store_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/store"
 )
 
 func TestSessionMemoriesRoundTrip(t *testing.T) {
@@ -39,6 +41,45 @@ func TestSessionMemoriesRoundTrip(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].ID != first.ID || got[1].ID != second.ID {
 		t.Fatalf("memories order/content = %+v, want first then second", got)
+	}
+}
+
+func TestForgetSessionMemorySoftDeletes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	sess, err := s.CreateSession(ctx, session.NewSession{ProjectDir: t.TempDir(), Model: session.ModelRef{Provider: "p", Name: "m"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	first, err := s.RememberSessionMemory(ctx, sess.ID, session.NewMemory{Content: "forget this"})
+	if err != nil {
+		t.Fatalf("RememberSessionMemory first: %v", err)
+	}
+	second, err := s.RememberSessionMemory(ctx, sess.ID, session.NewMemory{Content: "keep this"})
+	if err != nil {
+		t.Fatalf("RememberSessionMemory second: %v", err)
+	}
+
+	forgot, err := s.ForgetSessionMemory(ctx, sess.ID, first.ID)
+	if err != nil {
+		t.Fatalf("ForgetSessionMemory: %v", err)
+	}
+	if forgot.ID != first.ID || forgot.DeletedAt.IsZero() {
+		t.Fatalf("forgot = %+v, want deleted first memory", forgot)
+	}
+	got, err := s.ListSessionMemories(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("ListSessionMemories: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != second.ID {
+		t.Fatalf("active memories = %+v, want only second", got)
+	}
+	_, err = s.ForgetSessionMemory(ctx, sess.ID, first.ID)
+	if !errors.Is(err, session.ErrMemoryNotFound) {
+		t.Fatalf("second forget err = %v, want ErrMemoryNotFound", err)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("err should use session.ErrMemoryNotFound, got store.ErrNotFound: %v", err)
 	}
 }
 

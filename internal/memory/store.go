@@ -101,6 +101,33 @@ func (s *FileStore) Remember(ctx context.Context, scope session.MemoryScope, con
 	return m, nil
 }
 
+// Forget removes an active project or global memory file by id.
+func (s *FileStore) Forget(ctx context.Context, scope session.MemoryScope, memoryID string) (*session.Memory, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(memoryID) == "" {
+		return nil, fmt.Errorf("memory: memory_id required")
+	}
+	memories, err := s.List(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range memories {
+		if m.ID != memoryID {
+			continue
+		}
+		if err := os.Remove(m.Path); err != nil {
+			return nil, fmt.Errorf("memory: forget %s memory %q: %w", scope, memoryID, err)
+		}
+		now := s.now().UTC()
+		m.UpdatedAt = now
+		m.DeletedAt = now
+		return m, nil
+	}
+	return nil, fmt.Errorf("memory: forget %s memory %q: %w", scope, memoryID, session.ErrMemoryNotFound)
+}
+
 // ProjectMemoryGitignoreWarning returns a warning before the first project
 // memory write when .hygge/ is not ignored by git. It never edits .gitignore.
 func (s *FileStore) ProjectMemoryGitignoreWarning(ctx context.Context) (string, error) {
@@ -163,6 +190,11 @@ func (s *FileStore) List(ctx context.Context, scope session.MemoryScope) ([]*ses
 		return out[i].Path < out[j].Path
 	})
 	return out, nil
+}
+
+// MemoryDir returns the directory that backs a project or global memory scope.
+func (s *FileStore) MemoryDir(scope session.MemoryScope) (string, error) {
+	return s.dir(scope)
 }
 
 func (s *FileStore) projectHyggeIgnored(ctx context.Context) (bool, error) {

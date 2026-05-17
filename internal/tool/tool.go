@@ -60,7 +60,7 @@
 // Built-in mapping:
 //
 //   - read, grep, glob, skill, task       → Parallelizable() == true
-//   - bash, write, edit, todo, question   → Parallelizable() == false
+//   - bash, write, edit, remember, forget, todo, question → Parallelizable() == false
 //
 // Plugin tools default to false; opt in via the Lua registration table:
 //
