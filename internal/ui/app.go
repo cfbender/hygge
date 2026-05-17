@@ -131,9 +131,11 @@ type AppOptions struct {
 	// failures are surfaced to the UI without rolling back the runtime switch.
 	SaveModel  func(ctx context.Context, providerName, modelName string) error
 	SaveAPIKey func(ctx context.Context, providerName, apiKey string) error
-	ThemeNames []string
-	LoadTheme  func(ctx context.Context, name string) (*theme.Theme, error)
-	SaveTheme  func(ctx context.Context, name string) error
+	// RememberMemory persists project/global memory. Session memory uses Store.
+	RememberMemory func(ctx context.Context, scope session.MemoryScope, content string) (*session.Memory, error)
+	ThemeNames     []string
+	LoadTheme      func(ctx context.Context, name string) (*theme.Theme, error)
+	SaveTheme      func(ctx context.Context, name string) error
 	// EditPrompt opens the current prompt in an external editor and returns the
 	// edited prompt. Tests may inject this seam; production falls back to
 	// $VISUAL, then $EDITOR, then vi.

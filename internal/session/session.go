@@ -172,7 +172,11 @@ type Memory struct {
 	ID        string
 	Scope     MemoryScope
 	SessionID string
+	Title     string
+	Body      string
 	Content   string
+	Source    string
+	Path      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt time.Time

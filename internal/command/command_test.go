@@ -409,7 +409,7 @@ func TestBuiltinOutcomes(t *testing.T) {
 			cmdName: "remember",
 			input:   "prefers short final summaries",
 			check: func(t *testing.T, o Outcome) {
-				if got := o.Updates[UpdateRememberSessionMemory]; got != "prefers short final summaries" {
+				if got := o.Updates[UpdateRememberSessionMemory]; got != "session\nprefers short final summaries" {
 					t.Errorf("Updates[remember_session_memory]=%q", got)
 				}
 				if o.Notice != "" {
@@ -418,11 +418,21 @@ func TestBuiltinOutcomes(t *testing.T) {
 			},
 		},
 		{
+			name:    "remember-project",
+			cmdName: "remember",
+			input:   "--project use mise run precommit",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateRememberSessionMemory]; got != "project\nuse mise run precommit" {
+					t.Errorf("Updates[remember_session_memory]=%q", got)
+				}
+			},
+		},
+		{
 			name:    "remember-empty",
 			cmdName: "remember",
 			input:   "   ",
 			check: func(t *testing.T, o Outcome) {
-				if got := o.Updates[UpdateRememberSessionMemory]; got != "" {
+				if got := o.Updates[UpdateRememberSessionMemory]; got != "session\n" {
 					t.Errorf("empty remember should route to UI validation, got update %q", got)
 				}
 				if o.Notice != "" {

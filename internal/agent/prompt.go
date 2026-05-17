@@ -134,21 +134,48 @@ func buildLatestUserEnvelope(userText string, memories []*session.Memory) string
 func writeSessionMemories(b *strings.Builder, memories []*session.Memory) {
 	wrote := false
 	for _, memory := range memories {
-		if memory == nil || memory.Scope != session.MemoryScopeSession || !memory.DeletedAt.IsZero() || strings.TrimSpace(memory.Content) == "" {
+		text := memoryText(memory)
+		if memory == nil || !isPromptMemoryScope(memory.Scope) || !memory.DeletedAt.IsZero() || text == "" {
 			continue
 		}
 		wrote = true
-		b.WriteString("    <memory scope=\"session\" id=\"")
+		b.WriteString("    <memory scope=\"")
+		b.WriteString(string(memory.Scope))
+		b.WriteString("\" id=\"")
 		b.WriteString(memory.ID)
 		b.WriteString("\">\n")
+		if strings.TrimSpace(memory.Title) != "" {
+			b.WriteString("      <title>")
+			b.WriteString(cdata(memory.Title))
+			b.WriteString("</title>\n")
+		}
 		b.WriteString("      ")
-		b.WriteString(cdata(memory.Content))
+		b.WriteString(cdata(text))
 		b.WriteString("\n")
 		b.WriteString("    </memory>\n")
 	}
 	if !wrote {
 		b.WriteString("    No active memories.\n")
 	}
+}
+
+func isPromptMemoryScope(scope session.MemoryScope) bool {
+	switch scope {
+	case session.MemoryScopeGlobal, session.MemoryScopeProject, session.MemoryScopeSession:
+		return true
+	default:
+		return false
+	}
+}
+
+func memoryText(memory *session.Memory) string {
+	if memory == nil {
+		return ""
+	}
+	if text := strings.TrimSpace(memory.Body); text != "" {
+		return text
+	}
+	return strings.TrimSpace(memory.Content)
 }
 
 // stripHistoricalTurnContext removes a generated model-facing envelope from a
