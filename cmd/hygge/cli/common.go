@@ -50,6 +50,14 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
+const noProvidersConfiguredMessage = "No providers configured, you must configure one with hygge provider auth before using"
+
+var errNoProvidersConfigured = noProvidersConfiguredError{}
+
+type noProvidersConfiguredError struct{}
+
+func (noProvidersConfiguredError) Error() string { return noProvidersConfiguredMessage }
+
 // runtime is the wired graph of every component the CLI needs.  Returned
 // from bootstrap.  Callers must defer Close to release the SQLite handle
 // and unblock the agent's per-session locks.
@@ -396,6 +404,11 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		_ = stOpen.Close()
 		b.Close()
 		return nil, err
+	}
+	if opts.ProviderFactory == nil && providerOnlyFromDefaults(prov) && !providerHasCredential(cfg.Model.Provider, modelOpts) {
+		_ = stOpen.Close()
+		b.Close()
+		return nil, errNoProvidersConfigured
 	}
 	prv, err := buildProvider(opts.ProviderFactory, cfg, modelOpts)
 	if err != nil {
@@ -1231,6 +1244,37 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
 	return prv, nil
+}
+
+func providerOnlyFromDefaults(prov config.Provenance) bool {
+	for _, src := range prov["modes"] {
+		if src.File != "<defaults>" {
+			return false
+		}
+	}
+	sources := prov["model.provider"]
+	if len(sources) != 1 {
+		return false
+	}
+	return sources[0].File == "<defaults>"
+}
+
+func providerHasCredential(providerName string, opts map[string]any) bool {
+	if opts == nil {
+		opts = map[string]any{}
+	}
+	if key, ok := opts["api_key"].(string); ok && key != "" {
+		return true
+	}
+	if oauth, ok := opts["oauth"].(bool); ok && oauth {
+		return true
+	}
+	if envName := providerEnvVar(providerName); envName != "" {
+		if v, ok := os.LookupEnv(envName); ok && v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // providerEnvVar returns the canonical environment variable name a

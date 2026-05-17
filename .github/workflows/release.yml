@@ -51,7 +51,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o "dist/hygge-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" ./cmd/hygge
+          go build -trimpath -ldflags="-s -w" -o "dist/hygge${{ matrix.ext }}" ./cmd/hygge
 
       - name: Package artifact
         shell: bash
@@ -59,9 +59,9 @@ jobs:
           cd dist
           artifact="hygge-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
-            zip "${artifact}.zip" "${artifact}.exe"
+            zip "${artifact}.zip" "hygge.exe"
           else
-            tar -czf "${artifact}.tar.gz" "${artifact}"
+            tar -czf "${artifact}.tar.gz" "hygge"
           fi
 
       - name: Upload artifact
