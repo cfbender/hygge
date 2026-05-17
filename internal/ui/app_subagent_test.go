@@ -259,35 +259,6 @@ func TestForegroundSubagentEventsStayInSubagentTranscript(t *testing.T) {
 	}
 }
 
-func TestSubagentIterationLimitMarksFailed(t *testing.T) {
-	t.Parallel()
-	app, _ := makeForegroundApp(t)
-	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
-	app.Handle(bus.SubagentStarted{
-		SubSessionID:    "sub-1",
-		ParentSessionID: "fg-session",
-		Type:            "general",
-		Description:     "looped",
-		Model:           "x/y",
-		At:              time.Now().Add(-30 * time.Second),
-	})
-	app.Handle(bus.SubagentCompleted{
-		SubSessionID:    "sub-1",
-		ParentSessionID: "fg-session",
-		Type:            "general",
-		HitIterLimit:    true,
-		At:              time.Now(),
-	})
-	st := app.subagents["sub-1"]
-	if !st.HitIterLimit {
-		t.Fatal("expected HitIterLimit=true")
-	}
-	out := app.View().Content
-	if !strings.Contains(out, "failed (iteration limit)") {
-		t.Errorf("expected failed-banner in view, got:\n%s", out)
-	}
-}
-
 func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)

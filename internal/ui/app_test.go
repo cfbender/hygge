@@ -1461,16 +1461,6 @@ func TestCostUpdatesSidebar(t *testing.T) {
 	}
 }
 
-func TestIterationLimitAppendsSystemMessage(t *testing.T) {
-	t.Parallel()
-	app, _ := newTestApp(t)
-	app.Handle(bus.IterationLimitReached{Limit: 25})
-	out := app.View().Content
-	if !strings.Contains(out, "iteration limit reached") {
-		t.Errorf("expected system message in view, got:\n%s", out)
-	}
-}
-
 func TestModalBlocksInputKeys(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)

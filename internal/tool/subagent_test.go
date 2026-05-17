@@ -261,36 +261,6 @@ func TestSubagentTool_RunnerErrorSurfacesAsIsError(t *testing.T) {
 	}
 }
 
-func TestSubagentTool_IterationLimitReturnedToModel(t *testing.T) {
-	stub := &stubRunner{
-		types: standardTypes(),
-		res: SubagentResult{
-			SessionID:    "sub_4",
-			FinalText:    "iteration limit reached (3)",
-			HitIterLimit: true,
-		},
-	}
-	tt := NewSubagentTool(stub)
-	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
-		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
-	})
-	args := mustJSON(t, map[string]any{
-		"subagent_type": "general",
-		"description":   "loop",
-		"prompt":        "loop",
-	})
-	res, err := tt.Execute(context.Background(), args, ec)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if res.IsError {
-		t.Fatal("iteration limit should not surface as IsError -- it's a soft outcome")
-	}
-	if got := res.Metadata["hit_iter_limit"]; got != true {
-		t.Errorf("Metadata.hit_iter_limit: %v", got)
-	}
-}
-
 func TestSubagentTool_MissingArgs(t *testing.T) {
 	stub := &stubRunner{types: standardTypes()}
 	tt := NewSubagentTool(stub)

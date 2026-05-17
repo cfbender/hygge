@@ -645,7 +645,6 @@ func (a *App) bridge() {
 	subQuestion := bus.Subscribe[bus.QuestionAsked](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subQuestionAnswered := bus.Subscribe[bus.QuestionAnswered](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subMCPStatus := bus.Subscribe[bus.MCPStatusUpdated](a.opts.Bus, bus.SubscribeOptions{BufferSize: 32})
-	subIter := bus.Subscribe[bus.IterationLimitReached](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
 	subSubStart := bus.Subscribe[bus.SubagentStarted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subSubDone := bus.Subscribe[bus.SubagentCompleted](a.opts.Bus, bus.SubscribeOptions{BufferSize: 16})
 	subCmpReq := bus.Subscribe[bus.CompactionRequested](a.opts.Bus, bus.SubscribeOptions{BufferSize: 8})
@@ -676,7 +675,6 @@ func (a *App) bridge() {
 	go forward(subQuestion.C(), a.busCh, stop, subQuestion.Unsubscribe)
 	go forward(subQuestionAnswered.C(), a.busCh, stop, subQuestionAnswered.Unsubscribe)
 	go forward(subMCPStatus.C(), a.busCh, stop, subMCPStatus.Unsubscribe)
-	go forward(subIter.C(), a.busCh, stop, subIter.Unsubscribe)
 	go forward(subSubStart.C(), a.busCh, stop, subSubStart.Unsubscribe)
 	go forward(subSubDone.C(), a.busCh, stop, subSubDone.Unsubscribe)
 	go forward(subCmpReq.C(), a.busCh, stop, subCmpReq.Unsubscribe)
@@ -1876,9 +1874,7 @@ func (a *App) ensureSession(ctx context.Context) (string, error) {
 // Stage C routing: events tagged with a known descendant sub-session id
 // flow into the matching SubagentState; events tagged with the
 // foreground session id flow into the primary path; everything else
-// is dropped.  Events with no SessionID (e.g. IterationLimitReached
-// when the limit was hit by a sub-agent) are always routed to the
-// primary path on the assumption they describe the active focus.
+// is dropped.
 func (a *App) handleBusEvent(ev any) tea.Cmd {
 	// Most bus events may mutate visible messages/chrome. Streaming deltas are
 	// special-cased so users can scroll through large histories smoothly while
@@ -2100,26 +2096,6 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Ready:     e.Ready,
 			Error:     e.Error,
 			ToolCount: e.ToolCount,
-		})
-
-	case bus.IterationLimitReached:
-		// Route iter-limit notices to a sub-agent when the session
-		// matches; otherwise it's a parent-loop event.  The matching
-		// SubagentCompleted will arrive right after with
-		// HitIterLimit=true, so this is mainly a UX nicety in case
-		// the order ever inverts.
-		if a.routeToSubagent(e.SessionID) {
-			if st := a.subagents[e.SessionID]; st != nil {
-				st.HitIterLimit = true
-			}
-			return nil
-		}
-		if !a.isForeground(e.SessionID) {
-			return nil
-		}
-		a.messages = append(a.messages, uiMessage{
-			Role: components.RoleSystem,
-			Raw:  fmt.Sprintf("iteration limit reached (%d)", e.Limit),
 		})
 
 	// --- Compaction events (T2.3) ---
@@ -2695,10 +2671,8 @@ func (a *App) attachSubagentToSubagentMessage(state *components.SubagentState) {
 	}
 }
 
-// onSubagentCompleted reacts to bus.SubagentCompleted.  Marks EndedAt,
-// freezes the running cost/usage with the event's authoritative
-// totals, and surfaces HitIterLimit on the state so the header
-// switches to the failed style.
+// onSubagentCompleted reacts to bus.SubagentCompleted. Marks EndedAt and
+// freezes the running cost/usage with the event's authoritative totals.
 func (a *App) onSubagentCompleted(e bus.SubagentCompleted) tea.Cmd {
 	state, ok := a.subagents[e.SubSessionID]
 	if !ok {
@@ -2709,7 +2683,6 @@ func (a *App) onSubagentCompleted(e bus.SubagentCompleted) tea.Cmd {
 		end = a.opts.Now()
 	}
 	state.EndedAt = end
-	state.HitIterLimit = e.HitIterLimit
 	// CostUSD is the final authoritative cost.  Override the
 	// running counter even if it drifted (the design doc calls
 	// this out explicitly).

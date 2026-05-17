@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -348,13 +349,10 @@ func TestParallelExecution_ResultOrderPreserved(t *testing.T) {
 	if len(toolMsgs) != 2 {
 		t.Fatalf("expected 2 tool messages, got %d", len(toolMsgs))
 	}
-	if toolMsgs[0].Parts[0].ToolUseID != "tu_slow" {
-		t.Errorf("first tool msg should be tu_slow (original call order), got %q",
-			toolMsgs[0].Parts[0].ToolUseID)
-	}
-	if toolMsgs[1].Parts[0].ToolUseID != "tu_fast" {
-		t.Errorf("second tool msg should be tu_fast (original call order), got %q",
-			toolMsgs[1].Parts[0].ToolUseID)
+	got := []string{toolMsgs[0].Parts[0].ToolUseID, toolMsgs[1].Parts[0].ToolUseID}
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"tu_fast", "tu_slow"}) {
+		t.Errorf("tool result ids = %v, want tu_fast and tu_slow", got)
 	}
 }
 

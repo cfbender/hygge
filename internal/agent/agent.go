@@ -11,10 +11,9 @@
 //
 // # The Send loop in one paragraph
 //
-// Send appends the user message, then delegates the active turn to Fantasy
-// when a Fantasy model is configured. Fantasy owns model/tool iteration and is
-// intentionally uncapped: cancellation is context-driven. The legacy provider
-// loop still honors Options.MaxIterations for nil-Fantasy test/fallback seams.
+// Send appends the user message, then delegates the active turn to Fantasy.
+// Fantasy owns model/tool iteration and is intentionally uncapped: cancellation
+// is context-driven. A missing Fantasy model is a configuration error.
 //
 // # Sequential tool execution
 //
@@ -77,15 +76,6 @@ import (
 	"github.com/cfbender/hygge/internal/tool"
 )
 
-// defaultMaxIterations is used by the legacy nil-Fantasy provider loop when
-// [Options.MaxIterations] is zero. Fantasy active turns are uncapped.
-const defaultMaxIterations = 25
-
-// ErrIterationLimit is returned by the legacy nil-Fantasy provider loop when
-// it hits its configured iteration cap without converging. Fantasy active turns
-// are uncapped.
-var ErrIterationLimit = errors.New("agent: iteration limit reached")
-
 // ErrNothingToCompact is returned by Compact when the session contains
 // too few messages since the latest marker to justify summarising.
 var ErrNothingToCompact = errors.New("agent: nothing to compact")
@@ -104,7 +94,7 @@ type Options struct {
 	Provider provider.Provider
 	// FantasyModel, when non-nil, is used by the active turn loop via
 	// fantasy.Agent.Stream. Provider remains required for name/model metadata
-	// and legacy test seams.
+	// and cost lookup.
 	FantasyModel fantasy.LanguageModel
 	// TitleFantasyModel, when non-nil, is used for cheap internal session-title
 	// generation. Nil falls back to FantasyModel.
@@ -117,9 +107,6 @@ type Options struct {
 	Catalog *cost.Catalog
 	// SystemPrompt is the optional system prompt sent on every turn.
 	SystemPrompt string
-	// MaxIterations bounds only the legacy nil-Fantasy provider loop. Fantasy
-	// active turns are uncapped. Zero means defaultMaxIterations (25) for legacy.
-	MaxIterations int
 	// Pwd is the working directory passed to tools via ExecContext.  Empty
 	// means the tool helpers fall back to os.Getwd.
 	Pwd string
@@ -184,11 +171,11 @@ type Agent struct {
 	cancel context.CancelFunc
 	locks  map[string]*sync.Mutex
 	// pendingLazy maps sessionID -> lazy context blocks queued for
-	// the next provider turn.  Drained before each buildRequest in
-	// runLoop.  Guarded by mu.
+	// the next Fantasy model step. Drained before model calls in runLoop.
+	// Guarded by mu.
 	pendingLazy map[string][]agentsmd.Block
 	// pendingSystemAdditions maps sessionID -> one-turn system prompt
-	// additions queued by pre_message hooks. Drained before each provider
+	// additions queued by pre_message hooks. Drained before each model
 	// turn and never persisted into visible message history. Guarded by mu.
 	pendingSystemAdditions map[string][]string
 	// activeModeName is included in pre_message hook input so plugins can
@@ -237,9 +224,6 @@ func New(opts Options) (*Agent, error) {
 	if opts.Catalog == nil {
 		return nil, fmt.Errorf("agent: New: Catalog is required")
 	}
-	if opts.MaxIterations <= 0 {
-		opts.MaxIterations = defaultMaxIterations
-	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -260,10 +244,9 @@ func New(opts Options) (*Agent, error) {
 		queues:                 make(map[string][]QueuedSend),
 	}
 	a.runtime = NewRuntime(RuntimeOptions{
-		Model:         opts.FantasyModel,
-		TitleModel:    opts.TitleFantasyModel,
-		Tools:         opts.Tools,
-		MaxIterations: opts.MaxIterations,
+		Model:      opts.FantasyModel,
+		TitleModel: opts.TitleFantasyModel,
+		Tools:      opts.Tools,
 	})
 	a.session = NewSessionAgent(a, a.runtime)
 	return a, nil
@@ -583,8 +566,8 @@ func (a *Agent) isClosed() bool {
 
 // Send appends a user message to the session and runs the agent loop
 // until the assistant produces a final response with no further tool calls.
-// Fantasy-backed turns are uncapped; the legacy nil-Fantasy loop can still hit
-// ErrIterationLimit. Returns the final committed assistant message.
+// Fantasy-backed turns are uncapped. Returns the final committed assistant
+// message.
 //
 // If a Send is already in flight for the session, the new send is
 // enqueued and nil is returned immediately.  The caller can inspect
@@ -602,7 +585,6 @@ func (a *Agent) isClosed() bool {
 //   - bus.ToolCallRequested                   per tool call
 //   - bus.ToolCallCompleted                   per tool call
 //   - bus.MessageAppended (tool result)       per tool call
-//   - bus.IterationLimitReached               if the legacy loop cap is hit
 //   - bus.TurnCompleted                       after a successful turn
 //   - bus.QueueChanged                        when queue depth changes
 //

@@ -246,19 +246,6 @@ type AssistantThinkingDelta struct {
 	At time.Time
 }
 
-// IterationLimitReached fires when the agent loop hits its configured
-// maximum iteration count and aborts.  The agent persists an assistant
-// message describing the abort and returns ErrIterationLimit to the caller.
-type IterationLimitReached struct {
-	// SessionID is the session whose loop hit the limit.
-	SessionID string
-	// Limit is the configured maximum number of iterations.
-	Limit int
-	// At is the wall-clock time the limit was hit.
-	// Populated by the caller; the bus does not set this field.
-	At time.Time
-}
-
 // ContextUsageUpdated fires after each provider response with the current window usage.
 type ContextUsageUpdated struct {
 	// SessionID is the session whose context window was measured.
@@ -418,8 +405,8 @@ type TurnStarted struct {
 }
 
 // TurnCompleted fires after the agent loop finishes a full assistant turn
-// successfully (no error, no iteration-limit hit).  The UI and notification
-// layer use this to optionally alert the user that the assistant is ready.
+// successfully. The UI and notification layer use this to optionally alert the
+// user that the assistant is ready.
 type TurnCompleted struct {
 	// SessionID is the session whose turn completed.
 	SessionID string
@@ -427,8 +414,7 @@ type TurnCompleted struct {
 	At time.Time
 }
 
-// SubagentCompleted fires when a sub-agent finishes -- success,
-// iteration-limit abort, or hard failure.  Pairs 1:1 with
+// SubagentCompleted fires when a sub-agent finishes. Pairs 1:1 with
 // [SubagentStarted].
 type SubagentCompleted struct {
 	// SubSessionID is the id of the sub-session.
@@ -445,9 +431,6 @@ type SubagentCompleted struct {
 	// does NOT roll this into the parent's totals; it is surfaced
 	// here so observers can show a per-sub-agent breakdown.
 	CostUSD float64
-	// HitIterLimit is true when the sub-agent loop terminated
-	// because it hit the configured iteration cap.
-	HitIterLimit bool
 	// At is the wall-clock time the sub-agent finished.
 	At time.Time
 }
