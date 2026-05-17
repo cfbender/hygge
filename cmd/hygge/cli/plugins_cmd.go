@@ -491,6 +491,8 @@ hygge.register_tool {
         properties = {
             name = { type = "string" },
         },
+        required = { "name" },
+        additionalProperties = false,
     },
     execute = function(ctx, input)
         local who = "World"

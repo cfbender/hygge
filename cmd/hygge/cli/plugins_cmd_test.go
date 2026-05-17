@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -215,7 +216,7 @@ func TestPluginsTypesInstallPreservesExistingLuaRC(t *testing.T) {
 }
 
 func TestPluginsDevInitWritesScaffoldAndTypes(t *testing.T) {
-	hermeticHome(t)
+	home := hermeticHome(t)
 	dir := filepath.Join(t.TempDir(), "My Plugin")
 
 	root := NewRootCmd()
@@ -248,5 +249,42 @@ func TestPluginsDevInitWritesScaffoldAndTypes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".luarc.json")); err != nil {
 		t.Fatalf("expected .luarc.json: %v", err)
+	}
+
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	cfgBody := `[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[plugins]
+sources = ["local:` + dir + `"]
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o600); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	hello, ok := rt.Tools.Get("hello_world")
+	if !ok {
+		t.Fatal("scaffolded hello_world tool not registered")
+	}
+	schema := hello.InputSchema()
+	required, ok := schema["required"].([]any)
+	if !ok {
+		t.Fatalf("hello_world required = %T (%#v), want []any", schema["required"], schema["required"])
+	}
+	if len(required) != 1 || required[0] != "name" {
+		t.Fatalf("hello_world required = %#v, want [name]", required)
+	}
+	if schema["additionalProperties"] != false {
+		t.Fatalf("hello_world additionalProperties = %#v, want false", schema["additionalProperties"])
 	}
 }
