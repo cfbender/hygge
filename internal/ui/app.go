@@ -912,6 +912,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case rememberSessionMemoryMsg:
+		if m.err != nil {
+			a.notice = ""
+			return a, a.showToast("Memory not saved", m.err.Error())
+		}
+		body := m.content
+		if len(body) > 80 {
+			body = body[:80] + "…"
+		}
+		a.notice = ""
+		return a, a.showToast("Memory saved", body)
+
 	case sessionsLoadedMsg:
 		// Sessions loaded (or reloaded after rename/delete).
 		a.sessionsModal.Sessions = m.sessions

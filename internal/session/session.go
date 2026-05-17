@@ -153,6 +153,37 @@ type Marker struct {
 	CreatedAt        time.Time
 }
 
+// MemoryScope identifies where a remembered fact applies. Slice 3 persists
+// session-scoped memories; project/global scopes are reserved for the Markdown
+// file-backed memory slices.
+type MemoryScope string
+
+const (
+	// MemoryScopeSession applies only to one conversation session.
+	MemoryScopeSession MemoryScope = "session"
+	// MemoryScopeProject applies to a project directory.
+	MemoryScopeProject MemoryScope = "project"
+	// MemoryScopeGlobal applies across projects for the current user.
+	MemoryScopeGlobal MemoryScope = "global"
+)
+
+// Memory is a remembered fact that can be injected into future turns.
+type Memory struct {
+	ID        string
+	Scope     MemoryScope
+	SessionID string
+	Content   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt time.Time
+}
+
+// NewMemory is the input to Store.RememberSessionMemory. ID, Scope, and
+// timestamps are assigned by the Store for the session-backed slice.
+type NewMemory struct {
+	Content string
+}
+
 // TodoStatus is the persisted status for a lightweight session todo item.
 type TodoStatus string
 
@@ -329,6 +360,12 @@ type Store interface {
 	// in chronological order (oldest first).  Returns an empty slice (not
 	// an error) when no markers exist.
 	ListMarkersForSession(ctx context.Context, sessionID string) ([]*Marker, error)
+
+	// RememberSessionMemory stores a new active memory scoped to sessionID.
+	RememberSessionMemory(ctx context.Context, sessionID string, in NewMemory) (*Memory, error)
+
+	// ListSessionMemories returns active session memories in creation order.
+	ListSessionMemories(ctx context.Context, sessionID string) ([]*Memory, error)
 
 	// ReplaceSessionTodos stores the full current todo list for a session.
 	ReplaceSessionTodos(ctx context.Context, sessionID string, items []TodoItem) (TodoSummary, error)

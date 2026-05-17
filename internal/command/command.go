@@ -84,6 +84,10 @@ const (
 	// UpdateYolo asks the TUI to toggle reduced-confirmation mode.
 	// Value: "on" | "off" | "toggle".
 	UpdateYolo = "yolo"
+
+	// UpdateRememberSessionMemory asks the TUI to persist a session-scoped
+	// memory. Value shape: raw memory content typed after /remember.
+	UpdateRememberSessionMemory = "remember_session_memory"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].

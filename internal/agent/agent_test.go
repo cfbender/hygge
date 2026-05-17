@@ -655,6 +655,36 @@ func TestSetSystemPromptChangesSubsequentSendPrompt(t *testing.T) {
 	}
 }
 
+func TestSendInjectsSessionMemoriesIntoLatestUserEnvelope(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := env.Store.RememberSessionMemory(t.Context(), env.sessionID, session.NewMemory{Content: "prefers focused verification"}); err != nil {
+		t.Fatalf("RememberSessionMemory: %v", err)
+	}
+	prov := newFakeProvider("fake", scriptText("ok", provider.Usage{}))
+	a := env.newAgent(prov)
+
+	var latestUser string
+	prov.onStream = func(req provider.Request) {
+		if len(req.Messages) == 0 {
+			t.Fatal("provider request had no messages")
+		}
+		latest := req.Messages[len(req.Messages)-1]
+		if latest.Role != session.RoleUser || len(latest.Parts) == 0 {
+			t.Fatalf("latest provider message = %+v, want user text", latest)
+		}
+		latestUser = latest.Parts[0].Text
+	}
+	if _, err := a.Send(t.Context(), env.sessionID, userText("please do it")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if !strings.Contains(latestUser, `<memory scope="session"`) || !strings.Contains(latestUser, "prefers focused verification") {
+		t.Fatalf("latest user envelope missing session memory:\n%s", latestUser)
+	}
+	if !strings.Contains(latestUser, "please do it") || !strings.Contains(latestUser, userRequestOpen) {
+		t.Fatalf("latest user envelope missing raw request:\n%s", latestUser)
+	}
+}
+
 func TestSetModelChangesSubsequentSendProviderAndModel(t *testing.T) {
 	env := newTestEnv(t)
 	first := newFakeProvider("first", scriptText("one", provider.Usage{}))
@@ -1380,7 +1410,7 @@ func TestToFantasyMessagesSynthesizesMissingToolResults(t *testing.T) {
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "try again"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
 	if len(fmsgs) != 4 {
 		t.Fatalf("fantasy messages len = %d, want 4: %+v", len(fmsgs), fmsgs)
 	}
@@ -1407,7 +1437,7 @@ func TestToFantasyMessagesWrapsOnlyLatestUserMessage(t *testing.T) {
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
 	if len(fmsgs) != 3 {
 		t.Fatalf("fantasy messages len = %d, want 3: %+v", len(fmsgs), fmsgs)
 	}
@@ -1428,12 +1458,12 @@ func TestToFantasyMessagesWrapsOnlyLatestUserMessage(t *testing.T) {
 
 func TestToFantasyMessagesStripsHistoricalTurnContext(t *testing.T) {
 	msgs := []*session.Message{
-		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: buildLatestUserEnvelope("historical raw request")}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: buildLatestUserEnvelope("historical raw request", nil)}}},
 		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "older answer"}}},
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
 	older := fantasyMessageText(fmsgs[0])
 	if older != "historical raw request" {
 		t.Fatalf("older user message = %q, want raw request", older)
