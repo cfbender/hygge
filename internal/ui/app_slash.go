@@ -102,6 +102,10 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			a.memoryModal = components.MemoryModal{Theme: a.opts.Theme, ForgetOnly: forgetOnly}
 			a.updateInputFocus()
 			return tea.Batch(append(cmds, a.openMemoryModal())...)
+		case command.ModalRememberMemory:
+			a.openOverlay(overlayMemoryRemember)
+			a.rememberScopeModal = components.RememberScopeModal{Theme: a.opts.Theme, Content: out.Updates[command.UpdateRememberMemoryDraft]}
+			a.updateInputFocus()
 		case command.ModalCompactConfirm:
 			// Populate the modal with live session metadata.
 			msgCount := a.resolveCompactionMessageCount()
@@ -205,6 +209,8 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		return a.switchYoloCmd(value)
 	case command.UpdateRememberSessionMemory:
 		return a.rememberSessionMemoryCmd(value)
+	case command.UpdateRememberMemoryDraft:
+		return nil
 	case command.UpdateForgetMemory:
 		return a.forgetMemoryCmd(value)
 	case command.UpdateReasoning:

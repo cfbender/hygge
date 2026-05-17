@@ -534,7 +534,7 @@ func TestDefaultSystemPromptGuidesToolNarration(t *testing.T) {
 			t.Fatalf("defaultSystemPrompt missing %q:\n%s", want, defaultSystemPrompt)
 		}
 	}
-	for _, want := range []string{"<hygge_system_contract>", "<instruction_precedence>", "<memory_policy>", "<untrusted_context_policy>", "irreversible actions"} {
+	for _, want := range []string{"<hygge_system_contract>", "<instruction_precedence>", "<memory_policy>", "<untrusted_context_policy>", "irreversible actions", "propose memories", "session-scoped memories autonomously", "explicit user confirmation before saving inferred project/global memories"} {
 		if !strings.Contains(defaultSystemPrompt, want) {
 			t.Fatalf("defaultSystemPrompt missing hardened section/detail %q:\n%s", want, defaultSystemPrompt)
 		}

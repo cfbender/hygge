@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/cfbender/hygge/internal/bus"
@@ -67,13 +68,29 @@ func TestRememberToolRejectsLikelySecretForAllScopes(t *testing.T) {
 	}
 }
 
+func TestRememberToolProjectMemoryRequiresUserConfirmation(t *testing.T) {
+	projectDir := t.TempDir()
+	store := memory.NewFileStore(memory.FileStoreOptions{ProjectDir: projectDir, HomeDir: t.TempDir()})
+	tt := newRememberTool(nil, store)
+	res, err := tt.Execute(context.Background(), json.RawMessage(`{"scope":"project","content":"use mise run precommit"}`), ExecContext{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !res.IsError || res.Metadata["error"] != "confirmation_required" {
+		t.Fatalf("result = %+v, want confirmation_required IsError", res)
+	}
+	if !strings.Contains(res.Content, "explicit user confirmation") {
+		t.Fatalf("content = %q, want confirmation guidance", res.Content)
+	}
+}
+
 func TestRememberToolProjectMemoryRequiresPermission(t *testing.T) {
 	projectDir := t.TempDir()
 	rec := newRecordingResponder(permissionDecision(permission.ActionAllow))
 	e, b := builtinTestEngine(t, rec.decide)
 	tt := newRememberTool(nil, memory.NewFileStore(memory.FileStoreOptions{ProjectDir: projectDir, HomeDir: t.TempDir()}))
 
-	res, err := tt.Execute(context.Background(), json.RawMessage(`{"scope":"project","content":"use mise run precommit"}`), newExecContext(b, e, projectDir))
+	res, err := tt.Execute(context.Background(), json.RawMessage(`{"scope":"project","content":"use mise run precommit","confirmed_by_user":true}`), newExecContext(b, e, projectDir))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -83,6 +100,26 @@ func TestRememberToolProjectMemoryRequiresPermission(t *testing.T) {
 	reqs := rec.snapshot()
 	if len(reqs) != 1 || reqs[0].Category != string(permission.CategoryFileWrite) || reqs[0].ToolName != "remember" {
 		t.Fatalf("permission requests = %+v", reqs)
+	}
+}
+
+func TestRememberToolSchemaDocumentsAutonomousMemoryPolicy(t *testing.T) {
+	tt := newRememberTool(nil, nil)
+	desc := tt.Description()
+	for _, want := range []string{"session task constraints autonomously", "project/global memories require explicit user confirmation"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing %q:\n%s", want, desc)
+		}
+	}
+	schemaBytes, err := json.Marshal(tt.InputSchema())
+	if err != nil {
+		t.Fatalf("Marshal schema: %v", err)
+	}
+	schema := string(schemaBytes)
+	for _, want := range []string{"confirmed_by_user", "Required true for project/global memories", "confirmed a suggestion"} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("schema missing %q:\n%s", want, schema)
+		}
 	}
 }
 

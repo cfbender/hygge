@@ -379,11 +379,12 @@ type App struct {
 
 	// sessionsModal holds the live state of the sessions picker
 	// when activeModal == "sessions".
-	sessionsModal components.SessionsModal
-	memoryModal   components.MemoryModal
-	modelModal    components.ModelModal
-	apiKeyModal   components.APIKeyModal
-	themeModal    components.ThemeModal
+	sessionsModal      components.SessionsModal
+	memoryModal        components.MemoryModal
+	rememberScopeModal components.RememberScopeModal
+	modelModal         components.ModelModal
+	apiKeyModal        components.APIKeyModal
+	themeModal         components.ThemeModal
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -1194,6 +1195,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleSessionsModalKey(k)
 		case overlayMemory, overlayMemoryForget:
 			return a.handleMemoryModalKey(k)
+		case overlayMemoryRemember:
+			return a.handleRememberScopeModalKey(k)
 		case overlayCompactConfirm:
 			return a.handleCompactionModalKey(k)
 		case overlayHelp:
@@ -3404,7 +3407,7 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme:
+		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
@@ -3810,6 +3813,41 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 
 	case components.DeleteSessionAction:
 		return a.applyDeleteSession(m.ID)
+	}
+	return nil
+}
+
+// --- Remember scope modal integration ---------------------------------------
+
+func (a *App) handleRememberScopeModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.RememberScopeKey{Name: k.String()}
+	switch k.String() {
+	case "up":
+		sk.Name = "up"
+	case "down":
+		sk.Name = "down"
+	case "enter":
+		sk.Name = "enter"
+	case "esc":
+		sk.Name = "esc"
+	}
+
+	updated, msg := a.rememberScopeModal.HandleKey(sk)
+	a.rememberScopeModal = updated
+	if msg == nil {
+		return a, nil
+	}
+	return a, a.applyRememberScopeModalMsg(msg)
+}
+
+func (a *App) applyRememberScopeModalMsg(msg components.RememberScopeModalMsg) tea.Cmd {
+	switch m := msg.(type) {
+	case components.CloseRememberScopeModal:
+		a.closeOverlay(overlayMemoryRemember)
+		return nil
+	case components.RememberScopeAction:
+		a.closeOverlay(overlayMemoryRemember)
+		return a.rememberSessionMemoryCmd(string(m.Scope) + "\n" + m.Content)
 	}
 	return nil
 }

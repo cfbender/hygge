@@ -407,15 +407,18 @@ func TestBuiltinOutcomes(t *testing.T) {
 			},
 		},
 		{
-			name:    "remember",
+			name:    "remember-picker",
 			cmdName: "remember",
 			input:   "prefers short final summaries",
 			check: func(t *testing.T, o Outcome) {
-				if got := o.Updates[UpdateRememberSessionMemory]; got != "session\nprefers short final summaries" {
-					t.Errorf("Updates[remember_session_memory]=%q", got)
+				if o.OpenModal != ModalRememberMemory {
+					t.Errorf("OpenModal=%q, want %q", o.OpenModal, ModalRememberMemory)
+				}
+				if got := o.Updates[UpdateRememberMemoryDraft]; got != "prefers short final summaries" {
+					t.Errorf("Updates[remember_memory_draft]=%q", got)
 				}
 				if o.Notice != "" {
-					t.Errorf("remember should let the UI report save/failure state, got notice %q", o.Notice)
+					t.Errorf("remember should let the UI choose scope, got notice %q", o.Notice)
 				}
 			},
 		},
@@ -434,8 +437,11 @@ func TestBuiltinOutcomes(t *testing.T) {
 			cmdName: "remember",
 			input:   "   ",
 			check: func(t *testing.T, o Outcome) {
-				if got := o.Updates[UpdateRememberSessionMemory]; got != "session\n" {
-					t.Errorf("empty remember should route to UI validation, got update %q", got)
+				if o.OpenModal != ModalRememberMemory {
+					t.Errorf("OpenModal=%q, want %q", o.OpenModal, ModalRememberMemory)
+				}
+				if got := o.Updates[UpdateRememberMemoryDraft]; got != "" {
+					t.Errorf("empty remember draft=%q, want empty", got)
 				}
 				if o.Notice != "" {
 					t.Errorf("remember should not use notice, got %q", o.Notice)
