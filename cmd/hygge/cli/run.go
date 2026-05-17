@@ -273,7 +273,8 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}
 			return err
 		},
-		ThemeNames: theme.KnownNames(theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir}),
+		RememberMemory: rt.MemoryStore.Remember,
+		ThemeNames:     theme.KnownNames(theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir}),
 		LoadTheme: func(_ context.Context, name string) (*theme.Theme, error) {
 			return theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
 		},

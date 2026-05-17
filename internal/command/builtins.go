@@ -447,10 +447,24 @@ func (*rememberCmd) Args() []ArgSpec {
 	return []ArgSpec{{Name: "fact", Description: "fact to remember for this session", Required: true}}
 }
 func (*rememberCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
-	fact := strings.TrimSpace(input)
+	scope, fact := parseRememberInput(input)
 	return Outcome{
-		Updates: map[string]string{UpdateRememberSessionMemory: fact},
+		Updates: map[string]string{UpdateRememberSessionMemory: string(scope) + "\n" + fact},
 	}, nil
+}
+
+func parseRememberInput(input string) (string, string) {
+	input = strings.TrimSpace(input)
+	for _, scope := range []string{"session", "project", "global"} {
+		flag := "--" + scope
+		if input == flag {
+			return scope, ""
+		}
+		if rest, ok := strings.CutPrefix(input, flag+" "); ok {
+			return scope, strings.TrimSpace(rest)
+		}
+	}
+	return "session", input
 }
 
 // --- /version -------------------------------------------------------------

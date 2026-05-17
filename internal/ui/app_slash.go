@@ -243,9 +243,18 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 }
 
 func (a *App) rememberSessionMemoryCmd(value string) tea.Cmd {
-	content := strings.TrimSpace(value)
+	scope, content := parseRememberUpdate(value)
 	if content == "" {
 		return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("usage: /remember <fact>")} }
+	}
+	if scope == session.MemoryScopeProject || scope == session.MemoryScopeGlobal {
+		if a.opts.RememberMemory == nil {
+			return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("%s memory unavailable", scope)} }
+		}
+		return func() tea.Msg {
+			_, err := a.opts.RememberMemory(a.ctx, scope, content)
+			return rememberSessionMemoryMsg{content: content, err: err}
+		}
 	}
 	if a.opts.Store == nil {
 		return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("no store configured")} }
@@ -264,6 +273,20 @@ func (a *App) rememberSessionMemoryCmd(value string) tea.Cmd {
 		}
 		_, err = a.opts.Store.RememberSessionMemory(a.ctx, sessionID, session.NewMemory{Content: content})
 		return rememberSessionMemoryMsg{content: content, err: err}
+	}
+}
+
+func parseRememberUpdate(value string) (session.MemoryScope, string) {
+	scopeText, content, ok := strings.Cut(value, "\n")
+	if !ok {
+		return session.MemoryScopeSession, strings.TrimSpace(value)
+	}
+	scope := session.MemoryScope(strings.TrimSpace(scopeText))
+	switch scope {
+	case session.MemoryScopeSession, session.MemoryScopeProject, session.MemoryScopeGlobal:
+		return scope, strings.TrimSpace(content)
+	default:
+		return session.MemoryScopeSession, strings.TrimSpace(content)
 	}
 }
 

@@ -655,13 +655,24 @@ func TestSetSystemPromptChangesSubsequentSendPrompt(t *testing.T) {
 	}
 }
 
+type staticMemoryLoader []*session.Memory
+
+func (l staticMemoryLoader) ListMemories(context.Context) ([]*session.Memory, error) {
+	return append([]*session.Memory(nil), l...), nil
+}
+
 func TestSendInjectsSessionMemoriesIntoLatestUserEnvelope(t *testing.T) {
 	env := newTestEnv(t)
 	if _, err := env.Store.RememberSessionMemory(t.Context(), env.sessionID, session.NewMemory{Content: "prefers focused verification"}); err != nil {
 		t.Fatalf("RememberSessionMemory: %v", err)
 	}
 	prov := newFakeProvider("fake", scriptText("ok", provider.Usage{}))
-	a := env.newAgent(prov)
+	a := env.newAgent(prov, func(o *Options) {
+		o.MemoryLoader = staticMemoryLoader{
+			{ID: "01GLOBAL", Scope: session.MemoryScopeGlobal, Content: "global preference"},
+			{ID: "01PROJECT", Scope: session.MemoryScopeProject, Content: "project preference"},
+		}
+	})
 
 	var latestUser string
 	prov.onStream = func(req provider.Request) {
@@ -680,6 +691,7 @@ func TestSendInjectsSessionMemoriesIntoLatestUserEnvelope(t *testing.T) {
 	if !strings.Contains(latestUser, `<memory scope="session"`) || !strings.Contains(latestUser, "prefers focused verification") {
 		t.Fatalf("latest user envelope missing session memory:\n%s", latestUser)
 	}
+	assertPromptOrder(t, latestUser, `scope="global"`, `scope="project"`, `scope="session"`)
 	if !strings.Contains(latestUser, "please do it") || !strings.Contains(latestUser, userRequestOpen) {
 		t.Fatalf("latest user envelope missing raw request:\n%s", latestUser)
 	}

@@ -165,10 +165,19 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load messages: %w", err)
 	}
-	memories, err := a.opts.Store.ListSessionMemories(ctx, sessionID)
+	var memories []*session.Memory
+	if a.opts.MemoryLoader != nil {
+		loaded, err := a.opts.MemoryLoader.ListMemories(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("agent: load file-backed memories: %w", err)
+		}
+		memories = append(memories, loaded...)
+	}
+	sessionMemories, err := a.opts.Store.ListSessionMemories(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load session memories: %w", err)
 	}
+	memories = append(memories, sessionMemories...)
 	lazyBlocks := a.drainPendingLazy(sessionID)
 	systemPromptAdditions := a.drainPendingSystemAdditions(sessionID)
 	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), lazyBlocks, systemPromptAdditions, memories)

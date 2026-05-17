@@ -568,6 +568,30 @@ func TestSlashCommandRememberRequiresPreviousUserMessage(t *testing.T) {
 	}
 }
 
+func TestSlashCommandRememberProjectUsesFileMemorySeam(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	var gotScope session.MemoryScope
+	var gotContent string
+	app.opts.RememberMemory = func(_ context.Context, scope session.MemoryScope, content string) (*session.Memory, error) {
+		gotScope = scope
+		gotContent = content
+		return &session.Memory{Scope: scope, Content: content}, nil
+	}
+
+	typeInto(app, "/remember --project use mise run precommit")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected remember cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	if gotScope != session.MemoryScopeProject || gotContent != "use mise run precommit" {
+		t.Fatalf("remember seam got scope=%q content=%q", gotScope, gotContent)
+	}
+	if app.toast == nil || app.toast.title != "Memory saved" {
+		t.Fatalf("toast = %+v, want Memory saved", app.toast)
+	}
+}
+
 func TestSlashCommandNewStartsFreshSessionAndClearAliases(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

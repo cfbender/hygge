@@ -35,6 +35,7 @@ import (
 	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/mcp"
+	"github.com/cfbender/hygge/internal/memory"
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/plugin"
 	"github.com/cfbender/hygge/internal/provider"
@@ -75,6 +76,7 @@ type appRuntime struct {
 	Tools           *tool.Registry
 	Catalog         *cost.Catalog
 	Agent           *agent.Agent
+	MemoryStore     *memory.FileStore
 	Theme           *theme.Theme
 	Skills          *skill.Registry
 	Subagents       *subagent.Registry
@@ -575,6 +577,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 
 	contextWindow := lookupContextWindow(ctx, prv, cfg.Model.Name)
+	memoryStore := memory.NewFileStore(memory.FileStoreOptions{ProjectDir: opts.Pwd, HomeDir: opts.HomeDir, XDGConfigHome: xdgConfig, Now: opts.Now})
 
 	// Phase: skills load
 	t0 = time.Now()
@@ -771,6 +774,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		SystemPrompt:      sysPrompt,
 		Now:               opts.Now,
 		LazyContext:       lazyTracker,
+		MemoryLoader:      memoryStore,
 		Reasoning:         resolveReasoning(cfg, opts.ReasoningOverride),
 		Hooks:             hookReg,
 	})
@@ -807,6 +811,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Tools:            tools,
 		Catalog:          catalog,
 		Agent:            ag,
+		MemoryStore:      memoryStore,
 		Theme:            thm,
 		Skills:           skillReg,
 		Subagents:        subagentReg,

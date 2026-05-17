@@ -127,6 +127,9 @@ type Options struct {
 	// the seen-dir set is shared, which is the intended behaviour
 	// for one workspace).
 	LazyContext *agentsmd.LazyTracker
+	// MemoryLoader, when non-nil, loads file-backed global/project memories for
+	// prompt injection. Session memories are always loaded from Store.
+	MemoryLoader MemoryLoader
 	// Reasoning is the session-scoped reasoning knob copied onto
 	// every [provider.Request] this agent issues.  The zero value
 	// means "no reasoning" — adapters that support reasoning will
@@ -146,6 +149,11 @@ type Options struct {
 	// 0 disables the suggestion.  Default 80 (supplied by cmd/hygge/cli
 	// from config.Compaction.ThresholdPct).
 	CompactionThresholdPct float64
+}
+
+// MemoryLoader provides non-session memories in prompt-injection order.
+type MemoryLoader interface {
+	ListMemories(ctx context.Context) ([]*session.Memory, error)
 }
 
 // Agent is the orchestrator.  Construct via [New]; the zero value is not
