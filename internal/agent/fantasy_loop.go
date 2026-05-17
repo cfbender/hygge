@@ -421,15 +421,30 @@ func toFantasyMessages(
 			}
 		}
 	}
-	for _, m := range msgs {
+	latestUserIdx := -1
+	for i, m := range msgs {
+		if m != nil && m.Role == session.RoleUser {
+			latestUserIdx = i
+		}
+	}
+	for i, m := range msgs {
 		if m == nil {
 			continue
 		}
 		fm := fantasy.Message{Role: toFantasyRole(m.Role)}
+		if i == latestUserIdx && m.Role == session.RoleUser {
+			fm.Content = append(fm.Content, fantasy.TextPart{Text: buildLatestUserEnvelope(modelFacingUserText(m))})
+			out = append(out, fm)
+			continue
+		}
 		for _, p := range m.Parts {
 			switch p.Kind {
 			case session.PartText:
-				fm.Content = append(fm.Content, fantasy.TextPart{Text: p.Text})
+				text := p.Text
+				if m.Role == session.RoleUser {
+					text = stripHistoricalTurnContext(text)
+				}
+				fm.Content = append(fm.Content, fantasy.TextPart{Text: text})
 			case session.PartThinking:
 				fm.Content = append(fm.Content, fantasy.ReasoningPart{Text: p.Text})
 			case session.PartToolUse:
@@ -454,6 +469,23 @@ func toFantasyMessages(
 		}
 	}
 	return out
+}
+
+func modelFacingUserText(m *session.Message) string {
+	if m == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range m.Parts {
+		if p.Kind != session.PartText {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(stripHistoricalTurnContext(p.Text))
+	}
+	return b.String()
 }
 
 const orphanedToolCallMessage = "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"

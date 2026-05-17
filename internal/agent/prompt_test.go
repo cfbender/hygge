@@ -92,3 +92,52 @@ func TestComposeSystemPrompt_LazyBlocksAfterMarker(t *testing.T) {
 		t.Fatalf("want marker before lazy, got marker=%d lazy=%d in %q", markerIdx, lazyIdx, sys)
 	}
 }
+
+func TestBuildLatestUserEnvelope_OrderAndRawRequest(t *testing.T) {
+	envelope := buildLatestUserEnvelope("please inspect <file> and keep ]]> intact")
+	for _, want := range []string{
+		turnContextOpen,
+		"<workspace_state>",
+		"<editor_state>",
+		"<terminal_state>",
+		"<attached_context>",
+		"<memories>",
+		"<critical_turn_reminders>",
+		userRequestOpen,
+		turnContextClose,
+	} {
+		if !strings.Contains(envelope, want) {
+			t.Fatalf("envelope missing %q:\n%s", want, envelope)
+		}
+	}
+	assertPromptOrder(t, envelope, "<workspace_state>", "<memories>", "<critical_turn_reminders>", userRequestOpen)
+	if got := extractUserRequest(envelope); got != "please inspect <file> and keep ]]> intact" {
+		t.Fatalf("user request = %q", got)
+	}
+}
+
+func TestStripHistoricalTurnContextExtractsUserRequest(t *testing.T) {
+	envelope := buildLatestUserEnvelope("raw historical request")
+	if got := stripHistoricalTurnContext(envelope); got != "raw historical request" {
+		t.Fatalf("stripped request = %q", got)
+	}
+	plain := "user typed a normal message"
+	if got := stripHistoricalTurnContext(plain); got != plain {
+		t.Fatalf("plain message changed: %q", got)
+	}
+}
+
+func assertPromptOrder(t *testing.T, text string, parts ...string) {
+	t.Helper()
+	last := -1
+	for _, part := range parts {
+		idx := strings.Index(text, part)
+		if idx < 0 {
+			t.Fatalf("missing %q in:\n%s", part, text)
+		}
+		if idx <= last {
+			t.Fatalf("%q appears out of order in:\n%s", part, text)
+		}
+		last = idx
+	}
+}

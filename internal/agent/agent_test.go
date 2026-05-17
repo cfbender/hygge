@@ -1400,6 +1400,50 @@ func TestToFantasyMessagesSynthesizesMissingToolResults(t *testing.T) {
 	}
 }
 
+func TestToFantasyMessagesWrapsOnlyLatestUserMessage(t *testing.T) {
+	msgs := []*session.Message{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "older request"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "older answer"}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
+	}
+
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil)
+	if len(fmsgs) != 3 {
+		t.Fatalf("fantasy messages len = %d, want 3: %+v", len(fmsgs), fmsgs)
+	}
+	older := fantasyMessageText(fmsgs[0])
+	latest := fantasyMessageText(fmsgs[2])
+	if strings.Contains(older, turnContextOpen) {
+		t.Fatalf("older user message should remain unwrapped, got:\n%s", older)
+	}
+	all := fantasyMessageText(fmsgs[0]) + fantasyMessageText(fmsgs[1]) + latest
+	if count := strings.Count(all, turnContextOpen); count != 1 {
+		t.Fatalf("turn context count = %d, want 1 in:\n%s", count, all)
+	}
+	if !strings.Contains(latest, "latest request") || !strings.Contains(latest, userRequestOpen) {
+		t.Fatalf("latest user message missing envelope/raw request:\n%s", latest)
+	}
+	assertPromptOrder(t, latest, "<workspace_state>", "<memories>", "<critical_turn_reminders>", userRequestOpen)
+}
+
+func TestToFantasyMessagesStripsHistoricalTurnContext(t *testing.T) {
+	msgs := []*session.Message{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: buildLatestUserEnvelope("historical raw request")}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "older answer"}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
+	}
+
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil)
+	older := fantasyMessageText(fmsgs[0])
+	if older != "historical raw request" {
+		t.Fatalf("older user message = %q, want raw request", older)
+	}
+	all := older + fantasyMessageText(fmsgs[1]) + fantasyMessageText(fmsgs[2])
+	if count := strings.Count(all, turnContextOpen); count != 1 {
+		t.Fatalf("turn context count = %d, want 1 in:\n%s", count, all)
+	}
+}
+
 func TestWrapFantasyStreamErrorIncludesNestedProviderDetail(t *testing.T) {
 	inner := `{"error":{"message":"No tool output found for function call call_123.","type":"invalid_request_error"}}`
 	body := fmt.Sprintf(`{"error":{"message":"Provider returned error","metadata":{"raw":%q,"provider_name":"Azure"}}}`, inner)
