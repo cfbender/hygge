@@ -458,16 +458,19 @@ func (*rememberCmd) Name() string        { return "remember" }
 func (*rememberCmd) Description() string { return "Remember a fact for this session" }
 func (*rememberCmd) Source() string      { return "builtin" }
 func (*rememberCmd) Args() []ArgSpec {
-	return []ArgSpec{{Name: "fact", Description: "fact to remember for this session", Required: true}}
+	return []ArgSpec{{Name: "fact", Description: "fact to remember; choose scope when omitted", Required: false}}
 }
 func (*rememberCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
-	scope, fact := parseRememberInput(input)
+	scope, fact, explicitScope := parseRememberInput(input)
+	if !explicitScope {
+		return Outcome{OpenModal: ModalRememberMemory, Updates: map[string]string{UpdateRememberMemoryDraft: fact}}, nil
+	}
 	return Outcome{
 		Updates: map[string]string{UpdateRememberSessionMemory: string(scope) + "\n" + fact},
 	}, nil
 }
 
-func parseRememberInput(input string) (string, string) {
+func parseRememberInput(input string) (string, string, bool) {
 	return parseMemoryScopedInput(input)
 }
 
@@ -492,21 +495,22 @@ func (*forgetCmd) Execute(_ context.Context, _ App, input string) (Outcome, erro
 }
 
 func parseForgetInput(input string) (string, string) {
-	return parseMemoryScopedInput(input)
+	scope, value, _ := parseMemoryScopedInput(input)
+	return scope, value
 }
 
-func parseMemoryScopedInput(input string) (string, string) {
+func parseMemoryScopedInput(input string) (string, string, bool) {
 	input = strings.TrimSpace(input)
 	for _, scope := range []string{"session", "project", "global"} {
 		flag := "--" + scope
 		if input == flag {
-			return scope, ""
+			return scope, "", true
 		}
 		if rest, ok := strings.CutPrefix(input, flag+" "); ok {
-			return scope, strings.TrimSpace(rest)
+			return scope, strings.TrimSpace(rest), true
 		}
 	}
-	return "session", input
+	return "session", input, false
 }
 
 // --- /version -------------------------------------------------------------

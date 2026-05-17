@@ -510,7 +510,7 @@ func TestSlashCommandRememberStoresSessionMemory(t *testing.T) {
 		t.Fatalf("AppendMessage: %v", err)
 	}
 
-	typeInto(app, "/remember prefers terse updates")
+	typeInto(app, "/remember --session prefers terse updates")
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected remember cmd")
@@ -543,7 +543,7 @@ func TestSlashCommandRememberRequiresPreviousUserMessage(t *testing.T) {
 	app.opts.Store = st
 	app.opts.SessionID = sess.ID
 
-	typeInto(app, "/remember no splash memory")
+	typeInto(app, "/remember --session no splash memory")
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected remember cmd")
@@ -592,6 +592,48 @@ func TestSlashCommandRememberProjectUsesFileMemorySeam(t *testing.T) {
 	}
 	if app.toast == nil || app.toast.title != "Project memory saved" || !strings.Contains(app.toast.body, ".hygge/ is not ignored") {
 		t.Fatalf("toast = %+v, want project gitignore warning", app.toast)
+	}
+}
+
+func TestSlashCommandRememberWithoutScopeOpensScopePicker(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	var gotScope session.MemoryScope
+	var gotContent string
+	app.opts.RememberMemory = func(_ context.Context, scope session.MemoryScope, content string) (*session.Memory, error) {
+		gotScope = scope
+		gotContent = content
+		return &session.Memory{Scope: scope, Content: content}, nil
+	}
+
+	typeInto(app, "/remember use mise run precommit")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		runSlashTestCmd(app, cmd)
+	}
+	if top, ok := app.overlays.Top(); !ok || top != overlayMemoryRemember {
+		t.Fatalf("top overlay = %q, %v; want memory-remember", top, ok)
+	}
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	for _, want := range []string{"Remember memory", "Session", "Project", "Global", "use mise run precommit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("remember picker missing %q:\n%s", want, view)
+		}
+	}
+
+	_, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		t.Fatalf("down cmd = %v, want nil", cmd)
+	}
+	_, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected picker remember cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	if gotScope != session.MemoryScopeProject || gotContent != "use mise run precommit" {
+		t.Fatalf("remember seam got scope=%q content=%q", gotScope, gotContent)
+	}
+	if app.toast == nil || app.toast.title != "Memory saved" {
+		t.Fatalf("toast = %+v, want Memory saved", app.toast)
 	}
 }
 

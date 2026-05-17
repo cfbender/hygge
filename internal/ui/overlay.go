@@ -12,6 +12,7 @@ const (
 	overlayHelp           overlayKind = command.ModalHelp
 	overlaySessions       overlayKind = command.ModalSessions
 	overlayMemory         overlayKind = command.ModalMemory
+	overlayMemoryRemember overlayKind = command.ModalRememberMemory
 	overlayMemoryForget   overlayKind = command.ModalForgetMemory
 	overlayCompactConfirm overlayKind = command.ModalCompactConfirm
 	overlayModel          overlayKind = command.ModalModel

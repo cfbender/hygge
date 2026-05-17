@@ -111,6 +111,11 @@ func TestBuildLatestUserEnvelope_OrderAndRawRequest(t *testing.T) {
 		}
 	}
 	assertPromptOrder(t, envelope, "<workspace_state>", "<memories>", "<critical_turn_reminders>", userRequestOpen)
+	for _, want := range []string{"propose memories", "session task constraints autonomously", "explicit user confirmation before saving inferred project/global memories"} {
+		if !strings.Contains(envelope, want) {
+			t.Fatalf("envelope missing autonomous memory guidance %q:\n%s", want, envelope)
+		}
+	}
 	if got := extractUserRequest(envelope); got != "please inspect <file> and keep ]]> intact" {
 		t.Fatalf("user request = %q", got)
 	}

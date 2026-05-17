@@ -89,6 +89,9 @@ const (
 	// Value shape: "<scope>\n<content>".
 	UpdateRememberSessionMemory = "remember_session_memory"
 
+	// UpdateRememberMemoryDraft passes no-scope /remember text into the scope picker.
+	UpdateRememberMemoryDraft = "remember_memory_draft"
+
 	// UpdateForgetMemory asks the TUI to forget memory by ID.
 	// Value shape: "<scope>\n<memory_id>".
 	UpdateForgetMemory = "forget_memory"
@@ -101,6 +104,7 @@ const (
 	ModalHelp           = "help"
 	ModalSessions       = "sessions"
 	ModalMemory         = "memory"
+	ModalRememberMemory = "memory-remember"
 	ModalForgetMemory   = "memory-forget"
 	ModalCompactConfirm = "compact-confirm"
 	ModalModel          = "model"

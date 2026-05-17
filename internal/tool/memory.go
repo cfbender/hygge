@@ -35,7 +35,7 @@ func newRememberTool(sessionStore sessionMemoryStore, fileStore fileMemoryStore)
 func (t *rememberTool) Name() string { return "remember" }
 
 func (t *rememberTool) Description() string {
-	return "Persist a durable memory only when the user explicitly asks or clearly confirms a stable preference/fact. Never store secrets, credentials, or transient task details."
+	return "Persist a durable memory. You may save obvious session task constraints autonomously, but project/global memories require explicit user confirmation before calling this tool. Never store secrets, credentials, or transient task details."
 }
 
 func (t *rememberTool) InputSchema() map[string]any {
@@ -47,11 +47,15 @@ func (t *rememberTool) InputSchema() map[string]any {
 			"scope": map[string]any{
 				"type":        "string",
 				"enum":        []any{"session", "project", "global"},
-				"description": "Memory scope. Defaults to session when omitted.",
+				"description": "Memory scope. Defaults to session when omitted. Use session for current-task constraints; use project/global only after explicit user confirmation.",
 			},
 			"content": map[string]any{
 				"type":        "string",
 				"description": "The concise fact or preference to remember.",
+			},
+			"confirmed_by_user": map[string]any{
+				"type":        "boolean",
+				"description": "Required true for project/global memories. Set true only when the user explicitly asked to remember this at that scope or confirmed a suggestion.",
 			},
 		},
 	}
@@ -59,8 +63,9 @@ func (t *rememberTool) InputSchema() map[string]any {
 
 func (t *rememberTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecContext) (Result, error) {
 	var in struct {
-		Scope   string `json:"scope"`
-		Content string `json:"content"`
+		Scope           string `json:"scope"`
+		Content         string `json:"content"`
+		ConfirmedByUser bool   `json:"confirmed_by_user"`
 	}
 	if err := decodeArgs(raw, &in); err != nil {
 		return Result{}, err
@@ -88,6 +93,9 @@ func (t *rememberTool) Execute(ctx context.Context, raw json.RawMessage, ec Exec
 		}
 		m, err = t.sessionStore.RememberSessionMemory(ctx, ec.SessionID, session.NewMemory{Content: content})
 	case session.MemoryScopeProject, session.MemoryScopeGlobal:
+		if !in.ConfirmedByUser {
+			return Result{IsError: true, Content: fmt.Sprintf("memory not saved: %s memories require explicit user confirmation", scope), Metadata: map[string]any{"error": "confirmation_required", "scope": string(scope)}}, nil
+		}
 		if t.fileStore == nil {
 			return Result{}, newExecutionFailed("remember: file memory store not configured", nil)
 		}
