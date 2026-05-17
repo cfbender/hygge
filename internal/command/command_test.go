@@ -61,6 +61,7 @@ func TestCommandInterfaceImplementations(t *testing.T) {
 	var _ Command = (*modelCmd)(nil)
 	var _ Command = (*reasonCmd)(nil)
 	var _ Command = (*rememberCmd)(nil)
+	var _ Command = (*memoryCmd)(nil)
 	var _ Command = (*forgetCmd)(nil)
 	var _ Command = (*versionCmd)(nil)
 	var _ Command = (*templateCommand)(nil)
@@ -442,6 +443,15 @@ func TestBuiltinOutcomes(t *testing.T) {
 			},
 		},
 		{
+			name:    "memory",
+			cmdName: "memory",
+			check: func(t *testing.T, o Outcome) {
+				if o.OpenModal != ModalMemory {
+					t.Errorf("OpenModal=%q, want %q", o.OpenModal, ModalMemory)
+				}
+			},
+		},
+		{
 			name:    "forget",
 			cmdName: "forget",
 			input:   "01MEMORY",
@@ -451,6 +461,18 @@ func TestBuiltinOutcomes(t *testing.T) {
 				}
 				if o.Notice != "" {
 					t.Errorf("forget should let the UI report delete/failure state, got notice %q", o.Notice)
+				}
+			},
+		},
+		{
+			name:    "forget-picker",
+			cmdName: "forget",
+			check: func(t *testing.T, o Outcome) {
+				if o.OpenModal != ModalForgetMemory {
+					t.Errorf("OpenModal=%q, want %q", o.OpenModal, ModalForgetMemory)
+				}
+				if len(o.Updates) != 0 {
+					t.Errorf("Updates=%v, want none", o.Updates)
 				}
 			},
 		},

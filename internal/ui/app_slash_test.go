@@ -655,6 +655,90 @@ func TestSlashCommandForgetProjectUsesFileMemorySeam(t *testing.T) {
 	}
 }
 
+func TestSlashCommandMemoryOpensGroupedView(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sess, err := st.CreateSession(t.Context(), session.NewSession{ProjectDir: t.TempDir(), Model: session.ModelRef{Provider: "p", Name: "m"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := st.RememberSessionMemory(t.Context(), sess.ID, session.NewMemory{Content: "session fact"}); err != nil {
+		t.Fatalf("RememberSessionMemory: %v", err)
+	}
+	app.opts.Store = st
+	app.opts.SessionID = sess.ID
+	app.opts.ListMemories = func(context.Context) ([]*session.Memory, error) {
+		return []*session.Memory{
+			{ID: "project-id", Scope: session.MemoryScopeProject, Title: "Project fact", Body: "use mise run precommit", Path: "/repo/.hygge/memory/project-fact.md"},
+			{ID: "global-id", Scope: session.MemoryScopeGlobal, Title: "Global fact", Body: "prefer concise answers", Path: "/home/.config/hygge/memory/global-fact.md"},
+		}, nil
+	}
+
+	typeInto(app, "/memory")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected memory load cmd")
+	}
+	if top, ok := app.overlays.Top(); !ok || top != overlayMemory {
+		t.Fatalf("top overlay = %q, %v; want memory", top, ok)
+	}
+	runSlashTestCmd(app, cmd)
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	for _, want := range []string{"Memories", "Session", "session fact", "Project", "Project fact", "/repo/.hygge/memory/project-fact.md", "Global", "Global fact"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("memory view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestSlashCommandForgetWithoutArgumentOpensPicker(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sess, err := st.CreateSession(t.Context(), session.NewSession{ProjectDir: t.TempDir(), Model: session.ModelRef{Provider: "p", Name: "m"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	mem, err := st.RememberSessionMemory(t.Context(), sess.ID, session.NewMemory{Content: "picker forget fact"})
+	if err != nil {
+		t.Fatalf("RememberSessionMemory: %v", err)
+	}
+	app.opts.Store = st
+	app.opts.SessionID = sess.ID
+
+	typeInto(app, "/forget")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected memory picker load cmd")
+	}
+	if top, ok := app.overlays.Top(); !ok || top != overlayMemoryForget {
+		t.Fatalf("top overlay = %q, %v; want memory-forget", top, ok)
+	}
+	runSlashTestCmd(app, cmd)
+	_, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected picker forget cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	memories, err := st.ListSessionMemories(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListSessionMemories: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("memories = %+v, want picker-forgotten", memories)
+	}
+	if app.toast == nil || app.toast.title != "Memory forgotten" || app.toast.body != mem.ID {
+		t.Fatalf("toast = %+v, want Memory forgotten", app.toast)
+	}
+}
+
 func TestSlashCommandNewStartsFreshSessionAndClearAliases(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

@@ -24,7 +24,7 @@ func TestLoadBuiltinsAlwaysPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	for _, name := range []string{"help", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "remember", "forget", "version"} {
+	for _, name := range []string{"help", "clear", "compact", "cost", "sessions", "memory", "fork", "model", "reason", "remember", "forget", "version"} {
 		c, ok := reg.Get(name)
 		if !ok {
 			t.Errorf("missing built-in %s", name)

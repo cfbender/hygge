@@ -135,6 +135,8 @@ type AppOptions struct {
 	RememberMemory func(ctx context.Context, scope session.MemoryScope, content string) (*session.Memory, error)
 	// ForgetMemory deletes project/global memory. Session memory uses Store.
 	ForgetMemory func(ctx context.Context, scope session.MemoryScope, memoryID string) (*session.Memory, error)
+	// ListMemories loads file-backed global/project memories. Session memory uses Store.
+	ListMemories func(ctx context.Context) ([]*session.Memory, error)
 	// ProjectMemoryGitignoreWarning returns a warning before the first project memory
 	// write when .hygge/ may become untracked.
 	ProjectMemoryGitignoreWarning func(ctx context.Context) (string, error)
@@ -378,6 +380,7 @@ type App struct {
 	// sessionsModal holds the live state of the sessions picker
 	// when activeModal == "sessions".
 	sessionsModal components.SessionsModal
+	memoryModal   components.MemoryModal
 	modelModal    components.ModelModal
 	apiKeyModal   components.APIKeyModal
 	themeModal    components.ThemeModal
@@ -942,7 +945,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.showToast("Memory not forgotten", m.err.Error())
 		}
 		a.notice = ""
-		return a, a.showToast("Memory forgotten", m.memoryID)
+		cmd := a.showToast("Memory forgotten", m.memoryID)
+		if a.overlays.Has(overlayMemory) || a.overlays.Has(overlayMemoryForget) {
+			return a, tea.Batch(cmd, a.openMemoryModal())
+		}
+		return a, cmd
 
 	case sessionsLoadedMsg:
 		// Sessions loaded (or reloaded after rename/delete).
@@ -951,6 +958,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		filtered := a.sessionsModal.FilteredCount()
 		if a.sessionsModal.Cursor >= filtered && filtered > 0 {
 			a.sessionsModal.Cursor = filtered - 1
+		}
+		return a, nil
+
+	case memoriesLoadedMsg:
+		if m.err != nil {
+			a.memoryModal.Memories = nil
+			a.memoryModal.Cursor = 0
+			return a, a.setNotice("memory: " + m.err.Error())
+		}
+		a.memoryModal.Memories = m.memories
+		filtered := len(a.memoryModal.Filtered())
+		if a.memoryModal.Cursor >= filtered && filtered > 0 {
+			a.memoryModal.Cursor = filtered - 1
 		}
 		return a, nil
 
@@ -1172,6 +1192,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleQuestionModalKey(k)
 		case overlaySessions:
 			return a.handleSessionsModalKey(k)
+		case overlayMemory, overlayMemoryForget:
+			return a.handleMemoryModalKey(k)
 		case overlayCompactConfirm:
 			return a.handleCompactionModalKey(k)
 		case overlayHelp:
@@ -3382,7 +3404,7 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme:
+		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
@@ -3788,6 +3810,68 @@ func (a *App) applySessionsModalMsg(msg components.SessionsModalMsg) tea.Cmd {
 
 	case components.DeleteSessionAction:
 		return a.applyDeleteSession(m.ID)
+	}
+	return nil
+}
+
+// --- Memory modal integration ----------------------------------------------
+
+func (a *App) openMemoryModal() tea.Cmd {
+	return func() tea.Msg {
+		var memories []*session.Memory
+		if a.opts.Store != nil && a.opts.SessionID != "" {
+			sessionMemories, err := a.opts.Store.ListSessionMemories(a.ctx, a.opts.SessionID)
+			if err != nil {
+				return memoriesLoadedMsg{err: err}
+			}
+			memories = append(memories, sessionMemories...)
+		}
+		if a.opts.ListMemories != nil {
+			fileMemories, err := a.opts.ListMemories(a.ctx)
+			if err != nil {
+				return memoriesLoadedMsg{err: err}
+			}
+			memories = append(memories, fileMemories...)
+		}
+		return memoriesLoadedMsg{memories: memories}
+	}
+}
+
+func (a *App) handleMemoryModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.MemoryKey{Name: k.String(), Runes: []rune(k.Text)}
+	switch k.String() {
+	case "up":
+		sk.Name = "up"
+	case "down":
+		sk.Name = "down"
+	case "enter":
+		sk.Name = "enter"
+	case "esc":
+		sk.Name = "esc"
+	case "backspace", "delete":
+		sk.Name = "backspace"
+	default:
+		if len(k.Text) == 1 {
+			sk.Name = k.Text
+		}
+	}
+
+	updated, msg := a.memoryModal.HandleKey(sk)
+	a.memoryModal = updated
+	if msg == nil {
+		return a, nil
+	}
+	return a, a.applyMemoryModalMsg(msg)
+}
+
+func (a *App) applyMemoryModalMsg(msg components.MemoryModalMsg) tea.Cmd {
+	switch m := msg.(type) {
+	case components.CloseMemoryModal:
+		a.closeOverlay(overlayMemory)
+		a.closeOverlay(overlayMemoryForget)
+		return nil
+	case components.ForgetMemoryAction:
+		return a.forgetMemoryCmd(string(m.Scope) + "\n" + m.ID)
 	}
 	return nil
 }

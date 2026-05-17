@@ -275,6 +275,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		},
 		RememberMemory:                rt.MemoryStore.Remember,
 		ForgetMemory:                  rt.MemoryStore.Forget,
+		ListMemories:                  rt.MemoryStore.ListMemories,
 		ProjectMemoryGitignoreWarning: rt.MemoryStore.ProjectMemoryGitignoreWarning,
 		ThemeNames:                    theme.KnownNames(theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir}),
 		LoadTheme: func(_ context.Context, name string) (*theme.Theme, error) {
