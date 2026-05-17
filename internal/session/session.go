@@ -57,8 +57,12 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrMemoryNotFound is returned when a memory lookup or forget operation misses.
+var ErrMemoryNotFound = errors.New("memory not found")
 
 // ModelRef identifies a provider and model name.
 type ModelRef struct {
@@ -370,6 +374,9 @@ type Store interface {
 
 	// ListSessionMemories returns active session memories in creation order.
 	ListSessionMemories(ctx context.Context, sessionID string) ([]*Memory, error)
+
+	// ForgetSessionMemory marks an active session memory as deleted.
+	ForgetSessionMemory(ctx context.Context, sessionID, memoryID string) (*Memory, error)
 
 	// ReplaceSessionTodos stores the full current todo list for a session.
 	ReplaceSessionTodos(ctx context.Context, sessionID string, items []TodoItem) (TodoSummary, error)

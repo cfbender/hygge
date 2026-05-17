@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -65,6 +66,50 @@ func (s *Store) ListSessionMemories(ctx context.Context, sessionID string) ([]*s
 		return nil, fmt.Errorf("store: ListSessionMemories iterate: %w", err)
 	}
 	return out, nil
+}
+
+// ForgetSessionMemory marks an active session memory as deleted.
+func (s *Store) ForgetSessionMemory(ctx context.Context, sessionID, memoryID string) (*session.Memory, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("store: ForgetSessionMemory: session_id required")
+	}
+	if strings.TrimSpace(memoryID) == "" {
+		return nil, fmt.Errorf("store: ForgetSessionMemory: memory_id required")
+	}
+	m, err := s.getActiveSessionMemory(ctx, sessionID, memoryID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	nowMillis := now.UnixMilli()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE session_memories
+		SET deleted_at = ?, updated_at = ?
+		WHERE id = ? AND session_id = ? AND deleted_at IS NULL`, nowMillis, nowMillis, memoryID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: ForgetSessionMemory: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return nil, fmt.Errorf("store: ForgetSessionMemory %q: %w", memoryID, session.ErrMemoryNotFound)
+	}
+	m.UpdatedAt = now
+	m.DeletedAt = now
+	return m, nil
+}
+
+func (s *Store) getActiveSessionMemory(ctx context.Context, sessionID, memoryID string) (*session.Memory, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, session_id, content, created_at, updated_at, deleted_at
+		FROM session_memories
+		WHERE id = ? AND session_id = ? AND deleted_at IS NULL`, memoryID, sessionID)
+	m, err := scanMemory(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("store: ForgetSessionMemory %q: %w", memoryID, session.ErrMemoryNotFound)
+		}
+		return nil, fmt.Errorf("store: ForgetSessionMemory scan: %w", err)
+	}
+	return m, nil
 }
 
 func scanMemory(r rowScanner) (*session.Memory, error) {

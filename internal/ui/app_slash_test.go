@@ -595,6 +595,66 @@ func TestSlashCommandRememberProjectUsesFileMemorySeam(t *testing.T) {
 	}
 }
 
+func TestSlashCommandForgetDeletesSessionMemory(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sess, err := st.CreateSession(t.Context(), session.NewSession{ProjectDir: t.TempDir(), Model: session.ModelRef{Provider: "p", Name: "m"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	mem, err := st.RememberSessionMemory(t.Context(), sess.ID, session.NewMemory{Content: "forget this"})
+	if err != nil {
+		t.Fatalf("RememberSessionMemory: %v", err)
+	}
+	app.opts.Store = st
+	app.opts.SessionID = sess.ID
+
+	typeInto(app, "/forget "+mem.ID)
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected forget cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	memories, err := st.ListSessionMemories(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListSessionMemories: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("memories = %+v, want forgotten", memories)
+	}
+	if app.toast == nil || app.toast.title != "Memory forgotten" || app.toast.body != mem.ID {
+		t.Fatalf("toast = %+v, want Memory forgotten", app.toast)
+	}
+}
+
+func TestSlashCommandForgetProjectUsesFileMemorySeam(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	var gotScope session.MemoryScope
+	var gotMemoryID string
+	app.opts.ForgetMemory = func(_ context.Context, scope session.MemoryScope, memoryID string) (*session.Memory, error) {
+		gotScope = scope
+		gotMemoryID = memoryID
+		return &session.Memory{ID: memoryID, Scope: scope}, nil
+	}
+
+	typeInto(app, "/forget --project 01PROJECTMEMORY")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected forget cmd")
+	}
+	runSlashTestCmd(app, cmd)
+	if gotScope != session.MemoryScopeProject || gotMemoryID != "01PROJECTMEMORY" {
+		t.Fatalf("forget seam got scope=%q memoryID=%q", gotScope, gotMemoryID)
+	}
+	if app.toast == nil || app.toast.title != "Memory forgotten" || app.toast.body != "01PROJECTMEMORY" {
+		t.Fatalf("toast = %+v, want Memory forgotten", app.toast)
+	}
+}
+
 func TestSlashCommandNewStartsFreshSessionAndClearAliases(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

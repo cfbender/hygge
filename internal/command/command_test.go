@@ -61,6 +61,7 @@ func TestCommandInterfaceImplementations(t *testing.T) {
 	var _ Command = (*modelCmd)(nil)
 	var _ Command = (*reasonCmd)(nil)
 	var _ Command = (*rememberCmd)(nil)
+	var _ Command = (*forgetCmd)(nil)
 	var _ Command = (*versionCmd)(nil)
 	var _ Command = (*templateCommand)(nil)
 	var _ App = (*fakeApp)(nil)
@@ -437,6 +438,29 @@ func TestBuiltinOutcomes(t *testing.T) {
 				}
 				if o.Notice != "" {
 					t.Errorf("remember should not use notice, got %q", o.Notice)
+				}
+			},
+		},
+		{
+			name:    "forget",
+			cmdName: "forget",
+			input:   "01MEMORY",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateForgetMemory]; got != "session\n01MEMORY" {
+					t.Errorf("Updates[forget_memory]=%q", got)
+				}
+				if o.Notice != "" {
+					t.Errorf("forget should let the UI report delete/failure state, got notice %q", o.Notice)
+				}
+			},
+		},
+		{
+			name:    "forget-global",
+			cmdName: "forget",
+			input:   "--global 01GLOBALMEMORY",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateForgetMemory]; got != "global\n01GLOBALMEMORY" {
+					t.Errorf("Updates[forget_memory]=%q", got)
 				}
 			},
 		},

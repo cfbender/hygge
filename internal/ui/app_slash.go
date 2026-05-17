@@ -195,6 +195,8 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		return a.switchYoloCmd(value)
 	case command.UpdateRememberSessionMemory:
 		return a.rememberSessionMemoryCmd(value)
+	case command.UpdateForgetMemory:
+		return a.forgetMemoryCmd(value)
 	case command.UpdateReasoning:
 		switch value {
 		case "off", "low", "medium", "high":
@@ -285,6 +287,41 @@ func (a *App) rememberSessionMemoryCmd(value string) tea.Cmd {
 }
 
 func parseRememberUpdate(value string) (session.MemoryScope, string) {
+	return parseMemoryUpdate(value)
+}
+
+func (a *App) forgetMemoryCmd(value string) tea.Cmd {
+	scope, memoryID := parseForgetUpdate(value)
+	if memoryID == "" {
+		return func() tea.Msg { return forgetMemoryMsg{err: fmt.Errorf("usage: /forget <memory-id>")} }
+	}
+	if scope == session.MemoryScopeProject || scope == session.MemoryScopeGlobal {
+		if a.opts.ForgetMemory == nil {
+			return func() tea.Msg { return forgetMemoryMsg{err: fmt.Errorf("%s memory unavailable", scope)} }
+		}
+		return func() tea.Msg {
+			_, err := a.opts.ForgetMemory(a.ctx, scope, memoryID)
+			return forgetMemoryMsg{memoryID: memoryID, err: err}
+		}
+	}
+	if a.opts.Store == nil {
+		return func() tea.Msg { return forgetMemoryMsg{err: fmt.Errorf("no store configured")} }
+	}
+	if a.opts.SessionID == "" {
+		return func() tea.Msg { return forgetMemoryMsg{err: fmt.Errorf("no active session yet")} }
+	}
+	sessionID := a.opts.SessionID
+	return func() tea.Msg {
+		_, err := a.opts.Store.ForgetSessionMemory(a.ctx, sessionID, memoryID)
+		return forgetMemoryMsg{memoryID: memoryID, err: err}
+	}
+}
+
+func parseForgetUpdate(value string) (session.MemoryScope, string) {
+	return parseMemoryUpdate(value)
+}
+
+func parseMemoryUpdate(value string) (session.MemoryScope, string) {
 	scopeText, content, ok := strings.Cut(value, "\n")
 	if !ok {
 		return session.MemoryScopeSession, strings.TrimSpace(value)

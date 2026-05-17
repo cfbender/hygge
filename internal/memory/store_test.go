@@ -110,6 +110,40 @@ func TestFileStoreListMemoriesOrdersGlobalProject(t *testing.T) {
 	}
 }
 
+func TestFileStoreForgetRemovesMemoryFile(t *testing.T) {
+	st := NewFileStore(FileStoreOptions{ProjectDir: t.TempDir(), HomeDir: t.TempDir()})
+	first, err := st.Remember(context.Background(), session.MemoryScopeProject, "forget this project fact")
+	if err != nil {
+		t.Fatalf("Remember first: %v", err)
+	}
+	second, err := st.Remember(context.Background(), session.MemoryScopeProject, "keep this project fact")
+	if err != nil {
+		t.Fatalf("Remember second: %v", err)
+	}
+
+	forgot, err := st.Forget(context.Background(), session.MemoryScopeProject, first.ID)
+	if err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+	if forgot.ID != first.ID || forgot.DeletedAt.IsZero() {
+		t.Fatalf("forgot = %+v, want deleted first memory", forgot)
+	}
+	if _, err := os.Stat(first.Path); !os.IsNotExist(err) {
+		t.Fatalf("forgot file stat err = %v, want not exist", err)
+	}
+	got, err := st.List(context.Background(), session.MemoryScopeProject)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != second.ID {
+		t.Fatalf("memories = %+v, want only second", got)
+	}
+	_, err = st.Forget(context.Background(), session.MemoryScopeProject, first.ID)
+	if !errors.Is(err, session.ErrMemoryNotFound) {
+		t.Fatalf("second forget err = %v, want ErrMemoryNotFound", err)
+	}
+}
+
 func TestFileStoreRememberRejectsSecrets(t *testing.T) {
 	st := NewFileStore(FileStoreOptions{ProjectDir: t.TempDir(), HomeDir: t.TempDir()})
 	_, err := st.Remember(context.Background(), session.MemoryScopeProject, "password=super-secret")

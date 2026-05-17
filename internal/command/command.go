@@ -85,9 +85,13 @@ const (
 	// Value: "on" | "off" | "toggle".
 	UpdateYolo = "yolo"
 
-	// UpdateRememberSessionMemory asks the TUI to persist a session-scoped
-	// memory. Value shape: raw memory content typed after /remember.
+	// UpdateRememberSessionMemory asks the TUI to persist memory.
+	// Value shape: "<scope>\n<content>".
 	UpdateRememberSessionMemory = "remember_session_memory"
+
+	// UpdateForgetMemory asks the TUI to forget memory by ID.
+	// Value shape: "<scope>\n<memory_id>".
+	UpdateForgetMemory = "forget_memory"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].

@@ -128,6 +128,15 @@ type DefaultOptions struct {
 		GetSessionTodos(ctx context.Context, sessionID string) ([]session.TodoItem, session.TodoSummary, error)
 		ReplaceSessionTodos(ctx context.Context, sessionID string, items []session.TodoItem) (session.TodoSummary, error)
 	}
+	SessionMemoryStore interface {
+		RememberSessionMemory(ctx context.Context, sessionID string, in session.NewMemory) (*session.Memory, error)
+		ForgetSessionMemory(ctx context.Context, sessionID, memoryID string) (*session.Memory, error)
+	}
+	FileMemoryStore interface {
+		Remember(ctx context.Context, scope session.MemoryScope, content string) (*session.Memory, error)
+		Forget(ctx context.Context, scope session.MemoryScope, memoryID string) (*session.Memory, error)
+		MemoryDir(scope session.MemoryScope) (string, error)
+	}
 }
 
 // DefaultWith returns a Registry preloaded with the built-in tools, plus any
@@ -141,6 +150,8 @@ func DefaultWith(opts DefaultOptions) *Registry {
 	mustRegister(r, newBashTool())
 	mustRegister(r, newGrepTool())
 	mustRegister(r, newGlobTool())
+	mustRegister(r, newRememberTool(opts.SessionMemoryStore, opts.FileMemoryStore))
+	mustRegister(r, newForgetTool(opts.SessionMemoryStore, opts.FileMemoryStore))
 	mustRegister(r, newTodoTool(r.todos, opts.TodoStore))
 	mustRegister(r, NewQuestionTool())
 	if opts.SkillRegistry != nil {

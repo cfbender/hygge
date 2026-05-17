@@ -125,7 +125,7 @@ func newExecContext(b *bus.Bus, e *permission.Engine, pwd string) ExecContext {
 
 func TestDefault_RegistersBuiltInTools(t *testing.T) {
 	r := Default()
-	want := []string{"bash", "edit", "glob", "grep", "question", "read", "todo", "write"}
+	want := []string{"bash", "edit", "forget", "glob", "grep", "question", "read", "remember", "todo", "write"}
 	got := make([]string, 0, len(want))
 	for _, t := range r.All() {
 		got = append(got, t.Name())
@@ -138,8 +138,8 @@ func TestDefault_RegistersBuiltInTools(t *testing.T) {
 func TestDefault_AsProviderToolsSorted(t *testing.T) {
 	r := Default()
 	pts := r.AsProviderTools()
-	if len(pts) != 8 {
-		t.Fatalf("AsProviderTools: got %d entries, want 8", len(pts))
+	if len(pts) != 10 {
+		t.Fatalf("AsProviderTools: got %d entries, want 10", len(pts))
 	}
 	names := make([]string, len(pts))
 	for i, p := range pts {
