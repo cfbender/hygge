@@ -196,6 +196,10 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 		a.sessionsModal.Height = h
 		a.sessionsModal.Now = a.opts.Now()
 		return a.sessionsModal.View()
+	case overlayMemory, overlayMemoryForget:
+		a.memoryModal.Width = w
+		a.memoryModal.Height = h
+		return a.memoryModal.View()
 	case overlayCompactConfirm:
 		a.compactionModal.Width = w
 		a.compactionModal.Height = h

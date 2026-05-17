@@ -100,6 +100,8 @@ const (
 const (
 	ModalHelp           = "help"
 	ModalSessions       = "sessions"
+	ModalMemory         = "memory"
+	ModalForgetMemory   = "memory-forget"
 	ModalCompactConfirm = "compact-confirm"
 	ModalModel          = "model"
 	ModalAPIKey         = "apikey"

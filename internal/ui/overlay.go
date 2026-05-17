@@ -11,6 +11,8 @@ type overlayKind string
 const (
 	overlayHelp           overlayKind = command.ModalHelp
 	overlaySessions       overlayKind = command.ModalSessions
+	overlayMemory         overlayKind = command.ModalMemory
+	overlayMemoryForget   overlayKind = command.ModalForgetMemory
 	overlayCompactConfirm overlayKind = command.ModalCompactConfirm
 	overlayModel          overlayKind = command.ModalModel
 	overlayAPIKey         overlayKind = command.ModalAPIKey

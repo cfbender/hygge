@@ -36,6 +36,7 @@ func builtinCommands() []Command {
 		&costCmd{},
 		&attachCmd{},
 		&attachmentsCmd{},
+		&memoryCmd{},
 		&sessionsCmd{},
 		&forkCmd{},
 		&modelCmd{},
@@ -77,6 +78,18 @@ func currentVersion() string {
 		return v
 	}
 	return "dev"
+}
+
+// --- /memory ---------------------------------------------------------------
+
+type memoryCmd struct{}
+
+func (*memoryCmd) Name() string        { return "memory" }
+func (*memoryCmd) Description() string { return "Open the memory manager" }
+func (*memoryCmd) Source() string      { return "builtin" }
+func (*memoryCmd) Args() []ArgSpec     { return nil }
+func (*memoryCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
+	return Outcome{OpenModal: ModalMemory}, nil
 }
 
 // --- /help ----------------------------------------------------------------
@@ -469,6 +482,9 @@ func (*forgetCmd) Args() []ArgSpec {
 	return []ArgSpec{{Name: "memory_id", Description: "memory ID to forget", Required: true}}
 }
 func (*forgetCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	if strings.TrimSpace(input) == "" {
+		return Outcome{OpenModal: ModalForgetMemory}, nil
+	}
 	scope, memoryID := parseForgetInput(input)
 	return Outcome{
 		Updates: map[string]string{UpdateForgetMemory: string(scope) + "\n" + memoryID},

@@ -92,6 +92,16 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			}
 			a.updateInputFocus()
 			return tea.Batch(append(cmds, a.openSessionsModal())...)
+		case command.ModalMemory, command.ModalForgetMemory:
+			forgetOnly := out.OpenModal == command.ModalForgetMemory
+			kind := overlayMemory
+			if forgetOnly {
+				kind = overlayMemoryForget
+			}
+			a.openOverlay(kind)
+			a.memoryModal = components.MemoryModal{Theme: a.opts.Theme, ForgetOnly: forgetOnly}
+			a.updateInputFocus()
+			return tea.Batch(append(cmds, a.openMemoryModal())...)
 		case command.ModalCompactConfirm:
 			// Populate the modal with live session metadata.
 			msgCount := a.resolveCompactionMessageCount()
