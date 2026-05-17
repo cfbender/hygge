@@ -18,6 +18,7 @@ func TestBuiltinSetIsLocked(t *testing.T) {
 		"model",
 		"new",
 		"reason",
+		"remember",
 		"sessions",
 		"theme",
 		"version",

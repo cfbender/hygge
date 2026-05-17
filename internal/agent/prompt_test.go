@@ -94,7 +94,7 @@ func TestComposeSystemPrompt_LazyBlocksAfterMarker(t *testing.T) {
 }
 
 func TestBuildLatestUserEnvelope_OrderAndRawRequest(t *testing.T) {
-	envelope := buildLatestUserEnvelope("please inspect <file> and keep ]]> intact")
+	envelope := buildLatestUserEnvelope("please inspect <file> and keep ]]> intact", nil)
 	for _, want := range []string{
 		turnContextOpen,
 		"<workspace_state>",
@@ -117,13 +117,29 @@ func TestBuildLatestUserEnvelope_OrderAndRawRequest(t *testing.T) {
 }
 
 func TestStripHistoricalTurnContextExtractsUserRequest(t *testing.T) {
-	envelope := buildLatestUserEnvelope("raw historical request")
+	envelope := buildLatestUserEnvelope("raw historical request", nil)
 	if got := stripHistoricalTurnContext(envelope); got != "raw historical request" {
 		t.Fatalf("stripped request = %q", got)
 	}
 	plain := "user typed a normal message"
 	if got := stripHistoricalTurnContext(plain); got != plain {
 		t.Fatalf("plain message changed: %q", got)
+	}
+}
+
+func TestBuildLatestUserEnvelopeIncludesSessionMemories(t *testing.T) {
+	envelope := buildLatestUserEnvelope("use memory", []*session.Memory{
+		{ID: "01MEMORY", Scope: session.MemoryScopeSession, Content: "prefers focused diffs with ]]> preserved"},
+		{ID: "01PROJECT", Scope: session.MemoryScopeProject, Content: "not yet injected"},
+	})
+	if !strings.Contains(envelope, `<memory scope="session" id="01MEMORY">`) {
+		t.Fatalf("session memory wrapper missing:\n%s", envelope)
+	}
+	if !strings.Contains(envelope, "prefers focused diffs with ]]]]><![CDATA[> preserved") {
+		t.Fatalf("session memory content missing or not CDATA-split:\n%s", envelope)
+	}
+	if strings.Contains(envelope, "not yet injected") || strings.Contains(envelope, "No active memories") {
+		t.Fatalf("unexpected project/no-memory content in envelope:\n%s", envelope)
 	}
 }
 

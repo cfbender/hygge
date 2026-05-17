@@ -16,6 +16,7 @@ import (
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
@@ -489,6 +490,81 @@ func TestSlashCommandReasonUpdatesOpts(t *testing.T) {
 	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if app.opts.Reasoning.Effort != "high" {
 		t.Errorf("Reasoning.Effort = %q, want high", app.opts.Reasoning.Effort)
+	}
+}
+
+func TestSlashCommandRememberStoresSessionMemory(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sess, err := st.CreateSession(t.Context(), session.NewSession{ProjectDir: t.TempDir(), Model: session.ModelRef{Provider: "p", Name: "m"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	app.opts.Store = st
+	app.opts.SessionID = sess.ID
+	if _, err := st.AppendMessage(t.Context(), sess.ID, session.NewMessage{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "hello"}}}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	typeInto(app, "/remember prefers terse updates")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected remember cmd")
+	}
+	runSlashTestCmd(app, cmd)
+
+	memories, err := st.ListSessionMemories(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListSessionMemories: %v", err)
+	}
+	if len(memories) != 1 || memories[0].Content != "prefers terse updates" {
+		t.Fatalf("memories = %+v, want one remembered fact", memories)
+	}
+	if app.toast == nil || app.toast.title != "Memory saved" {
+		t.Fatalf("toast = %+v, want Memory saved", app.toast)
+	}
+}
+
+func TestSlashCommandRememberRequiresPreviousUserMessage(t *testing.T) {
+	app, _, _ := newSlashApp(t)
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sess, err := st.CreateSession(t.Context(), session.NewSession{ProjectDir: t.TempDir(), Model: session.ModelRef{Provider: "p", Name: "m"}})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	app.opts.Store = st
+	app.opts.SessionID = sess.ID
+
+	typeInto(app, "/remember no splash memory")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected remember cmd")
+	}
+	if app.notice != "" {
+		t.Fatalf("remember should not show optimistic notice before eligibility check, got %q", app.notice)
+	}
+	runSlashTestCmd(app, cmd)
+
+	memories, err := st.ListSessionMemories(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListSessionMemories: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("memories = %+v, want none before first user message", memories)
+	}
+	if app.notice != "" {
+		t.Fatalf("notice = %q, want toast-only remember feedback", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Memory not saved" || !strings.Contains(app.toast.body, "send a message before saving session memory") {
+		t.Fatalf("toast = %+v, want previous-message guidance", app.toast)
 	}
 }
 

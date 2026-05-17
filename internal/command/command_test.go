@@ -60,6 +60,7 @@ func TestCommandInterfaceImplementations(t *testing.T) {
 	var _ Command = (*forkCmd)(nil)
 	var _ Command = (*modelCmd)(nil)
 	var _ Command = (*reasonCmd)(nil)
+	var _ Command = (*rememberCmd)(nil)
 	var _ Command = (*versionCmd)(nil)
 	var _ Command = (*templateCommand)(nil)
 	var _ App = (*fakeApp)(nil)
@@ -400,6 +401,32 @@ func TestBuiltinOutcomes(t *testing.T) {
 				}
 				if !strings.Contains(o.Notice, "expected") {
 					t.Errorf("expected hint notice, got %q", o.Notice)
+				}
+			},
+		},
+		{
+			name:    "remember",
+			cmdName: "remember",
+			input:   "prefers short final summaries",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateRememberSessionMemory]; got != "prefers short final summaries" {
+					t.Errorf("Updates[remember_session_memory]=%q", got)
+				}
+				if o.Notice != "" {
+					t.Errorf("remember should let the UI report save/failure state, got notice %q", o.Notice)
+				}
+			},
+		},
+		{
+			name:    "remember-empty",
+			cmdName: "remember",
+			input:   "   ",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateRememberSessionMemory]; got != "" {
+					t.Errorf("empty remember should route to UI validation, got update %q", got)
+				}
+				if o.Notice != "" {
+					t.Errorf("remember should not use notice, got %q", o.Notice)
 				}
 			},
 		},

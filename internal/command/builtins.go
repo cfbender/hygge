@@ -43,6 +43,7 @@ func builtinCommands() []Command {
 		&apiKeyCmd{},
 		&reasonCmd{},
 		&yoloCmd{},
+		&rememberCmd{},
 		&versionCmd{},
 	}
 }
@@ -433,6 +434,23 @@ func (*yoloCmd) Execute(_ context.Context, _ App, input string) (Outcome, error)
 	default:
 		return Outcome{Notice: `/yolo: expected "on", "off", or "toggle"`}, nil
 	}
+}
+
+// --- /remember -------------------------------------------------------------
+
+type rememberCmd struct{}
+
+func (*rememberCmd) Name() string        { return "remember" }
+func (*rememberCmd) Description() string { return "Remember a fact for this session" }
+func (*rememberCmd) Source() string      { return "builtin" }
+func (*rememberCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "fact", Description: "fact to remember for this session", Required: true}}
+}
+func (*rememberCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	fact := strings.TrimSpace(input)
+	return Outcome{
+		Updates: map[string]string{UpdateRememberSessionMemory: fact},
+	}, nil
 }
 
 // --- /version -------------------------------------------------------------

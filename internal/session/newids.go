@@ -42,3 +42,6 @@ func NewMessageID() string { return newULID() }
 
 // NewMarkerID returns a 26-character canonical ULID string.
 func NewMarkerID() string { return newULID() }
+
+// NewMemoryID returns a 26-character canonical ULID string.
+func NewMemoryID() string { return newULID() }

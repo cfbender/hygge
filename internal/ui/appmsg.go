@@ -47,6 +47,11 @@ type clearNoticeMsg struct {
 	notice string
 }
 
+type rememberSessionMemoryMsg struct {
+	content string
+	err     error
+}
+
 // subagentTickMsg fires every second for an active sub-agent to drive
 // the elapsed-time counter in its rendered block.  The handler in
 // app.go re-issues the tick while the sub-agent is still running and

@@ -193,6 +193,8 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		}
 	case command.UpdateYolo:
 		return a.switchYoloCmd(value)
+	case command.UpdateRememberSessionMemory:
+		return a.rememberSessionMemoryCmd(value)
 	case command.UpdateReasoning:
 		switch value {
 		case "off", "low", "medium", "high":
@@ -238,6 +240,31 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		slogWarnUnknownUpdate(key, value)
 	}
 	return nil
+}
+
+func (a *App) rememberSessionMemoryCmd(value string) tea.Cmd {
+	content := strings.TrimSpace(value)
+	if content == "" {
+		return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("usage: /remember <fact>")} }
+	}
+	if a.opts.Store == nil {
+		return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("no store configured")} }
+	}
+	if a.opts.SessionID == "" {
+		return func() tea.Msg { return rememberSessionMemoryMsg{err: fmt.Errorf("no active session yet")} }
+	}
+	sessionID := a.opts.SessionID
+	return func() tea.Msg {
+		latestUserID, err := a.opts.Store.LatestUserMessageID(a.ctx, sessionID)
+		if err != nil {
+			return rememberSessionMemoryMsg{err: fmt.Errorf("lookup latest user message: %w", err)}
+		}
+		if latestUserID == "" {
+			return rememberSessionMemoryMsg{err: fmt.Errorf("send a message before saving session memory")}
+		}
+		_, err = a.opts.Store.RememberSessionMemory(a.ctx, sessionID, session.NewMemory{Content: content})
+		return rememberSessionMemoryMsg{content: content, err: err}
+	}
 }
 
 type modelSwitchResult struct {

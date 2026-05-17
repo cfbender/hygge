@@ -33,8 +33,8 @@ func TestOpen_FreshDB_RunsMigrations(t *testing.T) {
 		t.Fatalf("scan schema_migrations: %v", err)
 	}
 	// Keep in lock-step with the highest version under internal/store/migrations/.
-	if version != 5 {
-		t.Fatalf("expected schema_migrations version 5, got %d", version)
+	if version != 6 {
+		t.Fatalf("expected schema_migrations version 6, got %d", version)
 	}
 }
 
@@ -62,8 +62,8 @@ func TestOpen_Idempotent(t *testing.T) {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
 	// Must equal the number of files under internal/store/migrations/.
-	if count != 5 {
-		t.Fatalf("expected 5 migration records after re-open, got %d", count)
+	if count != 6 {
+		t.Fatalf("expected 6 migration records after re-open, got %d", count)
 	}
 }
 
