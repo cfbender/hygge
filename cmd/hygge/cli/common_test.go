@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -186,6 +187,36 @@ func TestBootstrapBuildsAllComponents(t *testing.T) {
 	}
 	if rt.Theme == nil {
 		t.Error("Theme nil")
+	}
+}
+
+func TestBootstrapFreshInstallWithoutProviderAuthShowsSetupMessage(t *testing.T) {
+	home := t.TempDir()
+	for _, providerName := range knownProviders() {
+		if envName := providerEnvVar(providerName); envName != "" {
+			t.Setenv(envName, "")
+		}
+	}
+
+	_, err := bootstrap(context.Background(), bootstrapOptions{
+		HomeDir:       home,
+		XDGConfigHome: filepath.Join(home, ".config"),
+		XDGStateHome:  filepath.Join(home, ".local", "state"),
+		Pwd:           home,
+		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+		SkipTea:       true,
+	})
+	if err == nil {
+		t.Fatal("expected bootstrap error")
+	}
+	if !errors.Is(err, errNoProvidersConfigured) {
+		t.Fatalf("bootstrap error = %v, want errNoProvidersConfigured", err)
+	}
+	if got := err.Error(); got != errNoProvidersConfigured.Error() {
+		t.Fatalf("bootstrap error text = %q, want %q", got, errNoProvidersConfigured.Error())
+	}
+	if strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+		t.Fatalf("bootstrap error leaked ANTHROPIC_API_KEY: %v", err)
 	}
 }
 
