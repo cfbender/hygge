@@ -49,6 +49,7 @@ type clearNoticeMsg struct {
 
 type rememberSessionMemoryMsg struct {
 	content string
+	warning string
 	err     error
 }
 

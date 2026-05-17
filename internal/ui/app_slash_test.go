@@ -572,6 +572,9 @@ func TestSlashCommandRememberProjectUsesFileMemorySeam(t *testing.T) {
 	app, _, _ := newSlashApp(t)
 	var gotScope session.MemoryScope
 	var gotContent string
+	app.opts.ProjectMemoryGitignoreWarning = func(context.Context) (string, error) {
+		return ".hygge/ is not ignored; add .hygge/ to .gitignore to keep project memories local.", nil
+	}
 	app.opts.RememberMemory = func(_ context.Context, scope session.MemoryScope, content string) (*session.Memory, error) {
 		gotScope = scope
 		gotContent = content
@@ -587,8 +590,8 @@ func TestSlashCommandRememberProjectUsesFileMemorySeam(t *testing.T) {
 	if gotScope != session.MemoryScopeProject || gotContent != "use mise run precommit" {
 		t.Fatalf("remember seam got scope=%q content=%q", gotScope, gotContent)
 	}
-	if app.toast == nil || app.toast.title != "Memory saved" {
-		t.Fatalf("toast = %+v, want Memory saved", app.toast)
+	if app.toast == nil || app.toast.title != "Project memory saved" || !strings.Contains(app.toast.body, ".hygge/ is not ignored") {
+		t.Fatalf("toast = %+v, want project gitignore warning", app.toast)
 	}
 }
 

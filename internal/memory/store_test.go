@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,6 +34,57 @@ func TestFileStoreRememberProjectMemoryRoundTrip(t *testing.T) {
 	if len(got) != 1 || got[0].Scope != session.MemoryScopeProject || got[0].Title != "Use mise run precommit before final status" || got[0].Body != "Use mise run precommit before final status" {
 		t.Fatalf("memories = %+v", got)
 	}
+}
+
+func TestProjectMemoryGitignoreWarningWhenHyggeNotIgnored(t *testing.T) {
+	projectDir := initGitRepo(t)
+	st := NewFileStore(FileStoreOptions{ProjectDir: projectDir, HomeDir: t.TempDir()})
+	warning, err := st.ProjectMemoryGitignoreWarning(context.Background())
+	if err != nil {
+		t.Fatalf("ProjectMemoryGitignoreWarning: %v", err)
+	}
+	if !strings.Contains(warning, ".hygge/ is not ignored") {
+		t.Fatalf("warning = %q, want .hygge guidance", warning)
+	}
+}
+
+func TestProjectMemoryGitignoreWarningSkippedWhenIgnoredOrNotFirst(t *testing.T) {
+	projectDir := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(projectDir, ".gitignore"), []byte(".hygge/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := NewFileStore(FileStoreOptions{ProjectDir: projectDir, HomeDir: t.TempDir()})
+	warning, err := st.ProjectMemoryGitignoreWarning(context.Background())
+	if err != nil {
+		t.Fatalf("ProjectMemoryGitignoreWarning ignored: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("warning = %q, want none when ignored", warning)
+	}
+
+	projectDir = initGitRepo(t)
+	st = NewFileStore(FileStoreOptions{ProjectDir: projectDir, HomeDir: t.TempDir()})
+	if _, err := st.Remember(context.Background(), session.MemoryScopeProject, "Existing memory"); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	warning, err = st.ProjectMemoryGitignoreWarning(context.Background())
+	if err != nil {
+		t.Fatalf("ProjectMemoryGitignoreWarning existing: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("warning = %q, want none after first memory", warning)
+	}
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
 }
 
 func TestFileStoreListMemoriesOrdersGlobalProject(t *testing.T) {

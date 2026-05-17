@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/cfbender/hygge/internal/gitexec"
 	"github.com/cfbender/hygge/internal/session"
 )
 
@@ -28,6 +30,7 @@ type FileStoreOptions struct {
 	HomeDir       string
 	XDGConfigHome string
 	Now           func() time.Time
+	Git           gitexec.Runner
 }
 
 // FileStore persists project and global memories as Markdown files.
@@ -36,6 +39,7 @@ type FileStore struct {
 	homeDir       string
 	xdgConfigHome string
 	now           func() time.Time
+	git           gitexec.Runner
 }
 
 // NewFileStore constructs a file-backed memory store.
@@ -44,7 +48,11 @@ func NewFileStore(opts FileStoreOptions) *FileStore {
 	if now == nil {
 		now = time.Now
 	}
-	return &FileStore{projectDir: opts.ProjectDir, homeDir: opts.HomeDir, xdgConfigHome: opts.XDGConfigHome, now: now}
+	git := opts.Git
+	if git == nil {
+		git = gitexec.DefaultRunner{}
+	}
+	return &FileStore{projectDir: opts.ProjectDir, homeDir: opts.HomeDir, xdgConfigHome: opts.XDGConfigHome, now: now, git: git}
 }
 
 // ListMemories returns global memories, then project memories, for prompt injection.
@@ -93,6 +101,30 @@ func (s *FileStore) Remember(ctx context.Context, scope session.MemoryScope, con
 	return m, nil
 }
 
+// ProjectMemoryGitignoreWarning returns a warning before the first project
+// memory write when .hygge/ is not ignored by git. It never edits .gitignore.
+func (s *FileStore) ProjectMemoryGitignoreWarning(ctx context.Context) (string, error) {
+	dir, err := s.dir(session.MemoryScopeProject)
+	if err != nil {
+		return "", err
+	}
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".md" {
+				return "", nil
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("memory: inspect project memory dir: %w", err)
+	}
+	ignored, err := s.projectHyggeIgnored(ctx)
+	if err != nil || ignored {
+		return "", err
+	}
+	return ".hygge/ is not ignored; add .hygge/ to .gitignore to keep project memories local.", nil
+}
+
 // List returns active file-backed memories for a single scope.
 func (s *FileStore) List(ctx context.Context, scope session.MemoryScope) ([]*session.Memory, error) {
 	if err := ctx.Err(); err != nil {
@@ -131,6 +163,24 @@ func (s *FileStore) List(ctx context.Context, scope session.MemoryScope) ([]*ses
 		return out[i].Path < out[j].Path
 	})
 	return out, nil
+}
+
+func (s *FileStore) projectHyggeIgnored(ctx context.Context) (bool, error) {
+	if strings.TrimSpace(s.projectDir) == "" {
+		return false, fmt.Errorf("memory: project directory required")
+	}
+	if _, err := s.git.Run(ctx, s.projectDir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return true, nil
+	}
+	_, err := s.git.Run(ctx, s.projectDir, "check-ignore", "-q", ".hygge/")
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("memory: check .hygge gitignore: %w", err)
 }
 
 func (s *FileStore) dir(scope session.MemoryScope) (string, error) {
