@@ -1093,6 +1093,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.err != nil {
 			return a, a.showToast("Steering not sent", m.err.Error())
 		}
+		text := strings.TrimSpace(m.text)
+		if text != "" {
+			a.messages = append(a.messages, uiMessage{
+				Role:          components.RoleUser,
+				Raw:           "Steering: " + text,
+				FinalMarkdown: renderMarkdown(a.ensureRenderer(), "Steering: "+text),
+				Timestamp:     a.opts.Now(),
+			})
+			a.invalidateMsgCache()
+		}
 		return a, a.showToast("Steering sent", "Applies at the next agent step")
 
 	case sendStarted:

@@ -195,16 +195,16 @@ func (a *App) steerCmd(text string) tea.Cmd {
 	return func() tea.Msg {
 		sid := a.foregroundID()
 		if sid == "" {
-			return steerCompleted{err: fmt.Errorf("no active session to steer")}
+			return steerCompleted{text: text, err: fmt.Errorf("no active session to steer")}
 		}
 		parts := []session.Part{{Kind: session.PartText, Text: text}}
 		if a.testAgentSteerFn != nil {
-			return steerCompleted{err: a.testAgentSteerFn(sid, parts)}
+			return steerCompleted{text: text, err: a.testAgentSteerFn(sid, parts)}
 		}
 		if a.opts.Agent == nil {
-			return steerCompleted{err: fmt.Errorf("agent unavailable")}
+			return steerCompleted{text: text, err: fmt.Errorf("agent unavailable")}
 		}
-		return steerCompleted{err: a.opts.Agent.Steer(sid, parts)}
+		return steerCompleted{text: text, err: a.opts.Agent.Steer(sid, parts)}
 	}
 }
 
