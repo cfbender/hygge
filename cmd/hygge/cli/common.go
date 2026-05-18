@@ -19,6 +19,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -166,7 +167,7 @@ type bootstrapOptions struct {
 	// SkipTea, when true, makes runTUI build the App but skip the
 	// tea.Program.Run loop.  Test-only.
 	SkipTea bool
-	// CatalogBaseURL overrides the cost catalog's models.dev host.
+	// CatalogBaseURL overrides the Catwalk catalog host.
 	// Tests point this at an httptest server (typically a 500-returning
 	// stub) so no live network call is ever made.  Test-only.
 	CatalogBaseURL string
@@ -1384,10 +1385,15 @@ func hasRealConfigSource(sources []config.Source) bool {
 }
 
 func hasAnyProviderAuth(stateOpts state.LoadOptions) bool {
+	return len(authConfiguredProviders(stateOpts)) > 0
+}
+
+func authConfiguredProviders(stateOpts state.LoadOptions) []string {
+	configured := make(map[string]bool)
 	for _, name := range knownProviders() {
 		if envName := providerEnvVar(name); envName != "" {
 			if v, ok := os.LookupEnv(envName); ok && v != "" {
-				return true
+				configured[name] = true
 			}
 		}
 	}
@@ -1396,10 +1402,27 @@ func hasAnyProviderAuth(stateOpts state.LoadOptions) bool {
 		XDGStateHome: stateOpts.XDGStateHome,
 	})
 	if err != nil {
-		slog.Debug("cli: hasAnyProviderAuth: auth.Load failed", "err", err)
-		return false
+		slog.Debug("cli: authConfiguredProviders: auth.Load failed", "err", err)
+		return sortedProviderNames(configured)
 	}
-	return len(store.List()) > 0
+	for _, name := range store.List() {
+		if strings.TrimSpace(name) != "" {
+			configured[name] = true
+		}
+	}
+	return sortedProviderNames(configured)
+}
+
+func sortedProviderNames(providers map[string]bool) []string {
+	if len(providers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // providerEnvVar returns the canonical environment variable name a

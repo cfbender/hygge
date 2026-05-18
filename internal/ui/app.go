@@ -71,16 +71,19 @@ type AppOptions struct {
 	// Modes is the ordered list of agent modes the user can cycle through
 	// with Tab. Each mode specifies a provider, model, and optional
 	// reasoning/prompt. Guaranteed non-empty after config loading.
-	Modes         []config.ModeConfig
-	SessionID     string // existing session to resume, or "" to create on first input
-	ProjectDir    string
-	ModelProvider string // "anthropic" etc, for status bar display
-	ModelName     string
-	ProfileName   string
-	Reasoning     provider.Reasoning
-	Commands      *command.Registry // slash-command registry; nil disables slash routing
-	Subagents     []MentionSubagent // sub-agent types selectable from @ mentions
-	Now           func() time.Time
+	Modes []config.ModeConfig
+	// AuthConfiguredProviders lists providers with global auth configured
+	// (env var or auth store), independent of the active profile.
+	AuthConfiguredProviders []string
+	SessionID               string // existing session to resume, or "" to create on first input
+	ProjectDir              string
+	ModelProvider           string // "anthropic" etc, for status bar display
+	ModelName               string
+	ProfileName             string
+	Reasoning               provider.Reasoning
+	Commands                *command.Registry // slash-command registry; nil disables slash routing
+	Subagents               []MentionSubagent // sub-agent types selectable from @ mentions
+	Now                     func() time.Time
 	// ContextWindow is the model's maximum context size in tokens.  Used by
 	// the compaction modal to display usage info.  0 means unknown.
 	ContextWindow int64
@@ -3554,6 +3557,11 @@ func (a *App) catalogModelOptions() []components.ModelOption {
 
 func (a *App) configuredModelProviders() map[string]bool {
 	configured := make(map[string]bool)
+	for _, provider := range a.opts.AuthConfiguredProviders {
+		if provider := strings.TrimSpace(provider); provider != "" {
+			configured[provider] = true
+		}
+	}
 	if provider := strings.TrimSpace(a.opts.ModelProvider); provider != "" {
 		configured[provider] = true
 	}

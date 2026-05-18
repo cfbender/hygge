@@ -153,7 +153,7 @@ type SessionConfig struct {
 type CatalogConfig struct {
 	// RefreshInterval is a Go duration string (e.g. "24h", "1h30m") that,
 	// when non-empty, schedules a periodic background refresh of the
-	// models.dev catalog.  Empty string (the default) means no periodic
+	// Catwalk catalog. Empty string (the default) means no periodic
 	// refresh — the one-shot startup refresh still fires.
 	//
 	// Values that cannot be parsed as a duration, or that are negative,

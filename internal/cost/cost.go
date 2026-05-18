@@ -4,15 +4,15 @@
 //   - A pure [Calculate] function that turns a [Usage] (token counts) into a
 //     [Money] given a [Pricing] (rates per million tokens).
 //   - A [Catalog] that resolves model pricing through a cascade of sources:
-//     in-memory cache -> on-disk JSON cache -> live HTTP fetch from
-//     models.dev -> hard-coded fallback table.
+//     shared Catwalk catalog -> live HTTP fetch from Catwalk -> hard-coded
+//     fallback table.
 //   - A small set of typed errors so callers can distinguish "model is not
 //     priced anywhere" from transport or parse failures.
 //
 // # Units
 //
 // Every rate in [Pricing] is dollars per ONE MILLION tokens.  This matches
-// the convention models.dev uses in its public catalog and avoids the
+// the convention Catwalk uses in its public catalog and avoids the
 // per-1k-vs-per-1M confusion that plagues pricing code.  Convert at the API
 // boundary — never store mixed units.
 //
@@ -31,8 +31,8 @@
 // # No live network in tests
 //
 // Tests under this package MUST NOT make real HTTP calls.  All network paths
-// are exercised against [net/http/httptest] servers.  The real models.dev
-// URL is only contacted from production code paths, and even then the
+// are exercised against [net/http/httptest] servers. The real Catwalk URL
+// is only contacted from production code paths, and even then the
 // catalog falls back gracefully on failure (see [Catalog.LookUp]).
 //
 // # Resilience
@@ -57,7 +57,7 @@ type Pricing struct {
 	Provider string
 
 	// Model is the model id as the provider exposes it (e.g.
-	// "claude-sonnet-4-5").  When the live models.dev catalog uses a
+	// "claude-sonnet-4-5"). When the live Catwalk catalog uses a
 	// different spelling (e.g. "claude-sonnet-4-5"), the catalog still
 	// returns Pricing.Model spelled the way the caller asked for.
 	Model string

@@ -80,6 +80,23 @@ var fixtureProviders = []catwalk.Provider{
 			},
 		},
 	},
+	{
+		ID:   "openrouter",
+		Name: "OpenRouter",
+		Type: catwalk.TypeOpenAI,
+		Models: []catwalk.Model{
+			{
+				ID:               "anthropic/claude-sonnet-4-5",
+				Name:             "Claude Sonnet 4.5 via OpenRouter",
+				CostPer1MIn:      3,
+				CostPer1MOut:     15,
+				ContextWindow:    200000,
+				DefaultMaxTokens: 8192,
+				CanReason:        true,
+				SupportsImages:   true,
+			},
+		},
+	},
 }
 
 // fixtureBody serialises fixtureProviders to JSON (catwalk /v2/providers format).
@@ -216,7 +233,7 @@ func TestLoad_CorruptDiskFallsBackToEmbedded(t *testing.T) {
 }
 
 // TestLoad_V1DiskCacheRejected confirms that an on-disk snapshot with
-// version=1 (models.dev format) is rejected and falls back to embedded.
+// version=1 (pre-Catwalk format) is rejected and falls back to embedded.
 func TestLoad_V1DiskCacheRejected(t *testing.T) {
 	t.Parallel()
 	dir := tempStateDir(t)
@@ -265,11 +282,11 @@ func TestRefresh_RoundTripsDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	if res.Providers != 2 {
-		t.Errorf("providers = %d, want 2", res.Providers)
+	if res.Providers != 3 {
+		t.Errorf("providers = %d, want 3", res.Providers)
 	}
-	if res.Models != 4 {
-		t.Errorf("models = %d, want 4", res.Models)
+	if res.Models != 5 {
+		t.Errorf("models = %d, want 5", res.Models)
 	}
 	if !res.FetchedAt.Equal(now) {
 		t.Errorf("FetchedAt = %v, want %v", res.FetchedAt, now)
@@ -506,6 +523,20 @@ func TestCatwalkMapping_FieldExtraction(t *testing.T) {
 	}
 	if len(h.ReasoningLevels) != 0 {
 		t.Errorf("haiku should have no reasoning levels, got %v", h.ReasoningLevels)
+	}
+
+	or := snap.Providers["openrouter"]["anthropic/claude-sonnet-4-5"]
+	if or.Provider != "openrouter" {
+		t.Errorf("OpenRouter Provider = %q, want openrouter", or.Provider)
+	}
+	if or.ID != "anthropic/claude-sonnet-4-5" {
+		t.Errorf("OpenRouter ID = %q, want namespaced id", or.ID)
+	}
+	if !or.Capabilities.Reasoning {
+		t.Errorf("OpenRouter namespaced model should retain Catwalk reasoning flag")
+	}
+	if !or.Capabilities.Attachment {
+		t.Errorf("OpenRouter namespaced model should map supports_attachments")
 	}
 }
 
@@ -802,10 +833,10 @@ func TestProviders_Sorted(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 	provs := c.Providers()
-	if len(provs) != 2 {
+	if len(provs) != 3 {
 		t.Fatalf("providers = %v", provs)
 	}
-	if provs[0] != "anthropic" || provs[1] != "openai" {
+	if provs[0] != "anthropic" || provs[1] != "openai" || provs[2] != "openrouter" {
 		t.Errorf("providers not sorted: %v", provs)
 	}
 }

@@ -65,7 +65,7 @@ func TestSmoke_EndToEnd(t *testing.T) {
 		t.Fatalf("seed main.go: %v", err)
 	}
 
-	// 500-only catalog server so the runtime never reaches models.dev.
+	// 500-only catalog server so the runtime never reaches Catwalk.
 	// LookUp falls back to the hard-coded table; for an unknown model
 	// (which we use below) that yields ErrModelNotPriced and the agent
 	// records cost = 0.
