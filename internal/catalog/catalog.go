@@ -49,8 +49,8 @@
 // received from the server is stored in the on-disk snapshot so that
 // subsequent calls can send If-None-Match, saving bandwidth when the
 // catalog has not changed (server replies 304).  An old-format v1 disk
-// snapshot (from the prior models.dev integration) is detected by its
-// version number and silently discarded so the catwalk snapshot is
+// snapshot (from the prior catalog integration) is detected by its
+// version number and silently discarded so the Catwalk snapshot is
 // fetched fresh.
 //
 // # Concurrency
@@ -109,8 +109,7 @@ const (
 	// SourceDisk means the snapshot was read from the on-disk cache
 	// at $XDG_STATE_HOME/hygge/catalog.json.
 	SourceDisk Source = "disk"
-	// SourceNetwork means the snapshot was just fetched from
-	// models.dev.
+	// SourceNetwork means the snapshot was just fetched from Catwalk.
 	SourceNetwork Source = "network"
 )
 
@@ -143,10 +142,6 @@ type Entry struct {
 	// model does not charge for that token class" (e.g. no caching).
 	Cost Cost
 
-	// ReleaseDate is a free-form date string ("2025-09-29", etc.).
-	// May be empty.  Populated only by the legacy models.dev path.
-	ReleaseDate string
-
 	// ReasoningLevels is the set of reasoning effort levels the model
 	// supports, e.g. ["low", "medium", "high"].  Empty when the model
 	// does not advertise explicit levels.
@@ -161,7 +156,7 @@ type Entry struct {
 	Source Source `json:"-"`
 }
 
-// Capabilities is the set of boolean feature flags upstream models.dev
+// Capabilities is the set of boolean feature flags the upstream catalog
 // advertises.  Zero value = "not advertised" — callers should treat that
 // as "unknown / probably false".
 type Capabilities struct {
@@ -255,7 +250,7 @@ type LoadOptions struct {
 }
 
 // Fetcher is the source interface the Catalog uses to obtain a fresh
-// snapshot.  Production wires this to the real models.dev fetcher; tests
+// snapshot. Production wires this to the real Catwalk fetcher; tests
 // inject a stub.
 type Fetcher interface {
 	// Fetch returns a populated snapshot, or an error.  The snapshot's
@@ -469,14 +464,14 @@ func (c *Catalog) Close() error {
 	return nil
 }
 
-// Lookup returns the catalog entry for (provider, model).  Both
-// arguments are matched against the canonical id used by models.dev.
+// Lookup returns the catalog entry for (provider, model). Both
+// arguments are matched against the canonical id used by Catwalk.
 // Returns ok=false when not found.
 //
 // The lookup is case-insensitive on provider and on model, since
 // upstream provider ids are sometimes spelled differently across hygge's
-// surfaces (e.g. user typing "Anthropic" in a config field) but
-// models.dev canonicalises to lowercase.
+// surfaces (e.g. user typing "Anthropic" in a config field) but Catwalk
+// canonicalises provider ids to lowercase.
 func (c *Catalog) Lookup(provider, model string) (Entry, bool) {
 	if provider == "" || model == "" {
 		return Entry{}, false

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -421,6 +422,24 @@ func TestBootstrap_AuthStoreInjectsAPIKey(t *testing.T) {
 // TestBootstrap_EnvVarBeatsAuthStore verifies that when the canonical
 // env var is set, the auth store is not consulted — the adapter's own
 // env fallback gets to run.
+func TestAuthConfiguredProvidersIncludesEnvAndAuthStore(t *testing.T) {
+	home := hermeticHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env-9999")
+	t.Setenv("OPENAI_API_KEY", "")
+	xdgState := filepath.Join(home, ".local", "state")
+	if err := auth.Set("openrouter",
+		auth.Credential{Type: auth.CredAPIKey, APIKey: "sk-from-store-1234"},
+		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("auth.Set: %v", err)
+	}
+
+	got := authConfiguredProviders(state.LoadOptions{HomeDir: home, XDGStateHome: xdgState})
+	want := []string{"anthropic", "openrouter"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("authConfiguredProviders = %v, want %v", got, want)
+	}
+}
+
 func TestBootstrap_EnvVarBeatsAuthStore(t *testing.T) {
 	home := hermeticHome(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env-9999")

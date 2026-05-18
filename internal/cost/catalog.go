@@ -36,7 +36,7 @@ type CatalogOptions struct {
 	// nil.  Nil uses an http.Client with a 15-second timeout.
 	HTTPClient *http.Client
 
-	// BaseURL overrides the models.dev host when Catalog is nil.
+	// BaseURL overrides the Catwalk host when Catalog is nil.
 	// Empty falls back to catalog.DefaultBaseURL.  Tests typically
 	// point this at an httptest server.
 	BaseURL string

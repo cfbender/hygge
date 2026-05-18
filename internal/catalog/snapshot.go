@@ -40,8 +40,8 @@ type snapshotFileFormat struct {
 //
 // Version history:
 //
-//	1 — original format backed by models.dev JSON
-//	2 — catwalk-backed; incompatible field set (ETag added,
+//	1 — original pre-Catwalk format
+//	2 — Catwalk-backed; incompatible field set (ETag added,
 //	    reasoning_levels / default_reasoning_effort added to Entry)
 const snapshotFileVersion = 2
 

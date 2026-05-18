@@ -115,7 +115,7 @@ type Config struct {
 	// Catalog, when non-nil, is consulted by reasoning-model detection
 	// before falling back to the legacy name-prefix heuristic.  The
 	// catalog is the authoritative source for capability metadata
-	// (sourced from models.dev); the prefix matcher is the fallback
+	// (sourced from Catwalk); the prefix matcher is the fallback
 	// for models the catalog hasn't been refreshed for.
 	//
 	// CatalogProvider is the provider id used for catalog Lookups.
@@ -293,8 +293,8 @@ func (a *adapter) buildRequestBody(req provider.Request) ([]byte, error) {
 //
 //  1. When a [*catalog.Catalog] is wired into Config.Catalog, look up
 //     the model in the catalog and use its [Capabilities.Reasoning]
-//     flag.  This is the authoritative source — when models.dev
-//     advertises reasoning, hygge believes it.
+//     flag. This is the authoritative source — when Catwalk advertises
+//     reasoning, hygge believes it.
 //  2. Otherwise (or when the catalog has no entry for the model), fall
 //     back to the hardcoded name-prefix matcher.  This keeps detection
 //     working for brand-new ids the catalog hasn't been refreshed for.

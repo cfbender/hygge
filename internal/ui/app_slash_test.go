@@ -215,6 +215,40 @@ func TestModelDialogOnlyShowsConfiguredProviders(t *testing.T) {
 	}
 }
 
+func TestModelDialogShowsAuthConfiguredProvidersAcrossProfiles(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	if app.opts.ModelProvider == "openai" {
+		t.Fatal("test fixture should start on a non-openai active provider")
+	}
+	app.opts.AuthConfiguredProviders = []string{"openai"}
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	filtered := app.modelModal.Filtered()
+	if len(filtered) == 0 {
+		t.Fatal("expected configured provider models")
+	}
+	hasCurrent := false
+	hasAuthConfigured := false
+	for _, opt := range filtered {
+		switch opt.Provider {
+		case app.opts.ModelProvider:
+			hasCurrent = true
+		case "openai":
+			hasAuthConfigured = true
+		default:
+			t.Fatalf("model dialog provider = %q, want current provider or auth-configured openai", opt.Provider)
+		}
+	}
+	if !hasCurrent {
+		t.Fatalf("model dialog missing current provider %q", app.opts.ModelProvider)
+	}
+	if !hasAuthConfigured {
+		t.Fatalf("model dialog missing auth-configured provider openai")
+	}
+}
+
 func TestModelDialogShowsConfiguredOpenRouterModels(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

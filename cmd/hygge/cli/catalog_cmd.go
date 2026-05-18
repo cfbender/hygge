@@ -17,13 +17,13 @@ import (
 func newCatalogCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "catalog",
-		Short: "Inspect and refresh the models.dev-backed catalog",
+		Short: "Inspect and refresh the Catwalk-backed catalog",
 		Long: `Inspect and refresh hygge's model catalog.
 
 The catalog is hygge's central source of truth for model metadata:
-pricing, capabilities, and context-window limits.  It is sourced from
-models.dev, persisted at $XDG_STATE_HOME/hygge/catalog.json, and
-shipped with an embedded snapshot so hygge works fully offline.
+pricing, capabilities, and context-window limits. It is sourced from
+Catwalk, persisted at $XDG_STATE_HOME/hygge/catalog.json, and shipped
+with an embedded snapshot so hygge works fully offline.
 
 Subcommands:
   list                     Summary by provider, with model counts.
@@ -31,8 +31,8 @@ Subcommands:
                            that provider id (id, context, capabilities,
                            pricing).
   show <provider>/<model>  All metadata for a single model.
-  refresh                  Pull a fresh snapshot from models.dev and
-                           write it to the state directory.`,
+  refresh                  Pull a fresh snapshot from Catwalk and write
+                           it to the state directory.`,
 	}
 	root.AddCommand(newCatalogListCmd(), newCatalogShowCmd(), newCatalogRefreshCmd())
 	return root
@@ -157,9 +157,6 @@ func printCatalogEntry(cmd *cobra.Command, e catalog.Entry) {
 	if e.Name != "" {
 		printf(tw, "name:\t%s\n", e.Name)
 	}
-	if e.ReleaseDate != "" {
-		printf(tw, "release_date:\t%s\n", e.ReleaseDate)
-	}
 	printf(tw, "source:\t%s\n", e.Source)
 	printf(tw, "\n")
 	printf(tw, "context_window:\t%s\n", formatContext(e.Limit.ContextWindow))
@@ -187,7 +184,7 @@ func newCatalogRefreshCmd() *cobra.Command {
 	var quiet bool
 	c := &cobra.Command{
 		Use:   "refresh",
-		Short: "Pull a fresh snapshot from models.dev and persist it",
+		Short: "Pull a fresh snapshot from Catwalk and persist it",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			rt, err := bootstrap(context.Background(), bootstrapOptions{
