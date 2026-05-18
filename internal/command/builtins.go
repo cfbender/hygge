@@ -34,6 +34,7 @@ func builtinCommands() []Command {
 		&clearCmd{},
 		&compactCmd{},
 		&costCmd{},
+		&queueCmd{},
 		&attachCmd{},
 		&attachmentsCmd{},
 		&memoryCmd{},
@@ -295,6 +296,24 @@ func (*costCmd) Execute(_ context.Context, app App, _ string) (Outcome, error) {
 		dollars = app.Cost()
 	}
 	return Outcome{Notice: fmt.Sprintf("running cost: $%.4f", dollars)}, nil
+}
+
+// --- /queue ---------------------------------------------------------------
+
+type queueCmd struct{}
+
+func (*queueCmd) Name() string        { return "queue" }
+func (*queueCmd) Description() string { return "Queue a message for after the active turn" }
+func (*queueCmd) Source() string      { return "builtin" }
+func (*queueCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "message", Description: "message to send after the active turn", Required: true}}
+}
+func (*queueCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	text := strings.TrimSpace(input)
+	if text == "" {
+		return Outcome{Notice: "usage: /queue <message>"}, nil
+	}
+	return Outcome{Updates: map[string]string{UpdateQueueMessage: text}}, nil
 }
 
 // --- /sessions ------------------------------------------------------------

@@ -213,6 +213,9 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		return nil
 	case command.UpdateForgetMemory:
 		return a.forgetMemoryCmd(value)
+	case command.UpdateQueueMessage:
+		a.enqueuePromptDraft(queuedPromptDraft{Text: value})
+		a.notice = fmt.Sprintf("queued message %d", a.queueCount)
 	case command.UpdateReasoning:
 		switch value {
 		case "off", "low", "medium", "high":

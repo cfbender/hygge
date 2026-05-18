@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/notify"
 	"github.com/cfbender/hygge/internal/session"
@@ -2309,17 +2310,18 @@ func TestQueueChanged_RendersQueuedPromptsNearInput(t *testing.T) {
 	}
 }
 
-func TestBusySubmitQueuesDraftOutOfChatAndClickEdits(t *testing.T) {
+func TestQueueCommandQueuesDraftOutOfChatAndClickEdits(t *testing.T) {
 	t.Parallel()
-	app, _ := newTestApp(t)
+	app, _, reg := newSlashApp(t)
 	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	app.opts.Commands = reg
 	app.busy = true
 	app.input.SetBusy(true, "")
 
-	typeInto(app, "queued one")
+	typeInto(app, "/queue queued one")
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
-		t.Fatalf("busy submit should queue locally without starting send, got cmd %T", cmd)
+		app.Update(cmd())
 	}
 	if len(app.messages) != 0 {
 		t.Fatalf("queued draft should not appear in chat, messages = %#v", app.messages)
@@ -2359,9 +2361,13 @@ func TestQueuedDraftEditPreservesOriginalPosition(t *testing.T) {
 		t.Fatalf("input after queued draft click = %q, want two", got)
 	}
 	app.setInputValueAndCursor("four", len("four"))
+	reg := command.New()
+	command.RegisterBuiltins(reg)
+	app.opts.Commands = reg
+	app.setInputValueAndCursor("/queue four", len("/queue four"))
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
-		t.Fatalf("busy edited draft submit should queue locally, got cmd %T", cmd)
+		app.Update(cmd())
 	}
 	if got := strings.Join(app.queuedPrompts, ","); got != "one,four,three" {
 		t.Fatalf("queued prompts = %q, want one,four,three", got)

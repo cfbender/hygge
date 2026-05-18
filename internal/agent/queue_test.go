@@ -63,55 +63,51 @@ func (s *slowProvider) CountTokens(_ context.Context, _ provider.Request) (int64
 }
 func (s *slowProvider) ListModels(_ context.Context) ([]provider.Model, error) { return nil, nil }
 
-// TestQueue_EnqueueWhileBusy verifies that a second Send on a busy session
-// is queued (returns nil error and nil message) and QueueCount returns 1.
-func TestQueue_EnqueueWhileBusy(t *testing.T) {
+// TestSendWhileBusyAppendsSteering verifies that a second Send on a busy
+// session is persisted immediately as inline steering instead of being queued.
+func TestSendWhileBusyAppendsSteering(t *testing.T) {
 	env := newTestEnv(t)
 
 	gate := make(chan struct{})
 	prov := newSlowProvider("fake", gate,
 		scriptText("first", provider.Usage{}),
-		scriptText("second", provider.Usage{}),
 	)
 	a := env.newAgent(prov)
 
 	ctx := context.Background()
 
-	// Start the first send; it blocks at the gate.
 	var firstDone sync.WaitGroup
 	firstDone.Go(func() {
 		_, _ = a.Send(ctx, env.sessionID, userText("first message"))
 	})
-
-	// Give the goroutine time to start and mark the session active.
 	time.Sleep(30 * time.Millisecond)
 
-	// Second send while first is in flight: should queue.
 	msg, err := a.Send(ctx, env.sessionID, userText("second message"))
 	if err != nil {
-		t.Fatalf("queued Send returned unexpected error: %v", err)
+		t.Fatalf("steering Send returned unexpected error: %v", err)
 	}
 	if msg != nil {
-		t.Fatalf("queued Send returned non-nil message (should be nil for queued): %v", msg)
+		t.Fatalf("steering Send returned non-nil message: %v", msg)
 	}
-	if got := a.QueueCount(env.sessionID); got != 1 {
-		t.Fatalf("QueueCount = %d, want 1", got)
-	}
-
-	prompts := a.QueuedPrompts(env.sessionID)
-	if len(prompts) != 1 || prompts[0] != "second message" {
-		t.Fatalf("QueuedPrompts = %v, want [\"second message\"]", prompts)
+	if got := a.QueueCount(env.sessionID); got != 0 {
+		t.Fatalf("QueueCount = %d, want 0", got)
 	}
 
-	// Release the gate so both complete.
+	msgs, err := env.Store.MessagesForSession(ctx, env.sessionID)
+	if err != nil {
+		t.Fatalf("MessagesForSession: %v", err)
+	}
+	if len(msgs) < 2 {
+		t.Fatalf("expected at least two user messages, got %d", len(msgs))
+	}
+	got := firstTextPart(msgs[len(msgs)-1].Parts)
+	want := "Inline steering instruction for the active turn: second message"
+	if got != want {
+		t.Fatalf("steering message = %q, want %q", got, want)
+	}
+
 	close(gate)
 	firstDone.Wait()
-
-	// After completion the queue should drain.
-	time.Sleep(100 * time.Millisecond)
-	if got := a.QueueCount(env.sessionID); got != 0 {
-		t.Fatalf("QueueCount after completion = %d, want 0", got)
-	}
 }
 
 // TestQueue_DequeueAfterCompletion verifies that the queued send runs
@@ -136,7 +132,9 @@ func TestQueue_DequeueAfterCompletion(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Enqueue the second message.
-	_, _ = a.Send(ctx, env.sessionID, userText("second"))
+	if err := a.Enqueue(env.sessionID, userText("second")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
 	if got := a.QueueCount(env.sessionID); got != 1 {
 		t.Fatalf("queue count before release = %d, want 1", got)
 	}
@@ -186,8 +184,12 @@ func TestQueue_ClearQueue(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Enqueue two messages.
-	_, _ = a.Send(ctx, env.sessionID, userText("q1"))
-	_, _ = a.Send(ctx, env.sessionID, userText("q2"))
+	if err := a.Enqueue(env.sessionID, userText("q1")); err != nil {
+		t.Fatalf("Enqueue q1: %v", err)
+	}
+	if err := a.Enqueue(env.sessionID, userText("q2")); err != nil {
+		t.Fatalf("Enqueue q2: %v", err)
+	}
 	if got := a.QueueCount(env.sessionID); got != 2 {
 		t.Fatalf("want queue=2, got %d", got)
 	}
@@ -249,7 +251,7 @@ func TestQueue_ConcurrentEnqueue(t *testing.T) {
 	for i := range n {
 		go func(i int) {
 			defer enqueuers.Done()
-			_, _ = a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i)))
+			_ = a.Enqueue(env.sessionID, userText(fmt.Sprintf("q%d", i)))
 		}(i)
 	}
 	enqueuers.Wait()
@@ -340,8 +342,12 @@ func TestQueue_MultiSessionIndependence(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Enqueue one message for each session.
-	_, _ = a.Send(ctx, env.sessionID, userText("s1-queued"))
-	_, _ = a.Send(ctx, sess2.ID, userText("s2-queued"))
+	if err := a.Enqueue(env.sessionID, userText("s1-queued")); err != nil {
+		t.Fatalf("Enqueue s1: %v", err)
+	}
+	if err := a.Enqueue(sess2.ID, userText("s2-queued")); err != nil {
+		t.Fatalf("Enqueue s2: %v", err)
+	}
 
 	// Queues are independent.
 	if got := a.QueueCount(env.sessionID); got != 1 {
@@ -385,8 +391,12 @@ func TestQueue_QueueChangedEvents(t *testing.T) {
 	})
 	time.Sleep(30 * time.Millisecond)
 
-	_, _ = a.Send(ctx, env.sessionID, userText("queued1"))
-	_, _ = a.Send(ctx, env.sessionID, userText("queued2"))
+	if err := a.Enqueue(env.sessionID, userText("queued1")); err != nil {
+		t.Fatalf("Enqueue queued1: %v", err)
+	}
+	if err := a.Enqueue(env.sessionID, userText("queued2")); err != nil {
+		t.Fatalf("Enqueue queued2: %v", err)
+	}
 	a.ClearQueue(env.sessionID)
 
 	close(gate)
@@ -492,10 +502,8 @@ func TestQueue_QueuedSendCompletesAfterCallerCtxCancelled(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Enqueue the second message while first is in flight.
-	// This uses a separate context (doesn't matter — it returns nil,nil immediately).
-	_, err := a.Send(context.Background(), env.sessionID, userText("second"))
-	if err != nil {
-		t.Fatalf("enqueue Send returned error: %v", err)
+	if err := a.Enqueue(env.sessionID, userText("second")); err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
 	}
 	if got := a.QueueCount(env.sessionID); got != 1 {
 		t.Fatalf("QueueCount = %d, want 1", got)
