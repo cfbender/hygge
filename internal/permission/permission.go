@@ -405,6 +405,7 @@ func (e *Engine) askUser(ctx context.Context, req Request) (Decision, error) {
 		Category:  string(req.Category),
 		Target:    req.Target,
 		ToolName:  req.ToolName,
+		Reason:    req.Reason,
 		At:        e.clock(),
 	})
 

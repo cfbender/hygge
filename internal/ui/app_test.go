@@ -1068,9 +1068,10 @@ func TestPermissionModalAppears(t *testing.T) {
 		Category:  "file.read",
 		Target:    "/Users/cfb/.aws/credentials",
 		ToolName:  "read",
+		Reason:    "needs to inspect config",
 	})
 	out := app.View().Content
-	for _, want := range []string{"permission request", "Tool:", "read", "/Users/cfb/.aws/credentials", "[y]"} {
+	for _, want := range []string{"permission request", "Tool:", "read", "/Users/cfb/.aws/credentials", "needs to inspect config", "[y]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("modal view missing %q in:\n%s", want, out)
 		}

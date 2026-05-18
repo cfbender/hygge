@@ -195,7 +195,9 @@ func TestYolo_StillDeniesSecrets(t *testing.T) {
 func TestAsk_FlowsThroughBus(t *testing.T) {
 	e, b, _ := newEngine(t, defaultCfg())
 
-	stop := fakeResponder(t, b, func(_ bus.PermissionAsked) bus.PermissionReplied {
+	askedCh := make(chan bus.PermissionAsked, 1)
+	stop := fakeResponder(t, b, func(asked bus.PermissionAsked) bus.PermissionReplied {
+		askedCh <- asked
 		return bus.PermissionReplied{Decision: "allow", Scope: "once", At: time.Now()}
 	})
 	defer stop()
@@ -203,6 +205,7 @@ func TestAsk_FlowsThroughBus(t *testing.T) {
 	d, err := e.Ask(context.Background(), Request{
 		Category: CategoryShell,
 		Target:   "ls -la",
+		Reason:   "inspect the working tree",
 	})
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
@@ -212,6 +215,15 @@ func TestAsk_FlowsThroughBus(t *testing.T) {
 	}
 	if d.Scope != ScopeOnce {
 		t.Errorf("Scope: got %v, want once", d.Scope)
+	}
+
+	select {
+	case asked := <-askedCh:
+		if asked.Reason != "inspect the working tree" {
+			t.Errorf("PermissionAsked.Reason = %q, want rationale", asked.Reason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for PermissionAsked")
 	}
 }
 
