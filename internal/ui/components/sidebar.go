@@ -263,7 +263,7 @@ func (s Sidebar) renderTodos(innerW int, mutedStyle lipgloss.Style) []string {
 	}
 
 	for _, t := range visible {
-		lines = append(lines, s.renderTodoRow(t, innerW, mutedStyle))
+		lines = append(lines, s.renderTodoRow(t, innerW, mutedStyle)...)
 	}
 	if extra > 0 {
 		lines = append(lines, mutedStyle.Render(sidebarTruncate(fmt.Sprintf("… +%d more", extra), innerW)))
@@ -271,9 +271,9 @@ func (s Sidebar) renderTodos(innerW int, mutedStyle lipgloss.Style) []string {
 	return lines
 }
 
-// renderTodoRow renders one todo row as "<glyph> <title>" truncated to
-// innerW.  The glyph and title styling depend on the todo status.
-func (s Sidebar) renderTodoRow(t SidebarTodo, innerW int, mutedStyle lipgloss.Style) string {
+// renderTodoRow renders one todo as "<glyph> <title>", wrapping long titles
+// onto continuation lines. The glyph and title styling depend on the todo status.
+func (s Sidebar) renderTodoRow(t SidebarTodo, innerW int, mutedStyle lipgloss.Style) []string {
 	var (
 		glyph      string
 		glyphStyle lipgloss.Style
@@ -298,17 +298,32 @@ func (s Sidebar) renderTodoRow(t SidebarTodo, innerW int, mutedStyle lipgloss.St
 		titleStyle = s.atomStyle(theme.AtomSidebarValue)
 	}
 
-	// Flatten multiline titles to a single line.
+	// Normalize manual line breaks and repeated spaces before wrapping.
 	title := strings.ReplaceAll(t.Title, "\n", " ")
 	title = strings.Join(strings.Fields(title), " ")
 
 	glyphW := lipgloss.Width(glyph)
 	titleBudget := innerW - glyphW - 1
 	if titleBudget < 1 {
-		return glyphStyle.Render(glyph)
+		return []string{glyphStyle.Render(glyph)}
 	}
-	truncated := sidebarTruncate(title, titleBudget)
-	return glyphStyle.Render(glyph) + " " + titleStyle.Render(truncated)
+	if title == "" {
+		return []string{glyphStyle.Render(glyph)}
+	}
+
+	wrapped := titleStyle.Width(titleBudget).Render(title)
+	titleLines := strings.Split(wrapped, "\n")
+	lines := make([]string, 0, len(titleLines))
+	prefix := glyphStyle.Render(glyph) + " "
+	continuationPrefix := strings.Repeat(" ", glyphW+1)
+	for i, line := range titleLines {
+		if i == 0 {
+			lines = append(lines, prefix+line)
+			continue
+		}
+		lines = append(lines, continuationPrefix+line)
+	}
+	return lines
 }
 
 // renderBottom builds the bottom identity block lines.
