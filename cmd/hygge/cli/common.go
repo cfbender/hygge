@@ -53,12 +53,16 @@ import (
 )
 
 const noProvidersConfiguredMessage = "No providers configured, you must configure one with hygge provider auth before using"
+const noModelConfiguredMessage = "No model configured. Run `hygge onboard` to choose one."
 
 var errNoProvidersConfigured = noProvidersConfiguredError{}
+var errNoModelConfigured = noModelConfiguredError{}
 
 type noProvidersConfiguredError struct{}
+type noModelConfiguredError struct{}
 
 func (noProvidersConfiguredError) Error() string { return noProvidersConfiguredMessage }
+func (noModelConfiguredError) Error() string     { return noModelConfiguredMessage }
 
 // runtime is the wired graph of every component the CLI needs.  Returned
 // from bootstrap.  Callers must defer Close to release the SQLite handle
@@ -1363,6 +1367,22 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 // entry in the per-machine auth.json store.  Used by the TUI entrypoint
 // to refuse to start when there is no way to talk to a model — every
 // other CLI command tolerates a missing credential.
+func hasConfiguredModel(prov config.Provenance) bool {
+	return hasRealConfigSource(prov["model.provider"]) && hasRealConfigSource(prov["model.name"])
+}
+
+func hasRealConfigSource(sources []config.Source) bool {
+	for _, src := range sources {
+		switch src.File {
+		case "", "<defaults>":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 func hasAnyProviderAuth(stateOpts state.LoadOptions) bool {
 	for _, name := range knownProviders() {
 		if envName := providerEnvVar(name); envName != "" {

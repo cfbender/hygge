@@ -162,6 +162,10 @@ func runRun(cmd *cobra.Command, _ []string) error {
 // immediately after the first render (used by resume_default="ask" and
 // `hygge resume` with multiple cwd sessions).
 func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
+	if !hasConfiguredModel(rt.Provenance) {
+		return errNoModelConfigured
+	}
+
 	// The TUI is the one entrypoint that always requires the ability
 	// to talk to a model.  Every other CLI command tolerates a missing
 	// credential so users can run `hygge provider auth`, `hygge config

@@ -139,6 +139,25 @@ func seedHermeticAuth(t *testing.T, home, xdgState string) {
 	}
 }
 
+func seedHermeticModelConfig(t *testing.T, home string) {
+	t.Helper()
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	body := []byte("[model]\nprovider = \"anthropic\"\nname = \"claude-sonnet-4-5\"\n")
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), body, 0o600); err != nil {
+		t.Fatalf("write model config: %v", err)
+	}
+}
+
+func hermeticHomeWithModel(t *testing.T) string {
+	t.Helper()
+	home := hermeticHome(t)
+	seedHermeticModelConfig(t, home)
+	return home
+}
+
 // seedSession creates a session row in the store via a one-shot
 // bootstrap — useful for tests that need the store to be non-empty.
 // Returns the session id.
@@ -282,6 +301,7 @@ func TestRunTUIWithoutProviderAuthShowsSetupMessage(t *testing.T) {
 			t.Setenv(envName, "")
 		}
 	}
+	seedHermeticModelConfig(t, home)
 
 	SetTestOverrides(&bootstrapOptions{
 		HomeDir:         home,

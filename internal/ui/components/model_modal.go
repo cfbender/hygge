@@ -17,6 +17,20 @@ type ModelOption struct {
 	Entry    catalog.Entry
 }
 
+// ConfiguredModelOption builds a selectable entry for a configured model that
+// is missing from the catalog snapshot.
+func ConfiguredModelOption(provider, model string) ModelOption {
+	return ModelOption{
+		Provider: provider,
+		Entry: catalog.Entry{
+			Provider: provider,
+			ID:       model,
+			Name:     model,
+			Source:   catalog.SourceEmbedded,
+		},
+	}
+}
+
 // ModelModal renders and updates the model-selection dialog.
 type ModelModal struct {
 	Width, Height int

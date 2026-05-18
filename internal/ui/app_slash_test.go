@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/bus"
+	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/session"
@@ -211,6 +212,50 @@ func TestModelDialogOnlyShowsConfiguredProviders(t *testing.T) {
 		if opt.Provider != app.opts.ModelProvider {
 			t.Fatalf("model dialog provider = %q, want only %q", opt.Provider, app.opts.ModelProvider)
 		}
+	}
+}
+
+func TestModelDialogShowsConfiguredOpenRouterModels(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.opts.ModelProvider = "openrouter"
+	app.opts.ModelName = "openai/gpt-4o-mini"
+	cat, err := catalog.Load(catalog.LoadOptions{
+		StateDir:          t.TempDir(),
+		Source:            staticCatalogFetcher{snap: anthropicOnlySnapshot()},
+		BackgroundRefresh: new(false),
+	})
+	if err != nil {
+		t.Fatalf("catalog load: %v", err)
+	}
+	defer func() {
+		if err := cat.Close(); err != nil {
+			t.Errorf("catalog close: %v", err)
+		}
+	}()
+	if _, err := cat.Refresh(context.Background()); err != nil {
+		t.Fatalf("catalog refresh: %v", err)
+	}
+	if _, ok := cat.Lookup("openrouter", "openai/gpt-4o-mini"); ok {
+		t.Fatal("test catalog unexpectedly contains OpenRouter")
+	}
+	app.opts.Catalog = cost.NewCatalog(cost.CatalogOptions{Catalog: cat})
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	filtered := app.modelModal.Filtered()
+	if len(filtered) == 0 {
+		t.Fatal("expected OpenRouter models for configured OpenRouter provider")
+	}
+	hasOpenRouter := false
+	for _, opt := range filtered {
+		if opt.Provider == "openrouter" {
+			hasOpenRouter = true
+			break
+		}
+	}
+	if !hasOpenRouter {
+		t.Fatalf("model dialog providers did not include configured OpenRouter: %v", filtered)
 	}
 }
 
@@ -1287,3 +1332,33 @@ type testErr struct{ msg string }
 func (e testErr) Error() string { return e.msg }
 
 func errForTest(msg string) error { return testErr{msg: msg} }
+
+type staticCatalogFetcher struct {
+	snap *catalog.Snapshot
+}
+
+func (f staticCatalogFetcher) Fetch(context.Context) (*catalog.Snapshot, error) {
+	return f.snap, nil
+}
+
+func anthropicOnlySnapshot() *catalog.Snapshot {
+	return &catalog.Snapshot{
+		Providers: map[string]map[string]catalog.Entry{
+			"anthropic": {
+				"claude-sonnet-4-5": {
+					Provider: "anthropic",
+					ID:       "claude-sonnet-4-5",
+					Name:     "Claude Sonnet 4.5",
+					Limit:    catalog.Limit{ContextWindow: 200_000, MaxOutput: 8_192},
+					Capabilities: catalog.Capabilities{
+						InputText:   true,
+						InputImages: true,
+						ToolCalling: true,
+					},
+				},
+			},
+		},
+	}
+}
+
+//go:fix inline
