@@ -16,7 +16,9 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"image/color"
 	"io"
 	"os"
 	"slices"
@@ -25,11 +27,17 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/cfbender/hygge/internal/auth"
 )
+
+var errProviderAuthCancelled = errors.New("provider auth cancelled")
 
 // newProviderCmd builds the `hygge provider` subcommand group.
 func newProviderCmd() *cobra.Command {
@@ -53,9 +61,8 @@ config can be checked into a dotfiles repository safely.`,
 // newProviderAuthCmd builds `hygge provider auth [name]`.
 //
 // Interactive flow:
-//   - if name is omitted, print the known-provider list and prompt for
-//     a number-or-name selection.
-//   - prompt for auth method (1=API key, 2=OAuth-not-yet-supported).
+//   - if name is omitted, open a searchable known-provider picker.
+//   - if the provider has multiple supported auth methods, open a method picker.
 //   - for API key: read once without echo via term.ReadPassword.
 //
 // Non-interactive flow (stdin is not a TTY):
@@ -94,6 +101,9 @@ func newProviderAuthCmd() *cobra.Command {
 			}
 			if name == "" {
 				name, err = pickProvider(cmd, reader, isTTY)
+				if errors.Is(err, errProviderAuthCancelled) {
+					return nil
+				}
 				if err != nil {
 					return err
 				}
@@ -102,28 +112,174 @@ func newProviderAuthCmd() *cobra.Command {
 				return die(cmd, "provider name is required")
 			}
 
-			// 2. Pick auth method.  Default is API key.  Non-TTY
-			// stdin always implies API key (the only flow that
-			// doesn't need interactive input).
-			method := "1"
+			// 2. Pick auth method. Non-TTY stdin always implies API key
+			// because it is the only flow that does not need interactive input.
+			method := authMethodAPIKey
 			if isTTY {
-				printf(out(cmd), "Auth method for %s:\n  1) API key (paste)\n  2) OAuth (ChatGPT Pro/Plus)\nPick (1 or 2): ", name)
-				line, _ := reader.ReadString('\n')
-				if v := strings.TrimSpace(line); v != "" {
-					method = v
+				method, err = pickAuthMethod(cmd, reader, name, true)
+				if errors.Is(err, errProviderAuthCancelled) {
+					return nil
+				}
+				if err != nil {
+					return err
 				}
 			}
 
 			switch method {
-			case "1", "api_key", "api-key", "key":
+			case authMethodAPIKey:
 				return runProviderAuthAPIKey(cmd, reader, isTTY, name, authOpts)
-			case "2", "oauth":
+			case authMethodOAuth:
 				return runProviderAuthOAuth(cmd, name, authOpts)
 			default:
 				return die(cmd, "unknown auth method %q", method)
 			}
 		},
 	}
+}
+
+type authMethod string
+
+const (
+	authMethodAPIKey authMethod = "api_key"
+	authMethodOAuth  authMethod = "oauth"
+)
+
+type authMethodOption struct {
+	method      authMethod
+	title       string
+	description string
+}
+
+func authMethodOptions(providerName string) []authMethodOption {
+	options := []authMethodOption{{
+		method:      authMethodAPIKey,
+		title:       "API key",
+		description: "Paste a provider API key; stored locally in the auth store.",
+	}}
+	if providerSupportsOAuth(providerName) {
+		options = append(options, authMethodOption{
+			method:      authMethodOAuth,
+			title:       "OAuth",
+			description: "Sign in with ChatGPT Pro/Plus for the OpenAI Codex endpoint.",
+		})
+	}
+	return options
+}
+
+func providerSupportsOAuth(providerName string) bool {
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "openai":
+		return true
+	default:
+		return false
+	}
+}
+
+func pickAuthMethod(cmd *cobra.Command, reader *bufio.Reader, providerName string, isTTY bool) (authMethod, error) {
+	options := authMethodOptions(providerName)
+	if len(options) == 1 {
+		return options[0].method, nil
+	}
+	if isTTY {
+		return pickAuthMethodInteractive(cmd, providerName, options)
+	}
+	return pickAuthMethodFromLine(reader, options)
+}
+
+func pickAuthMethodFromLine(reader *bufio.Reader, options []authMethodOption) (authMethod, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("read auth method selection: %w", err)
+	}
+	choice := strings.TrimSpace(line)
+	if choice == "" {
+		return options[0].method, nil
+	}
+	if n, convErr := strconv.Atoi(choice); convErr == nil {
+		if n < 1 || n > len(options) {
+			return "", fmt.Errorf("selection %d out of range [1, %d]", n, len(options))
+		}
+		return options[n-1].method, nil
+	}
+	choice = strings.ToLower(strings.ReplaceAll(choice, "-", "_"))
+	for _, option := range options {
+		if choice == string(option.method) || choice == strings.ToLower(option.title) {
+			return option.method, nil
+		}
+	}
+	return "", fmt.Errorf("auth method %q is not available for this provider", choice)
+}
+
+func pickAuthMethodInteractive(cmd *cobra.Command, providerName string, options []authMethodOption) (authMethod, error) {
+	items := make([]list.Item, 0, len(options))
+	for _, option := range options {
+		items = append(items, authMethodSelectItem{option: option})
+	}
+
+	delegate := list.NewDefaultDelegate()
+	delegate.SetSpacing(0)
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(providerSelectAccentColor())
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(providerSelectMutedColor())
+
+	l := list.New(items, delegate, 72, min(10, max(7, len(items)+5)))
+	l.Title = "Auth method for " + providerName
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(true)
+	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
+	l.AdditionalShortHelpKeys = func() []key.Binding { return nil }
+
+	m := authMethodSelectModel{list: l}
+	p := tea.NewProgram(m, tea.WithInput(cmd.InOrStdin()), tea.WithOutput(out(cmd)))
+	finalModel, err := p.Run()
+	if err != nil {
+		return "", fmt.Errorf("auth method picker: %w", err)
+	}
+	selected, ok := finalModel.(authMethodSelectModel)
+	if !ok || selected.cancelled || selected.choice == "" {
+		writeln(out(cmd), "Cancelled.")
+		return "", errProviderAuthCancelled
+	}
+	return selected.choice, nil
+}
+
+type authMethodSelectItem struct {
+	option authMethodOption
+}
+
+func (i authMethodSelectItem) FilterValue() string { return i.option.title }
+func (i authMethodSelectItem) Title() string       { return i.option.title }
+func (i authMethodSelectItem) Description() string { return i.option.description }
+
+type authMethodSelectModel struct {
+	list      list.Model
+	choice    authMethod
+	cancelled bool
+}
+
+func (m authMethodSelectModel) Init() tea.Cmd { return nil }
+
+func (m authMethodSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.Keystroke() {
+		case "ctrl+c", "esc":
+			m.cancelled = true
+			return m, tea.Quit
+		case "enter":
+			if item, ok := m.list.SelectedItem().(authMethodSelectItem); ok {
+				m.choice = item.option.method
+				return m, tea.Quit
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m authMethodSelectModel) View() tea.View {
+	return tea.NewView(m.list.View())
 }
 
 // runProviderAuthOAuth runs the OpenAI Codex device authorization flow.
@@ -208,17 +364,18 @@ func runProviderAuthAPIKey(cmd *cobra.Command, reader *bufio.Reader, isTTY bool,
 	return nil
 }
 
-// pickProvider prints the known-provider list and reads a selection
-// (number or name).  Returns the resolved provider name.
+// pickProvider resolves a provider name. In a TTY it opens a searchable list;
+// in non-interactive flows it preserves the line-oriented number-or-name input
+// used by tests and shell pipelines.
 func pickProvider(cmd *cobra.Command, reader *bufio.Reader, isTTY bool) (string, error) {
 	names := knownProviders()
 	if isTTY {
-		writeln(out(cmd), "Known providers:")
-		for i, n := range names {
-			printf(out(cmd), "  %d) %s\n", i+1, n)
-		}
-		printRaw(out(cmd), "Pick a provider (number or name): ")
+		return pickProviderInteractive(cmd, names)
 	}
+	return pickProviderFromLine(reader, names)
+}
+
+func pickProviderFromLine(reader *bufio.Reader, names []string) (string, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", fmt.Errorf("read provider selection: %w", err)
@@ -227,16 +384,98 @@ func pickProvider(cmd *cobra.Command, reader *bufio.Reader, isTTY bool) (string,
 	if choice == "" {
 		return "", nil
 	}
-	// Numeric selection.
 	if n, convErr := strconv.Atoi(choice); convErr == nil {
 		if n < 1 || n > len(names) {
 			return "", fmt.Errorf("selection %d out of range [1, %d]", n, len(names))
 		}
 		return names[n-1], nil
 	}
-	// Free-form name.  Allow unknown names — the user may target a
-	// provider hygge does not yet ship an adapter for.
 	return choice, nil
+}
+
+func pickProviderInteractive(cmd *cobra.Command, names []string) (string, error) {
+	items := make([]list.Item, 0, len(names))
+	for _, name := range names {
+		items = append(items, providerSelectItem{name: name})
+	}
+
+	delegate := list.NewDefaultDelegate()
+	delegate.SetSpacing(0)
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(providerSelectAccentColor())
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(providerSelectMutedColor())
+
+	l := list.New(items, delegate, 72, min(18, max(8, len(items)+4)))
+	l.Title = "Choose a provider"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.SetShowHelp(true)
+	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
+	l.AdditionalShortHelpKeys = func() []key.Binding { return nil }
+
+	m := providerSelectModel{list: l}
+	p := tea.NewProgram(m, tea.WithInput(cmd.InOrStdin()), tea.WithOutput(out(cmd)))
+	finalModel, err := p.Run()
+	if err != nil {
+		return "", fmt.Errorf("provider picker: %w", err)
+	}
+	selected, ok := finalModel.(providerSelectModel)
+	if !ok || selected.cancelled || selected.choice == "" {
+		writeln(out(cmd), "Cancelled.")
+		return "", errProviderAuthCancelled
+	}
+	return selected.choice, nil
+}
+
+type providerSelectItem struct {
+	name string
+}
+
+func (i providerSelectItem) FilterValue() string { return i.name }
+func (i providerSelectItem) Title() string       { return i.name }
+func (i providerSelectItem) Description() string {
+	if env := providerEnvVar(i.name); env != "" {
+		return "uses " + env
+	}
+	return "custom provider credential"
+}
+
+type providerSelectModel struct {
+	list      list.Model
+	choice    string
+	cancelled bool
+}
+
+func (m providerSelectModel) Init() tea.Cmd { return nil }
+
+func (m providerSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.Keystroke() {
+		case "ctrl+c", "esc":
+			m.cancelled = true
+			return m, tea.Quit
+		case "enter":
+			if item, ok := m.list.SelectedItem().(providerSelectItem); ok {
+				m.choice = item.name
+				return m, tea.Quit
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m providerSelectModel) View() tea.View {
+	return tea.NewView(m.list.View())
+}
+
+func providerSelectAccentColor() color.Color {
+	return lipgloss.Color("#A78BFA")
+}
+
+func providerSelectMutedColor() color.Color {
+	return lipgloss.Color("#9CA3AF")
 }
 
 // newProviderListCmd builds `hygge provider list`.

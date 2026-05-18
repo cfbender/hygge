@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/provider"
@@ -279,6 +284,96 @@ func TestProviderRemove_ConfirmNo(t *testing.T) {
 	if _, ok := store.Get("anthropic"); !ok {
 		t.Error("credential removed despite 'n' answer")
 	}
+}
+
+func TestAuthMethodOptions_AreProviderAware(t *testing.T) {
+	openCodeMethods := authMethodOptions("opencode-go")
+	if len(openCodeMethods) != 1 || openCodeMethods[0].method != authMethodAPIKey {
+		t.Fatalf("opencode-go methods = %#v, want only API key", openCodeMethods)
+	}
+	for _, method := range openCodeMethods {
+		if strings.Contains(strings.ToLower(method.title), "oauth") || strings.Contains(strings.ToLower(method.description), "chatgpt") {
+			t.Fatalf("opencode-go should not mention OAuth/ChatGPT: %#v", method)
+		}
+	}
+
+	openAIMethods := authMethodOptions("openai")
+	if len(openAIMethods) != 2 {
+		t.Fatalf("openai methods count = %d, want 2", len(openAIMethods))
+	}
+	if openAIMethods[1].method != authMethodOAuth {
+		t.Fatalf("openai second method = %q, want oauth", openAIMethods[1].method)
+	}
+}
+
+func TestPickAuthMethodFromLine_RejectsUnavailableOAuth(t *testing.T) {
+	_, err := pickAuthMethodFromLine(bufio.NewReader(strings.NewReader("2\n")), authMethodOptions("opencode-go"))
+	if err == nil {
+		t.Fatalf("expected unavailable OAuth selection to error")
+	}
+
+	got, err := pickAuthMethodFromLine(bufio.NewReader(strings.NewReader("2\n")), authMethodOptions("openai"))
+	if err != nil {
+		t.Fatalf("openai oauth selection: %v", err)
+	}
+	if got != authMethodOAuth {
+		t.Fatalf("method got %q, want oauth", got)
+	}
+}
+
+func TestPickProviderFromLine_NumberAndName(t *testing.T) {
+	names := []string{"anthropic", "openai"}
+
+	got, err := pickProviderFromLine(bufio.NewReader(strings.NewReader("2\n")), names)
+	if err != nil {
+		t.Fatalf("pick number: %v", err)
+	}
+	if got != "openai" {
+		t.Fatalf("pick number got %q, want openai", got)
+	}
+
+	got, err = pickProviderFromLine(bufio.NewReader(strings.NewReader("custom\n")), names)
+	if err != nil {
+		t.Fatalf("pick name: %v", err)
+	}
+	if got != "custom" {
+		t.Fatalf("pick name got %q, want custom", got)
+	}
+}
+
+func TestProviderSelectModel_EnterChoosesCurrentItem(t *testing.T) {
+	m := newProviderSelectModelForTest([]string{"anthropic", "openai"})
+	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got := updated.(providerSelectModel)
+	if got.choice != "anthropic" {
+		t.Fatalf("choice got %q, want anthropic", got.choice)
+	}
+	if got.cancelled {
+		t.Fatalf("enter should not mark selection cancelled")
+	}
+}
+
+func TestProviderSelectModel_CancelKeys(t *testing.T) {
+	for _, msg := range []tea.KeyPressMsg{
+		tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}),
+		tea.KeyPressMsg(tea.Key{Code: 'c', Text: "c", Mod: uv.ModCtrl}),
+	} {
+		m := newProviderSelectModelForTest([]string{"anthropic"})
+		updated, _ := m.Update(msg)
+		got := updated.(providerSelectModel)
+		if !got.cancelled {
+			t.Fatalf("%s should cancel", msg.Keystroke())
+		}
+	}
+}
+
+func newProviderSelectModelForTest(names []string) providerSelectModel {
+	items := make([]list.Item, 0, len(names))
+	for _, name := range names {
+		items = append(items, providerSelectItem{name: name})
+	}
+	delegate := list.NewDefaultDelegate()
+	return providerSelectModel{list: list.New(items, delegate, 80, 10)}
 }
 
 // TestMaskKey covers the masking helper directly.

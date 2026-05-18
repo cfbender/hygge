@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 
+	"charm.land/fang/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -80,9 +82,12 @@ func applyTestOverrides(o bootstrapOptions) bootstrapOptions {
 // process exit code.
 func Execute() int {
 	cmd := NewRootCmd()
-	if err := cmd.Execute(); err != nil {
-		// Cobra prints the error itself when SilenceErrors is false; we
-		// just translate the failure into a non-zero exit code.
+	if err := fang.Execute(
+		context.Background(),
+		cmd,
+		fang.WithVersion(Version),
+		fang.WithNotifySignal(os.Interrupt),
+	); err != nil {
 		return 1
 	}
 	return 0
@@ -131,6 +136,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newConfigCmd(),
 		newThemeCmd(),
 		newProviderCmd(),
+		newModelsCmd(),
 		newOnboardCmd(),
 		newSkillsCmd(),
 		newSubagentsCmd(),
