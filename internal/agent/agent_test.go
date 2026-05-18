@@ -1486,6 +1486,33 @@ func TestToFantasyMessagesStripsHistoricalTurnContext(t *testing.T) {
 	}
 }
 
+func TestToFantasyMessagesPreservesLatestUserImages(t *testing.T) {
+	msgs := []*session.Message{
+		{Role: session.RoleUser, Parts: []session.Part{
+			{Kind: session.PartText, Text: "what is in this image?"},
+			{Kind: session.PartImage, ImageMimeType: "image/png", ImageBase64: "cG5nIGJ5dGVz"},
+		}},
+	}
+
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	if len(fmsgs) != 1 {
+		t.Fatalf("fantasy messages len = %d, want 1", len(fmsgs))
+	}
+	if len(fmsgs[0].Content) != 2 {
+		t.Fatalf("latest user content len = %d, want envelope text plus image: %+v", len(fmsgs[0].Content), fmsgs[0].Content)
+	}
+	if _, ok := fantasy.AsMessagePart[fantasy.TextPart](fmsgs[0].Content[0]); !ok {
+		t.Fatalf("first content = %T, want TextPart", fmsgs[0].Content[0])
+	}
+	file, ok := fantasy.AsMessagePart[fantasy.FilePart](fmsgs[0].Content[1])
+	if !ok {
+		t.Fatalf("second content = %T, want FilePart", fmsgs[0].Content[1])
+	}
+	if file.MediaType != "image/png" || string(file.Data) != "png bytes" {
+		t.Fatalf("file part = %+v, want decoded png image", file)
+	}
+}
+
 func TestWrapFantasyStreamErrorIncludesNestedProviderDetail(t *testing.T) {
 	inner := `{"error":{"message":"No tool output found for function call call_123.","type":"invalid_request_error"}}`
 	body := fmt.Sprintf(`{"error":{"message":"Provider returned error","metadata":{"raw":%q,"provider_name":"Azure"}}}`, inner)

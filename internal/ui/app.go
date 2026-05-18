@@ -1328,13 +1328,15 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.slashPaletteDismissed = false
 			return a, a.runSlashCommand(displayText)
 		}
+		pastedAttachments := a.pastedInputAttachments(rawText)
 		text := a.expandPastedInputText(rawText)
+		displayText = a.displayPastedInputText(rawText)
 		mentionAttachments, err := a.promptAttachmentsForMentions(text)
 		if err != nil {
 			return a, a.setNotice("mention: " + err.Error())
 		}
-		a.history.Add(text)
-		attachments := a.drainPromptAttachments(mentionAttachments)
+		a.history.Add(displayText)
+		attachments := a.drainPromptAttachments(appendUniquePromptAttachments(pastedAttachments, mentionAttachments...))
 		a.input.Reset()
 		a.pastedInputBlocks = nil
 		a.slashPaletteDismissed = false
@@ -1342,10 +1344,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Resume auto-scroll when the user sends a message.
 		a.userScrolled = false
 		if a.busy {
-			a.enqueuePromptDraft(queuedPromptDraft{Text: text, Attachments: attachments})
+			a.enqueuePromptDraft(queuedPromptDraft{Text: displayText, Attachments: attachments})
 			return a, nil
 		}
-		return a, a.startSendWithAttachments(text, attachments)
+		return a, a.startSendWithAttachments(displayText, attachments)
 	case "pgup":
 		// Scroll message list up one page; pause auto-scroll.
 		if !a.msgViewport.AtTop() {

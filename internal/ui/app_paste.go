@@ -15,8 +15,9 @@ import (
 )
 
 type pastedInputBlock struct {
-	Marker  string
-	Content string
+	Marker      string
+	Content     string
+	Attachments []promptAttachment
 }
 
 func (a *App) handlePaste(m tea.PasteMsg) (tea.Model, tea.Cmd) {
@@ -30,8 +31,8 @@ func (a *App) handlePaste(m tea.PasteMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if att, ok := imageAttachmentFromPaste(content); ok {
-		a.pendingAttachments = appendUniquePromptAttachments(a.pendingAttachments, att)
-		a.notice = fmt.Sprintf("attached %s (%s)", att.Name, formatBytes(att.Size))
+		a.insertPastedInputBlock(pastedImageMarker(att), "", att)
+		a.notice = ""
 		return a, nil
 	}
 
@@ -40,18 +41,22 @@ func (a *App) handlePaste(m tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return a.updateInputPaste(content)
 	}
 
-	marker := pastedInputMarker(lineCount)
-	a.input.Textarea.InsertString(marker + " ")
-	a.pastedInputBlocks = append(a.pastedInputBlocks, pastedInputBlock{
-		Marker:  marker,
-		Content: content,
-	})
+	a.insertPastedInputBlock(pastedInputMarker(lineCount), content)
 	a.history.Reset()
 	a.paletteHighlight = -1
 	a.slashPaletteDismissed = false
 	a.mentionHighlight = -1
 	a.mentionDismissed = false
 	return a, nil
+}
+
+func (a *App) insertPastedInputBlock(marker, content string, attachments ...promptAttachment) {
+	a.input.Textarea.InsertString(marker + " ")
+	a.pastedInputBlocks = append(a.pastedInputBlocks, pastedInputBlock{
+		Marker:      marker,
+		Content:     content,
+		Attachments: attachments,
+	})
 }
 
 func (a *App) updateInputPaste(content string) (tea.Model, tea.Cmd) {
@@ -214,6 +219,38 @@ func (a *App) expandPastedInputText(text string) string {
 	return out
 }
 
+func (a *App) displayPastedInputText(text string) string {
+	if len(a.pastedInputBlocks) == 0 || text == "" {
+		return text
+	}
+	out := text
+	for _, block := range a.pastedInputBlocks {
+		if block.Marker == "" {
+			continue
+		}
+		replacement := block.Content
+		if len(block.Attachments) > 0 {
+			replacement = strings.TrimSpace(block.Marker)
+		}
+		out = strings.Replace(out, block.Marker, replacement, 1)
+	}
+	return out
+}
+
+func (a *App) pastedInputAttachments(text string) []promptAttachment {
+	if len(a.pastedInputBlocks) == 0 || text == "" {
+		return nil
+	}
+	var attachments []promptAttachment
+	for _, block := range a.pastedInputBlocks {
+		if block.Marker == "" || len(block.Attachments) == 0 || !strings.Contains(text, block.Marker) {
+			continue
+		}
+		attachments = appendUniquePromptAttachments(attachments, block.Attachments...)
+	}
+	return attachments
+}
+
 func normalizePasteContent(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	return strings.ReplaceAll(s, "\r", "\n")
@@ -237,6 +274,20 @@ func imageAttachmentFromPaste(content string) (promptAttachment, bool) {
 		}
 		path = u.Path
 	}
+
+	candidates := []string{path}
+	if unescaped := unescapePastedPath(path); unescaped != path {
+		candidates = append(candidates, unescaped)
+	}
+	for _, candidate := range candidates {
+		if att, ok := loadImageAttachmentCandidate(candidate); ok {
+			return att, true
+		}
+	}
+	return promptAttachment{}, false
+}
+
+func loadImageAttachmentCandidate(path string) (promptAttachment, bool) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return promptAttachment{}, false
@@ -256,12 +307,45 @@ func imageAttachmentFromPaste(content string) (promptAttachment, bool) {
 	return att, true
 }
 
+func unescapePastedPath(path string) string {
+	if !strings.Contains(path, `\`) {
+		return path
+	}
+	var out strings.Builder
+	out.Grow(len(path))
+	escaped := false
+	for _, r := range path {
+		if escaped {
+			out.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		out.WriteRune(r)
+	}
+	if escaped {
+		out.WriteRune('\\')
+	}
+	return out.String()
+}
+
 func pastedInputMarker(lineCount int) string {
 	label := "lines"
 	if lineCount == 1 {
 		label = "line"
 	}
 	return fmt.Sprintf("[Pasted %d %s]", lineCount, label)
+}
+
+func pastedImageMarker(att promptAttachment) string {
+	name := strings.TrimSpace(att.Name)
+	if name == "" {
+		name = "image"
+	}
+	return fmt.Sprintf("[Pasted image: %s]", name)
 }
 
 func isInputBackspace(k tea.KeyPressMsg) bool {
