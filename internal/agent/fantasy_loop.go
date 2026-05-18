@@ -38,18 +38,6 @@ type fantasyToolOptions struct {
 	beforeRun func() error
 }
 
-type turnFantasyModel struct {
-	fantasy.LanguageModel
-	beforeStream func(fantasy.Call) fantasy.Call
-}
-
-func (m turnFantasyModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	if m.beforeStream != nil {
-		call = m.beforeStream(call)
-	}
-	return m.LanguageModel.Stream(ctx, call)
-}
-
 func (f *fantasyTool) Info() fantasy.ToolInfo {
 	params, required := fantasyToolSchema(f.t.InputSchema())
 	return fantasy.ToolInfo{Name: f.t.Name(), Description: f.t.Description(), Parameters: params, Required: required, Parallel: f.t.Parallelizable()}
@@ -179,9 +167,7 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		return nil, fmt.Errorf("agent: load session memories: %w", err)
 	}
 	memories = append(memories, sessionMemories...)
-	lazyBlocks := a.drainPendingLazy(sessionID)
-	systemPromptAdditions := a.drainPendingSystemAdditions(sessionID)
-	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), lazyBlocks, systemPromptAdditions, memories)
+	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), nil, nil, memories)
 	pwd := a.opts.Pwd
 	if pwd == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -257,27 +243,11 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		a.collectLazyContext(sessionID, pwd, toolMsg)
 		return nil
 	}})
-	turnModel := turnFantasyModel{LanguageModel: a.runtime.model, beforeStream: func(call fantasy.Call) fantasy.Call {
-		lazy := a.drainPendingLazy(sessionID)
-		additions := a.drainPendingSystemAdditions(sessionID)
-		if len(lazy) == 0 && len(additions) == 0 {
-			return call
-		}
-		extra := composeSystemPrompt("", nil, lazy, additions)
-		if strings.TrimSpace(extra) == "" {
-			return call
-		}
-		for i := range call.Prompt {
-			if call.Prompt[i].Role == fantasy.MessageRoleSystem {
-				call.Prompt[i].Content = append(call.Prompt[i].Content, fantasy.TextPart{Text: "\n\n" + extra})
-				return call
-			}
-		}
-		call.Prompt = append([]fantasy.Message{fantasy.NewSystemMessage(extra)}, call.Prompt...)
-		return call
-	}}
-	ag := fantasy.NewAgent(turnModel, fantasy.WithTools(ftools...))
+	ag := fantasy.NewAgent(a.runtime.model, fantasy.WithTools(ftools...))
 	call := fantasy.AgentStreamCall{Messages: fmsgs,
+		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
+			return a.prepareFantasyStep(ctx, sessionID, opts)
+		},
 		OnTextDelta: func(_ string, delta string) error {
 			mu.Lock()
 			textBuf.WriteString(delta)
@@ -403,6 +373,30 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		logHookWarns(warns)
 	}
 	return final, nil
+}
+
+func (a *Agent) prepareFantasyStep(ctx context.Context, sessionID string, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
+	lazy := a.drainPendingLazy(sessionID)
+	additions := a.drainPendingSystemAdditions(sessionID)
+	if len(lazy) == 0 && len(additions) == 0 {
+		return ctx, fantasy.PrepareStepResult{}, nil
+	}
+	extra := composeSystemPrompt("", nil, lazy, additions)
+	if strings.TrimSpace(extra) == "" {
+		return ctx, fantasy.PrepareStepResult{}, nil
+	}
+	return ctx, fantasy.PrepareStepResult{Messages: appendFantasySystemText(opts.Messages, extra)}, nil
+}
+
+func appendFantasySystemText(messages []fantasy.Message, text string) []fantasy.Message {
+	out := append([]fantasy.Message(nil), messages...)
+	for i := range out {
+		if out[i].Role == fantasy.MessageRoleSystem {
+			out[i].Content = append(out[i].Content, fantasy.TextPart{Text: "\n\n" + text})
+			return out
+		}
+	}
+	return append([]fantasy.Message{fantasy.NewSystemMessage(text)}, out...)
 }
 
 func toFantasyMessages(
