@@ -1293,6 +1293,27 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	}
 }
 
+func TestResizeClearsSelectionAndStaleCanvas(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	_ = app.View()
+	if app.lastCanvas.RenderBuffer == nil {
+		t.Fatal("expected rendered canvas")
+	}
+	app.sel.hasRange = true
+	app.sel.active = true
+
+	app.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+
+	if app.sel.hasRange || app.sel.active {
+		t.Fatalf("resize should clear selection, got %+v", app.sel)
+	}
+	if app.lastCanvas.RenderBuffer != nil {
+		t.Fatal("resize should discard stale canvas before the next render")
+	}
+}
+
 // TestRendererWidthRespectsSidebar verifies that the glamour renderer is built
 // at the bubble inner width, not the full terminal or left-column width.
 // On a 250-column terminal with a 40-column sidebar, leftW = 210, and the
