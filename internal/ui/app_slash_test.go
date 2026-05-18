@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,6 +62,21 @@ func typeInto(app *App, s string) {
 	for _, r := range s {
 		app.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
+}
+
+type testSlashCommand struct {
+	name        string
+	description string
+}
+
+func (c testSlashCommand) Name() string        { return c.name }
+func (c testSlashCommand) Description() string { return c.description }
+func (c testSlashCommand) Source() string      { return "test" }
+func (c testSlashCommand) Args() []command.ArgSpec {
+	return nil
+}
+func (c testSlashCommand) Execute(context.Context, command.App, string) (command.Outcome, error) {
+	return command.Outcome{}, nil
 }
 
 var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
@@ -956,6 +972,28 @@ func TestSlashCommandPaletteArrowsNavigate(t *testing.T) {
 	app.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if app.paletteHighlight != 0 {
 		t.Errorf("after Up, highlight = %d, want 0", app.paletteHighlight)
+	}
+}
+
+func TestSlashCommandPaletteMouseWheelScrollsRenderedWindow(t *testing.T) {
+	t.Parallel()
+	app, _, reg := newSlashApp(t)
+	for i := range 12 {
+		if err := reg.Register(testSlashCommand{name: fmt.Sprintf("zzz%02d", i), description: "scroll test"}); err != nil {
+			t.Fatalf("register command: %v", err)
+		}
+	}
+	typeInto(app, "/zzz")
+	for range 10 {
+		app.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	}
+
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	if !strings.Contains(view, "/zzz10") {
+		t.Fatalf("rendered palette did not scroll to highlighted command /zzz10:\n%s", view)
+	}
+	if strings.Contains(view, "/zzz00") {
+		t.Fatalf("rendered palette still shows the first command after scrolling near the end:\n%s", view)
 	}
 }
 

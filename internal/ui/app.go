@@ -1216,6 +1216,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		// Clear selection on scroll.
 		a.clearSelection()
+		if a.handleCompletionWheel(m) {
+			return a, nil
+		}
 		if !a.anyOverlayOpen() {
 			prevOffset := a.msgViewport.YOffset()
 			a.msgViewport, _ = a.msgViewport.Update(m)
@@ -1548,6 +1551,28 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return a.updateInputKey(k)
+}
+
+func (a *App) handleCompletionWheel(m tea.MouseWheelMsg) bool {
+	mouse := tea.Mouse(m)
+	delta := 0
+	switch mouse.Button {
+	case tea.MouseWheelDown:
+		delta = 1
+	case tea.MouseWheelUp:
+		delta = -1
+	default:
+		return false
+	}
+	if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
+		a.movePaletteHighlight(delta)
+		return true
+	}
+	if _, _, ok := a.activeMentionQuery(); ok && !a.mentionDismissed {
+		a.moveMentionHighlight(delta)
+		return true
+	}
+	return false
 }
 
 func (a *App) updateInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
