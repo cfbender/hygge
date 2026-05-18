@@ -86,12 +86,19 @@ func (p CommandPalette) View() string {
 		), width)
 	}
 
-	visible := p.Matches
-	overflow := 0
-	if len(visible) > commandPaletteMaxRows {
-		overflow = len(visible) - commandPaletteMaxRows
-		visible = visible[:commandPaletteMaxRows]
+	selected := p.Highlight
+	if selected < 0 || selected >= len(p.Matches) {
+		selected = -1
 	}
+	windowHighlight := selected
+	if windowHighlight < 0 {
+		windowHighlight = 0
+	}
+	start := paletteWindowStart(len(p.Matches), commandPaletteMaxRows, windowHighlight)
+	end := min(start+commandPaletteMaxRows, len(p.Matches))
+	visible := p.Matches[start:end]
+	overflowBefore := start
+	overflowAfter := len(p.Matches) - end
 
 	// Establish a per-row layout: "  /name<padding>  description"
 	nameWidth := 0
@@ -104,19 +111,19 @@ func (p CommandPalette) View() string {
 		nameWidth = innerWidth / 2
 	}
 
-	hi := p.Highlight
-	if hi < 0 || hi >= len(visible) {
-		hi = -1
+	rows := make([]string, 0, len(visible)+2)
+	if overflowBefore > 0 {
+		rows = append(rows, p.style(theme.AtomMuted).Render(
+			fmt.Sprintf("  ↑ %d more", overflowBefore),
+		))
 	}
-
-	rows := make([]string, 0, len(visible)+1)
 	for i, c := range visible {
 		nameTok := "/" + c.Name()
 		nameCol := padRight(nameTok, nameWidth)
 		descCol := truncate(c.Description(), innerWidth-nameWidth-2)
 
 		var row string
-		if i == hi {
+		if start+i == selected {
 			accent := p.style(theme.AtomAccent)
 			rowText := fmt.Sprintf("▶ %s  %s", nameCol, descCol)
 			row = accent.Render(rowText)
@@ -127,13 +134,28 @@ func (p CommandPalette) View() string {
 		}
 		rows = append(rows, row)
 	}
-	if overflow > 0 {
+	if overflowAfter > 0 {
 		rows = append(rows, p.style(theme.AtomMuted).Render(
-			fmt.Sprintf("  +%d more — keep typing to narrow", overflow),
+			fmt.Sprintf("  ↓ %d more — keep typing to narrow", overflowAfter),
 		))
 	}
 	body := strings.Join(rows, "\n")
 	return p.box(body, width)
+}
+
+func paletteWindowStart(total, maxRows, highlight int) int {
+	if total <= maxRows || maxRows <= 0 {
+		return 0
+	}
+	start := highlight - maxRows/2
+	if start < 0 {
+		return 0
+	}
+	lastStart := total - maxRows
+	if start > lastStart {
+		return lastStart
+	}
+	return start
 }
 
 // box wraps body in the palette's themed border at the requested width.
