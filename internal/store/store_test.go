@@ -2,7 +2,10 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cfbender/hygge/internal/session"
@@ -120,6 +123,45 @@ func TestOpen_ReopenPreservesData(t *testing.T) {
 	}
 	if got.ID != sess.ID {
 		t.Errorf("session not preserved: %q vs %q", got.ID, sess.ID)
+	}
+}
+
+func TestStore_ConcurrentWritersUseBusyTimeout(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hygge_test.db")
+	const writers = 8
+	stores := make([]*store.Store, writers)
+	for i := range stores {
+		s, err := store.Open(t.Context(), dbPath)
+		if err != nil {
+			t.Fatalf("open store %d: %v", i, err)
+		}
+		stores[i] = s
+		t.Cleanup(func() { _ = s.Close() })
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i, s := range stores {
+		wg.Add(1)
+		go func(i int, s *store.Store) {
+			defer wg.Done()
+			_, err := s.CreateSession(t.Context(), session.NewSession{
+				ProjectDir: fmt.Sprintf("/parallel/%d", i),
+				Model:      session.ModelRef{Provider: "anthropic", Name: "x"},
+			})
+			if err != nil {
+				errs <- err
+			}
+		}(i, s)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if strings.Contains(err.Error(), "SQLITE_BUSY") || strings.Contains(err.Error(), "database is locked") {
+			t.Fatalf("concurrent write hit SQLite lock: %v", err)
+		}
+		t.Fatalf("concurrent write failed: %v", err)
 	}
 }
 
