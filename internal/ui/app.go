@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -150,6 +151,16 @@ type AppOptions struct {
 	// edited prompt. Tests may inject this seam; production falls back to
 	// $VISUAL, then $EDITOR, then vi.
 	EditPrompt func(ctx context.Context, initial string) (string, error)
+	// NeedsOnboarding opens the first-run onboarding wizard before chat.
+	NeedsOnboarding bool
+	// KnownProviders lists provider IDs selectable in onboarding.
+	KnownProviders []string
+	// SaveOnboardingResult persists the completed onboarding configuration.
+	SaveOnboardingResult func(ctx context.Context, result OnboardingResult) error
+	// GeneratePrompt generates a system prompt during onboarding. It should return
+	// an error without blocking manual editing when generation fails.
+	GeneratePrompt func(ctx context.Context, providerName, modelName, apiKey, idea string) (string, error)
+
 	// Yolo bypasses configurable permission prompts/default denies while keeping
 	// the hard-coded secrets denylist active.
 	Yolo    bool
@@ -220,6 +231,17 @@ func New(opts AppOptions) (*App, error) {
 	}
 	a.history = newInputHistory(xdgStateHome(opts.HomeDir))
 	a.initModes()
+	if opts.NeedsOnboarding {
+		providers := append([]string(nil), opts.KnownProviders...)
+		if len(providers) == 0 {
+			providers = []string{"anthropic", "openai", "openrouter"}
+		}
+		a.onboardingWizard = components.OnboardingWizard{
+			Theme:     opts.Theme,
+			Providers: providers,
+			Models:    a.onboardingModelIDs(opts.ModelProvider),
+		}
+	}
 	if opts.SessionID != "" || !opts.OpenSessionsModalOnStart {
 		a.bridge()
 	}
@@ -388,6 +410,7 @@ type App struct {
 	modelModal         components.ModelModal
 	apiKeyModal        components.APIKeyModal
 	themeModal         components.ThemeModal
+	onboardingWizard   components.OnboardingWizard
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -565,7 +588,10 @@ func (a *App) Init() tea.Cmd {
 	if a.opts.SessionID != "" || !a.opts.OpenSessionsModalOnStart {
 		cmds = append(cmds, a.listenBus())
 	}
-	if a.opts.OpenSessionsModalOnStart {
+	if a.opts.NeedsOnboarding {
+		a.openOverlay(overlayOnboarding)
+		a.updateInputFocus()
+	} else if a.opts.OpenSessionsModalOnStart {
 		// Initialise the modal and schedule a load.
 		a.openOverlay(overlaySessions)
 		a.sessionsModal = components.SessionsModal{
@@ -837,6 +863,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// around mode changes. Consume them at the root so they never fall through
 		// to the textarea component.
 		return a, nil
+
+	case components.OnboardingGeneratedPromptReady:
+		a.onboardingWizard = a.onboardingWizard.ApplyGeneratedPrompt(m)
+		return a, nil
+
+	case components.OnboardingSaved:
+		a.onboardingWizard.Saving = false
+		if m.Err != nil {
+			a.onboardingWizard.SaveError = m.Err.Error()
+			return a, nil
+		}
+		a.opts.NeedsOnboarding = false
+		a.closeOverlay(overlayOnboarding)
+		return a, a.showToast("Setup complete", "Your first mode is ready")
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -1215,6 +1255,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleAPIKeyModalKey(k)
 		case overlayTheme:
 			return a.handleThemeModalKey(k)
+		case overlayOnboarding:
+			return a.handleOnboardingKey(k)
 		case overlayQuit:
 			switch k.String() {
 			case "y", "Y", "ctrl+c":
@@ -3415,7 +3457,7 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme:
+		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme, overlayOnboarding:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
@@ -3528,6 +3570,86 @@ func (a *App) saveAPIKeyCmd(providerName, apiKey string) tea.Cmd {
 		}
 		return apiKeySaveResult{provider: providerName}
 	}
+}
+
+func (a *App) handleOnboardingKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.OnboardingKey{Name: k.String(), Runes: []rune(k.Text)}
+	switch k.String() {
+	case "up", "down", "enter", "esc", "ctrl+n", "ctrl+p", "backspace", "delete", "ctrl+u":
+		if k.String() == "delete" {
+			sk.Name = "backspace"
+		}
+	default:
+		if len(k.Text) == 1 {
+			sk.Name = k.Text
+		}
+	}
+	updated, msg := a.onboardingWizard.HandleKey(sk)
+	if updated.ProviderName != a.onboardingWizard.ProviderName {
+		updated.Models = a.onboardingModelIDs(updated.ProviderName)
+	}
+	a.onboardingWizard = updated
+	switch m := msg.(type) {
+	case components.OnboardingClose:
+		// Onboarding is required for normal chat, so Esc exits instead of exposing
+		// an unusable empty session.
+		return a, tea.Quit
+	case components.OnboardingGeneratePrompt:
+		return a, a.generateOnboardingPromptCmd(m)
+	case components.OnboardingSaveResult:
+		a.onboardingWizard.Saving = true
+		a.onboardingWizard.SaveError = ""
+		return a, a.saveOnboardingCmd(m)
+	}
+	return a, nil
+}
+
+func (a *App) generateOnboardingPromptCmd(req components.OnboardingGeneratePrompt) tea.Cmd {
+	return func() tea.Msg {
+		if a.opts.GeneratePrompt == nil {
+			return components.OnboardingGeneratedPromptReady{ForSubagent: req.ForSubagent, Err: errors.New("prompt generation is unavailable")}
+		}
+		prompt, err := a.opts.GeneratePrompt(a.ctx, req.ProviderName, req.ModelName, req.APIKey, req.Idea)
+		return components.OnboardingGeneratedPromptReady{Prompt: prompt, Err: err, ForSubagent: req.ForSubagent}
+	}
+}
+
+func (a *App) saveOnboardingCmd(req components.OnboardingSaveResult) tea.Cmd {
+	return func() tea.Msg {
+		if a.opts.SaveOnboardingResult == nil {
+			return components.OnboardingSaved{Err: errors.New("onboarding save is unavailable")}
+		}
+		keys := make(map[string]string, len(a.onboardingWizard.ProviderKeys))
+		maps.Copy(keys, a.onboardingWizard.ProviderKeys)
+		result := OnboardingResult{
+			ProviderName:    req.ProviderName,
+			ProviderAPIKey:  req.ProviderAPIKey,
+			ProviderAPIKeys: keys,
+			Mode:            req.Mode,
+			Subagents:       req.Subagents,
+		}
+		if err := a.opts.SaveOnboardingResult(a.ctx, result); err != nil {
+			return components.OnboardingSaved{Err: err}
+		}
+		a.opts.ModelProvider = req.Mode.Provider
+		a.opts.ModelName = req.Mode.Model
+		a.opts.Modes = []config.ModeConfig{req.Mode}
+		return components.OnboardingSaved{}
+	}
+}
+
+func (a *App) onboardingModelIDs(providerName string) []string {
+	if a.opts.Catalog == nil || a.opts.Catalog.Source() == nil {
+		return nil
+	}
+	entries := a.opts.Catalog.Source().Models(providerName)
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ID) != "" {
+			out = append(out, entry.ID)
+		}
+	}
+	return out
 }
 
 func (a *App) catalogModelOptions() []components.ModelOption {

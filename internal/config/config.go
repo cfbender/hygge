@@ -322,6 +322,10 @@ type LoadOptions struct {
 
 	// HomeDir overrides $HOME for XDG path computation.  Useful in tests.
 	HomeDir string
+
+	// IgnoreExternalSources loads only built-in defaults and explicit Flags.
+	// It skips user config, profiles, walk-up config, and HYGGE_* env overrides.
+	IgnoreExternalSources bool
 }
 
 // Load resolves configuration from all sources and returns the merged,
@@ -350,15 +354,22 @@ func Load(ctx context.Context, opts LoadOptions) (*Config, Provenance, error) {
 	xdgStateHome := xdgStateDir(opts)
 
 	// Resolve profile name.
-	profileName, err := resolveProfileName(opts, xdgConfigHome, xdgStateHome)
-	if err != nil {
-		return nil, nil, err
+	profileName := "default"
+	var err error
+	if !opts.IgnoreExternalSources {
+		profileName, err = resolveProfileName(opts, xdgConfigHome, xdgStateHome)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Enumerate all sources.
-	sources, err := enumerateSources(ctx, opts, xdgConfigHome, profileName)
-	if err != nil {
-		return nil, nil, err
+	var sources []configSource
+	if !opts.IgnoreExternalSources {
+		sources, err = enumerateSources(ctx, opts, xdgConfigHome, profileName)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Start with builtin defaults.
@@ -381,11 +392,13 @@ func Load(ctx context.Context, opts LoadOptions) (*Config, Provenance, error) {
 	}
 
 	// Merge environment variables.
-	envMap := buildEnvMap(opts)
-	if len(envMap) > 0 {
-		envSrc := Source{File: "<env>"}
-		if err := deepMergeInto(merged, envMap, prov, envSrc); err != nil {
-			return nil, nil, err
+	if !opts.IgnoreExternalSources {
+		envMap := buildEnvMap(opts)
+		if len(envMap) > 0 {
+			envSrc := Source{File: "<env>"}
+			if err := deepMergeInto(merged, envMap, prov, envSrc); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 

@@ -53,18 +53,6 @@ import (
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-const noProvidersConfiguredMessage = "No providers configured, you must configure one with hygge provider auth before using"
-const noModelConfiguredMessage = "No model configured. Run `hygge onboard` to choose one."
-
-var errNoProvidersConfigured = noProvidersConfiguredError{}
-var errNoModelConfigured = noModelConfiguredError{}
-
-type noProvidersConfiguredError struct{}
-type noModelConfiguredError struct{}
-
-func (noProvidersConfiguredError) Error() string { return noProvidersConfiguredMessage }
-func (noModelConfiguredError) Error() string     { return noModelConfiguredMessage }
-
 // runtime is the wired graph of every component the CLI needs.  Returned
 // from bootstrap.  Callers must defer Close to release the SQLite handle
 // and unblock the agent's per-session locks.
@@ -110,6 +98,9 @@ type appRuntime struct {
 	// PluginPM is the package manager used by the plugins registry.
 	// Exposed for CLI commands that need to inspect cache directories.
 	PluginPM *plugin.PackageManager
+	// NoConfigAuth is true when this runtime was bootstrapped without loading
+	// user/project config or provider auth.
+	NoConfigAuth bool
 	// catalogSrc is the raw catalog.Catalog closed by Close to stop
 	// any periodic-refresh ticker goroutine.
 	catalogSrc *catalog.Catalog
@@ -184,6 +175,10 @@ type bootstrapOptions struct {
 	// Yolo bypasses configurable permission prompts/default denies while keeping
 	// hard-coded secrets denied.
 	Yolo bool
+	// NoConfigAuth ignores user/project config files, HYGGE_* config env vars,
+	// provider env vars, and auth.json during bootstrap. It is intended for
+	// onboarding/manual testing and still permits saving new onboarding config.
+	NoConfigAuth bool
 	// FantasyModel injects a no-network language model for bootstrap tests. When
 	// nil, production resolves the configured provider/model through Fantasy.
 	FantasyModel fantasy.LanguageModel
@@ -451,10 +446,11 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// state ourselves.
 	cfgEnv := envLookupWithXDG(opts.HomeDir, xdgConfig, xdgState)
 	cfg, prov, err := config.Load(ctx, config.LoadOptions{
-		Pwd:       opts.Pwd,
-		Profile:   opts.ProfileName,
-		HomeDir:   opts.HomeDir,
-		EnvLookup: cfgEnv,
+		Pwd:                   opts.Pwd,
+		Profile:               opts.ProfileName,
+		HomeDir:               opts.HomeDir,
+		EnvLookup:             cfgEnv,
+		IgnoreExternalSources: opts.NoConfigAuth,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cli: load config: %w", err)
@@ -498,25 +494,30 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	//
 	// The provider adapter's own resolveAPIKey chain is preserved
 	// unchanged; this code is purely about feeding it the right input.
-	modelOpts, err := resolveProviderOptionsFor(cfg.Model.Provider, cfg, stateOpts)
+	modelOpts, err := resolveProviderOptionsForWithAuth(cfg.Model.Provider, cfg, stateOpts, !opts.NoConfigAuth)
 	if err != nil {
 		_ = stOpen.Close()
 		b.Close()
 		return nil, err
 	}
-	prv, err := buildProvider(opts.ProviderFactory, cfg, modelOpts)
-	if err != nil {
-		// Missing credentials must not block CLI inspection commands.
-		// The TUI entrypoint (runRun / runResume) enforces the "at
-		// least one provider has auth" check; everything else can run
-		// against a no-op stub.  Non-auth failures still surface.
-		if errors.Is(err, provider.ErrAuth) {
-			slog.Debug("cli: configured provider has no credential; using stub", "provider", cfg.Model.Provider, "err", err)
-			prv = stubProvider{}
-		} else {
-			_ = stOpen.Close()
-			b.Close()
-			return nil, err
+	var prv provider.Provider
+	if opts.NoConfigAuth {
+		prv = stubProvider{}
+	} else {
+		prv, err = buildProvider(opts.ProviderFactory, cfg, modelOpts)
+		if err != nil {
+			// Missing credentials must not block CLI inspection commands.
+			// The TUI entrypoint opens onboarding when no provider auth exists;
+			// every other CLI command tolerates a no-op stub. Non-auth failures
+			// still surface.
+			if errors.Is(err, provider.ErrAuth) {
+				slog.Debug("cli: configured provider has no credential; using stub", "provider", cfg.Model.Provider, "err", err)
+				prv = stubProvider{}
+			} else {
+				_ = stOpen.Close()
+				b.Close()
+				return nil, err
+			}
 		}
 	}
 	permEngine, err := permission.New(permission.EngineOptions{
@@ -545,6 +546,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	var fantasyResolved llm.ProviderResolution
 	if opts.FantasyModel != nil {
 		fantasyResolved.Model = opts.FantasyModel
+	} else if opts.NoConfigAuth {
+		fantasyResolved = llm.ProviderResolution{}
 	} else {
 		fantasyResolved, err = llm.ResolveProviderModel(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc)
 		if err != nil {
@@ -564,7 +567,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		}
 	}
 	var titleFantasyModel fantasy.LanguageModel
-	if opts.FantasyModel == nil && cfg.Model.SmallModel != "" {
+	if opts.FantasyModel == nil && !opts.NoConfigAuth && cfg.Model.SmallModel != "" {
 		smallProvider := cfg.Model.SmallProvider
 		if smallProvider == "" {
 			smallProvider = cfg.Model.Provider
@@ -847,6 +850,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Pwd:              opts.Pwd,
 		Plugins:          pluginReg,
 		PluginPM:         pluginPM,
+		NoConfigAuth:     opts.NoConfigAuth,
 		catalogSrc:       catSrc,
 		logCloser:        logCloser,
 	}
@@ -1242,6 +1246,10 @@ func buildProviderForName(providerName string, factory func(opts map[string]any)
 // CredOAuth entries are skipped with a warning — the OAuth flow is
 // scaffolded but not yet wired end-to-end.
 func resolveProviderOptionsFor(providerName string, cfg *config.Config, stateOpts state.LoadOptions) (map[string]any, error) {
+	return resolveProviderOptionsForWithAuth(providerName, cfg, stateOpts, true)
+}
+
+func resolveProviderOptionsForWithAuth(providerName string, cfg *config.Config, stateOpts state.LoadOptions, allowAuth bool) (map[string]any, error) {
 	merged := make(map[string]any, 1)
 	// 1) Inherit cfg.Model.Options only when this is the parent's
 	//    provider.  When a subagent override targets a different
@@ -1255,6 +1263,10 @@ func resolveProviderOptionsFor(providerName string, cfg *config.Config, stateOpt
 				return merged, nil
 			}
 		}
+	}
+
+	if !allowAuth {
+		return merged, nil
 	}
 
 	// 2) Environment variable: defer to the adapter.  If the canonical

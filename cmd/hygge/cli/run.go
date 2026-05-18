@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -16,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/state"
@@ -67,14 +69,20 @@ var newFlag bool
 // configurable permission checks are bypassed while secrets remain denied.
 var yoloFlag bool
 
+// noConfigAuthFlag starts the TUI as if no user/project config or provider
+// credentials exist. It is intended for onboarding/manual testing.
+var noConfigAuthFlag bool
+
 // init binds --resume, --reasoning, --continue, and --new.
 // Called from NewRootCmd via wireRunFlags below.
 func wireRunFlags(root *cobra.Command) {
+	noConfigAuthFlag = false
 	root.Flags().StringVar(&resumeFlag, "resume", "", "resume the most recent session whose id starts with this prefix")
 	root.Flags().StringVar(&reasoningFlag, "reasoning", "", "reasoning depth for the run: off | low | medium | high (overrides [model] reasoning)")
 	root.Flags().BoolVarP(&continueFlag, "continue", "c", false, "resume the most recent session for the current directory")
 	root.Flags().BoolVar(&newFlag, "new", false, "start a fresh session (overrides resume_default = continue)")
 	root.Flags().BoolVar(&yoloFlag, "yolo", false, "allow non-secret tool actions without prompting")
+	root.Flags().BoolVar(&noConfigAuthFlag, "no-config-auth", false, "start without loading user/project config or provider auth (for onboarding testing)")
 }
 
 // runRun is the body of `hygge` (no subcommand).  Bootstraps the
@@ -103,6 +111,7 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		ReasoningOverride: reasoningFlag,
 		Yolo:              yoloFlag,
 		AsyncMCP:          true,
+		NoConfigAuth:      noConfigAuthFlag,
 	})
 	if err != nil {
 		return err
@@ -161,18 +170,20 @@ func runRun(cmd *cobra.Command, _ []string) error {
 // openSessionsModalOnStart, when true, opens the sessions picker
 // immediately after the first render (used by resume_default="ask" and
 // `hygge resume` with multiple cwd sessions).
-func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
-	if !hasConfiguredModel(rt.Provenance) {
-		return errNoModelConfigured
+func configuredProvidersForRuntime(rt *appRuntime) []string {
+	if rt != nil && rt.NoConfigAuth {
+		return nil
 	}
+	if rt == nil {
+		return nil
+	}
+	return authConfiguredProviders(rt.StateOpts)
+}
 
-	// The TUI is the one entrypoint that always requires the ability
-	// to talk to a model.  Every other CLI command tolerates a missing
-	// credential so users can run `hygge provider auth`, `hygge config
-	// explain`, etc. without first wiring an API key.
-	if !hasAnyProviderAuth(rt.StateOpts) {
-		return errNoProvidersConfigured
-	}
+func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
+	// Determine whether the wizard must run before regular chat is available.
+	// The TUI always opens; onboarding replaces the main view when needed.
+	needsOnboarding := rt.NoConfigAuth || !hasConfiguredModel(rt.Provenance) || !hasAnyProviderAuth(rt.StateOpts)
 
 	// Map CLI MCPServerStatus → UI SidebarMCPStatus so internal/ui has no
 	// dependency on cmd/.
@@ -203,7 +214,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		Theme:                   rt.Theme,
 		StyleTheme:              rt.Config.Theme.Name,
 		Modes:                   rt.Config.Modes,
-		AuthConfiguredProviders: authConfiguredProviders(rt.StateOpts),
+		AuthConfiguredProviders: configuredProvidersForRuntime(rt),
 		SessionID:               sessionID,
 		ProjectDir:              rt.Pwd,
 		ModelProvider:           rt.Config.Model.Provider,
@@ -217,6 +228,97 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		HomeDir:                 homeDir(),
 		NerdFonts:               rt.Config.UI.NerdFonts,
 		MCPStatuses:             mcpStatuses,
+		NeedsOnboarding:         needsOnboarding,
+		KnownProviders:          knownProviders(),
+		SaveOnboardingResult: func(ictx context.Context, result ui.OnboardingResult) error {
+			// 1. Persist every provider API key collected during onboarding.
+			providerKeys := result.ProviderAPIKeys
+			if len(providerKeys) == 0 && result.ProviderAPIKey != "" {
+				providerKeys = map[string]string{result.ProviderName: result.ProviderAPIKey}
+			}
+			for providerName, apiKey := range providerKeys {
+				if apiKey == "" {
+					continue
+				}
+				if err := auth.Set(providerName, auth.Credential{Type: auth.CredAPIKey, APIKey: apiKey, AddedAt: time.Now()}, auth.LoadOptions{HomeDir: rt.StateOpts.HomeDir, XDGStateHome: rt.StateOpts.XDGStateHome}); err != nil {
+					return fmt.Errorf("onboarding: save api key for %s: %w", providerName, err)
+				}
+				if providerName == result.Mode.Provider {
+					if rt.Config.Model.Options == nil {
+						rt.Config.Model.Options = map[string]any{}
+					}
+					rt.Config.Model.Options["api_key"] = apiKey
+				}
+			}
+			// 2. Persist mode (model selection + inline prompt) to user config.
+			if _, err := config.WriteOnboardingMode(config.WriteOnboardingModeOptions{
+				HomeDir:       rt.StateOpts.HomeDir,
+				XDGConfigHome: rt.XDGConfigHome,
+				Pwd:           rt.Pwd,
+				Provenance:    rt.Provenance,
+			}, result.Mode); err != nil {
+				return fmt.Errorf("onboarding: save mode: %w", err)
+			}
+			rt.Config.Model.Provider = result.Mode.Provider
+			rt.Config.Model.Name = result.Mode.Model
+			// Synthesize a modes slice from the onboarding result so the
+			// rest of the session has the new mode immediately available.
+			rt.Config.Modes = []config.ModeConfig{result.Mode}
+
+			// 3. Persist subagents to user subagents.toml if any were created.
+			if len(result.Subagents) > 0 {
+				agents := make([]config.OnboardingSubagent, 0, len(result.Subagents))
+				for _, draft := range result.Subagents {
+					agents = append(agents, config.OnboardingSubagent{
+						Name:        draft.Name,
+						Description: draft.Idea,
+						Prompt:      draft.Prompt,
+					})
+				}
+				if err := config.WriteSubagentsToml(config.WriteSubagentsTomlOptions{
+					HomeDir:       rt.StateOpts.HomeDir,
+					XDGConfigHome: rt.XDGConfigHome,
+				}, agents); err != nil {
+					return fmt.Errorf("onboarding: save subagents: %w", err)
+				}
+			}
+
+			// 4. Refresh the runtime agent to use the new model+prompt.
+			modelOpts, err := resolveProviderOptionsFor(result.Mode.Provider, rt.Config, rt.StateOpts)
+			if err != nil {
+				return fmt.Errorf("onboarding: resolve provider opts: %w", err)
+			}
+			prv, err := buildProviderForName(result.Mode.Provider, rt.ProviderFactory, modelOpts)
+			if err != nil {
+				return fmt.Errorf("onboarding: build provider: %w", err)
+			}
+			resolved, err := llm.ResolveProviderModel(ictx, result.Mode.Provider, result.Mode.Model, modelOpts, rt.catalogSrc)
+			if err != nil {
+				return fmt.Errorf("onboarding: resolve model: %w", err)
+			}
+			if err := rt.Agent.SetModel(result.Mode.Provider, result.Mode.Model, prv, resolved.Model); err != nil {
+				return fmt.Errorf("onboarding: set model: %w", err)
+			}
+			if result.Mode.Prompt != "" {
+				if err := rt.Agent.SetSystemPrompt(composeModeSystemPrompt(rt.BaseSystemPrompt, result.Mode.Prompt)); err != nil {
+					return fmt.Errorf("onboarding: set system prompt: %w", err)
+				}
+			}
+			rt.Provider = prv
+			return nil
+		},
+		GeneratePrompt: func(ictx context.Context, providerName, modelName, apiKey, idea string) (string, error) {
+			// Build a one-shot provider with the given credentials to generate a prompt.
+			opts := map[string]any{}
+			if apiKey != "" {
+				opts["api_key"] = apiKey
+			}
+			prv, err := buildProviderForName(providerName, rt.ProviderFactory, opts)
+			if err != nil {
+				return "", fmt.Errorf("prompt gen: build provider: %w", err)
+			}
+			return ui.GenerateSystemPrompt(ictx, prv, modelName, idea)
+		},
 		OnSessionCreated: func(id string) {
 			sessionID = id
 			if err := state.AddRecentSession(id, rt.StateOpts); err != nil {
