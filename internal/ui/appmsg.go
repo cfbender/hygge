@@ -28,6 +28,8 @@ type sendCompleted struct {
 	Err    error
 }
 
+type steerCompleted struct{ err error }
+
 type queuedPromptDraft struct {
 	Text        string
 	Attachments []promptAttachment

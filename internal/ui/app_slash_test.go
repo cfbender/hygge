@@ -1396,3 +1396,34 @@ func anthropicOnlySnapshot() *catalog.Snapshot {
 }
 
 //go:fix inline
+func TestSlashCommandSteerSendsActiveTurnGuidance(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.opts.SessionID = "01STEERSESSION"
+
+	var gotSession string
+	var gotText string
+	app.testAgentSteerFn = func(sessionID string, parts []session.Part) error {
+		gotSession = sessionID
+		gotText = parts[0].Text
+		return nil
+	}
+
+	cmd := app.runSlashCommand("/steer use the smaller fix")
+	if cmd == nil {
+		t.Fatal("expected steer command")
+	}
+	msg := cmd()
+	if m, ok := msg.(steerCompleted); ok {
+		app.Update(m)
+	}
+	if gotSession != "01STEERSESSION" || gotText != "use the smaller fix" {
+		t.Fatalf("steer call = session %q text %q", gotSession, gotText)
+	}
+	if app.toast == nil || app.toast.title != "Steering sent" {
+		t.Fatalf("toast = %+v, want Steering sent", app.toast)
+	}
+	if app.queueCount != 0 || len(app.queuedDrafts) != 0 {
+		t.Fatalf("steer should not queue; count %d drafts %#v", app.queueCount, app.queuedDrafts)
+	}
+}
