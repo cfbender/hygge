@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"maps"
@@ -108,6 +109,8 @@ func hermeticHome(t *testing.T) string {
 	xdgConfig := filepath.Join(home, ".config")
 	xdgState := filepath.Join(home, ".local", "state")
 
+	seedHermeticAuth(t, home, xdgState)
+
 	SetTestOverrides(&bootstrapOptions{
 		HomeDir:         home,
 		XDGConfigHome:   xdgConfig,
@@ -120,6 +123,20 @@ func hermeticHome(t *testing.T) string {
 	})
 	t.Cleanup(func() { SetTestOverrides(nil) })
 	return home
+}
+
+// seedHermeticAuth writes a fake anthropic credential into auth.json
+// under the given hermetic home/state so hasAnyProviderAuth (the TUI
+// entrypoint gate) is satisfied.  Tests that swap to a different
+// XDGStateHome via SetTestOverrides must call this for the new state
+// dir if they exercise runTUI.
+func seedHermeticAuth(t *testing.T, home, xdgState string) {
+	t.Helper()
+	if err := auth.Set("anthropic",
+		auth.Credential{Type: auth.CredAPIKey, APIKey: "sk-hermetic-test"},
+		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("seedHermeticAuth: %v", err)
+	}
 }
 
 // seedSession creates a session row in the store via a one-shot
@@ -223,7 +240,12 @@ func TestBootstrapAutoloadsPluginDirectories(t *testing.T) {
 	}
 }
 
-func TestBootstrapFreshInstallWithoutProviderAuthShowsSetupMessage(t *testing.T) {
+// TestBootstrapWithoutProviderAuthSucceeds verifies the change in v0.x:
+// bootstrap (used by every CLI command) no longer fails when no
+// provider credential is configured.  Inspection commands such as
+// `hygge provider list` or `hygge config explain` must run on a fresh
+// install where the user has not yet authenticated.
+func TestBootstrapWithoutProviderAuthSucceeds(t *testing.T) {
 	home := t.TempDir()
 	for _, providerName := range knownProviders() {
 		if envName := providerEnvVar(providerName); envName != "" {
@@ -231,7 +253,7 @@ func TestBootstrapFreshInstallWithoutProviderAuthShowsSetupMessage(t *testing.T)
 		}
 	}
 
-	_, err := bootstrap(context.Background(), bootstrapOptions{
+	rt, err := bootstrap(context.Background(), bootstrapOptions{
 		HomeDir:       home,
 		XDGConfigHome: filepath.Join(home, ".config"),
 		XDGStateHome:  filepath.Join(home, ".local", "state"),
@@ -239,17 +261,54 @@ func TestBootstrapFreshInstallWithoutProviderAuthShowsSetupMessage(t *testing.T)
 		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
 		SkipTea:       true,
 	})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// The credential gate now lives on the TUI entrypoint.
+	if hasAnyProviderAuth(rt.StateOpts) {
+		t.Fatal("hasAnyProviderAuth = true; want false when no env var or auth.json entry")
+	}
+}
+
+// TestRunTUIWithoutProviderAuthShowsSetupMessage verifies that the TUI
+// entrypoint (the only place that requires a working model) refuses to
+// start when no provider has credentials.
+func TestRunTUIWithoutProviderAuthShowsSetupMessage(t *testing.T) {
+	home := t.TempDir()
+	for _, providerName := range knownProviders() {
+		if envName := providerEnvVar(providerName); envName != "" {
+			t.Setenv(envName, "")
+		}
+	}
+
+	SetTestOverrides(&bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    filepath.Join(home, ".local", "state"),
+		Pwd:             home,
+		ProviderFactory: fakeProviderFactory,
+		FantasyModel:    fakeFantasyLanguageModel{},
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		SkipTea:         true,
+	})
+	t.Cleanup(func() { SetTestOverrides(nil) })
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{})
+	err := root.Execute()
 	if err == nil {
-		t.Fatal("expected bootstrap error")
+		t.Fatal("expected runTUI to error when no provider auth is configured")
 	}
 	if !errors.Is(err, errNoProvidersConfigured) {
-		t.Fatalf("bootstrap error = %v, want errNoProvidersConfigured", err)
-	}
-	if got := err.Error(); got != errNoProvidersConfigured.Error() {
-		t.Fatalf("bootstrap error text = %q, want %q", got, errNoProvidersConfigured.Error())
+		t.Fatalf("err = %v, want errNoProvidersConfigured", err)
 	}
 	if strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
-		t.Fatalf("bootstrap error leaked ANTHROPIC_API_KEY: %v", err)
+		t.Fatalf("error leaked ANTHROPIC_API_KEY: %v", err)
 	}
 }
 

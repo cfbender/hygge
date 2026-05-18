@@ -126,7 +126,13 @@ func TestProviderAuth_EmptyKeyRejected(t *testing.T) {
 
 // TestProviderList_Empty: no credentials → friendly empty marker.
 func TestProviderList_Empty(t *testing.T) {
-	hermeticHome(t)
+	home := hermeticHome(t)
+	// hermeticHome seeds a fake credential so runTUI tests pass.
+	// `provider list` is the one place that asserts the store is empty.
+	xdgState := filepath.Join(home, ".local", "state")
+	if err := auth.Remove("anthropic", auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("auth.Remove: %v", err)
+	}
 
 	root := NewRootCmd()
 	var out bytes.Buffer

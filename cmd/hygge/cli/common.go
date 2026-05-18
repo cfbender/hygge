@@ -13,6 +13,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -498,16 +499,20 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		b.Close()
 		return nil, err
 	}
-	if opts.ProviderFactory == nil && providerOnlyFromDefaults(prov) && !providerHasCredential(cfg.Model.Provider, modelOpts) {
-		_ = stOpen.Close()
-		b.Close()
-		return nil, errNoProvidersConfigured
-	}
 	prv, err := buildProvider(opts.ProviderFactory, cfg, modelOpts)
 	if err != nil {
-		_ = stOpen.Close()
-		b.Close()
-		return nil, err
+		// Missing credentials must not block CLI inspection commands.
+		// The TUI entrypoint (runRun / runResume) enforces the "at
+		// least one provider has auth" check; everything else can run
+		// against a no-op stub.  Non-auth failures still surface.
+		if errors.Is(err, provider.ErrAuth) {
+			slog.Debug("cli: configured provider has no credential; using stub", "provider", cfg.Model.Provider, "err", err)
+			prv = stubProvider{}
+		} else {
+			_ = stOpen.Close()
+			b.Close()
+			return nil, err
+		}
 	}
 	permEngine, err := permission.New(permission.EngineOptions{
 		Bus:    b,
@@ -538,10 +543,19 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	} else {
 		fantasyResolved, err = llm.ResolveProviderModel(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc)
 		if err != nil {
-			permEngine.Close()
-			_ = stOpen.Close()
-			b.Close()
-			return nil, fmt.Errorf("cli: build fantasy model: %w", err)
+			// Missing credentials are non-fatal at bootstrap so CLI
+			// inspection commands work without an API key.  The TUI
+			// entrypoint enforces the auth requirement before
+			// reaching a state where the model is actually used.
+			if errors.Is(err, provider.ErrAuth) {
+				slog.Debug("cli: skipping fantasy model resolution; no credential", "provider", cfg.Model.Provider, "err", err)
+				fantasyResolved = llm.ProviderResolution{}
+			} else {
+				permEngine.Close()
+				_ = stOpen.Close()
+				b.Close()
+				return nil, fmt.Errorf("cli: build fantasy model: %w", err)
+			}
 		}
 	}
 	var titleFantasyModel fantasy.LanguageModel
@@ -1343,35 +1357,29 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 	return prv, nil
 }
 
-func providerOnlyFromDefaults(prov config.Provenance) bool {
-	for _, src := range prov["modes"] {
-		if src.File != "<defaults>" {
-			return false
+// hasAnyProviderAuth reports whether any known provider has at least
+// one credential source configured.  A credential source is either the
+// provider's canonical environment variable being set non-empty, or an
+// entry in the per-machine auth.json store.  Used by the TUI entrypoint
+// to refuse to start when there is no way to talk to a model — every
+// other CLI command tolerates a missing credential.
+func hasAnyProviderAuth(stateOpts state.LoadOptions) bool {
+	for _, name := range knownProviders() {
+		if envName := providerEnvVar(name); envName != "" {
+			if v, ok := os.LookupEnv(envName); ok && v != "" {
+				return true
+			}
 		}
 	}
-	sources := prov["model.provider"]
-	if len(sources) != 1 {
+	store, err := auth.Load(auth.LoadOptions{
+		HomeDir:      stateOpts.HomeDir,
+		XDGStateHome: stateOpts.XDGStateHome,
+	})
+	if err != nil {
+		slog.Debug("cli: hasAnyProviderAuth: auth.Load failed", "err", err)
 		return false
 	}
-	return sources[0].File == "<defaults>"
-}
-
-func providerHasCredential(providerName string, opts map[string]any) bool {
-	if opts == nil {
-		opts = map[string]any{}
-	}
-	if key, ok := opts["api_key"].(string); ok && key != "" {
-		return true
-	}
-	if oauth, ok := opts["oauth"].(bool); ok && oauth {
-		return true
-	}
-	if envName := providerEnvVar(providerName); envName != "" {
-		if v, ok := os.LookupEnv(envName); ok && v != "" {
-			return true
-		}
-	}
-	return false
+	return len(store.List()) > 0
 }
 
 // providerEnvVar returns the canonical environment variable name a
