@@ -65,6 +65,7 @@ type diffPair struct {
 	new diffRow
 }
 
+// IsTruncated reports whether the diff exceeds its configured preview line limit.
 func (d DiffView) IsTruncated() bool {
 	lines := strings.Split(strings.TrimRight(d.Raw, "\n"), "\n")
 	if len(lines) == 1 && lines[0] == "" {
