@@ -11,6 +11,7 @@ import (
 )
 
 const defaultDiffPreviewLines = 12
+const sideBySideDiffMinWidth = 72
 
 var hunkHeaderPattern = regexp.MustCompile(`@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@`)
 
@@ -47,6 +48,9 @@ func (d DiffView) View() string {
 
 	rows := diffRows(lines)
 	numW := diffLineNumberWidth(rows)
+	if width >= sideBySideDiffMinWidth {
+		return renderSideBySideDiff(rows, numW, width, truncated, diffStyles(d.Theme))
+	}
 	contentW := max(width-(numW*2)-5, 1)
 
 	styles := diffStyles(d.Theme)
@@ -58,6 +62,111 @@ func (d DiffView) View() string {
 		out = append(out, styles.meta.Italic(true).Render("… diff truncated"))
 	}
 	return strings.Join(out, "\n")
+}
+
+type diffPair struct {
+	old diffRow
+	new diffRow
+}
+
+func renderSideBySideDiff(rows []diffRow, numW, width int, truncated bool, s diffLineStyles) string {
+	connectorW := 5
+	paneW := max((width-connectorW)/2, numW+4)
+	contentW := max(paneW-numW-3, 1)
+	pairs := sideBySidePairs(rows)
+	out := make([]string, 0, len(pairs)+1)
+	for _, pair := range pairs {
+		if pair.old.kind == diffRowMeta || pair.new.kind == diffRowMeta {
+			text := pair.old.text
+			if text == "" {
+				text = pair.new.text
+			}
+			out = append(out, s.meta.Render(clipVisible(text, width)))
+			continue
+		}
+		left := renderDiffPane(pair.old, numW, contentW, false, s)
+		right := renderDiffPane(pair.new, numW, contentW, true, s)
+		out = append(out, left+renderDiffConnector(pair)+right)
+	}
+	if truncated {
+		out = append(out, s.meta.Italic(true).Render("… diff truncated"))
+	}
+	return strings.Join(out, "\n")
+}
+
+func sideBySidePairs(rows []diffRow) []diffPair {
+	pairs := make([]diffPair, 0, len(rows))
+	for i := 0; i < len(rows); i++ {
+		row := rows[i]
+		if row.kind == diffRowDel {
+			delStart := i
+			for i < len(rows) && rows[i].kind == diffRowDel {
+				i++
+			}
+			addStart := i
+			for i < len(rows) && rows[i].kind == diffRowAdd {
+				i++
+			}
+			delRows := rows[delStart:addStart]
+			addRows := rows[addStart:i]
+			shared := min(len(delRows), len(addRows))
+			for j := range shared {
+				pairs = append(pairs, diffPair{old: delRows[j], new: addRows[j]})
+			}
+			for j := shared; j < len(delRows); j++ {
+				pairs = append(pairs, diffPair{old: delRows[j]})
+			}
+			for j := shared; j < len(addRows); j++ {
+				pairs = append(pairs, diffPair{new: addRows[j]})
+			}
+			i--
+			continue
+		}
+		if row.kind == diffRowAdd {
+			pairs = append(pairs, diffPair{new: row})
+			continue
+		}
+		pairs = append(pairs, diffPair{old: row, new: row})
+	}
+	return pairs
+}
+
+func renderDiffPane(row diffRow, numW, contentW int, useNewLine bool, s diffLineStyles) string {
+	if row.text == "" && row.kind == diffRowBody && row.oldLine == 0 && row.newLine == 0 {
+		return strings.Repeat(" ", numW+3+contentW)
+	}
+	n := row.oldLine
+	if useNewLine {
+		n = row.newLine
+	}
+	if row.kind == diffRowAdd || n == 0 {
+		n = row.newLine
+	}
+	gutter := s.gutter.Render(formatDiffLineNumber(n, numW) + " │ ")
+	text := clipVisible(row.text, contentW)
+	switch row.kind {
+	case diffRowAdd:
+		return gutter + s.add.Render(padDiffRight(text, contentW))
+	case diffRowDel:
+		return gutter + s.del.Render(padDiffRight(text, contentW))
+	case diffRowMeta:
+		return gutter + s.meta.Render(padDiffRight(text, contentW))
+	default:
+		return gutter + s.body.Render(padDiffRight(text, contentW))
+	}
+}
+
+func renderDiffConnector(pair diffPair) string {
+	switch {
+	case pair.old.kind == diffRowDel && pair.new.kind == diffRowAdd:
+		return " ╰─╮ "
+	case pair.old.kind == diffRowDel:
+		return " ╰── "
+	case pair.new.kind == diffRowAdd:
+		return " ──╮ "
+	default:
+		return "  │  "
+	}
 }
 
 type diffRow struct {
@@ -168,6 +277,13 @@ func padLeft(s string, width int) string {
 		return s
 	}
 	return strings.Repeat(" ", width-len(s)) + s
+}
+
+func padDiffRight(s string, width int) string {
+	for lipgloss.Width(s) < width {
+		s += " "
+	}
+	return s
 }
 
 type diffLineStyles struct {

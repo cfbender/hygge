@@ -1158,13 +1158,93 @@ func TestDiffView_StylesUnifiedDiff(t *testing.T) {
 		Raw:   "--- a/main.go\n+++ b/main.go\n@@ -12,1 +12,1 @@\n-old\n+new",
 	}.View()
 	plain := stripANSI(out)
-	for _, want := range []string{"--- a/main.go", "+++ b/main.go", "@@ -12,1 +12,1 @@", "12 │    │ -old", "   │ 12 │ +new"} {
+	for _, want := range []string{"--- a/main.go", "+++ b/main.go", "@@ -12,1 +12,1 @@", "12 │ -old", "╰─╮", "12 │ +new"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("diff view missing %q:\n%s", want, plain)
 		}
 	}
 	if out == plain {
 		t.Fatalf("diff view should style diff lines, got plain output:\n%s", out)
+	}
+}
+
+func TestDiffView_SideBySideConnectsInsertionsAndDeletions(t *testing.T) {
+	t.Parallel()
+	out := DiffView{
+		Width: 96,
+		Theme: theme.ShellTheme(),
+		Raw:   "@@ -1,3 +1,3 @@\n keep\n-delete\n+insert\n+added",
+	}.View()
+	plain := stripANSI(out)
+	for _, want := range []string{"1 │  keep", "2 │ -delete", "╰─╮", "2 │ +insert", "──╮", "3 │ +added"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("side-by-side diff missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "2 │    │ -delete") {
+		t.Fatalf("side-by-side diff should not use inline old/new gutters:\n%s", plain)
+	}
+}
+
+func TestDiffView_SideBySidePairsContiguousReplacementRuns(t *testing.T) {
+	t.Parallel()
+	plain := stripANSI(DiffView{
+		Width: 104,
+		Theme: theme.ShellTheme(),
+		Raw:   "@@ -10,3 +10,4 @@\n-old one\n-old two\n+new one\n+new two\n+new three",
+	}.View())
+
+	assertDiffLineContains(t, plain, "-old one", "+new one")
+	assertDiffLineContains(t, plain, "-old two", "+new two")
+	assertDiffLineContains(t, plain, "──╮", "+new three")
+	if line := diffLineContaining(plain, "-old two"); strings.Contains(line, "+new one") {
+		t.Fatalf("second deletion should pair with second addition, got line:\n%s\nfull diff:\n%s", line, plain)
+	}
+}
+
+func TestDiffView_SideBySideUsesNewLineNumbersOnRightContextPane(t *testing.T) {
+	t.Parallel()
+	plain := stripANSI(DiffView{
+		Width: 96,
+		Theme: theme.ShellTheme(),
+		Raw:   "@@ -1,2 +1,3 @@\n keep\n+inserted\n next",
+	}.View())
+
+	assertDiffLineContains(t, plain, "2 │  next", "3 │  next")
+	if line := diffLineContaining(plain, " next"); strings.Count(line, "2 │  next") > 1 {
+		t.Fatalf("right context pane should use new line number after insertion, got line:\n%s\nfull diff:\n%s", line, plain)
+	}
+}
+
+func assertDiffLineContains(t *testing.T, diff, first, second string) {
+	t.Helper()
+	line := diffLineContaining(diff, first)
+	if line == "" || !strings.Contains(line, second) {
+		t.Fatalf("diff line containing %q should also contain %q; line=%q\nfull diff:\n%s", first, second, line, diff)
+	}
+}
+
+func diffLineContaining(diff, text string) string {
+	for line := range strings.SplitSeq(diff, "\n") {
+		if strings.Contains(line, text) {
+			return line
+		}
+	}
+	return ""
+}
+
+func TestDiffView_NarrowWidthKeepsInlineFallback(t *testing.T) {
+	t.Parallel()
+	plain := stripANSI(DiffView{
+		Width: 60,
+		Theme: theme.ShellTheme(),
+		Raw:   "@@ -1,1 +1,1 @@\n-old\n+new",
+	}.View())
+	if !strings.Contains(plain, "1 │   │ -old") || !strings.Contains(plain, "  │ 1 │ +new") {
+		t.Fatalf("narrow diff should keep readable inline fallback:\n%s", plain)
+	}
+	if strings.Contains(plain, "╰─╮") {
+		t.Fatalf("narrow diff should not use side-by-side connectors:\n%s", plain)
 	}
 }
 
@@ -1184,7 +1264,7 @@ func TestToolGroup_RendersEditReturnedDiff(t *testing.T) {
 		},
 	}
 	plain := stripANSI(ml.View())
-	for _, want := range []string{"Edit", "main.go", "edited main.go", "--- main.go (before)", "+++ main.go (after)", "7 │   │", "  │ 7 │", `-fmt.Println("old")`, `+fmt.Println("new")`} {
+	for _, want := range []string{"Edit", "main.go", "edited main.go", "--- main.go (before)", "+++ main.go (after)", "7 │", "╰─╮", `-fmt.Println("old")`, `+fmt.Println("new")`} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("edit diff preview missing %q:\n%s", want, plain)
 		}
