@@ -34,15 +34,7 @@ func (d DiffView) View() string {
 		return ""
 	}
 
-	maxLines := d.MaxLines
-	if maxLines <= 0 {
-		maxLines = defaultDiffPreviewLines
-	}
-	truncated := false
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		truncated = true
-	}
+	lines, truncated := d.visibleLines(lines)
 
 	width := d.Width
 	if width <= 0 {
@@ -71,6 +63,26 @@ func (d DiffView) View() string {
 type diffPair struct {
 	old diffRow
 	new diffRow
+}
+
+func (d DiffView) IsTruncated() bool {
+	lines := strings.Split(strings.TrimRight(d.Raw, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return false
+	}
+	_, truncated := d.visibleLines(lines)
+	return truncated
+}
+
+func (d DiffView) visibleLines(lines []string) ([]string, bool) {
+	maxLines := d.MaxLines
+	if maxLines <= 0 {
+		maxLines = defaultDiffPreviewLines
+	}
+	if len(lines) <= maxLines {
+		return lines, false
+	}
+	return lines[:maxLines], true
 }
 
 func renderSideBySideDiff(rows []diffRow, numW, width int, truncated bool, s diffLineStyles) string {

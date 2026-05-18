@@ -306,9 +306,9 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 		switch chunk.kind {
 		case chunkToolGroup:
 			text = m.renderToolGroup(chunk.group)
-			// Track bash tool blocks for click-to-expand.
+			// Track standalone tool blocks for click-to-expand.
 			for _, msg := range chunk.group {
-				if (msg.ToolName == "bash" || msg.ToolName == "Bash") && msg.ToolUseID != "" {
+				if msg.ToolUseID != "" && isExpandableToolBlock(msg) {
 					toolZones = append(toolZones, ToolHitZone{
 						ToolUseID: msg.ToolUseID,
 						partIndex: len(parts),
@@ -412,6 +412,15 @@ func isStandaloneToolBlock(msg UIMessage) bool {
 	if msg.Role != RoleTool {
 		return false
 	}
+	switch strings.ToLower(msg.ToolName) {
+	case "bash", "edit", "write":
+		return true
+	default:
+		return false
+	}
+}
+
+func isExpandableToolBlock(msg UIMessage) bool {
 	switch strings.ToLower(msg.ToolName) {
 	case "bash", "edit", "write":
 		return true
@@ -870,7 +879,17 @@ func (m MessageList) toolDiffPreview(msg UIMessage, width int) string {
 		return ""
 	}
 	if !msg.IsStreaming && looksLikeDiff(msg.Raw) {
-		return DiffView{Raw: msg.Raw, Width: width, Theme: m.Theme}.View()
+		expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
+		maxLines := defaultDiffPreviewLines
+		if expanded {
+			maxLines = 10_000
+		}
+		diff := DiffView{Raw: msg.Raw, Width: width, Theme: m.Theme, MaxLines: maxLines}
+		out := diff.View()
+		if !expanded && diff.IsTruncated() {
+			out += "\n" + m.muted().Italic(true).Render("Click to expand")
+		}
+		return out
 	}
 	return ""
 }
