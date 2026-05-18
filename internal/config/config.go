@@ -536,6 +536,7 @@ func validateConfig(cfg *Config) error {
 		{"permission.shell", cfg.Permission.Shell},
 		{"permission.network", cfg.Permission.Network},
 		{"permission.mcp", cfg.Permission.MCP},
+		{"permission.subagent", cfg.Permission.Subagent},
 	}
 	for _, p := range perms {
 		if !valid[p.val] {
