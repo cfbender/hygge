@@ -800,6 +800,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = m.Width
 		a.height = m.Height
+		a.clearSelection()
+		a.lastCanvas = uv.ScreenBuffer{}
 		a.invalidateMsgCache()
 		// Compute the left column width accounting for the sidebar.
 		sidebarW := sidebarWidthForTerminal(m.Width)
