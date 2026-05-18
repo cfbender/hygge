@@ -1004,6 +1004,27 @@ func TestSidebarTodos_WithItems(t *testing.T) {
 	}
 }
 
+func TestSidebarTodos_WrapsLongTitles(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:  22,
+		Height: 35,
+		Theme:  theme.ShellTheme(),
+		Todos: []SidebarTodo{
+			{Title: "Implement sidebar todo wrapping without truncating details", Status: SidebarTodoInProgress},
+		},
+	}
+	out := stripANSI(sb.View())
+	if strings.Contains(out, "…") {
+		t.Errorf("sidebar should wrap long todo title instead of truncating with ellipsis; got:\n%s", out)
+	}
+	for _, want := range []string{"→ Implement sidebar", "  todo wrapping", "  without", "  truncating", "  details"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sidebar missing wrapped todo fragment %q; got:\n%s", want, out)
+		}
+	}
+}
+
 func TestSidebarTodos_TruncatesAt6(t *testing.T) {
 	t.Parallel()
 	var items []SidebarTodo
