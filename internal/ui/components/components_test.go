@@ -1,6 +1,7 @@
 package components
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -8,8 +9,24 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
+
+type stubCommand struct {
+	name        string
+	description string
+}
+
+func (c stubCommand) Name() string        { return c.name }
+func (c stubCommand) Description() string { return c.description }
+func (c stubCommand) Source() string      { return "test" }
+func (c stubCommand) Args() []command.ArgSpec {
+	return nil
+}
+func (c stubCommand) Execute(context.Context, command.App, string) (command.Outcome, error) {
+	return command.Outcome{}, nil
+}
 
 func TestMessageListRendersRoles(t *testing.T) {
 	t.Parallel()
@@ -53,6 +70,44 @@ func TestMessageListCompactionMarkerStaysWithinWidth(t *testing.T) {
 		if got := lipgloss.Width(line); got > width {
 			t.Fatalf("marker line width = %d, want <= %d\nline: %q\noutput:\n%s", got, width, line, out)
 		}
+	}
+}
+
+func TestCommandPaletteScrollsHighlightedMatchIntoView(t *testing.T) {
+	t.Parallel()
+	commands := make([]command.Command, 12)
+	for i := range commands {
+		commands[i] = stubCommand{name: fmt.Sprintf("cmd%02d", i), description: "test command"}
+	}
+
+	out := CommandPalette{Width: 80, Matches: commands, Highlight: 10}.View()
+	if !strings.Contains(out, "/cmd10") {
+		t.Fatalf("highlighted command should be visible after scrolling:\n%s", out)
+	}
+	if strings.Contains(out, "/cmd00") {
+		t.Fatalf("first command should scroll out of view when highlight is near the end:\n%s", out)
+	}
+	if !strings.Contains(out, "↑") {
+		t.Fatalf("expected overflow-above indicator in:\n%s", out)
+	}
+}
+
+func TestMentionPaletteScrollsHighlightedMatchIntoView(t *testing.T) {
+	t.Parallel()
+	mentions := make([]MentionItem, 12)
+	for i := range mentions {
+		mentions[i] = MentionItem{Kind: "file", Label: fmt.Sprintf("file%02d.go", i)}
+	}
+
+	out := MentionPalette{Width: 80, Matches: mentions, Highlight: 10}.View()
+	if !strings.Contains(out, "@file10.go") {
+		t.Fatalf("highlighted mention should be visible after scrolling:\n%s", out)
+	}
+	if strings.Contains(out, "@file00.go") {
+		t.Fatalf("first mention should scroll out of view when highlight is near the end:\n%s", out)
+	}
+	if !strings.Contains(out, "↑") {
+		t.Fatalf("expected overflow-above indicator in:\n%s", out)
 	}
 }
 

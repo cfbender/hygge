@@ -45,12 +45,19 @@ func (p MentionPalette) View() string {
 		), width)
 	}
 
-	visible := p.Matches
-	overflow := 0
-	if len(visible) > mentionPaletteMaxRows {
-		overflow = len(visible) - mentionPaletteMaxRows
-		visible = visible[:mentionPaletteMaxRows]
+	selected := p.Highlight
+	if selected < 0 || selected >= len(p.Matches) {
+		selected = -1
 	}
+	windowHighlight := selected
+	if windowHighlight < 0 {
+		windowHighlight = 0
+	}
+	start := paletteWindowStart(len(p.Matches), mentionPaletteMaxRows, windowHighlight)
+	end := min(start+mentionPaletteMaxRows, len(p.Matches))
+	visible := p.Matches[start:end]
+	overflowBefore := start
+	overflowAfter := len(p.Matches) - end
 
 	labelWidth := 0
 	for _, item := range visible {
@@ -62,12 +69,12 @@ func (p MentionPalette) View() string {
 		labelWidth = innerWidth / 2
 	}
 
-	hi := p.Highlight
-	if hi < 0 || hi >= len(visible) {
-		hi = -1
+	rows := make([]string, 0, len(visible)+2)
+	if overflowBefore > 0 {
+		rows = append(rows, p.style(theme.AtomMuted).Render(
+			fmt.Sprintf("  ↑ %d more", overflowBefore),
+		))
 	}
-
-	rows := make([]string, 0, len(visible)+1)
 	for i, item := range visible {
 		labelCol := padRight("@"+item.Label, labelWidth)
 		desc := item.Kind
@@ -76,7 +83,7 @@ func (p MentionPalette) View() string {
 		}
 		descCol := truncate(desc, innerWidth-labelWidth-2)
 
-		if i == hi {
+		if start+i == selected {
 			accent := p.style(theme.AtomAccent)
 			rows = append(rows, accent.Render(fmt.Sprintf("▶ %s  %s", labelCol, descCol)))
 		} else {
@@ -84,9 +91,9 @@ func (p MentionPalette) View() string {
 			rows = append(rows, fmt.Sprintf("  %s  %s", muted.Render(labelCol), descCol))
 		}
 	}
-	if overflow > 0 {
+	if overflowAfter > 0 {
 		rows = append(rows, p.style(theme.AtomMuted).Render(
-			fmt.Sprintf("  +%d more — keep typing to narrow", overflow),
+			fmt.Sprintf("  ↓ %d more — keep typing to narrow", overflowAfter),
 		))
 	}
 
