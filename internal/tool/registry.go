@@ -150,6 +150,7 @@ func DefaultWith(opts DefaultOptions) *Registry {
 	mustRegister(r, newBashTool())
 	mustRegister(r, newGrepTool())
 	mustRegister(r, newGlobTool())
+	mustRegister(r, newWebfetchTool(nil))
 	mustRegister(r, newRememberTool(opts.SessionMemoryStore, opts.FileMemoryStore))
 	mustRegister(r, newForgetTool(opts.SessionMemoryStore, opts.FileMemoryStore))
 	mustRegister(r, newTodoTool(r.todos, opts.TodoStore))
