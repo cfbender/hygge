@@ -191,6 +191,23 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (a *App) steerCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		sid := a.foregroundID()
+		if sid == "" {
+			return steerCompleted{err: fmt.Errorf("no active session to steer")}
+		}
+		parts := []session.Part{{Kind: session.PartText, Text: text}}
+		if a.testAgentSteerFn != nil {
+			return steerCompleted{err: a.testAgentSteerFn(sid, parts)}
+		}
+		if a.opts.Agent == nil {
+			return steerCompleted{err: fmt.Errorf("agent unavailable")}
+		}
+		return steerCompleted{err: a.opts.Agent.Steer(sid, parts)}
+	}
+}
+
 // applyUpdate dispatches a single Outcome.Updates entry. Unknown keys are
 // logged and ignored. Model changes return a command so provider/model rebuilds
 // happen off the render loop; reasoning remains local UI state.
@@ -215,7 +232,9 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		return a.forgetMemoryCmd(value)
 	case command.UpdateQueueMessage:
 		a.enqueuePromptDraft(queuedPromptDraft{Text: value})
-		a.notice = fmt.Sprintf("queued message %d", a.queueCount)
+		return a.showToast("Message queued", "It will send after the active turn")
+	case command.UpdateSteerMessage:
+		return a.steerCmd(value)
 	case command.UpdateReasoning:
 		switch value {
 		case "off", "low", "medium", "high":

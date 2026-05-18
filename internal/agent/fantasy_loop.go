@@ -378,6 +378,9 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 func (a *Agent) prepareFantasyStep(ctx context.Context, sessionID string, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
 	lazy := a.drainPendingLazy(sessionID)
 	additions := a.drainPendingSystemAdditions(sessionID)
+	if steering := a.drainPendingSteering(sessionID); len(steering) > 0 {
+		additions = append(additions, steeringSystemInstruction(steering))
+	}
 	if len(lazy) == 0 && len(additions) == 0 {
 		return ctx, fantasy.PrepareStepResult{}, nil
 	}

@@ -35,6 +35,7 @@ func builtinCommands() []Command {
 		&compactCmd{},
 		&costCmd{},
 		&queueCmd{},
+		&steerCmd{},
 		&attachCmd{},
 		&attachmentsCmd{},
 		&memoryCmd{},
@@ -314,6 +315,24 @@ func (*queueCmd) Execute(_ context.Context, _ App, input string) (Outcome, error
 		return Outcome{Notice: "usage: /queue <message>"}, nil
 	}
 	return Outcome{Updates: map[string]string{UpdateQueueMessage: text}}, nil
+}
+
+// --- /steer ---------------------------------------------------------------
+
+type steerCmd struct{}
+
+func (*steerCmd) Name() string        { return "steer" }
+func (*steerCmd) Description() string { return "Guide the active turn at the next Fantasy step" }
+func (*steerCmd) Source() string      { return "builtin" }
+func (*steerCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "message", Description: "guidance for the active turn", Required: true}}
+}
+func (*steerCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	text := strings.TrimSpace(input)
+	if text == "" {
+		return Outcome{Notice: "usage: /steer <message>"}, nil
+	}
+	return Outcome{Updates: map[string]string{UpdateSteerMessage: text}}, nil
 }
 
 // --- /sessions ------------------------------------------------------------

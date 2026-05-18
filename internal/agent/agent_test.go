@@ -2284,3 +2284,46 @@ func (c *capturingTool) Execute(_ context.Context, input json.RawMessage, _ tool
 	*c.received = append([]byte(nil), input...)
 	return tool.Result{Content: "ok"}, nil
 }
+func TestSteerAppliesAtNextFantasyStepOnly(t *testing.T) {
+	env := newTestEnv(t)
+	a := env.newAgent(newFakeProvider("fake", scriptText("ok", provider.Usage{})))
+
+	a.mu.Lock()
+	a.activeRuns[env.sessionID] = struct{}{}
+	a.mu.Unlock()
+
+	if err := a.Steer(env.sessionID, userText("prefer the direct fix")); err != nil {
+		t.Fatalf("Steer: %v", err)
+	}
+
+	messages := []fantasy.Message{fantasy.NewSystemMessage("base system")}
+	_, prepared, err := a.prepareFantasyStep(context.Background(), env.sessionID, fantasy.PrepareStepFunctionOptions{Messages: messages})
+	if err != nil {
+		t.Fatalf("prepareFantasyStep: %v", err)
+	}
+	if len(prepared.Messages) == 0 {
+		t.Fatal("expected prepared messages")
+	}
+	got := fantasyMessageText(prepared.Messages[0])
+	if !strings.Contains(got, "base system") || !strings.Contains(got, "prefer the direct fix") {
+		t.Fatalf("prepared system = %q", got)
+	}
+
+	_, prepared, err = a.prepareFantasyStep(context.Background(), env.sessionID, fantasy.PrepareStepFunctionOptions{Messages: messages})
+	if err != nil {
+		t.Fatalf("second prepareFantasyStep: %v", err)
+	}
+	if prepared.Messages != nil {
+		t.Fatalf("steering should be one-shot, got prepared messages: %#v", prepared.Messages)
+	}
+}
+
+func TestSteerRequiresActiveTurn(t *testing.T) {
+	env := newTestEnv(t)
+	a := env.newAgent(newFakeProvider("fake", scriptText("ok", provider.Usage{})))
+
+	err := a.Steer(env.sessionID, userText("too late"))
+	if !errors.Is(err, ErrNoActiveTurn) {
+		t.Fatalf("Steer err = %v, want ErrNoActiveTurn", err)
+	}
+}

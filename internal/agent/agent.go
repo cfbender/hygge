@@ -83,6 +83,9 @@ var ErrNothingToCompact = errors.New("agent: nothing to compact")
 // ErrClosed is returned by Send and Compact after Close.
 var ErrClosed = errors.New("agent: closed")
 
+// ErrNoActiveTurn is returned by Steer when there is no active run to guide.
+var ErrNoActiveTurn = errors.New("agent: no active turn to steer")
+
 // Options configures an Agent.  Bus, Store, Provider, Permission, Tools,
 // and Catalog are required; the rest have sensible defaults.
 type Options struct {
@@ -183,9 +186,13 @@ type Agent struct {
 	// Guarded by mu.
 	pendingLazy map[string][]agentsmd.Block
 	// pendingSystemAdditions maps sessionID -> one-turn system prompt
-	// additions queued by pre_message hooks or inline steering. Drained before
-	// each model turn and never persisted into visible message history. Guarded by mu.
+	// additions queued by pre_message hooks. Drained before each Fantasy step and
+	// never persisted into visible message history. Guarded by mu.
 	pendingSystemAdditions map[string][]string
+	// pendingSteering maps sessionID -> active-turn user guidance queued by /steer.
+	// Drained before the next Fantasy step and never persisted as a user message.
+	// Guarded by mu.
+	pendingSteering map[string][]string
 	// activeModeName is included in pre_message hook input so plugins can
 	// rebuild system prompt additions for the currently selected UI mode.
 	// Guarded by mu.
@@ -203,7 +210,7 @@ type Agent struct {
 	// Guarded by mu.
 	pluginInjects map[pluginInjectKey]int
 	// activeRuns is the set of session IDs currently executing a Send.
-	// Used to decide whether an incoming Send should be treated as inline steering.
+	// Used to decide whether an incoming Send should be queued behind the active turn.
 	// Guarded by mu.
 	activeRuns map[string]struct{}
 	// queues holds per-session queues of pending sends that arrived while
@@ -247,6 +254,7 @@ func New(opts Options) (*Agent, error) {
 		locks:                  make(map[string]*sync.Mutex),
 		pendingLazy:            make(map[string][]agentsmd.Block),
 		pendingSystemAdditions: make(map[string][]string),
+		pendingSteering:        make(map[string][]string),
 		thresholdFired:         make(map[string]bool),
 		activeRuns:             make(map[string]struct{}),
 		queues:                 make(map[string][]QueuedSend),
@@ -577,9 +585,8 @@ func (a *Agent) isClosed() bool {
 // Fantasy-backed turns are uncapped. Returns the final committed assistant
 // message.
 //
-// If a Send is already in flight for the session, the new send is appended
-// immediately as an inline steering instruction and nil is returned. Explicit
-// queued sends should use Enqueue instead.
+// If a Send is already in flight for the session, the new send is queued for
+// a future turn and nil is returned. Active-turn guidance should use Steer.
 //
 // Bus events emitted, in order per iteration:
 //
@@ -608,17 +615,25 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 		return nil, fmt.Errorf("agent: Send: userParts required")
 	}
 
-	// Check whether the session is already running. If so, append this as
-	// an inline steering instruction for the active turn instead of queueing
-	// a future turn.
+	// Check whether the session is already running. If so, queue this as a
+	// future turn instead of modifying the active Fantasy turn.
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
 		return nil, ErrClosed
 	}
 	if _, busy := a.activeRuns[sessionID]; busy {
+		a.queues[sessionID] = append(a.queues[sessionID], QueuedSend{Parts: append([]session.Part(nil), userParts...)})
+		count := len(a.queues[sessionID])
+		prompts := queuedPrompts(a.queues[sessionID])
 		a.mu.Unlock()
-		return a.appendSteering(ctx, sessionID, userParts)
+		bus.Publish(a.opts.Bus, bus.QueueChanged{
+			SessionID: sessionID,
+			Count:     count,
+			Prompts:   prompts,
+			At:        a.opts.Now(),
+		})
+		return nil, nil
 	}
 	// Mark session as active before releasing mu.
 	a.activeRuns[sessionID] = struct{}{}
@@ -771,43 +786,31 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	return result, runErr
 }
 
-func (a *Agent) appendSteering(ctx context.Context, sessionID string, userParts []session.Part) (*session.Message, error) {
-	steeringParts := steeringParts(userParts)
-	msg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
-		Role:  session.RoleUser,
-		Parts: steeringParts,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("agent: Send: append steering: %w", err)
+// Steer queues active-turn guidance to be applied at the next Fantasy step.
+func (a *Agent) Steer(sessionID string, userParts []session.Part) error {
+	if a.isClosed() {
+		return ErrClosed
 	}
-	bus.Publish(a.opts.Bus, bus.MessageAppended{
-		SessionID: sessionID,
-		MessageID: msg.ID,
-		Role:      string(session.RoleUser),
-		At:        a.opts.Now(),
-	})
-	a.appendPendingSystemAdditions(sessionID, []string{steeringSystemInstruction(steeringParts)})
-	return nil, nil
-}
-
-func steeringParts(parts []session.Part) []session.Part {
-	out := make([]session.Part, len(parts))
-	copy(out, parts)
-	for i := range out {
-		if out[i].Kind == session.PartText {
-			out[i].Text = "Inline steering instruction for the active turn: " + out[i].Text
-			return out
-		}
+	if sessionID == "" {
+		return fmt.Errorf("agent: Steer: sessionID required")
 	}
-	return out
-}
-
-func steeringSystemInstruction(parts []session.Part) string {
-	text := firstTextPart(parts)
+	if len(userParts) == 0 {
+		return fmt.Errorf("agent: Steer: userParts required")
+	}
+	text := strings.TrimSpace(firstTextPart(userParts))
 	if text == "" {
-		return "The user sent an inline steering instruction during this active turn. Treat the latest user message as guidance for the work already in progress, not as a new queued task."
+		return fmt.Errorf("agent: Steer: text required")
 	}
-	return "The user sent this inline steering instruction during the active turn. Treat it as immediate guidance for the work already in progress, not as a new queued task:\n\n" + text
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return ErrClosed
+	}
+	if _, busy := a.activeRuns[sessionID]; !busy {
+		return ErrNoActiveTurn
+	}
+	a.pendingSteering[sessionID] = append(a.pendingSteering[sessionID], text)
+	return nil
 }
 
 func firstTextPart(parts []session.Part) string {
@@ -817,6 +820,25 @@ func firstTextPart(parts []session.Part) string {
 		}
 	}
 	return ""
+}
+
+func steeringSystemInstruction(steering []string) string {
+	clean := make([]string, 0, len(steering))
+	for _, text := range steering {
+		if trimmed := strings.TrimSpace(text); trimmed != "" {
+			clean = append(clean, trimmed)
+		}
+	}
+	if len(clean) == 0 {
+		return "The user provided steering for the active turn. Apply it to the current work if still relevant. Do not treat it as a new queued task."
+	}
+	var b strings.Builder
+	b.WriteString("The user provided steering for the active turn. Apply it to the current work if still relevant. Do not treat it as a new queued task.\n\nSteering:")
+	for _, text := range clean {
+		b.WriteString("\n- ")
+		b.WriteString(text)
+	}
+	return b.String()
 }
 
 // queuedPrompts extracts the first PartText from each QueuedSend.
@@ -969,6 +991,17 @@ func (a *Agent) clearPendingSystemAdditions(sessionID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.pendingSystemAdditions, sessionID)
+}
+
+func (a *Agent) drainPendingSteering(sessionID string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	steering := a.pendingSteering[sessionID]
+	if len(steering) == 0 {
+		return nil
+	}
+	delete(a.pendingSteering, sessionID)
+	return steering
 }
 
 // replaceTextParts returns a copy of parts where every PartText entry

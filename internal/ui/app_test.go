@@ -2329,6 +2329,9 @@ func TestQueueCommandQueuesDraftOutOfChatAndClickEdits(t *testing.T) {
 	if app.queueCount != 1 || len(app.queuedDrafts) != 1 || app.queuedPrompts[0] != "queued one" {
 		t.Fatalf("queue state = count %d drafts %#v prompts %#v", app.queueCount, app.queuedDrafts, app.queuedPrompts)
 	}
+	if strings.Contains(app.notice, "queued message") {
+		t.Fatalf("queue command should not leave sticky queued-message notice, got %q", app.notice)
+	}
 	out := app.View().Content
 	if !strings.Contains(out, "click to edit") {
 		t.Fatalf("queued draft hint missing from view:\n%s", out)

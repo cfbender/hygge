@@ -497,6 +497,9 @@ type App struct {
 	// a controllable stub without requiring a concrete *agent.Agent.  Must
 	// not be set in production code.
 	testAgentSendFn func(ctx context.Context, sessionID string, parts []session.Part) (*session.Message, error)
+	// testAgentSteerFn, when non-nil, is called by steerCmd instead of
+	// opts.Agent.Steer. Used exclusively by unit tests.
+	testAgentSteerFn func(sessionID string, parts []session.Part) error
 
 	// testAgentClearQueueFn, when non-nil, is called by the Esc handler
 	// instead of opts.Agent.ClearQueue.  Used exclusively by unit tests.
@@ -1085,6 +1088,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.showToast("Yolo mode", "Enabled — secrets still protected")
 		}
 		return a, a.showToast("Yolo mode", "Disabled")
+
+	case steerCompleted:
+		if m.err != nil {
+			return a, a.showToast("Steering not sent", m.err.Error())
+		}
+		return a, a.showToast("Steering sent", "Applies at the next agent step")
 
 	case sendStarted:
 		wasBusy := a.busy

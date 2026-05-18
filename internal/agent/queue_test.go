@@ -63,9 +63,9 @@ func (s *slowProvider) CountTokens(_ context.Context, _ provider.Request) (int64
 }
 func (s *slowProvider) ListModels(_ context.Context) ([]provider.Model, error) { return nil, nil }
 
-// TestSendWhileBusyAppendsSteering verifies that a second Send on a busy
-// session is persisted immediately as inline steering instead of being queued.
-func TestSendWhileBusyAppendsSteering(t *testing.T) {
+// TestSendWhileBusyQueues verifies that a second Send on a busy session is
+// queued for a future turn instead of steering the active turn.
+func TestSendWhileBusyQueues(t *testing.T) {
 	env := newTestEnv(t)
 
 	gate := make(chan struct{})
@@ -84,26 +84,21 @@ func TestSendWhileBusyAppendsSteering(t *testing.T) {
 
 	msg, err := a.Send(ctx, env.sessionID, userText("second message"))
 	if err != nil {
-		t.Fatalf("steering Send returned unexpected error: %v", err)
+		t.Fatalf("busy Send returned unexpected error: %v", err)
 	}
 	if msg != nil {
-		t.Fatalf("steering Send returned non-nil message: %v", msg)
+		t.Fatalf("busy Send returned non-nil message: %v", msg)
 	}
-	if got := a.QueueCount(env.sessionID); got != 0 {
-		t.Fatalf("QueueCount = %d, want 0", got)
+	if got := a.QueueCount(env.sessionID); got != 1 {
+		t.Fatalf("QueueCount = %d, want 1", got)
 	}
 
 	msgs, err := env.Store.MessagesForSession(ctx, env.sessionID)
 	if err != nil {
 		t.Fatalf("MessagesForSession: %v", err)
 	}
-	if len(msgs) < 2 {
-		t.Fatalf("expected at least two user messages, got %d", len(msgs))
-	}
-	got := firstTextPart(msgs[len(msgs)-1].Parts)
-	want := "Inline steering instruction for the active turn: second message"
-	if got != want {
-		t.Fatalf("steering message = %q, want %q", got, want)
+	if len(msgs) != 1 {
+		t.Fatalf("queued send should not be persisted yet; got %d messages", len(msgs))
 	}
 
 	close(gate)

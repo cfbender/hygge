@@ -289,6 +289,16 @@ func TestBuiltinOutcomes(t *testing.T) {
 			},
 		},
 		{
+			name:    "steer",
+			cmdName: "steer",
+			input:   "prefer the smaller change",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateSteerMessage]; got != "prefer the smaller change" {
+					t.Errorf("Updates[%q]=%q, want steering text", UpdateSteerMessage, got)
+				}
+			},
+		},
+		{
 			name:    "sessions",
 			cmdName: "sessions",
 			check: func(t *testing.T, o Outcome) {

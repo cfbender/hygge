@@ -98,6 +98,9 @@ const (
 
 	// UpdateQueueMessage asks the TUI to add text to the explicit queued-message list.
 	UpdateQueueMessage = "queue_message"
+
+	// UpdateSteerMessage asks the TUI to send active-turn steering to the agent.
+	UpdateSteerMessage = "steer_message"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].
