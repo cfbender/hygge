@@ -293,6 +293,49 @@ func TestCtrlEEditorExpandsPastedMarkers(t *testing.T) {
 	}
 }
 
+func TestPasteImagePathAddsAttachment(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	path := filepath.Join(t.TempDir(), "clip.png")
+	if err := os.WriteFile(path, []byte("png bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app.Update(tea.PasteMsg{Content: "file://" + path})
+
+	if got := app.input.Value(); got != "" {
+		t.Fatalf("image paste should not insert text, got %q", got)
+	}
+	if len(app.pendingAttachments) != 1 {
+		t.Fatalf("pending attachments = %+v, want one", app.pendingAttachments)
+	}
+	att := app.pendingAttachments[0]
+	if att.Name != "clip.png" || att.MimeType != "image/png" || len(att.Parts) != 1 || att.Parts[0].Kind != session.PartImage {
+		t.Fatalf("unexpected image attachment: %+v", att)
+	}
+	if !strings.Contains(app.notice, "attached clip.png") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+}
+
+func TestPasteNonImagePathStaysText(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(path, []byte("alpha"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app.Update(tea.PasteMsg{Content: path})
+
+	if got := app.input.Value(); got != path {
+		t.Fatalf("non-image path paste = %q, want %q", got, path)
+	}
+	if len(app.pendingAttachments) != 0 {
+		t.Fatalf("non-image path should not attach: %+v", app.pendingAttachments)
+	}
+}
+
 func seedLargeStreamingChat(t *testing.T, app *App) {
 	t.Helper()
 	for range 80 {

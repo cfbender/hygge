@@ -2,6 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"mime"
+	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -22,6 +26,12 @@ func (a *App) handlePaste(m tea.PasteMsg) (tea.Model, tea.Cmd) {
 
 	content := normalizePasteContent(m.Content)
 	if content == "" {
+		return a, nil
+	}
+
+	if att, ok := imageAttachmentFromPaste(content); ok {
+		a.pendingAttachments = appendUniquePromptAttachments(a.pendingAttachments, att)
+		a.notice = fmt.Sprintf("attached %s (%s)", att.Name, formatBytes(att.Size))
 		return a, nil
 	}
 
@@ -214,6 +224,36 @@ func pasteLineCount(s string) int {
 		return 0
 	}
 	return strings.Count(s, "\n") + 1
+}
+
+func imageAttachmentFromPaste(content string) (promptAttachment, bool) {
+	path := strings.TrimSpace(content)
+	if path == "" || strings.ContainsAny(path, "\n\x00") {
+		return promptAttachment{}, false
+	}
+	if u, err := url.Parse(path); err == nil && u.Scheme != "" {
+		if u.Scheme != "file" {
+			return promptAttachment{}, false
+		}
+		path = u.Path
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return promptAttachment{}, false
+	}
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		return promptAttachment{}, false
+	}
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(abs)))
+	if !strings.HasPrefix(mimeType, "image/") {
+		return promptAttachment{}, false
+	}
+	att, err := loadPromptAttachment(abs)
+	if err != nil {
+		return promptAttachment{}, false
+	}
+	return att, true
 }
 
 func pastedInputMarker(lineCount int) string {
