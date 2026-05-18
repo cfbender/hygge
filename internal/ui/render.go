@@ -103,7 +103,7 @@ func (a *App) renderChatContent() string {
 	// parses the full string into lines which is expensive for large
 	// conversations.
 	if needsRebuild {
-		a.msgViewport.SetContent(a.msgCache)
+		a.msgViewport.SetContent("\n" + a.msgCache)
 	}
 
 	if !a.userScrolled {
