@@ -124,6 +124,23 @@ func TestTypingKeepsSplashInputCentered(t *testing.T) {
 	}
 }
 
+func TestNoticeKeepsSplashInputCentered(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.notice = "attached screenshot.png"
+
+	out := app.View().Content
+	plain := ansiEscapeRE.ReplaceAllString(out, "")
+	for _, want := range []string{"███████", "Ctrl+E opens this prompt"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("notice should keep splash prompt visible; missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(plain, "attached screenshot.png") {
+		t.Fatalf("splash notice should not consume chrome height:\n%s", out)
+	}
+}
+
 func TestSplashSmokeAnimates(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
@@ -293,28 +310,66 @@ func TestCtrlEEditorExpandsPastedMarkers(t *testing.T) {
 	}
 }
 
-func TestPasteImagePathAddsAttachment(t *testing.T) {
+func TestPasteImagePathCreatesMarkerAndSendsAttachment(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
-	path := filepath.Join(t.TempDir(), "clip.png")
+	app.opts.SessionID = "session-1"
+	path := filepath.Join(t.TempDir(), "Screenshot 2026-05-18 at 9.25.10 AM.png")
 	if err := os.WriteFile(path, []byte("png bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	gotCh := make(chan []session.Part, 1)
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		gotCh <- append([]session.Part(nil), parts...)
+		return nil, nil
+	}
 
-	app.Update(tea.PasteMsg{Content: "file://" + path})
+	escapedPath := strings.ReplaceAll(path, " ", `\ `)
+	app.Update(tea.PasteMsg{Content: escapedPath})
 
-	if got := app.input.Value(); got != "" {
-		t.Fatalf("image paste should not insert text, got %q", got)
+	if got, want := app.input.Value(), "[Pasted image: Screenshot 2026-05-18 at 9.25.10 AM.png] "; got != want {
+		t.Fatalf("image paste marker = %q, want %q", got, want)
 	}
-	if len(app.pendingAttachments) != 1 {
-		t.Fatalf("pending attachments = %+v, want one", app.pendingAttachments)
+	if len(app.pendingAttachments) != 0 {
+		t.Fatalf("pasted image should be marker-scoped, not a global pending chip: %+v", app.pendingAttachments)
 	}
-	att := app.pendingAttachments[0]
-	if att.Name != "clip.png" || att.MimeType != "image/png" || len(att.Parts) != 1 || att.Parts[0].Kind != session.PartImage {
-		t.Fatalf("unexpected image attachment: %+v", att)
+	if len(app.pastedInputBlocks) != 1 || len(app.pastedInputBlocks[0].Attachments) != 1 {
+		t.Fatalf("pasted image block missing attachment: %+v", app.pastedInputBlocks)
 	}
-	if !strings.Contains(app.notice, "attached clip.png") {
-		t.Fatalf("notice = %q", app.notice)
+	view := app.View().Content
+	plainView := ansiEscapeRE.ReplaceAllString(view, "")
+	if !strings.Contains(plainView, "[Pasted image: Screenshot 2026-05-18 at 9.25.10") || !strings.Contains(plainView, "AM.png]") {
+		t.Fatalf("image paste marker missing from view:\n%s", view)
+	}
+	if app.notice != "" {
+		t.Fatalf("image marker is the attachment feedback; notice = %q, want empty", app.notice)
+	}
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	_ = cmd()
+	var got []session.Part
+	select {
+	case got = <-gotCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("send function was not called")
+	}
+	if len(got) != 2 {
+		t.Fatalf("sent parts = %+v, want text plus image", got)
+	}
+	if !strings.Contains(got[0].Text, "[Pasted image: Screenshot 2026-05-18 at 9.25.10 AM.png]") {
+		t.Fatalf("sent text should keep visible marker, got %q", got[0].Text)
+	}
+	if got[1].Kind != session.PartImage || got[1].ImageMimeType != "image/png" || got[1].ImageBase64 == "" {
+		t.Fatalf("image attachment not sent correctly: %+v", got[1])
+	}
+	if len(app.messages) == 0 || !strings.Contains(app.messages[len(app.messages)-1].Raw, "[Pasted image: Screenshot 2026-05-18 at 9.25.10 AM.png]") {
+		t.Fatalf("optimistic user message should keep visible marker: %+v", app.messages)
+	}
+	if len(app.pastedInputBlocks) != 0 {
+		t.Fatalf("pasted blocks not cleared after send: %+v", app.pastedInputBlocks)
 	}
 }
 

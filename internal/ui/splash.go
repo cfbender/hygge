@@ -14,7 +14,6 @@ func (a *App) splashActive() bool {
 	return !a.viewingSubagent() &&
 		!a.busy &&
 		!a.compactionInFlight &&
-		a.notice == "" &&
 		a.compactionToast == "" &&
 		len(a.pendingAttachments) == 0 &&
 		len(a.messages) == 0 &&

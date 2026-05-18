@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -447,7 +448,7 @@ func toFantasyMessages(
 		}
 		fm := fantasy.Message{Role: toFantasyRole(m.Role)}
 		if i == latestUserIdx && m.Role == session.RoleUser {
-			fm.Content = append(fm.Content, fantasy.TextPart{Text: buildLatestUserEnvelope(modelFacingUserText(m), memories)})
+			fm.Content = append(fm.Content, latestUserFantasyParts(m, memories)...)
 			out = append(out, fm)
 			continue
 		}
@@ -483,6 +484,25 @@ func toFantasyMessages(
 		}
 	}
 	return out
+}
+
+func latestUserFantasyParts(m *session.Message, memories []*session.Memory) []fantasy.MessagePart {
+	parts := []fantasy.MessagePart{fantasy.TextPart{Text: buildLatestUserEnvelope(modelFacingUserText(m), memories)}}
+	if m == nil {
+		return parts
+	}
+	for _, p := range m.Parts {
+		if p.Kind != session.PartImage {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(p.ImageBase64)
+		if err != nil {
+			slog.Warn("agent: dropping invalid image attachment", "err", err)
+			continue
+		}
+		parts = append(parts, fantasy.FilePart{Data: data, MediaType: p.ImageMimeType})
+	}
+	return parts
 }
 
 func modelFacingUserText(m *session.Message) string {

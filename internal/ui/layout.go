@@ -177,6 +177,9 @@ func (a *App) bannerHeight() int {
 
 // noticeHeight returns the height for ephemeral notices.
 func (a *App) noticeHeight() int {
+	if a.splashActive() {
+		return 0
+	}
 	h := 0
 	if a.notice != "" {
 		h++
