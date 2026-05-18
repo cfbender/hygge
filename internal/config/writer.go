@@ -263,15 +263,16 @@ func pluginSourcesWriteTarget(opts WritePluginSourcesOptions) string {
 }
 
 func atomicWriteConfig(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // intentional config path resolved by writer target policy
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
+	tmp, err := os.CreateTemp(dir, ".config-*.toml")
 	if err != nil {
 		return fmt.Errorf("create temp config: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() { _ = os.Remove(tmpPath) }() //nolint:gosec // temp path returned by os.CreateTemp in config dir
 
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
@@ -280,7 +281,7 @@ func atomicWriteConfig(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp config: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil { //nolint:gosec // intentional atomic replacement of resolved config path
 		return fmt.Errorf("replace config: %w", err)
 	}
 	return nil
@@ -295,6 +296,186 @@ func lastRealSource(sources []Source) string {
 		return file
 	}
 	return ""
+}
+
+// WriteOnboardingModeOptions controls the narrow config writer for the
+// onboarding wizard's mode result. It shares the model writer's target-
+// resolution inputs.
+type WriteOnboardingModeOptions = WriteModelOptions
+
+// WriteSubagentsTomlOptions configures WriteSubagentsToml.
+// Only HomeDir and XDGConfigHome are used.
+type WriteSubagentsTomlOptions struct {
+	HomeDir       string
+	XDGConfigHome string
+}
+
+// OnboardingSubagent is a minimal sub-agent descriptor used during onboarding.
+// It carries only what the wizard collects; the runtime loads the canonical
+// subagent.Type after bootstrap.
+type OnboardingSubagent struct {
+	Name        string
+	Description string
+	Prompt      string
+	Model       string // optional "<provider>/<model>" ref; empty = inherit
+}
+
+// WriteOnboardingMode persists a single [[modes]] entry produced by the
+// onboarding wizard into the user config at $XDG_CONFIG_HOME/hygge/config.toml.
+// It always targets the user config (no provenance reuse) because onboarding
+// only ever runs when no real model/auth config exists.
+// The first call creates the file; subsequent calls from mode editing
+// replace the matching entry.
+func WriteOnboardingMode(opts WriteOnboardingModeOptions, mode ModeConfig) (string, error) {
+	if mode.Name == "" || mode.Provider == "" || mode.Model == "" {
+		return "", fmt.Errorf("config: onboarding mode requires name, provider, and model")
+	}
+	target := filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+	m := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
+		parsed, err := parseTOMLBytes(data)
+		if err != nil {
+			return target, &ParseError{File: target, Err: err}
+		}
+		m = parsed
+	} else if !os.IsNotExist(err) {
+		return target, fmt.Errorf("config: read onboarding target: %w", err)
+	}
+
+	// Write model.provider and model.name so bare `hygge` works without
+	// an explicit [[modes]] section in configs that rely on defaults.
+	modelMap, ok := m["model"].(map[string]any)
+	if !ok {
+		modelMap = map[string]any{}
+		m["model"] = modelMap
+	}
+	modelMap["provider"] = mode.Provider
+	modelMap["name"] = mode.Model
+
+	// Encode the mode as a TOML table that can sit in an [[modes]] array.
+	// We find or replace by Name inside any existing "modes" slice.
+	newEntry := map[string]any{
+		"name":     mode.Name,
+		"provider": mode.Provider,
+		"model":    mode.Model,
+	}
+	if mode.Prompt != "" {
+		newEntry["prompt"] = mode.Prompt
+	}
+	if mode.Description != "" {
+		newEntry["description"] = mode.Description
+	}
+	if mode.Color != "" {
+		newEntry["color"] = mode.Color
+	}
+	if mode.Reasoning != "" {
+		newEntry["reasoning"] = mode.Reasoning
+	}
+
+	existing, _ := m["modes"].([]any)
+	kept := make([]any, 0, len(existing)+1)
+	replaced := false
+	for _, raw := range existing {
+		tbl, ok := raw.(map[string]any)
+		if !ok {
+			kept = append(kept, raw)
+			continue
+		}
+		name, _ := tbl["name"].(string)
+		switch name {
+		case mode.Name:
+			kept = append(kept, newEntry)
+			replaced = true
+		case "General":
+			// Onboarding creates an explicit first mode, so drop the synthesized
+			// fallback mode if it was previously written to config.
+			continue
+		default:
+			kept = append(kept, raw)
+		}
+	}
+	if !replaced {
+		kept = append(kept, newEntry)
+	}
+	m["modes"] = kept
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return target, fmt.Errorf("config: encode onboarding target: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return target, fmt.Errorf("config: create config dir: %w", err)
+	}
+	if err := os.WriteFile(target, buf.Bytes(), 0o600); err != nil {
+		return target, fmt.Errorf("config: write onboarding target: %w", err)
+	}
+	return target, nil
+}
+
+// WriteSubagentsToml appends or replaces OnboardingSubagent entries in the
+// user-level $XDG_CONFIG_HOME/hygge/subagents.toml file.  Entries sharing a
+// Name are updated in-place; new names are appended.  Existing entries for
+// other names are left untouched.
+func WriteSubagentsToml(opts WriteSubagentsTomlOptions, agents []OnboardingSubagent) error {
+	if len(agents) == 0 {
+		return nil
+	}
+	xdg := opts.XDGConfigHome
+	if xdg == "" {
+		if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+			xdg = v
+		} else {
+			home := opts.HomeDir
+			if home == "" {
+				var err error
+				if home, err = os.UserHomeDir(); err != nil {
+					return fmt.Errorf("config: subagents toml: home dir: %w", err)
+				}
+			}
+			xdg = filepath.Join(home, ".config")
+		}
+	}
+	target := filepath.Join(xdg, "hygge", "subagents.toml")
+
+	// Read or initialise the TOML map.
+	raw := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
+		if err2 := toml.Unmarshal(data, &raw); err2 != nil {
+			return fmt.Errorf("config: parse subagents.toml: %w", err2)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("config: read subagents.toml: %w", err)
+	}
+
+	// Ensure top-level [subagents] table exists.
+	subMap, ok := raw["subagents"].(map[string]any)
+	if !ok {
+		subMap = map[string]any{}
+		raw["subagents"] = subMap
+	}
+
+	for _, ag := range agents {
+		if ag.Name == "" {
+			continue
+		}
+		entry := map[string]any{
+			"description": ag.Description,
+			"prompt":      ag.Prompt,
+		}
+		if ag.Model != "" {
+			entry["model"] = ag.Model
+		}
+		subMap[ag.Name] = entry
+	}
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
+		return fmt.Errorf("config: encode subagents.toml: %w", err)
+	}
+	if err := atomicWriteConfig(target, buf.Bytes()); err != nil {
+		return fmt.Errorf("config: write subagents.toml: %w", err)
+	}
+	return nil
 }
 
 func resolveWriterXDGConfig(opts WriteModelOptions) string {

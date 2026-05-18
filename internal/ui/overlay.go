@@ -18,6 +18,7 @@ const (
 	overlayModel          overlayKind = command.ModalModel
 	overlayAPIKey         overlayKind = command.ModalAPIKey
 	overlayTheme          overlayKind = command.ModalTheme
+	overlayOnboarding     overlayKind = "onboarding"
 	overlayPermission     overlayKind = "permission"
 	overlayQuestion       overlayKind = "question"
 	overlayQuit           overlayKind = "quit"

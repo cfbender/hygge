@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -292,10 +291,10 @@ func TestBootstrapWithoutProviderAuthSucceeds(t *testing.T) {
 	}
 }
 
-// TestRunTUIWithoutProviderAuthShowsSetupMessage verifies that the TUI
-// entrypoint (the only place that requires a working model) refuses to
-// start when no provider has credentials.
-func TestRunTUIWithoutProviderAuthShowsSetupMessage(t *testing.T) {
+// TestRunTUIWithoutProviderAuthOpensOnboarding verifies that the TUI
+// entrypoint opens even when no provider has credentials; onboarding handles
+// first-run setup inside the app.
+func TestRunTUIWithoutProviderAuthOpensOnboarding(t *testing.T) {
 	home := t.TempDir()
 	for _, providerName := range knownProviders() {
 		if envName := providerEnvVar(providerName); envName != "" {
@@ -321,15 +320,11 @@ func TestRunTUIWithoutProviderAuthShowsSetupMessage(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&out)
 	root.SetArgs([]string{})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected runTUI to error when no provider auth is configured")
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if !errors.Is(err, errNoProvidersConfigured) {
-		t.Fatalf("err = %v, want errNoProvidersConfigured", err)
-	}
-	if strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
-		t.Fatalf("error leaked ANTHROPIC_API_KEY: %v", err)
+	if strings.Contains(out.String(), "ANTHROPIC_API_KEY") {
+		t.Fatalf("output leaked ANTHROPIC_API_KEY: %v", out.String())
 	}
 }
 
@@ -378,6 +373,47 @@ func stateLoadOptionsForTest() state.LoadOptions {
 // TestBootstrap_AuthStoreInjectsAPIKey verifies that with no
 // model.options.api_key in config and no env var set, a stored
 // auth.json credential is injected into the provider factory's opts.
+func TestBootstrapNoConfigAuthIgnoresConfigAndAuth(t *testing.T) {
+	home := t.TempDir()
+	xdgState := filepath.Join(home, ".local", "state")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env-should-be-ignored")
+	seedHermeticModelConfig(t, home)
+	if err := auth.Set("anthropic",
+		auth.Credential{Type: auth.CredAPIKey, APIKey: "sk-from-store-should-be-ignored"},
+		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("auth.Set: %v", err)
+	}
+
+	captured := &optsCapture{}
+	rt, err := bootstrap(context.Background(), bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    xdgState,
+		Pwd:             home,
+		ProviderFactory: captured.factory,
+		FantasyModel:    nil,
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		NoConfigAuth:    true,
+	})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if !rt.NoConfigAuth {
+		t.Fatal("rt.NoConfigAuth = false, want true")
+	}
+	if rt.Config.Model.Provider != "anthropic" || rt.Config.Model.Name != "claude-sonnet-4-5" {
+		t.Fatalf("model = %s/%s, want defaults", rt.Config.Model.Provider, rt.Config.Model.Name)
+	}
+	if hasConfiguredModel(rt.Provenance) {
+		t.Fatalf("hasConfiguredModel = true; provenance = %v", rt.Provenance)
+	}
+	if got := captured.snapshot(); got != nil {
+		t.Fatalf("provider factory was called with opts %#v; want no provider/auth load", got)
+	}
+}
+
 func TestBootstrap_AuthStoreInjectsAPIKey(t *testing.T) {
 	home := hermeticHome(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")

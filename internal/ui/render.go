@@ -222,6 +222,10 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 		a.themeModal.Width = w
 		a.themeModal.Height = h
 		return a.themeModal.View()
+	case overlayOnboarding:
+		a.onboardingWizard.Width = w
+		a.onboardingWizard.Height = h
+		return a.onboardingWizard.View()
 	case overlayQuit:
 		return a.renderQuitOverlay(w, h)
 	}

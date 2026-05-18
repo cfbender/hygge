@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,7 +29,7 @@ func TestResumeNoMatchExitsWithError(t *testing.T) {
 	}
 }
 
-func TestRunNoArgsWithoutConfiguredModelTellsUserToOnboard(t *testing.T) {
+func TestRunNoArgsWithoutConfiguredModelOpensOnboarding(t *testing.T) {
 	hermeticHome(t)
 
 	root := NewRootCmd()
@@ -38,15 +37,11 @@ func TestRunNoArgsWithoutConfiguredModelTellsUserToOnboard(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&out)
 	root.SetArgs([]string{})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when no model is configured")
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if !errors.Is(err, errNoModelConfigured) {
-		t.Fatalf("err = %v, want errNoModelConfigured", err)
-	}
-	if !strings.Contains(err.Error(), "hygge onboard") {
-		t.Fatalf("error should tell user to run hygge onboard, got %v", err)
+	if out.Len() > 0 {
+		t.Fatalf("expected no startup output, got:\n%s", out.String())
 	}
 }
 
