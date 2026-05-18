@@ -83,8 +83,16 @@ func (f Footer) View() string {
 	leftStr := strings.Join(left, sep)
 	rightStr := strings.Join(right, sep)
 
-	// Spread left and right across the full width.
+	// Flex left and right across the full width. When space is tight, keep the
+	// left identity legible and truncate metadata before it can overflow.
 	leftW := lipgloss.Width(leftStr)
+	if leftW >= width {
+		return lipgloss.NewStyle().MaxWidth(width).Render(leftStr)
+	}
+	rightMaxW := width - leftW - 1
+	if lipgloss.Width(rightStr) > rightMaxW {
+		rightStr = lipgloss.NewStyle().MaxWidth(rightMaxW).Render(rightStr)
+	}
 	rightW := lipgloss.Width(rightStr)
 	gap := max(width-leftW-rightW, 1)
 	line := leftStr + strings.Repeat(" ", gap) + rightStr

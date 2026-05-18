@@ -435,6 +435,25 @@ func TestFooterCapitalizesAgentAndProvider(t *testing.T) {
 	}
 }
 
+func TestFooterTruncatesMetadataToWidth(t *testing.T) {
+	t.Parallel()
+	f := Footer{
+		Width:          24,
+		Theme:          theme.ShellTheme(),
+		AgentType:      "general",
+		ModelName:      "claude-sonnet-with-a-very-long-name",
+		Provider:       "openrouter",
+		ReasoningLevel: "high",
+	}
+	out := f.View()
+	if got := lipgloss.Width(out); got > f.Width {
+		t.Fatalf("footer width = %d, want <= %d; out=%q", got, f.Width, stripANSI(out))
+	}
+	if !strings.Contains(stripANSI(out), "General") {
+		t.Fatalf("footer should keep left identity visible: %q", stripANSI(out))
+	}
+}
+
 func TestPermissionModalRendersRequest(t *testing.T) {
 	t.Parallel()
 	m := PermissionModal{
