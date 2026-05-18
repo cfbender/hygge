@@ -325,6 +325,7 @@ func TestResumeAnyDisablesCwdScope(t *testing.T) {
 	home2 := t.TempDir()
 	xdgConfig2 := filepath.Join(home2, ".config")
 	xdgState2 := filepath.Join(home2, ".local", "state")
+	seedHermeticAuth(t, home2, xdgState2)
 	SetTestOverrides(&bootstrapOptions{
 		HomeDir:         home2,
 		XDGConfigHome:   xdgConfig2,
