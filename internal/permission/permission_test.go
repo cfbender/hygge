@@ -339,10 +339,12 @@ func TestAsk_SessionScopeCache(t *testing.T) {
 
 // --- 14: always-scope reply persists to state -------------------------------
 
-func TestAsk_AlwaysScopePersists(t *testing.T) {
+func TestAsk_AlwaysScopePersistsAndCachesImmediately(t *testing.T) {
 	e, b, stateOpts := newEngine(t, defaultCfg())
 
+	var asks atomic.Int32
 	stop := fakeResponder(t, b, func(_ bus.PermissionAsked) bus.PermissionReplied {
+		asks.Add(1)
 		return bus.PermissionReplied{Decision: "allow", Scope: "always", At: time.Now()}
 	})
 	defer stop()
@@ -357,6 +359,21 @@ func TestAsk_AlwaysScopePersists(t *testing.T) {
 	}
 	if d.Action != ActionAllow || d.Scope != ScopeAlways {
 		t.Errorf("decision: got %+v, want allow/always", d)
+	}
+
+	sibling, err := e.Ask(context.Background(), Request{
+		Category: CategoryFileWrite,
+		Target:   "/repo/src/other.go",
+		Pwd:      "/repo",
+	})
+	if err != nil {
+		t.Fatalf("sibling Ask: %v", err)
+	}
+	if sibling.Action != ActionAllow || sibling.Scope != ScopeAlways {
+		t.Errorf("sibling decision: got %+v, want cached allow/always", sibling)
+	}
+	if got := asks.Load(); got != 1 {
+		t.Errorf("bus asks: got %d, want 1 (always allow should cache immediately)", got)
 	}
 
 	s, err := state.Load(stateOpts)

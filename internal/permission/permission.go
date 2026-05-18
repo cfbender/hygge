@@ -458,8 +458,10 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 		}
 	}
 
-	if decision.Scope == ScopeSession {
-		// Store the promoted pattern so future lookups match siblings.
+	if decision.Action == ActionAllow && (decision.Scope == ScopeSession || decision.Scope == ScopeAlways) {
+		// Store the promoted pattern so future lookups match siblings. Always
+		// approvals are persisted for future processes and also take effect
+		// immediately in the current engine.
 		promoted := req
 		promoted.Target = pattern
 		e.storeSession(promoted, decision)
