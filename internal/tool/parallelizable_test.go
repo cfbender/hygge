@@ -20,6 +20,7 @@ func TestParallelizable_BuiltinMapping(t *testing.T) {
 		{"read", newReadTool(rt), true},
 		{"grep", newGrepTool(), true},
 		{"glob", newGlobTool(), true},
+		{"webfetch", newWebfetchTool(nil), true},
 		{"bash", newBashTool(), false},
 		{"write", newWriteTool(rt), false},
 		{"edit", newEditTool(rt), false},
