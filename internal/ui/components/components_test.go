@@ -135,6 +135,19 @@ func TestMentionTokensHighlightedInInputAndUserBubble(t *testing.T) {
 	}
 }
 
+func TestMentionHighlightExcludesTrailingPunctuation(t *testing.T) {
+	t.Parallel()
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	out := HighlightMentions("read @internal/ui/app.go.", style)
+
+	if want := style.Render("@internal/ui/app.go") + "."; !strings.Contains(out, want) {
+		t.Fatalf("mention punctuation was highlighted; want %q in:\n%s", want, out)
+	}
+	if bad := style.Render("@internal/ui/app.go."); strings.Contains(out, bad) {
+		t.Fatalf("trailing punctuation should not be highlighted; found %q in:\n%s", bad, out)
+	}
+}
+
 func TestPastedInputMarkerHighlightIgnoresCursorANSI(t *testing.T) {
 	t.Parallel()
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("5"))

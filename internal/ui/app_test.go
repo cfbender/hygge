@@ -907,6 +907,37 @@ func TestAtFileMentionAddsFileToPromptContext(t *testing.T) {
 	}
 }
 
+func TestAtFileMentionAllowsTrailingPunctuation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "notes.md"), []byte("important context\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	for _, prompt := range []string{
+		"read @docs/notes.md.",
+		"read @docs/notes.md,",
+		"read (@docs/notes.md)",
+		"read @docs/notes.md?",
+		"read @docs/notes.md!",
+	} {
+		t.Run(prompt, func(t *testing.T) {
+			attachments, err := (&App{opts: AppOptions{ProjectDir: dir}}).promptAttachmentsForMentions(prompt)
+			if err != nil {
+				t.Fatalf("promptAttachmentsForMentions: %v", err)
+			}
+			if len(attachments) != 1 {
+				t.Fatalf("attachments len = %d, want 1", len(attachments))
+			}
+			if !strings.Contains(attachments[0].Parts[0].Text, "important context") {
+				t.Fatal("mentioned file content was not attached")
+			}
+		})
+	}
+}
+
 func TestAtFileMentionAllowsLargeTextFileContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "large.txt")

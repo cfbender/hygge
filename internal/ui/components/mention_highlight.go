@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-var mentionTokenPattern = regexp.MustCompile(`(^|[\s(])(@(?:agent:[A-Za-z0-9_]+|[A-Za-z0-9_./~:-]+))`)
+var mentionTokenPattern = regexp.MustCompile(`(^|[\s(])(@(?:agent:[A-Za-z0-9_]+|[A-Za-z0-9_./~:-]*[A-Za-z0-9_~:-]))`)
 
 // HighlightMentions applies style to @ mention tokens in already-rendered text.
 func HighlightMentions(s string, style lipgloss.Style) string {
