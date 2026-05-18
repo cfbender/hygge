@@ -2167,6 +2167,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			ToolName:  e.ToolName,
 			Category:  e.Category,
 			Target:    e.Target,
+			Why:       e.Reason,
 		})
 		a.syncPermissionOverlay()
 		a.updateInputFocus()

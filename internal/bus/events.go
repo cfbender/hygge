@@ -135,6 +135,8 @@ type PermissionAsked struct {
 	Target string
 	// ToolName is which tool is asking for permission.
 	ToolName string
+	// Reason is the optional human rationale for the permission request.
+	Reason string
 	// At is the wall-clock time the permission was requested.
 	// Populated by the caller; the bus does not set this field.
 	At time.Time
