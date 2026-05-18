@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -766,6 +767,43 @@ func TestAtMentionPaletteCompletesFilesAndSubagents(t *testing.T) {
 	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got, want := app.input.Value(), "open @internal/ui/app.go "; got != want {
 		t.Fatalf("file mention completion = %q, want %q", got, want)
+	}
+}
+
+func TestAtMentionPaletteMouseWheelScrollsRenderedWindow(t *testing.T) {
+	t.Parallel()
+	b := bus.New()
+	subagents := make([]MentionSubagent, 12)
+	for i := range subagents {
+		subagents[i] = MentionSubagent{Name: fmt.Sprintf("agent%02d", i), Description: "scroll test"}
+	}
+	app, err := New(AppOptions{
+		Bus:           b,
+		Theme:         theme.ShellTheme(),
+		ModelProvider: "anthropic",
+		ModelName:     "test-model",
+		Subagents:     subagents,
+		Now:           func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Close()
+		b.Close()
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	typeInto(app, "ask @agent")
+	for range 10 {
+		app.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	}
+
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	if !strings.Contains(view, "@agent:agent10") {
+		t.Fatalf("rendered mention palette did not scroll to highlighted mention @agent:agent10:\n%s", view)
+	}
+	if strings.Contains(view, "@agent:agent00") {
+		t.Fatalf("rendered mention palette still shows the first mention after scrolling near the end:\n%s", view)
 	}
 }
 
