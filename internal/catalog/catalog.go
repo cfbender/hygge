@@ -549,6 +549,20 @@ func (c *Catalog) Providers() []string {
 	c.mu.RLock()
 	snap := c.snapshot
 	c.mu.RUnlock()
+	return providerIDsFromSnapshot(snap)
+}
+
+// EmbeddedProviders returns the sorted provider ids bundled with the Catwalk
+// module. It is network-free and suitable for first-run provider pickers.
+func EmbeddedProviders() []string {
+	snap, err := loadEmbeddedSnapshot()
+	if err != nil {
+		return nil
+	}
+	return providerIDsFromSnapshot(snap)
+}
+
+func providerIDsFromSnapshot(snap *Snapshot) []string {
 	if snap == nil {
 		return nil
 	}
