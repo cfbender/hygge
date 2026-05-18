@@ -3534,12 +3534,19 @@ func (a *App) catalogModelOptions() []components.ModelOption {
 	providers := src.Providers()
 	configured := a.configuredModelProviders()
 	out := make([]components.ModelOption, 0)
+	seen := make(map[string]bool)
 	for _, providerID := range providers {
 		if len(configured) > 0 && !configured[providerID] {
 			continue
 		}
 		for _, entry := range src.Models(providerID) {
 			out = append(out, components.ModelOption{Provider: providerID, Entry: entry})
+			seen[providerID] = true
+		}
+	}
+	if provider := strings.TrimSpace(a.opts.ModelProvider); provider != "" && !seen[provider] {
+		if model := strings.TrimSpace(a.opts.ModelName); model != "" {
+			out = append(out, components.ConfiguredModelOption(provider, model))
 		}
 	}
 	return out

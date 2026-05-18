@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -29,11 +30,31 @@ func TestResumeNoMatchExitsWithError(t *testing.T) {
 	}
 }
 
+func TestRunNoArgsWithoutConfiguredModelTellsUserToOnboard(t *testing.T) {
+	hermeticHome(t)
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when no model is configured")
+	}
+	if !errors.Is(err, errNoModelConfigured) {
+		t.Fatalf("err = %v, want errNoModelConfigured", err)
+	}
+	if !strings.Contains(err.Error(), "hygge onboard") {
+		t.Fatalf("error should tell user to run hygge onboard, got %v", err)
+	}
+}
+
 func TestRunNoArgsBuildsAppAndSkipsTea(t *testing.T) {
-	// SkipTea was set by hermeticHome — that means runTUI returns
+	// SkipTea was set by hermeticHomeWithModel — that means runTUI returns
 	// immediately after constructing the App, exercising the bootstrap
 	// path end-to-end without ever taking over a TTY.
-	hermeticHome(t)
+	hermeticHomeWithModel(t)
 
 	root := NewRootCmd()
 	var out bytes.Buffer
@@ -49,7 +70,7 @@ func TestRunNoArgsBuildsAppAndSkipsTea(t *testing.T) {
 }
 
 func TestResumeWithSeed(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 	id := seedSession(t, home)
 
 	root := NewRootCmd()
@@ -137,7 +158,7 @@ func TestContinueAndNewConflict(t *testing.T) {
 // TestContinueNoSessionStartsFresh verifies that --continue with no sessions
 // silently starts a fresh session (no error).
 func TestContinueNoSessionStartsFresh(t *testing.T) {
-	hermeticHome(t)
+	hermeticHomeWithModel(t)
 
 	root := NewRootCmd()
 	var out bytes.Buffer
@@ -152,7 +173,7 @@ func TestContinueNoSessionStartsFresh(t *testing.T) {
 // TestContinueWithSessionResumes verifies that --continue resumes the most
 // recent cwd-scoped session.
 func TestContinueWithSessionResumes(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 	seedSession(t, home) // creates a session in the cwd
 
 	root := NewRootCmd()
@@ -168,14 +189,18 @@ func TestContinueWithSessionResumes(t *testing.T) {
 // TestNewFlagStartsFresh verifies that --new starts a fresh session even
 // when resume_default = "continue" is configured.
 func TestNewFlagStartsFresh(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 
 	// Write a user config with resume_default = "continue".
 	cfgDir := filepath.Join(home, ".config", "hygge")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir cfg: %v", err)
 	}
-	cfgBody := `[session]
+	cfgBody := `[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[session]
 resume_default = "continue"
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o644); err != nil {
@@ -197,13 +222,17 @@ resume_default = "continue"
 // TestResumeDefaultContinueResumes verifies that resume_default = "continue"
 // causes the bare `hygge` to resume the most recent cwd session.
 func TestResumeDefaultContinueResumes(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 
 	cfgDir := filepath.Join(home, ".config", "hygge")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir cfg: %v", err)
 	}
-	cfgBody := `[session]
+	cfgBody := `[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[session]
 resume_default = "continue"
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o644); err != nil {
@@ -226,13 +255,17 @@ resume_default = "continue"
 // launches the TUI with the sessions picker open (SkipTea so it doesn't
 // block; we just check it doesn't error).
 func TestResumeDefaultAskOpensPicker(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 
 	cfgDir := filepath.Join(home, ".config", "hygge")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir cfg: %v", err)
 	}
-	cfgBody := `[session]
+	cfgBody := `[model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[session]
 resume_default = "ask"
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o644); err != nil {
@@ -269,7 +302,7 @@ func TestResumeNoArgNoSession(t *testing.T) {
 
 // TestResumeNoArgOneSessionResumes auto-picks the single session.
 func TestResumeNoArgOneSessionResumes(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 	id := seedSession(t, home)
 
 	root := NewRootCmd()
@@ -289,7 +322,7 @@ func TestResumeNoArgOneSessionResumes(t *testing.T) {
 // sessions the TUI is launched with the picker open (SkipTea so it doesn't
 // block).
 func TestResumeNoArgMultipleSessionsOpensPicker(t *testing.T) {
-	home := hermeticHome(t)
+	home := hermeticHomeWithModel(t)
 	seedSession(t, home)
 	seedSession(t, home)
 
@@ -326,6 +359,7 @@ func TestResumeAnyDisablesCwdScope(t *testing.T) {
 	xdgConfig2 := filepath.Join(home2, ".config")
 	xdgState2 := filepath.Join(home2, ".local", "state")
 	seedHermeticAuth(t, home2, xdgState2)
+	seedHermeticModelConfig(t, home2)
 	SetTestOverrides(&bootstrapOptions{
 		HomeDir:         home2,
 		XDGConfigHome:   xdgConfig2,
