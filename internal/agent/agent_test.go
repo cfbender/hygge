@@ -116,6 +116,7 @@ type fakeFantasyModel struct {
 	onStream      func(fantasy.Call)
 	calls         atomic.Int32
 	mu            sync.Mutex
+	streamCalls   []fantasy.Call
 }
 
 type providerFantasyModel struct {
@@ -229,6 +230,9 @@ func (f *fakeFantasyModel) Generate(_ context.Context, call fantasy.Call) (*fant
 
 func (f *fakeFantasyModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 	f.calls.Add(1)
+	f.mu.Lock()
+	f.streamCalls = append(f.streamCalls, call)
+	f.mu.Unlock()
 	if f.onStream != nil {
 		f.onStream(call)
 	}
@@ -278,6 +282,20 @@ func (f *fakeFantasyModel) StreamObject(context.Context, fantasy.ObjectCall) (fa
 
 func (f *fakeFantasyModel) Provider() string { return f.provider }
 func (f *fakeFantasyModel) Model() string    { return f.model }
+
+func (f *fakeFantasyModel) steeringPromptRole(callIndex int) fantasy.MessageRole {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if callIndex < 0 || callIndex >= len(f.streamCalls) {
+		return ""
+	}
+	for _, msg := range f.streamCalls[callIndex].Prompt {
+		if strings.Contains(fantasyMessageText(msg), "prefer the direct fix") {
+			return msg.Role
+		}
+	}
+	return ""
+}
 
 func TestAgentGenerateTitleUsesTitleFantasyModel(t *testing.T) {
 	env := newTestEnv(t)
@@ -2304,9 +2322,11 @@ func TestSteerAppliesAtNextFantasyStepOnly(t *testing.T) {
 	if len(prepared.Messages) == 0 {
 		t.Fatal("expected prepared messages")
 	}
-	got := fantasyMessageText(prepared.Messages[0])
-	if !strings.Contains(got, "base system") || !strings.Contains(got, "prefer the direct fix") {
+	if got := fantasyMessageText(prepared.Messages[0]); !strings.Contains(got, "base system") {
 		t.Fatalf("prepared system = %q", got)
+	}
+	if len(prepared.Messages) < 2 || prepared.Messages[1].Role != fantasy.MessageRoleUser || !strings.Contains(fantasyMessageText(prepared.Messages[1]), "prefer the direct fix") {
+		t.Fatalf("prepared steering message = %#v", prepared.Messages)
 	}
 
 	_, prepared, err = a.prepareFantasyStep(context.Background(), env.sessionID, fantasy.PrepareStepFunctionOptions{Messages: messages})
@@ -2325,5 +2345,98 @@ func TestSteerRequiresActiveTurn(t *testing.T) {
 	err := a.Steer(env.sessionID, userText("too late"))
 	if !errors.Is(err, ErrNoActiveTurn) {
 		t.Fatalf("Steer err = %v, want ErrNoActiveTurn", err)
+	}
+}
+
+type blockingTool struct {
+	name    string
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingTool) Name() string        { return b.name }
+func (b *blockingTool) Description() string { return "blocking" }
+func (b *blockingTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (b *blockingTool) Parallelizable() bool { return false }
+func (b *blockingTool) Execute(ctx context.Context, _ json.RawMessage, _ tool.ExecContext) (tool.Result, error) {
+	close(b.started)
+	select {
+	case <-b.release:
+		return tool.Result{Content: "tool done"}, nil
+	case <-ctx.Done():
+		return tool.Result{}, ctx.Err()
+	}
+}
+
+func TestSteerDuringToolExecutionReachesNextFantasyStep(t *testing.T) {
+	env := newTestEnv(t)
+	block := &blockingTool{name: "block_for_steer", started: make(chan struct{}), release: make(chan struct{})}
+	if err := env.Tools.Register(block); err != nil {
+		t.Fatalf("Register blocking tool: %v", err)
+	}
+
+	var callsMu sync.Mutex
+	var prompts []string
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeToolCall, ID: "tu-steer", ToolCallName: "block_for_steer", ToolCallInput: `{}`},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "saw it"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1}},
+		},
+	}}
+	model.onStream = func(call fantasy.Call) {
+		callsMu.Lock()
+		defer callsMu.Unlock()
+		var b strings.Builder
+		for _, msg := range call.Prompt {
+			b.WriteString(fantasyMessageText(msg))
+			b.WriteString("\n")
+		}
+		prompts = append(prompts, b.String())
+	}
+	a := env.newAgent(newFakeProvider("fake"), func(o *Options) { o.FantasyModel = model })
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.Send(context.Background(), env.sessionID, userText("use the tool"))
+		done <- err
+	}()
+
+	select {
+	case <-block.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tool did not start")
+	}
+	if err := a.Steer(env.sessionID, userText("prefer the direct fix")); err != nil {
+		t.Fatalf("Steer while tool running: %v", err)
+	}
+	close(block.release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Send did not complete")
+	}
+
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	if len(prompts) < 2 {
+		t.Fatalf("provider calls = %d, want at least 2", len(prompts))
+	}
+	if !strings.Contains(prompts[1], "prefer the direct fix") {
+		t.Fatalf("second provider prompt did not include steering:\n%s", prompts[1])
+	}
+	if got := model.steeringPromptRole(1); got != fantasy.MessageRoleUser {
+		t.Fatalf("steering prompt role = %s, want user", got)
 	}
 }

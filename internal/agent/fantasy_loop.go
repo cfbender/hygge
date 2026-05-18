@@ -378,17 +378,19 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 func (a *Agent) prepareFantasyStep(ctx context.Context, sessionID string, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
 	lazy := a.drainPendingLazy(sessionID)
 	additions := a.drainPendingSystemAdditions(sessionID)
-	if steering := a.drainPendingSteering(sessionID); len(steering) > 0 {
-		additions = append(additions, steeringSystemInstruction(steering))
-	}
-	if len(lazy) == 0 && len(additions) == 0 {
+	steering := a.drainPendingSteering(sessionID)
+	if len(lazy) == 0 && len(additions) == 0 && len(steering) == 0 {
 		return ctx, fantasy.PrepareStepResult{}, nil
 	}
-	extra := composeSystemPrompt("", nil, lazy, additions)
-	if strings.TrimSpace(extra) == "" {
-		return ctx, fantasy.PrepareStepResult{}, nil
+
+	messages := append([]fantasy.Message(nil), opts.Messages...)
+	if extra := composeSystemPrompt("", nil, lazy, additions); strings.TrimSpace(extra) != "" {
+		messages = appendFantasySystemText(messages, extra)
 	}
-	return ctx, fantasy.PrepareStepResult{Messages: appendFantasySystemText(opts.Messages, extra)}, nil
+	if steeringText := steeringUserText(steering); strings.TrimSpace(steeringText) != "" {
+		messages = append(messages, fantasy.NewUserMessage(steeringText))
+	}
+	return ctx, fantasy.PrepareStepResult{Messages: messages}, nil
 }
 
 func appendFantasySystemText(messages []fantasy.Message, text string) []fantasy.Message {

@@ -1426,4 +1426,41 @@ func TestSlashCommandSteerSendsActiveTurnGuidance(t *testing.T) {
 	if app.queueCount != 0 || len(app.queuedDrafts) != 0 {
 		t.Fatalf("steer should not queue; count %d drafts %#v", app.queueCount, app.queuedDrafts)
 	}
+	if len(app.messages) != 1 || !strings.Contains(app.messages[0].Raw, "Steering: use the smaller fix") {
+		t.Fatalf("steering should appear in chat, messages = %#v", app.messages)
+	}
+}
+
+func TestSlashCommandSteerViaEnterWhileBusyDoesNotQueue(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.opts.SessionID = "01STEERSESSION"
+	app.busy = true
+	app.input.SetBusy(true, "")
+
+	var gotSession string
+	var gotText string
+	app.testAgentSteerFn = func(sessionID string, parts []session.Part) error {
+		gotSession = sessionID
+		gotText = parts[0].Text
+		return nil
+	}
+
+	typeInto(app, "/steer use the smaller fix")
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected steer command")
+	}
+	if msg := cmd(); msg != nil {
+		app.Update(msg)
+	}
+	if gotSession != "01STEERSESSION" || gotText != "use the smaller fix" {
+		t.Fatalf("steer call = session %q text %q", gotSession, gotText)
+	}
+	if app.queueCount != 0 || len(app.queuedDrafts) != 0 {
+		t.Fatalf("steer should not queue; count %d drafts %#v", app.queueCount, app.queuedDrafts)
+	}
+	if len(app.messages) != 1 || !strings.Contains(app.messages[0].Raw, "Steering: use the smaller fix") {
+		t.Fatalf("steering should appear in chat, messages = %#v", app.messages)
+	}
 }

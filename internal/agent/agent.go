@@ -822,7 +822,7 @@ func firstTextPart(parts []session.Part) string {
 	return ""
 }
 
-func steeringSystemInstruction(steering []string) string {
+func steeringUserText(steering []string) string {
 	clean := make([]string, 0, len(steering))
 	for _, text := range steering {
 		if trimmed := strings.TrimSpace(text); trimmed != "" {
@@ -830,12 +830,12 @@ func steeringSystemInstruction(steering []string) string {
 		}
 	}
 	if len(clean) == 0 {
-		return "The user provided steering for the active turn. Apply it to the current work if still relevant. Do not treat it as a new queued task."
+		return ""
 	}
 	var b strings.Builder
-	b.WriteString("The user provided steering for the active turn. Apply it to the current work if still relevant. Do not treat it as a new queued task.\n\nSteering:")
+	b.WriteString("Steering for the active turn. Apply this to the current work if still relevant. Do not treat it as a new queued task.")
 	for _, text := range clean {
-		b.WriteString("\n- ")
+		b.WriteString("\n\n")
 		b.WriteString(text)
 	}
 	return b.String()

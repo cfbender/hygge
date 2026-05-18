@@ -1,5 +1,6 @@
 # TODOs
 
+- / commands  and @ mentions should be scrollable
 - second agent message of nonsense
   - for example here is the end of one message and then the start of the next:
   - Yes: we should rely more on Fantasy, especially for step preparation.
@@ -45,3 +46,4 @@ isrolled’s shape##
 ification Queue Hyg. prompt FantasyStep.
 
 the customizing persistence.
+- agent seems to be getting dumber over time and speaking like a caveman. is there some sort of context rot, something wrong with the system prompt, or is this openAI doing this?
