@@ -1466,10 +1466,13 @@ func providerEnvVar(name string) string {
 	}
 }
 
-// knownProviders returns the providers providerEnvVar recognises.
-// Used by the `hygge provider auth` picker to enumerate known names
-// without duplicating the list.
+// knownProviders returns the Catwalk-bundled provider ids used by provider
+// pickers. It stays network-free so first-run onboarding works offline.
 func knownProviders() []string {
+	providers := catalog.EmbeddedProviders()
+	if len(providers) > 0 {
+		return providers
+	}
 	return []string{
 		"anthropic",
 		"openai",

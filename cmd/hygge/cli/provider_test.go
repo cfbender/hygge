@@ -75,7 +75,7 @@ func TestProviderAuth_NonTTYStdin(t *testing.T) {
 }
 
 // TestProviderAuth_NoArgPicksFromList: with no positional arg, the
-// picker reads a numeric selection from stdin.  Followed by a piped
+// picker reads a provider selection from stdin. Followed by a piped
 // API key.
 func TestProviderAuth_NoArgPicksFromList(t *testing.T) {
 	home := hermeticHome(t)
@@ -84,8 +84,7 @@ func TestProviderAuth_NoArgPicksFromList(t *testing.T) {
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
-	// "1" picks anthropic (first in knownProviders); the key follows.
-	root.SetIn(strings.NewReader("1\nsk-second-key-9999\n"))
+	root.SetIn(strings.NewReader("anthropic\nsk-second-key-9999\n"))
 	root.SetArgs([]string{"provider", "auth"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -325,11 +324,13 @@ func TestProviderEnvVar(t *testing.T) {
 // TestKnownProviders sanity-checks the picker enumeration.
 func TestKnownProviders(t *testing.T) {
 	names := knownProviders()
-	if len(names) < 3 {
-		t.Errorf("knownProviders returned %d entries; want at least 3", len(names))
+	if len(names) <= 8 {
+		t.Errorf("knownProviders returned %d entries; want Catwalk provider list, not the legacy 8-provider cap", len(names))
 	}
-	if !providerKnownContains("anthropic") {
-		t.Error("anthropic missing from knownProviders")
+	for _, name := range []string{"anthropic", "openai", "openrouter"} {
+		if !providerKnownContains(name) {
+			t.Errorf("%s missing from knownProviders", name)
+		}
 	}
 }
 
