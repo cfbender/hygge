@@ -1486,6 +1486,32 @@ func TestToFantasyMessagesWrapsOnlyLatestUserMessage(t *testing.T) {
 	assertPromptOrder(t, latest, "<workspace_state>", "<memories>", "<critical_turn_reminders>", userRequestOpen)
 }
 
+func TestToFantasyMessagesDropsHistoricalAssistantThinking(t *testing.T) {
+	msgs := []*session.Message{
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "older request"}}},
+		{Role: session.RoleAssistant, Parts: []session.Part{
+			{Kind: session.PartThinking, Text: "private reasoning that should not be replayed"},
+			{Kind: session.PartText, Text: "visible answer"},
+		}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
+	}
+
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	if len(fmsgs) != 3 {
+		t.Fatalf("fantasy messages len = %d, want 3: %+v", len(fmsgs), fmsgs)
+	}
+	assistant := fmsgs[1]
+	if len(assistant.Content) != 1 {
+		t.Fatalf("assistant content len = %d, want only visible text: %+v", len(assistant.Content), assistant.Content)
+	}
+	if _, ok := fantasy.AsMessagePart[fantasy.ReasoningPart](assistant.Content[0]); ok {
+		t.Fatalf("historical assistant thinking should not be replayed: %+v", assistant.Content)
+	}
+	if got := fantasyMessageText(assistant); got != "visible answer" {
+		t.Fatalf("assistant text = %q, want visible answer", got)
+	}
+}
+
 func TestToFantasyMessagesStripsHistoricalTurnContext(t *testing.T) {
 	msgs := []*session.Message{
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: buildLatestUserEnvelope("historical raw request", nil)}}},

@@ -460,7 +460,11 @@ func toFantasyMessages(
 				}
 				fm.Content = append(fm.Content, fantasy.TextPart{Text: text})
 			case session.PartThinking:
-				fm.Content = append(fm.Content, fantasy.ReasoningPart{Text: p.Text})
+				// Thinking is persisted for UI hydration and auditability, but it is
+				// model-internal scratchpad from a previous step. Replaying it as
+				// historical assistant content can amplify malformed partial reasoning
+				// and degrade later turns, especially across provider boundaries.
+				continue
 			case session.PartToolUse:
 				fm.Content = append(fm.Content, fantasy.ToolCallPart{ToolCallID: p.ToolID, ToolName: p.ToolName, Input: string(p.ToolInput)})
 			case session.PartToolResult:
@@ -474,6 +478,9 @@ func toFantasyMessages(
 				}
 				fm.Content = append(fm.Content, fantasy.ToolResultPart{ToolCallID: p.ToolUseID, Output: output})
 			}
+		}
+		if len(fm.Content) == 0 {
+			continue
 		}
 		out = append(out, fm)
 		if m.Role == session.RoleAssistant {
