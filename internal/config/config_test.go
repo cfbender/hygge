@@ -71,6 +71,9 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	if cfg.Permission.Network != PermDeny {
 		t.Errorf("permission.network: got %q, want %q", cfg.Permission.Network, PermDeny)
 	}
+	if cfg.Permission.Subagent != PermAllow {
+		t.Errorf("permission.subagent: got %q, want %q", cfg.Permission.Subagent, PermAllow)
+	}
 	if cfg.Theme.Name != "shell" {
 		t.Errorf("theme.name: got %q, want %q", cfg.Theme.Name, "shell")
 	}
@@ -685,22 +688,47 @@ name = "local-model"
 // --- test 14: invalid permission value rejected ------------------------------
 
 func TestLoad_InvalidPermissionValue(t *testing.T) {
-	tmp := t.TempDir()
-
-	cfgDir := filepath.Join(tmp, ".config", "hygge")
-	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+	for _, tc := range []struct {
+		name string
+		body string
+		key  string
+	}{
+		{
+			name: "shell",
+			body: `
 [permission]
 shell = "maybe"
-`)
+`,
+			key: "permission.shell",
+		},
+		{
+			name: "subagent",
+			body: `
+[permission]
+subagent = "maybe"
+`,
+			key: "permission.subagent",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
 
-	opts := hermeticOpts(t, tmp, nil)
-	_, _, err := Load(context.Background(), opts)
-	if err == nil {
-		t.Fatal("expected validation error for invalid permission value")
-	}
-	var ive *InvalidValueError
-	if !errors.As(err, &ive) {
-		t.Errorf("expected *InvalidValueError, got %T: %v", err, err)
+			cfgDir := filepath.Join(tmp, ".config", "hygge")
+			writeTOML(t, filepath.Join(cfgDir, "config.toml"), tc.body)
+
+			opts := hermeticOpts(t, tmp, nil)
+			_, _, err := Load(context.Background(), opts)
+			if err == nil {
+				t.Fatal("expected validation error for invalid permission value")
+			}
+			var ive *InvalidValueError
+			if !errors.As(err, &ive) {
+				t.Fatalf("expected *InvalidValueError, got %T: %v", err, err)
+			}
+			if ive.Key != tc.key {
+				t.Errorf("InvalidValueError.Key = %q, want %q", ive.Key, tc.key)
+			}
+		})
 	}
 }
 

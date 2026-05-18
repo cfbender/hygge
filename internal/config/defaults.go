@@ -28,6 +28,7 @@ func defaultConfig() map[string]any {
 			"shell":                 string(PermAsk),
 			"network":               string(PermDeny),
 			"mcp":                   string(PermAsk),
+			"subagent":              string(PermAllow),
 		},
 		"theme": map[string]any{
 			"name": "shell",
