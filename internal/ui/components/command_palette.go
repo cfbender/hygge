@@ -90,10 +90,7 @@ func (p CommandPalette) View() string {
 	if selected < 0 || selected >= len(p.Matches) {
 		selected = -1
 	}
-	windowHighlight := selected
-	if windowHighlight < 0 {
-		windowHighlight = 0
-	}
+	windowHighlight := max(selected, 0)
 	start := paletteWindowStart(len(p.Matches), commandPaletteMaxRows, windowHighlight)
 	end := min(start+commandPaletteMaxRows, len(p.Matches))
 	visible := p.Matches[start:end]
