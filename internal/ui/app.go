@@ -2659,6 +2659,14 @@ func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 	if !a.isInForegroundChain(e.ParentSessionID) {
 		return nil
 	}
+	messages := []components.UIMessage(nil)
+	if e.InitialPrompt != "" {
+		messages = append(messages, components.UIMessage{
+			Role:      components.RoleUser,
+			Raw:       e.InitialPrompt,
+			Timestamp: e.At,
+		})
+	}
 	state := &components.SubagentState{
 		SubSessionID:    e.SubSessionID,
 		ParentSessionID: e.ParentSessionID,
@@ -2667,6 +2675,7 @@ func (a *App) onSubagentStarted(e bus.SubagentStarted) tea.Cmd {
 		Description:     e.Description,
 		Model:           e.Model,
 		StartedAt:       e.At,
+		Messages:        messages,
 	}
 	a.subagents[e.SubSessionID] = state
 

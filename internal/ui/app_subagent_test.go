@@ -33,14 +33,16 @@ func TestSubagentStarted_AddsCollapsedBlockUnderSubagentMessage(t *testing.T) {
 		Args:      []byte(`{"subagent_type":"general","description":"find LICENSE"}`),
 	})
 
+	startedAt := time.Now().Add(-2 * time.Second)
 	app.Handle(bus.SubagentStarted{
 		SubSessionID:    "sub-1",
 		ParentSessionID: "fg-session",
 		ParentMessageID: "tool_use_1",
 		Type:            "general",
 		Description:     "find LICENSE",
+		InitialPrompt:   "Find the LICENSE file and summarize it.",
 		Model:           "anthropic/claude-haiku-4-5",
-		At:              time.Now().Add(-2 * time.Second),
+		At:              startedAt,
 	})
 
 	if got := len(app.subagents); got != 1 {
@@ -55,6 +57,18 @@ func TestSubagentStarted_AddsCollapsedBlockUnderSubagentMessage(t *testing.T) {
 	}
 	if !st.IsRunning() {
 		t.Errorf("expected state to be running")
+	}
+	if len(st.Messages) != 1 {
+		t.Fatalf("expected initial prompt message, got %d messages", len(st.Messages))
+	}
+	if st.Messages[0].Role != components.RoleUser {
+		t.Fatalf("initial prompt role: got %q want %q", st.Messages[0].Role, components.RoleUser)
+	}
+	if st.Messages[0].Raw != "Find the LICENSE file and summarize it." {
+		t.Fatalf("initial prompt text: got %q", st.Messages[0].Raw)
+	}
+	if !st.Messages[0].Timestamp.Equal(startedAt) {
+		t.Fatalf("initial prompt timestamp: got %v want %v", st.Messages[0].Timestamp, startedAt)
 	}
 
 	// The subagent tool UIMessage should now carry SubagentID.
