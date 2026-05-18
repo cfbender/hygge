@@ -18,6 +18,11 @@ go install github.com/cfbender/hygge@latest
 With mise:
 
 ```sh
+mise install github:cfbender/hygge@latest
+```
+
+or for the go backend:
+```sh
 mise install go:github.com/cfbender/hygge@latest
 ```
 
