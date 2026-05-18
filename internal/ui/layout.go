@@ -153,11 +153,11 @@ func (a *App) editorHeight() int {
 
 // pillsHeight returns the height needed for status pills.
 func (a *App) pillsHeight() int {
-	if a.queueCount <= 0 && a.todoIncomplete <= 0 {
+	if a.queueCount <= 0 {
 		return 0
 	}
 	h := 1
-	if a.queueCount > 0 && len(a.queuedPrompts) > 0 {
+	if len(a.queuedPrompts) > 0 {
 		visible := min(len(a.queuedPrompts), 3)
 		h += visible
 		if a.queueCount > visible {
