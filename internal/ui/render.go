@@ -327,8 +327,6 @@ func (a *App) renderChromeContent() string {
 		QueueCount:     a.queueCount,
 		QueuedPrompts:  a.queuedPrompts,
 		QueuedEditable: len(a.queuedDrafts) > 0,
-		TodoCount:      a.todoIncomplete,
-		TodoRunning:    a.busy && a.todoInProgress > 0,
 	}.View()
 	if statusPills != "" {
 		sections = append(sections, statusPills)

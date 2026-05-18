@@ -356,25 +356,7 @@ func TestStatusPillsNoQueueEmpty(t *testing.T) {
 	t.Parallel()
 	out := StatusPills{Width: 60, Theme: theme.ShellTheme()}.View()
 	if out != "" {
-		t.Errorf("status pills should be empty without queue/todo state; got %q", out)
-	}
-}
-
-func TestStatusPillsRendersTodoCount(t *testing.T) {
-	t.Parallel()
-	out := StatusPills{Width: 60, Theme: theme.ShellTheme(), TodoCount: 3}.View()
-	plain := stripANSI(out)
-	if !strings.Contains(plain, "3 todos") {
-		t.Errorf("status pills missing todo count; got:\n%s", plain)
-	}
-}
-
-func TestStatusPillsRendersRunningTodoSpinner(t *testing.T) {
-	t.Parallel()
-	out := StatusPills{Width: 60, Theme: theme.ShellTheme(), TodoCount: 1, TodoRunning: true}.View()
-	plain := stripANSI(out)
-	if !strings.Contains(plain, "◌ 1 todo") {
-		t.Errorf("status pills missing running todo marker; got:\n%s", plain)
+		t.Errorf("status pills should be empty without queue state; got %q", out)
 	}
 }
 

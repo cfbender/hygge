@@ -18,8 +18,6 @@ type StatusPills struct {
 	QueueCount     int
 	QueuedPrompts  []string
 	QueuedEditable bool
-	TodoCount      int
-	TodoRunning    bool
 }
 
 // View renders a single row of pills. Empty state renders nothing so the input
@@ -32,16 +30,6 @@ func (p StatusPills) View() string {
 			label += " · click to edit"
 		}
 		pills = append(pills, p.pill(label, theme.AtomAccent))
-	}
-	if p.TodoCount > 0 {
-		label := fmt.Sprintf("%d todo", p.TodoCount)
-		if p.TodoCount != 1 {
-			label += "s"
-		}
-		if p.TodoRunning {
-			label = "◌ " + label
-		}
-		pills = append(pills, p.pill(label, theme.AtomMuted))
 	}
 	if len(pills) == 0 {
 		return ""
