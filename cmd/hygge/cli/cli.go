@@ -9,7 +9,7 @@ import (
 )
 
 // Version is the human-facing version string surfaced by CLI and TUI chrome.
-const Version = "0.7.0"
+const Version = "0.8.0"
 
 // globalFlags holds values bound to root-level persistent flags.  A
 // single struct keeps subcommand bodies free of cobra-Flag plumbing.
