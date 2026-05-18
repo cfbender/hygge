@@ -101,11 +101,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open %q: %w", path, err)
 	}
-	if isMemory {
-		// Single connection prevents the shared-cache memory DB from
-		// being reaped if all conns are returned to the pool.
-		db.SetMaxOpenConns(1)
-	}
+	// SQLite PRAGMAs such as foreign_keys and busy_timeout are connection-local.
+	// Keep each Store on one connection so the connection configured below is the
+	// one used for all reads/writes. Separate Store instances, including parallel
+	// subagents, still coordinate through WAL and busy_timeout.
+	db.SetMaxOpenConns(1)
 
 	if err := applyPragmas(ctx, db); err != nil {
 		_ = db.Close()
