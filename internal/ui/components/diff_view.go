@@ -11,7 +11,11 @@ import (
 )
 
 const defaultDiffPreviewLines = 12
-const sideBySideDiffMinWidth = 72
+
+const (
+	sideBySideDiffMinWidth = 72
+	diffPaneSeparator      = "  │  "
+)
 
 var hunkHeaderPattern = regexp.MustCompile(`@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@`)
 
@@ -70,8 +74,8 @@ type diffPair struct {
 }
 
 func renderSideBySideDiff(rows []diffRow, numW, width int, truncated bool, s diffLineStyles) string {
-	connectorW := 5
-	paneW := max((width-connectorW)/2, numW+4)
+	separatorW := lipgloss.Width(diffPaneSeparator)
+	paneW := max((width-separatorW)/2, numW+4)
 	contentW := max(paneW-numW-3, 1)
 	pairs := sideBySidePairs(rows)
 	out := make([]string, 0, len(pairs)+1)
@@ -86,7 +90,7 @@ func renderSideBySideDiff(rows []diffRow, numW, width int, truncated bool, s dif
 		}
 		left := renderDiffPane(pair.old, numW, contentW, false, s)
 		right := renderDiffPane(pair.new, numW, contentW, true, s)
-		out = append(out, left+renderDiffConnector(pair)+right)
+		out = append(out, left+diffPaneSeparator+right)
 	}
 	if truncated {
 		out = append(out, s.meta.Italic(true).Render("… diff truncated"))
@@ -153,19 +157,6 @@ func renderDiffPane(row diffRow, numW, contentW int, useNewLine bool, s diffLine
 		return gutter + s.meta.Render(padDiffRight(text, contentW))
 	default:
 		return gutter + s.body.Render(padDiffRight(text, contentW))
-	}
-}
-
-func renderDiffConnector(pair diffPair) string {
-	switch {
-	case pair.old.kind == diffRowDel && pair.new.kind == diffRowAdd:
-		return " ╰─╮ "
-	case pair.old.kind == diffRowDel:
-		return " ╰── "
-	case pair.new.kind == diffRowAdd:
-		return " ──╮ "
-	default:
-		return "  │  "
 	}
 }
 
