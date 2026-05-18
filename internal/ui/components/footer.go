@@ -51,7 +51,7 @@ func (f Footer) View() string {
 	muted := f.muted()
 
 	// Left side: mode indicator or agent type + [spinner].
-	var left []string
+	var left = []string{" "}
 	if f.ModeIndicator != "" {
 		left = append(left, f.ModeIndicator)
 	} else {
@@ -76,6 +76,7 @@ func (f Footer) View() string {
 	}
 	if f.ReasoningLevel != "" {
 		right = append(right, muted.Render(f.ReasoningLevel))
+		right = append(right, muted.Render(" "))
 	}
 
 	sep := muted.Render(" · ")
