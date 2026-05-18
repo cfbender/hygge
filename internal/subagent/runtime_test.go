@@ -619,6 +619,9 @@ func TestRun_PublishesSubagentStartedAndCompleted(t *testing.T) {
 		if ev.Type != "general" {
 			t.Fatalf("Started.Type: got %q", ev.Type)
 		}
+		if ev.InitialPrompt != "hi" {
+			t.Fatalf("Started.InitialPrompt: got %q want %q", ev.InitialPrompt, "hi")
+		}
 		// Stage C: Model is populated as `<provider>/<model-id>`.
 		// The fake provider is named "fake" and ModelName is
 		// "fake-model".

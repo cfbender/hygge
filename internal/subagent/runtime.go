@@ -345,6 +345,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		ParentMessageID: in.ParentToolUseID,
 		Type:            t.Name,
 		Description:     in.Description,
+		InitialPrompt:   in.Prompt,
 		Model:           runProvider.Name() + "/" + runModelName,
 		At:              startedAt,
 	})

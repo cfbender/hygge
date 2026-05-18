@@ -285,6 +285,8 @@ type SubagentStarted struct {
 	Type string
 	// Description is the short human-language mission label.
 	Description string
+	// InitialPrompt is the first user-shaped message handed to the sub-agent.
+	InitialPrompt string
 	// Model is the resolved provider+model identifier the sub-agent
 	// is running under, in `<provider>/<model-id>` form (e.g.
 	// `anthropic/claude-haiku-4-5`).  The slash-separated form is
