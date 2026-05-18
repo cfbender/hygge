@@ -49,10 +49,7 @@ func (p MentionPalette) View() string {
 	if selected < 0 || selected >= len(p.Matches) {
 		selected = -1
 	}
-	windowHighlight := selected
-	if windowHighlight < 0 {
-		windowHighlight = 0
-	}
+	windowHighlight := max(selected, 0)
 	start := paletteWindowStart(len(p.Matches), mentionPaletteMaxRows, windowHighlight)
 	end := min(start+mentionPaletteMaxRows, len(p.Matches))
 	visible := p.Matches[start:end]
