@@ -19,6 +19,7 @@ func TestBuiltinSetIsLocked(t *testing.T) {
 		"memory",
 		"model",
 		"new",
+		"queue",
 		"reason",
 		"remember",
 		"sessions",

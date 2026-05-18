@@ -279,6 +279,16 @@ func TestBuiltinOutcomes(t *testing.T) {
 			},
 		},
 		{
+			name:    "queue",
+			cmdName: "queue",
+			input:   "follow up after this",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateQueueMessage]; got != "follow up after this" {
+					t.Errorf("Updates[%q]=%q, want queued text", UpdateQueueMessage, got)
+				}
+			},
+		},
+		{
 			name:    "sessions",
 			cmdName: "sessions",
 			check: func(t *testing.T, o Outcome) {

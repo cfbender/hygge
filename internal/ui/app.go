@@ -1311,10 +1311,6 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if displayText == "" {
 			return a, nil
 		}
-		// Slash commands cannot be queued — block them while busy.
-		if a.busy && strings.HasPrefix(displayText, "/") {
-			return a, nil
-		}
 		if strings.HasPrefix(displayText, "/") {
 			if slashPrefixOnly(displayText) {
 				name, _ := splitSlash(displayText)
@@ -1346,10 +1342,6 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.mentionDismissed = false
 		// Resume auto-scroll when the user sends a message.
 		a.userScrolled = false
-		if a.busy {
-			a.enqueuePromptDraft(queuedPromptDraft{Text: displayText, Attachments: attachments})
-			return a, nil
-		}
 		return a, a.startSendWithAttachments(displayText, attachments)
 	case "pgup":
 		// Scroll message list up one page; pause auto-scroll.

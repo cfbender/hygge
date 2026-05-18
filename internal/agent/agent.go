@@ -183,8 +183,8 @@ type Agent struct {
 	// Guarded by mu.
 	pendingLazy map[string][]agentsmd.Block
 	// pendingSystemAdditions maps sessionID -> one-turn system prompt
-	// additions queued by pre_message hooks. Drained before each model
-	// turn and never persisted into visible message history. Guarded by mu.
+	// additions queued by pre_message hooks or inline steering. Drained before
+	// each model turn and never persisted into visible message history. Guarded by mu.
 	pendingSystemAdditions map[string][]string
 	// activeModeName is included in pre_message hook input so plugins can
 	// rebuild system prompt additions for the currently selected UI mode.
@@ -203,7 +203,7 @@ type Agent struct {
 	// Guarded by mu.
 	pluginInjects map[pluginInjectKey]int
 	// activeRuns is the set of session IDs currently executing a Send.
-	// Used to decide whether an incoming Send should be enqueued.
+	// Used to decide whether an incoming Send should be treated as inline steering.
 	// Guarded by mu.
 	activeRuns map[string]struct{}
 	// queues holds per-session queues of pending sends that arrived while
@@ -577,10 +577,9 @@ func (a *Agent) isClosed() bool {
 // Fantasy-backed turns are uncapped. Returns the final committed assistant
 // message.
 //
-// If a Send is already in flight for the session, the new send is
-// enqueued and nil is returned immediately.  The caller can inspect
-// the queue via QueueCount / QueuedPrompts.  The queued send is
-// dispatched automatically once the active run completes.
+// If a Send is already in flight for the session, the new send is appended
+// immediately as an inline steering instruction and nil is returned. Explicit
+// queued sends should use Enqueue instead.
 //
 // Bus events emitted, in order per iteration:
 //
@@ -609,27 +608,17 @@ func (a *Agent) Send(ctx context.Context, sessionID string, userParts []session.
 		return nil, fmt.Errorf("agent: Send: userParts required")
 	}
 
-	// Check whether the session is already running. If so, enqueue.
+	// Check whether the session is already running. If so, append this as
+	// an inline steering instruction for the active turn instead of queueing
+	// a future turn.
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
 		return nil, ErrClosed
 	}
 	if _, busy := a.activeRuns[sessionID]; busy {
-		// Enqueue and return immediately.
-		a.queues[sessionID] = append(a.queues[sessionID], QueuedSend{
-			Parts: append([]session.Part(nil), userParts...),
-		})
-		count := len(a.queues[sessionID])
-		prompts := queuedPrompts(a.queues[sessionID])
 		a.mu.Unlock()
-		bus.Publish(a.opts.Bus, bus.QueueChanged{
-			SessionID: sessionID,
-			Count:     count,
-			Prompts:   prompts,
-			At:        a.opts.Now(),
-		})
-		return nil, nil
+		return a.appendSteering(ctx, sessionID, userParts)
 	}
 	// Mark session as active before releasing mu.
 	a.activeRuns[sessionID] = struct{}{}
@@ -737,7 +726,7 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 		return nil, fmt.Errorf("agent: Send: append user: %w", err)
 	}
 	if a.opts.Hooks != nil {
-		a.replacePendingSystemAdditions(sessionID, systemPromptAdditions)
+		a.appendPendingSystemAdditions(sessionID, systemPromptAdditions)
 		defer a.clearPendingSystemAdditions(sessionID)
 	}
 	// Seed a preview title from the user's message when the session has no
@@ -782,6 +771,54 @@ func (a *Agent) doSend(ctx context.Context, sessionID string, userParts []sessio
 	return result, runErr
 }
 
+func (a *Agent) appendSteering(ctx context.Context, sessionID string, userParts []session.Part) (*session.Message, error) {
+	steeringParts := steeringParts(userParts)
+	msg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{
+		Role:  session.RoleUser,
+		Parts: steeringParts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent: Send: append steering: %w", err)
+	}
+	bus.Publish(a.opts.Bus, bus.MessageAppended{
+		SessionID: sessionID,
+		MessageID: msg.ID,
+		Role:      string(session.RoleUser),
+		At:        a.opts.Now(),
+	})
+	a.appendPendingSystemAdditions(sessionID, []string{steeringSystemInstruction(steeringParts)})
+	return nil, nil
+}
+
+func steeringParts(parts []session.Part) []session.Part {
+	out := make([]session.Part, len(parts))
+	copy(out, parts)
+	for i := range out {
+		if out[i].Kind == session.PartText {
+			out[i].Text = "Inline steering instruction for the active turn: " + out[i].Text
+			return out
+		}
+	}
+	return out
+}
+
+func steeringSystemInstruction(parts []session.Part) string {
+	text := firstTextPart(parts)
+	if text == "" {
+		return "The user sent an inline steering instruction during this active turn. Treat the latest user message as guidance for the work already in progress, not as a new queued task."
+	}
+	return "The user sent this inline steering instruction during the active turn. Treat it as immediate guidance for the work already in progress, not as a new queued task:\n\n" + text
+}
+
+func firstTextPart(parts []session.Part) string {
+	for _, p := range parts {
+		if p.Kind == session.PartText {
+			return p.Text
+		}
+	}
+	return ""
+}
+
 // queuedPrompts extracts the first PartText from each QueuedSend.
 // len(result) == len(q).  Callers must hold a.mu.
 func queuedPrompts(q []QueuedSend) []string {
@@ -795,6 +832,35 @@ func queuedPrompts(q []QueuedSend) []string {
 		}
 	}
 	return prompts
+}
+
+// Enqueue adds a prompt to the explicit per-session queue for later execution.
+func (a *Agent) Enqueue(sessionID string, userParts []session.Part) error {
+	if a.isClosed() {
+		return ErrClosed
+	}
+	if sessionID == "" {
+		return fmt.Errorf("agent: Enqueue: sessionID required")
+	}
+	if len(userParts) == 0 {
+		return fmt.Errorf("agent: Enqueue: userParts required")
+	}
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return ErrClosed
+	}
+	a.queues[sessionID] = append(a.queues[sessionID], QueuedSend{Parts: append([]session.Part(nil), userParts...)})
+	count := len(a.queues[sessionID])
+	prompts := queuedPrompts(a.queues[sessionID])
+	a.mu.Unlock()
+	bus.Publish(a.opts.Bus, bus.QueueChanged{
+		SessionID: sessionID,
+		Count:     count,
+		Prompts:   prompts,
+		At:        a.opts.Now(),
+	})
+	return nil
 }
 
 // QueueCount returns the number of pending queued sends for the session.
@@ -875,6 +941,15 @@ func (a *Agent) replacePendingSystemAdditions(sessionID string, additions []stri
 		return
 	}
 	a.pendingSystemAdditions[sessionID] = append([]string(nil), additions...)
+}
+
+func (a *Agent) appendPendingSystemAdditions(sessionID string, additions []string) {
+	if len(additions) == 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingSystemAdditions[sessionID] = append(a.pendingSystemAdditions[sessionID], additions...)
 }
 
 // drainPendingSystemAdditions returns and clears queued one-turn system prompt

@@ -95,6 +95,9 @@ const (
 	// UpdateForgetMemory asks the TUI to forget memory by ID.
 	// Value shape: "<scope>\n<memory_id>".
 	UpdateForgetMemory = "forget_memory"
+
+	// UpdateQueueMessage asks the TUI to add text to the explicit queued-message list.
+	UpdateQueueMessage = "queue_message"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].
