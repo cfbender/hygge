@@ -15,7 +15,7 @@ import (
 
 const maxMentionFileCandidates = 2000
 
-var promptMentionPattern = regexp.MustCompile(`(^|\s)@([^\s]+)`)
+var promptMentionPattern = regexp.MustCompile(`(^|[\s(])@([^\s]+)`)
 
 // MentionSubagent is the UI-facing description of a selectable sub-agent type.
 // The CLI maps internal/subagent.Type values into this shape so internal/ui can
