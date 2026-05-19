@@ -12,7 +12,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -440,15 +439,12 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		// manipulated before this point.
 		tea.WithEnvironment(os.Environ()),
 		tea.WithContext(ctx),
-		// Force TrueColor profile so lipgloss/v2 never sends an OSC 11
-		// background-color query to the terminal.  Without this, the
-		// auto-detect probe (\e]11;?\a) fires at startup and the response
-		// (\e]11;rgb:…\a) leaks into stdin, appearing as garbage text in
-		// the textarea.  TrueColor is the safest default for a modern
-		// terminal; users on older terminals will see colours downsampled
-		// by the renderer rather than by us.
-		// See: https://github.com/charmbracelet/lipgloss/issues/XXX (upstream v2 tracking issue)
-		tea.WithColorProfile(colorprofile.TrueColor),
+		// Force a concrete color profile so lipgloss/v2 never sends an OSC 11
+		// background-color query to the terminal. Without this, the auto-detect
+		// probe can leak terminal responses into stdin. Default macOS Terminal
+		// advertises 256 colors and renders some true-color sequences poorly, so
+		// use ANSI256 there unless COLORTERM explicitly opts into true color.
+		tea.WithColorProfile(tuiColorProfile(os.Environ())),
 		// Drop any OSC terminal-response events that slip through bubbletea
 		// v2.0.6's input parser as raw KeyPressMsg text.  This is a
 		// secondary defence on top of WithColorProfile — some terminals still
