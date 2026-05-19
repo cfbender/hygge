@@ -234,15 +234,30 @@ func New(opts AppOptions) (*App, error) {
 			providers = []string{"anthropic", "openai", "openrouter"}
 		}
 		a.onboardingWizard = components.OnboardingWizard{
-			Theme:     opts.Theme,
-			Providers: providers,
-			Models:    a.onboardingModelIDs(opts.ModelProvider),
+			Theme:               opts.Theme,
+			Providers:           providers,
+			ConfiguredProviders: configuredProviderSet(opts.AuthConfiguredProviders),
+			Models:              a.onboardingModelIDs(opts.ModelProvider),
 		}
 	}
 	if opts.SessionID != "" || !opts.OpenSessionsModalOnStart {
 		a.bridge()
 	}
 	return a, nil
+}
+
+func configuredProviderSet(providers []string) map[string]bool {
+	if len(providers) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(providers))
+	for _, provider := range providers {
+		provider = strings.TrimSpace(provider)
+		if provider != "" {
+			set[provider] = true
+		}
+	}
+	return set
 }
 
 // App is the root bubbletea model.

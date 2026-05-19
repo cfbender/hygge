@@ -47,10 +47,11 @@ type OnboardingWizard struct {
 	Step OnboardingStep
 
 	// step 0/1: provider + API key
-	ProviderCursor int
-	ProviderName   string
-	APIKey         string
-	ProviderKeys   map[string]string
+	ProviderCursor      int
+	ProviderName        string
+	APIKey              string
+	ProviderKeys        map[string]string
+	ConfiguredProviders map[string]bool
 
 	// step 2: model pick
 	Models       []string // filled after provider is confirmed
@@ -217,6 +218,12 @@ func (w OnboardingWizard) handleWelcome(k OnboardingKey) (OnboardingWizard, Onbo
 		w.ProviderName = w.Providers[w.ProviderCursor]
 		w.APIKey = ""
 		w.inputBuf = ""
+		if w.hasConfiguredProvider(w.ProviderName) {
+			w.ModelQuery = ""
+			w.ModelCursor = 0
+			w.Step = OnboardStepPickModel
+			return w, nil
+		}
 		w.Step = OnboardStepAPIKey
 	}
 	return w, nil
@@ -255,7 +262,7 @@ func (w OnboardingWizard) handleAPIKey(k OnboardingKey) (OnboardingWizard, Onboa
 }
 
 func (w OnboardingWizard) handleProviderMore(k OnboardingKey) (OnboardingWizard, OnboardingMsg) {
-	configured := len(w.ProviderKeys)
+	configured := w.configuredProviderCount()
 	switch k.Name {
 	case "y":
 		w.Step = OnboardStepWelcome
@@ -269,9 +276,30 @@ func (w OnboardingWizard) handleProviderMore(k OnboardingKey) (OnboardingWizard,
 		w.ModelCursor = 0
 		w.Step = OnboardStepPickModel
 	case "esc":
-		w.Step = OnboardStepAPIKey
+		if w.hasConfiguredProvider(w.ProviderName) {
+			w.Step = OnboardStepWelcome
+		} else {
+			w.Step = OnboardStepAPIKey
+		}
 	}
 	return w, nil
+}
+
+func (w OnboardingWizard) hasConfiguredProvider(providerName string) bool {
+	if w.ConfiguredProviders == nil {
+		return false
+	}
+	return w.ConfiguredProviders[providerName]
+}
+
+func (w OnboardingWizard) configuredProviderCount() int {
+	configured := len(w.ConfiguredProviders)
+	for name := range w.ProviderKeys {
+		if !w.ConfiguredProviders[name] {
+			configured++
+		}
+	}
+	return configured
 }
 
 func (w OnboardingWizard) filteredModels() []string {
@@ -292,7 +320,11 @@ func (w OnboardingWizard) handlePickModel(k OnboardingKey) (OnboardingWizard, On
 	filtered := w.filteredModels()
 	switch k.Name {
 	case "esc":
-		w.Step = OnboardStepAPIKey
+		if w.hasConfiguredProvider(w.ProviderName) {
+			w.Step = OnboardStepWelcome
+		} else {
+			w.Step = OnboardStepAPIKey
+		}
 		w.inputBuf = ""
 	case "up", "ctrl+p":
 		if w.ModelCursor > 0 {
@@ -680,7 +712,7 @@ func (w OnboardingWizard) View() string {
 	case OnboardStepProviderMore:
 		body.WriteString(primary.Render("Provider saved") + "\n")
 		body.WriteString(muted.Render("Configure as many providers as you want before creating your first mode.") + "\n\n")
-		fmt.Fprintf(&body, "Configured providers: %d\n", len(w.ProviderKeys))
+		fmt.Fprintf(&body, "Configured providers: %d\n", w.configuredProviderCount())
 		body.WriteString("\n" + muted.Render("y add another provider   n/enter continue to model   esc back"))
 
 	case OnboardStepPickModel:
