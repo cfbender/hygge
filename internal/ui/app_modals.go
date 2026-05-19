@@ -187,6 +187,14 @@ func (a *App) saveAPIKeyCmd(providerName, apiKey string) tea.Cmd {
 	}
 }
 
+func (a *App) handleOnboardingPaste(m tea.PasteMsg) (tea.Model, tea.Cmd) {
+	content := normalizePasteContent(m.Content)
+	if content == "" {
+		return a, nil
+	}
+	return a.applyOnboardingKey(components.OnboardingKey{Name: "paste", Runes: []rune(content)})
+}
+
 func (a *App) handleOnboardingKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	sk := components.OnboardingKey{Name: k.String(), Runes: []rune(k.Text)}
 	switch k.String() {
@@ -199,6 +207,10 @@ func (a *App) handleOnboardingKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			sk.Name = k.Text
 		}
 	}
+	return a.applyOnboardingKey(sk)
+}
+
+func (a *App) applyOnboardingKey(sk components.OnboardingKey) (tea.Model, tea.Cmd) {
 	updated, msg := a.onboardingWizard.HandleKey(sk)
 	if updated.ProviderName != a.onboardingWizard.ProviderName {
 		updated.Models = a.onboardingModelIDs(updated.ProviderName)
