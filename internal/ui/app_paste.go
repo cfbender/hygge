@@ -21,6 +21,9 @@ type pastedInputBlock struct {
 }
 
 func (a *App) handlePaste(m tea.PasteMsg) (tea.Model, tea.Cmd) {
+	if top, ok := a.overlays.Top(); ok && top == overlayOnboarding {
+		return a.handleOnboardingPaste(m)
+	}
 	if a.anyOverlayOpen() || a.viewingSubagent() {
 		return a, nil
 	}
