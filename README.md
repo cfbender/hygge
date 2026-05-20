@@ -35,14 +35,13 @@ mise install go:github.com/cfbender/hygge@v0.5.0
 
 ## Quick start
 
-Set an API key for your provider, then launch Hygge from a project directory:
+Launch Hygge to start the onboarding flow
 
 ```sh
-hygge provider auth anthropic
 hygge
 ```
 
-Environment variables such as `ANTHROPIC_API_KEY` also work.
+Manual configuration via `hygge provider auth` or environment variables such as `ANTHROPIC_API_KEY` also work.
 
 Or build from source:
 
