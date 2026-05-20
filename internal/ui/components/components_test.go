@@ -834,6 +834,35 @@ func TestSubagentBubbleWrap(t *testing.T) {
 	}
 }
 
+func containsBackgroundSGR(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\x1b' || i+1 >= len(s) || s[i+1] != '[' {
+			continue
+		}
+		j := i + 2
+		for j < len(s) && s[j] != 'm' {
+			j++
+		}
+		if j >= len(s) {
+			return false
+		}
+		seq := s[i+2 : j]
+		if strings.Contains(seq, "48;") || strings.Contains(seq, "48:") || strings.Contains(seq, "49") {
+			return true
+		}
+		for part := range strings.SplitSeq(seq, ";") {
+			if len(part) == 2 && part[0] == '4' && part[1] >= '0' && part[1] <= '7' {
+				return true
+			}
+			if len(part) == 3 && part[:2] == "10" && part[2] >= '0' && part[2] <= '7' {
+				return true
+			}
+		}
+		i = j
+	}
+	return false
+}
+
 // stripANSI is a naive ANSI escape stripper for test assertions.
 // Removes ESC[...m sequences so tests can check plain text.
 func stripANSI(s string) string {
@@ -1256,6 +1285,9 @@ func TestDiffView_StylesUnifiedDiff(t *testing.T) {
 	assertNoDiffConnectorGlyphs(t, plain)
 	if out == plain {
 		t.Fatalf("diff view should style diff lines, got plain output:\n%s", out)
+	}
+	if containsBackgroundSGR(out) {
+		t.Fatalf("shell diff view should use foreground colors without background fills:\n%q", out)
 	}
 }
 

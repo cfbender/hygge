@@ -23,10 +23,11 @@ func ShellTheme() *Theme {
 			AtomCodeBg: {kind: colorKindDefault},        // no override — terminal background
 
 			// Diff hunk backgrounds.
-			// 256-color dark green/red; lipgloss degrades gracefully on 16-color
-			// terminals by mapping 256-color indices to the nearest ANSI slot.
-			AtomDiffAddBg: {kind: colorKindANSI, raw: "64"}, // muted olive green
-			AtomDiffDelBg: {kind: colorKindANSI, raw: "52"}, // dark red
+			// The shell theme leaves these unset so diffs use semantic ANSI
+			// foregrounds without painting large red/green blocks. Custom themes may
+			// still opt into background fills via diff.add.bg / diff.del.bg.
+			AtomDiffAddBg: {kind: colorKindDefault},
+			AtomDiffDelBg: {kind: colorKindDefault},
 
 			// Status bar.
 			AtomStatusBarFg: {kind: colorKindANSI, raw: "15"}, // bright white

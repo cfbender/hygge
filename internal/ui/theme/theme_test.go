@@ -88,6 +88,15 @@ func TestShellTheme_Complete(t *testing.T) {
 	}
 }
 
+func TestShellTheme_DiffBackgroundsDefault(t *testing.T) {
+	sh := ShellTheme()
+	for _, a := range []Atom{AtomDiffAddBg, AtomDiffDelBg} {
+		if c := sh.Colors[a]; !c.IsDefault() {
+			t.Fatalf("ShellTheme %s = %s, want default", a, c.String())
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 2. Load("shell", ...) returns shell theme without disk I/O
 // ---------------------------------------------------------------------------

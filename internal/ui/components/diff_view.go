@@ -1,6 +1,7 @@
 package components
 
 import (
+	"image/color"
 	"regexp"
 	"strconv"
 	"strings"
@@ -338,13 +339,29 @@ func diffStyles(t *theme.Theme) diffLineStyles {
 			gutter: lipgloss.NewStyle().Faint(true),
 		}
 	}
+	add := t.Style(theme.AtomSuccess)
+	if bg := t.Style(theme.AtomDiffAddBg).GetBackground(); hasColor(bg) {
+		add = add.Background(bg)
+	}
+	del := t.Style(theme.AtomError)
+	if bg := t.Style(theme.AtomDiffDelBg).GetBackground(); hasColor(bg) {
+		del = del.Background(bg)
+	}
 	return diffLineStyles{
-		add:    t.Style(theme.AtomCodeFg).Background(t.Style(theme.AtomDiffAddBg).GetBackground()),
-		del:    t.Style(theme.AtomCodeFg).Background(t.Style(theme.AtomDiffDelBg).GetBackground()),
+		add:    add,
+		del:    del,
 		meta:   t.Style(theme.AtomMuted).Faint(true),
 		body:   t.Style(theme.AtomCodeFg),
 		gutter: t.Style(theme.AtomMuted).Faint(true),
 	}
+}
+
+func hasColor(c color.Color) bool {
+	if c == nil {
+		return false
+	}
+	_, isNoColor := c.(lipgloss.NoColor)
+	return !isNoColor
 }
 
 func isDiffMetaLine(line string) bool {
