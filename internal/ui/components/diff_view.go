@@ -16,7 +16,24 @@ const defaultDiffPreviewLines = 12
 const (
 	sideBySideDiffMinWidth = 72
 	diffPaneSeparator      = "  │  "
+	// diffTabWidth is the number of spaces tabs are expanded to before
+	// measuring/clipping diff content. Terminals render hard tabs by advancing
+	// to the next tab stop, which lipgloss.Width does not account for; we
+	// normalise to a fixed cell count so our width math matches what the
+	// terminal actually paints.
+	diffTabWidth = 8
 )
+
+var diffTabReplacement = strings.Repeat(" ", diffTabWidth)
+
+// expandDiffTabs replaces hard tabs with spaces so width math used to clip and
+// pad diff content matches the terminal's rendered width.
+func expandDiffTabs(s string) string {
+	if !strings.ContainsRune(s, '\t') {
+		return s
+	}
+	return strings.ReplaceAll(s, "\t", diffTabReplacement)
+}
 
 var hunkHeaderPattern = regexp.MustCompile(`@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@`)
 
@@ -226,6 +243,7 @@ func diffRows(lines []string) []diffRow {
 	inHunk := false
 	rows := make([]diffRow, 0, len(lines))
 	for _, line := range lines {
+		line = expandDiffTabs(line)
 		if oldStart, newStart, ok := parseHunkHeader(line); ok {
 			oldLine = oldStart
 			newLine = newStart
