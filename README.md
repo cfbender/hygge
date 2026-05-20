@@ -35,13 +35,33 @@ mise install go:github.com/cfbender/hygge@v0.5.0
 
 ## Quick start
 
-Launch Hygge to start the onboarding flow
+Launch Hygge to start the onboarding flow:
 
 ```sh
 hygge
 ```
 
-Manual configuration via `hygge provider auth` or environment variables such as `ANTHROPIC_API_KEY` also work.
+To set up a starter agent layout from the CLI, authenticate at least one provider,
+then run `hygge init` and pick a style:
+
+```sh
+hygge provider auth 
+hygge init
+```
+
+You can also choose a style directly:
+
+```sh
+hygge init general   # one general engineering mode
+hygge init amp       # smart/rush/deep modes plus specialist subagents
+hygge init opencode  # build/plan modes plus general/explore/scout subagents
+```
+
+`hygge init` writes editable prompt files under
+`$XDG_CONFIG_HOME/hygge/prompts/<style>/`, updates your user `config.toml`, and
+writes `subagents.toml` for styles that include subagents. Manual configuration
+via `hygge provider auth` or environment variables such as `ANTHROPIC_API_KEY`
+also work.
 
 Or build from source:
 
@@ -85,6 +105,7 @@ hygge config explain [key]
 hygge profile list
 hygge profile show [name]
 hygge profile use <name>
+hygge init [general|amp|opencode]
 hygge provider auth [name]
 hygge provider list
 hygge provider remove <name>

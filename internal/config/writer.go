@@ -298,6 +298,89 @@ func lastRealSource(sources []Source) string {
 	return ""
 }
 
+// WriteInitStyleOptions controls the writer used by `hygge init`.
+type WriteInitStyleOptions = WriteModelOptions
+
+// InitStyleConfig is a complete mode/subagent preset selected by `hygge init`.
+type InitStyleConfig struct {
+	Modes     []ModeConfig
+	Subagents []OnboardingSubagent
+}
+
+// WriteInitStyle persists all modes for an init style to the user config and
+// any subagents to the user subagents.toml. Existing unrelated config fields
+// are preserved. Existing modes are replaced because init is a bootstrap/reset
+// operation for the user's agent layout.
+func WriteInitStyle(opts WriteInitStyleOptions, style InitStyleConfig) (string, error) {
+	if len(style.Modes) == 0 {
+		return "", fmt.Errorf("config: init style requires at least one mode")
+	}
+	for _, mode := range style.Modes {
+		if strings.TrimSpace(mode.Name) == "" || strings.TrimSpace(mode.Provider) == "" || strings.TrimSpace(mode.Model) == "" {
+			return "", fmt.Errorf("config: init style mode requires name, provider, and model")
+		}
+	}
+
+	target := filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+	m := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
+		parsed, err := parseTOMLBytes(data)
+		if err != nil {
+			return target, &ParseError{File: target, Err: err}
+		}
+		m = parsed
+	} else if !os.IsNotExist(err) {
+		return target, fmt.Errorf("config: read init target: %w", err)
+	}
+
+	first := style.Modes[0]
+	modelMap, ok := m["model"].(map[string]any)
+	if !ok {
+		modelMap = map[string]any{}
+		m["model"] = modelMap
+	}
+	modelMap["provider"] = first.Provider
+	modelMap["name"] = first.Model
+	if first.Reasoning != "" {
+		modelMap["reasoning"] = first.Reasoning
+	}
+
+	modes := make([]any, 0, len(style.Modes))
+	for _, mode := range style.Modes {
+		entry := map[string]any{
+			"name":     mode.Name,
+			"provider": mode.Provider,
+			"model":    mode.Model,
+		}
+		if mode.Prompt != "" {
+			entry["prompt"] = mode.Prompt
+		}
+		if mode.Description != "" {
+			entry["description"] = mode.Description
+		}
+		if mode.Color != "" {
+			entry["color"] = mode.Color
+		}
+		if mode.Reasoning != "" {
+			entry["reasoning"] = mode.Reasoning
+		}
+		modes = append(modes, entry)
+	}
+	m["modes"] = modes
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return target, fmt.Errorf("config: encode init target: %w", err)
+	}
+	if err := atomicWriteConfig(target, buf.Bytes()); err != nil {
+		return target, fmt.Errorf("config: write init target: %w", err)
+	}
+	if err := WriteSubagentsToml(WriteSubagentsTomlOptions{HomeDir: opts.HomeDir, XDGConfigHome: opts.XDGConfigHome}, style.Subagents); err != nil {
+		return target, err
+	}
+	return target, nil
+}
+
 // WriteOnboardingModeOptions controls the narrow config writer for the
 // onboarding wizard's mode result. It shares the model writer's target-
 // resolution inputs.
