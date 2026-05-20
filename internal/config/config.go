@@ -55,6 +55,17 @@ import (
 	"github.com/cfbender/hygge/internal/state"
 )
 
+// SubagentEntry is the per-type configuration that can appear inside the
+// [subagents.<name>] table in config.toml (or in a profile file).  The schema
+// is identical to the entries accepted by subagents.toml so both sources are
+// interchangeable.
+type SubagentEntry struct {
+	Description string   `mapstructure:"description"`
+	Prompt      string   `mapstructure:"prompt"`
+	Tools       []string `mapstructure:"tools"`
+	Model       string   `mapstructure:"model"`
+}
+
 // Config is the typed, fully-resolved configuration.
 type Config struct {
 	// Profile is the name of the active profile.  Not decoded from TOML;
@@ -69,6 +80,14 @@ type Config struct {
 	Session       SessionConfig       `mapstructure:"session"`
 	Catalog       CatalogConfig       `mapstructure:"catalog"`
 	Notifications NotificationsConfig `mapstructure:"notifications"`
+
+	// Subagents holds subagent type definitions declared directly in
+	// config.toml (or a profile).  Each key is the type name; the value
+	// carries the same fields as a subagents.toml entry.  These are merged
+	// through the normal profile machinery, so a profile can add or override
+	// individual types.  The subagent registry loader consults this map in
+	// addition to the legacy subagents.toml files.
+	Subagents map[string]SubagentEntry `mapstructure:"subagents"`
 	// Modes defines the agent modes available to the user. The app is always
 	// in a mode; the first mode is the default. Each mode specifies a
 	// provider and model. The [[modes]] array-of-tables is the preferred

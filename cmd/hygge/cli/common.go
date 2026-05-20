@@ -662,6 +662,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		XDGConfigHome: xdgConfig,
 		Pwd:           opts.Pwd,
 		DefaultTools:  defaultSubagentTools,
+		Config:        cfg,
 	})
 	if err != nil {
 		slog.Warn("cli: failed to load subagents.toml; using built-in types only", "err", err)

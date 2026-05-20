@@ -67,19 +67,30 @@ type LoadOptions struct {
 	// MINUS "subagent" so sub-agents inherit the orchestrator's full
 	// toolbox by default.
 	DefaultTools []string
+
+	// Config is the already-loaded application config.  When non-nil,
+	// any [subagents.<name>] entries defined in config.toml (including
+	// profile-merged values) are applied as an additional layer between
+	// the user-level subagents.toml files and the project-level files.
+	// This allows users to declare subagent types directly in config.toml
+	// and have them follow the normal profile override/merge workflow.
+	Config *config.Config
 }
 
 // Load discovers sub-agent types in precedence order:
 //
 //  1. Built-in: "general" (always present).
-//  2. ~/.agents/subagents.toml             (user, vendor-neutral)
-//  3. ~/.config/hygge/subagents.toml       (user, hygge-native)
-//  4. <project-root>/.agents/subagents.toml   (project, vendor-neutral)
-//  5. <project-root>/.hygge/subagents.toml    (project, hygge-native)
+//  2. ~/.agents/subagents.toml                  (user, vendor-neutral)
+//  3. ~/.config/hygge/subagents.toml            (user, hygge-native)
+//  4. opts.Config [subagents.*] entries         (user, from config.toml + profile)
+//  5. <project-root>/.agents/subagents.toml     (project, vendor-neutral)
+//  6. <project-root>/.hygge/subagents.toml      (project, hygge-native)
 //
 // Later layers override earlier types of the same Name.  Missing files
 // are silently ignored.  Malformed files emit slog.Warn and are
 // skipped; the remaining valid types still load.
+// opts.Config is optional; omitting it falls back to the legacy
+// subagents.toml-only discovery path.
 func Load(opts LoadOptions) (*Registry, error) {
 	homeDir := opts.HomeDir
 	if homeDir == "" {
@@ -100,6 +111,15 @@ func Load(opts LoadOptions) (*Registry, error) {
 
 	loadOneFile(byName, filepath.Join(homeDir, ".agents", "subagents.toml"), "user")
 	loadOneFile(byName, filepath.Join(xdgConfig, "hygge", "subagents.toml"), "user")
+
+	// Apply subagent entries from the merged config (config.toml + active
+	// profile).  These are treated as a "user" layer that sits between the
+	// file-based user layer above and the project-level files below.
+	// The baseDir for prompt file resolution is the user's hygge config dir.
+	if opts.Config != nil {
+		cfgBaseDir := filepath.Join(xdgConfig, "hygge")
+		loadFromConfig(byName, opts.Config, cfgBaseDir)
+	}
 
 	if opts.Pwd != "" {
 		if p := findProjectFile(opts.Pwd, filepath.Join(".agents", "subagents.toml"), homeDir); p != "" {
@@ -199,6 +219,26 @@ func loadOneFile(byName map[string]Type, path, source string) {
 		// users may want to widen / narrow its tool list).  We still
 		// pin Source = source so list output reflects the override
 		// origin.
+		byName[t.Name] = t
+	}
+}
+
+// loadFromConfig applies subagent entries from an already-loaded config.Config.
+// Entries in cfg.Subagents are treated as a "user" layer.  The baseDir is
+// used to resolve any "file:" prompt references (typically the hygge config
+// directory, e.g. ~/.config/hygge).
+func loadFromConfig(byName map[string]Type, cfg *config.Config, baseDir string) {
+	for name, entry := range cfg.Subagents {
+		t, err := normalizeEntry(name, tomlEntry{
+			Description: entry.Description,
+			Prompt:      entry.Prompt,
+			Tools:       append([]string(nil), entry.Tools...),
+			Model:       entry.Model,
+		}, "user", baseDir)
+		if err != nil {
+			slog.Warn("subagent: skipping config.toml entry", "name", name, "err", err)
+			continue
+		}
 		byName[t.Name] = t
 	}
 }
