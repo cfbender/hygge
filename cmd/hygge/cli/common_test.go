@@ -16,6 +16,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/config"
+	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/state"
@@ -351,7 +352,7 @@ func TestFantasyModelResolverDoesNotReuseParentAfterConfigChange(t *testing.T) {
 			"base_url": "https://first.invalid/v1",
 		},
 	}}
-	resolver := buildFantasyModelResolver(cfg, stateLoadOptionsForTest(), nil, fakeFantasyLanguageModel{})
+	resolver := buildFantasyModelResolver(cfg, stateLoadOptionsForTest(), nil, fakeFantasyLanguageModel{}, llm.ProviderBuildOptions{})
 
 	cfg.Model.Options["base_url"] = "https://second.invalid/v1"
 	got, err := resolver(context.Background(), "test-provider", "model-a")

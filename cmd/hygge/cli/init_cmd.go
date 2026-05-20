@@ -453,10 +453,6 @@ func initCLIStyles() initStyles {
 	}
 }
 
-func initTitleStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(initAccentColor())
-}
-
 func newInitListDelegate() list.DefaultDelegate {
 	delegate := list.NewDefaultDelegate()
 	delegate.SetSpacing(0)

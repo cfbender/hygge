@@ -150,6 +150,12 @@ func (f *fantasyTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.T
 }
 
 func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string) (*session.Message, error) {
+	// Apply per-turn context decoration (e.g. injecting session ID for
+	// HTTP-transport-level header middleware).
+	if a.opts.TurnContextDecorator != nil {
+		ctx = a.opts.TurnContextDecorator(ctx, sessionID)
+	}
+
 	msgs, marker, err := a.opts.Store.MessagesSinceLatestMarker(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load messages: %w", err)

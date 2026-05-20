@@ -1,0 +1,6 @@
+name        = "openrouter-session"
+version     = "0.1.0"
+description = "Logs OpenRouter x-session-id injection events for debugging."
+
+[capabilities]
+hooks = true
