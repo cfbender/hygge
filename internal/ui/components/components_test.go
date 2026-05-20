@@ -1447,6 +1447,37 @@ func TestDiffView_InlineLongLinesDoNotOverflow(t *testing.T) {
 	}
 }
 
+// TestDiffView_TabsExpandedSoLinesDoNotOverflow verifies that hard tabs in
+// diff content are expanded to spaces before clipping. Terminals render tabs
+// as multi-cell tab stops, but lipgloss.Width counts them as a single cell, so
+// without expansion a "clipped" diff line still overflows the bubble width
+// once the terminal expands the tabs at draw time.
+func TestDiffView_TabsExpandedSoLinesDoNotOverflow(t *testing.T) {
+	t.Parallel()
+	raw := "@@ -1,2 +1,2 @@\n" +
+		"-\t\tAtomCodeBg: {kind: colorKindDefault}, // no override since terminal background varies\n" +
+		"+\t\tAtomCodeBg: {kind: colorKindDefault}, // tweaked override since terminal background varies"
+
+	for _, width := range []int{72, 96, 117, 150} {
+		out := DiffView{
+			Width: width,
+			Theme: theme.ShellTheme(),
+			Raw:   raw,
+		}.View()
+		for i, line := range strings.Split(out, "\n") {
+			if strings.ContainsRune(line, '\t') {
+				t.Errorf("width=%d: line %d still contains a hard tab; "+
+					"diff content should be expanded so terminal width matches lipgloss width. plain=%q",
+					width, i, stripANSI(line))
+			}
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("width=%d: line %d width=%d exceeds limit; plain=%q",
+					width, i, got, stripANSI(line))
+			}
+		}
+	}
+}
+
 func TestToolGroup_RendersEditReturnedDiff(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
