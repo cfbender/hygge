@@ -71,6 +71,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 
 	if out.ClearHistory {
 		a.messages = nil
+		a.lastAssistantFlushIdx = -1
 		a.subagents = map[string]*components.SubagentState{}
 		a.renderer = nil
 		a.rendererW = 0

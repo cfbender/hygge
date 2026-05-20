@@ -203,23 +203,24 @@ func New(opts AppOptions) (*App, error) {
 	inp.SetStyles(&themeStyles)
 
 	a := &App{
-		opts:          opts,
-		styles:        &themeStyles,
-		ctx:           ctx,
-		cancel:        cancel,
-		busCh:         make(chan any, 256),
-		input:         inp,
-		spinner:       spinner.New(),
-		width:         80,
-		height:        24,
-		msgColW:       61, // default: bubble content at 80 cols (int(80*0.80)-3)
-		subagents:     make(map[string]*components.SubagentState),
-		subagentAnims: make(map[string]*anim.Anim),
-		expandedTools: make(map[string]bool),
-		msgViewport:   viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
-		touched:       appstate.NewTouchedFiles(),
-		focused:       true,
-		notifyBackend: nb,
+		opts:                  opts,
+		styles:                &themeStyles,
+		ctx:                   ctx,
+		cancel:                cancel,
+		busCh:                 make(chan any, 256),
+		input:                 inp,
+		spinner:               spinner.New(),
+		width:                 80,
+		height:                24,
+		msgColW:               61, // default: bubble content at 80 cols (int(80*0.80)-3)
+		subagents:             make(map[string]*components.SubagentState),
+		subagentAnims:         make(map[string]*anim.Anim),
+		expandedTools:         make(map[string]bool),
+		msgViewport:           viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
+		touched:               appstate.NewTouchedFiles(),
+		focused:               true,
+		notifyBackend:         nb,
+		lastAssistantFlushIdx: -1,
 	}
 	a.msgViewport.MouseWheelEnabled = true
 	a.spinner.Spinner = spinner.Meter
@@ -592,6 +593,20 @@ type App struct {
 	// placeholder stays on through the brief gap between one turn completing
 	// and the next queued turn's TurnStarted arriving.
 	activeTurns int
+
+	// lastAssistantFlushIdx records the index of the most recently flushed
+	// assistant bubble in a.messages. It is set when flushAssistantStream
+	// finalises a bubble and cleared (set to -1) on any event that legitimately
+	// ends an assistant span: a new tool/user/tool-result message appended,
+	// a tool call requested, a turn completing, or a sub-agent boundary.
+	//
+	// When >=0 and a fresh AssistantTextDelta arrives, the delta extends the
+	// flushed bubble in-place rather than spawning a new bubble. This is a
+	// defensive guard against phantom "extra message" bubbles caused by stray
+	// deltas arriving after MessageAppended (see internal/agent/fantasy_loop.go
+	// instrumentation logging "appendAssistant dropped buffered content"). The
+	// underlying agent-side cause is still under investigation.
+	lastAssistantFlushIdx int
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the

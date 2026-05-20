@@ -1109,6 +1109,64 @@ func TestFinalCommitRendersMarkdown(t *testing.T) {
 	}
 }
 
+// TestPostFlushDeltaExtendsBubble verifies the defensive guard against
+// phantom "extra assistant message" bubbles: when a delta arrives after a
+// MessageAppended (which flushed the streaming bubble) but before any event
+// that legitimately ends an assistant span (tool call, new user/tool message,
+// turn completed), the delta extends the just-flushed bubble in place rather
+// than spawning a new bubble.
+func TestPostFlushDeltaExtendsBubble(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.AssistantTextDelta{Text: "first turn body"})
+	app.Handle(bus.MessageAppended{Role: "assistant", MessageID: "m1"})
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("after flush: expected 1 message, got %d", got)
+	}
+	if app.messages[0].IsStreaming {
+		t.Fatalf("after flush: expected IsStreaming=false")
+	}
+
+	// A stray delta arrives without any intervening tool/user/turn event.
+	app.Handle(bus.AssistantTextDelta{Text: " plus stray tail"})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("post-flush stray delta should extend, not append; got %d messages", got)
+	}
+	if !strings.Contains(app.messages[0].Raw, "first turn body plus stray tail") {
+		t.Fatalf("expected extended bubble to contain combined text; got Raw=%q", app.messages[0].Raw)
+	}
+	if !app.messages[0].IsStreaming {
+		t.Fatalf("extended bubble should be re-marked streaming so a later flush can re-finalise it")
+	}
+}
+
+// TestPostFlushDeltaAfterToolStartsNewBubble verifies that when a tool call
+// or new user/tool message intervenes between a flush and the next delta,
+// the delta starts a fresh bubble (the guard is correctly invalidated).
+func TestPostFlushDeltaAfterToolStartsNewBubble(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.AssistantTextDelta{Text: "step one text"})
+	app.Handle(bus.MessageAppended{Role: "assistant", MessageID: "m1"})
+	app.Handle(bus.ToolCallRequested{ToolName: "read", ToolUseID: "tu1", Args: []byte(`{"path":"/x"}`)})
+	app.Handle(bus.ToolCallCompleted{ToolName: "read", ToolUseID: "tu1", Result: []byte("ok")})
+	app.Handle(bus.AssistantTextDelta{Text: "step two text"})
+
+	// Expect: assistant(step one) + tool(read) + assistant(step two).
+	if got := len(app.messages); got != 3 {
+		t.Fatalf("expected 3 messages, got %d", got)
+	}
+	if app.messages[0].Raw != "step one text" {
+		t.Errorf("messages[0].Raw = %q, want %q", app.messages[0].Raw, "step one text")
+	}
+	if !strings.Contains(app.messages[2].Raw, "step two text") {
+		t.Errorf("messages[2].Raw = %q, want to contain %q", app.messages[2].Raw, "step two text")
+	}
+}
+
 func TestToolCallDisplay(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
