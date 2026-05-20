@@ -112,6 +112,15 @@ func (a *App) appendThinkingDelta(text string) {
 	if n := len(a.messages); n > 0 {
 		last := &a.messages[n-1]
 		if last.Role == components.RoleAssistant && last.IsStreaming {
+			// Placeholder bubbles are transient feedback for the gap before
+			// the next assistant turn starts. The first real signal (text or
+			// thinking) clears the placeholder before we accumulate content.
+			if last.IsPlaceholder {
+				last.Raw = ""
+				last.VisibleRaw = ""
+				last.FinalMarkdown = ""
+				last.IsPlaceholder = false
+			}
 			last.Thinking += text
 			return
 		}
@@ -150,6 +159,16 @@ func (a *App) appendAssistantDelta(text string) {
 	if n := len(a.messages); n > 0 {
 		last := &a.messages[n-1]
 		if last.Role == components.RoleAssistant && last.IsStreaming {
+			// If the trailing assistant is the "continuing…" placeholder
+			// inserted after a subagent finished, drop the placeholder text
+			// and let the real delta replace it. The placeholder flag also
+			// gets cleared so the bubble renders in normal (non-muted) style.
+			if last.IsPlaceholder {
+				last.Raw = ""
+				last.VisibleRaw = ""
+				last.FinalMarkdown = ""
+				last.IsPlaceholder = false
+			}
 			last.Raw += text
 			// Reveal the whole accumulated buffer immediately (chunk-level reveal).
 			last.VisibleRaw = last.Raw
@@ -193,6 +212,18 @@ func (a *App) flushAssistantStream(role, messageID string) {
 		return
 	}
 	last := &a.messages[idx]
+	// A "continuing…" placeholder that's now being flushed against a persisted
+	// message with no real text content (e.g. parent's assistant turn was only
+	// a tool_use) would otherwise stay on screen as a muted empty bubble. Drop
+	// the placeholder row instead so the next event reflows naturally.
+	if last.IsPlaceholder && (!hasPersisted || persisted.Raw == "") {
+		a.messages = append(a.messages[:idx], a.messages[idx+1:]...)
+		if hasPersisted {
+			a.insertPersistedAssistantMessage(persisted)
+		}
+		return
+	}
+	last.IsPlaceholder = false
 	last.IsStreaming = false
 	last.Timestamp = a.opts.Now()
 	if hasPersisted {

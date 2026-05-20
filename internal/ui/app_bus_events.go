@@ -93,6 +93,10 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		if !a.isForeground(e.SessionID) {
 			return nil
 		}
+		// The parent has started its next step. Drop any "continuing…"
+		// placeholder before appending the tool row so the transcript
+		// reflows naturally.
+		a.dropContinuingPlaceholder()
 		// Finalize any trailing thinking block before a tool call.
 		a.finalizeTrailingThinking()
 		target := a.displayTargetForTool(e.ToolName, e.Args)
@@ -379,6 +383,9 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		if !a.isForeground(e.SessionID) {
 			return nil
 		}
+		// Drop any lingering "continuing…" placeholder: the turn is over, so
+		// further parent deltas (which would have cleared it) are not coming.
+		a.dropContinuingPlaceholder()
 		a.maybeNotify(notify.Notification{
 			Title:   "Hygge is waiting…",
 			Message: fmt.Sprintf("Turn completed in %q", a.sessionTitle),

@@ -138,6 +138,13 @@ type UIMessage struct {
 	// typing animation. Raw keeps the full accumulated provider text; VisibleRaw
 	// lags behind it while IsStreaming is true so new text can animate in.
 	VisibleRaw string
+
+	// IsPlaceholder marks an assistant bubble as a transient "waiting for the
+	// next response" indicator. Used after a subagent completes so the user
+	// sees feedback near the chat content while the parent's next LLM call is
+	// still pending its first token. The first real assistant delta clears
+	// the placeholder content before appending.
+	IsPlaceholder bool
 }
 
 // MessageList renders the conversation history.
@@ -601,6 +608,18 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		bodyParts = append(bodyParts, thinkStyle.Render(thinking))
 	}
 	if rawBody != "" {
+		if msg.IsPlaceholder {
+			// Placeholder bubbles render the waiting hint in muted italic so
+			// it visually reads as transient feedback rather than a real
+			// assistant reply.
+			var phStyle lipgloss.Style
+			if m.Theme != nil {
+				phStyle = m.Theme.Style(theme.AtomBubbleBodyMuted).Italic(true)
+			} else {
+				phStyle = lipgloss.NewStyle().Faint(true).Italic(true)
+			}
+			rawBody = phStyle.Render(rawBody)
+		}
 		bodyParts = append(bodyParts, rawBody)
 	}
 	body := strings.Join(bodyParts, "\n\n")
