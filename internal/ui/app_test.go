@@ -445,10 +445,8 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	app.userScrolled = true
 	app.msgViewport.PageUp()
 	app.appendAssistantDelta(" more")
-	app.typingAnimActive = true
-	for range len([]rune(" more")) {
-		app.handleTypingTick()
-	}
+	// Simulate the invalidation that the bus event handler performs after each delta.
+	app.invalidateMsgCacheForStreamingDelta()
 
 	_ = app.renderChatContent()
 	if app.msgCache != baseline {
@@ -987,10 +985,11 @@ func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	}
 }
 
-func TestStreamingAssistantTextBuffersThenRevealsPerCharacter(t *testing.T) {
+func TestStreamingAssistantChunkReveal(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
+	// First chunk: "abc" should be immediately visible — no tick required.
 	app.Handle(bus.AssistantTextDelta{Text: "abc"})
 
 	if got := len(app.messages); got != 1 {
@@ -1001,32 +1000,27 @@ func TestStreamingAssistantTextBuffersThenRevealsPerCharacter(t *testing.T) {
 		t.Errorf("expected IsStreaming=true mid-stream")
 	}
 	if msg.Raw != "abc" {
-		t.Fatalf("Raw = %q, want buffered full text", msg.Raw)
+		t.Fatalf("Raw = %q, want %q", msg.Raw, "abc")
 	}
-	if msg.VisibleRaw != "" {
-		t.Fatalf("VisibleRaw before tick = %q, want empty buffered view", msg.VisibleRaw)
+	// Chunk-level reveal: VisibleRaw must equal Raw immediately after the delta.
+	if msg.VisibleRaw != "abc" {
+		t.Fatalf("VisibleRaw = %q after first chunk, want %q (chunk-level reveal)", msg.VisibleRaw, "abc")
 	}
-	if strings.Contains(app.View().Content, "abc") {
-		t.Fatalf("buffered text should not render before a typing tick")
+	if msg.FinalMarkdown == "" {
+		t.Fatal("FinalMarkdown should be rendered immediately after chunk reveal")
+	}
+	// The text must be visible in the view without any tick.
+	if !strings.Contains(app.View().Content, "abc") {
+		t.Fatal("streamed chunk must appear in view immediately without a tick")
 	}
 
-	app.typingAnimActive = true
-	app.handleTypingTick()
-	if msg.VisibleRaw != "a" {
-		t.Fatalf("VisibleRaw after first tick = %q, want %q", msg.VisibleRaw, "a")
-	}
-	app.handleTypingTick()
-	if msg.VisibleRaw != "ab" {
-		t.Fatalf("VisibleRaw after second tick = %q, want %q", msg.VisibleRaw, "ab")
-	}
+	// Second chunk: "d" appended — still immediate, no partial reveal.
 	app.Handle(bus.AssistantTextDelta{Text: "d"})
-	if msg.Raw != "abcd" || msg.VisibleRaw != "ab" {
-		t.Fatalf("delta should buffer without immediate reveal: Raw=%q VisibleRaw=%q", msg.Raw, msg.VisibleRaw)
+	if msg.Raw != "abcd" {
+		t.Fatalf("Raw = %q after second chunk, want %q", msg.Raw, "abcd")
 	}
-	app.handleTypingTick()
-	app.handleTypingTick()
 	if msg.VisibleRaw != "abcd" {
-		t.Fatalf("VisibleRaw after ticks = %q, want full text", msg.VisibleRaw)
+		t.Fatalf("VisibleRaw = %q after second chunk, want %q (no backlog)", msg.VisibleRaw, "abcd")
 	}
 }
 
@@ -1038,20 +1032,14 @@ func TestStreamingAssistantMarkdownRendersVisibleBuffer(t *testing.T) {
 	if !app.messages[0].IsStreaming {
 		t.Fatal("expected assistant message to still be streaming")
 	}
-	if app.messages[0].FinalMarkdown != "" {
-		t.Fatal("expected streaming markdown to stay empty until typing tick reveals text")
-	}
-
-	app.typingAnimActive = true
-	for range len([]rune(app.messages[0].Raw)) {
-		app.handleTypingTick()
+	// Chunk-level reveal: FinalMarkdown is rendered immediately on each delta.
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("expected FinalMarkdown rendered immediately after chunk delta")
 	}
 	if app.messages[0].VisibleRaw != app.messages[0].Raw {
-		t.Fatalf("VisibleRaw = %q, want full raw %q", app.messages[0].VisibleRaw, app.messages[0].Raw)
+		t.Fatalf("VisibleRaw = %q, want full raw %q (chunk-level reveal)", app.messages[0].VisibleRaw, app.messages[0].Raw)
 	}
-	if app.messages[0].FinalMarkdown == "" {
-		t.Fatal("expected revealed streaming markdown to be rendered")
-	}
+
 	before := app.View().Content
 	plainBefore := ansiEscapeRE.ReplaceAllString(before, "")
 	if strings.Contains(plainBefore, "# heading") {

@@ -117,9 +117,3 @@ type clearCompactionToastMsg struct{}
 // dismissBannerMsg asks the App to hide the threshold suggestion banner for
 // the current crossing.  Fired when the user presses Ctrl+X.
 type dismissBannerMsg struct{}
-
-// typingTickMsg fires at the typing-animation frame rate (≈60 ms) to advance
-// the character reveal pointer on the current streaming assistant message,
-// producing a pseudo-typing / fade-in effect. The tick loop stops automatically
-// once the streaming message is fully revealed or streaming ends.
-type typingTickMsg struct{}
