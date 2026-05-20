@@ -1047,16 +1047,17 @@ func TestFinalCommitRendersMarkdown(t *testing.T) {
 func TestToolCallDisplay(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
+	app.opts.ProjectDir = "/work/repo"
 
 	app.Handle(bus.ToolCallRequested{
 		ToolName: "read",
-		Args:     []byte(`{"path":"/etc/passwd","limit":50}`),
+		Args:     []byte(`{"path":"/work/repo/internal/app.go","limit":50}`),
 	})
 	if got := len(app.messages); got != 1 {
 		t.Fatalf("expected 1 message, got %d", got)
 	}
-	if app.messages[0].Target != "/etc/passwd" {
-		t.Errorf("target = %q, want /etc/passwd", app.messages[0].Target)
+	if app.messages[0].Target != "internal/app.go" {
+		t.Errorf("target = %q, want internal/app.go", app.messages[0].Target)
 	}
 	if !app.messages[0].IsStreaming {
 		t.Errorf("expected tool message to be streaming until completed")
@@ -1076,10 +1077,13 @@ func TestToolCallDisplay(t *testing.T) {
 	out := app.View().Content
 	// Non-task tool calls now render as tool-group bubbles (no "▌tool: read" gutter,
 	// no raw body in view).  Name and target must appear; raw lines must not.
-	for _, want := range []string{"Read", "/etc/passwd"} {
+	for _, want := range []string{"Read", "internal/app.go"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("tool view missing %q in:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "/work/repo/internal/app.go") {
+		t.Errorf("tool view should show relative project path, got:\n%s", out)
 	}
 	if strings.Contains(out, "▌tool: read") {
 		t.Errorf("tool view must not contain old gutter '▌tool: read'; got:\n%s", out)

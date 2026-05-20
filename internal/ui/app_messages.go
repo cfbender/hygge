@@ -2,6 +2,7 @@ package ui
 
 import (
 	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
@@ -356,6 +357,34 @@ func (a *App) rerenderFinalMarkdownMessages() {
 // string (path, command) from a tool's raw JSON args.  Returns "" when the
 // args don't decode or don't contain anything obvious.  We are intentionally
 // duck-typed here — internal/ui must not depend on internal/tool schemas.
+func (a *App) displayTargetForTool(toolName string, args []byte) string {
+	target := extractTarget(args)
+	if target == "" || !toolDisplaysPath(toolName) {
+		return target
+	}
+	return relativePathFromPwd(target, a.opts.ProjectDir)
+}
+
+func toolDisplaysPath(toolName string) bool {
+	switch toolName {
+	case "read", "edit", "write":
+		return true
+	default:
+		return false
+	}
+}
+
+func relativePathFromPwd(path, pwd string) string {
+	if path == "" || pwd == "" || !filepath.IsAbs(path) {
+		return path
+	}
+	rel, err := filepath.Rel(pwd, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return path
+	}
+	return rel
+}
+
 func extractTarget(args []byte) string {
 	s := string(args)
 	for _, key := range []string{`"path"`, `"file"`, `"command"`, `"url"`, `"target"`} {
