@@ -15,12 +15,16 @@ const (
 
 // defaultConfig returns the built-in defaults for every config key.
 // Keys not supplied by any source fall back to these values.
+//
+// Note: model.provider, model.name, and model.reasoning are intentionally
+// absent from defaults.  Provider/name/reasoning should come from [[modes]]
+// entries; when no modes are declared, validateConfig synthesises a "General"
+// mode using hard-coded fallback values.  model.small_model and
+// model.small_provider remain here because they live outside of modes.
 func defaultConfig() map[string]any {
 	return map[string]any{
 		"model": map[string]any{
-			"provider": "anthropic",
-			"name":     "claude-sonnet-4-5",
-			"options":  map[string]any{},
+			"options": map[string]any{},
 		},
 		"permission": map[string]any{
 			"file_read_outside_pwd": string(PermAsk),

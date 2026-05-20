@@ -71,8 +71,13 @@ type Config struct {
 	Notifications NotificationsConfig `mapstructure:"notifications"`
 	// Modes defines the agent modes available to the user. The app is always
 	// in a mode; the first mode is the default. Each mode specifies a
-	// provider and model. When no [[modes]] are declared, a built-in
-	// "General" mode is synthesized from the [model] section (or defaults).
+	// provider and model. The [[modes]] array-of-tables is the preferred
+	// way to configure provider/model; the [model] section (provider/name)
+	// is only used as a fallback for modes that omit those fields or when
+	// no [[modes]] are declared at all.
+	// When no [[modes]] are declared, a built-in "General" mode is
+	// synthesized: it uses [model].provider/name when set, otherwise falls
+	// back to hard-coded defaults ("anthropic" / "claude-sonnet-4-5").
 	// After Load(), Modes is guaranteed to have at least one entry.
 	Modes []ModeConfig `mapstructure:"modes"`
 
@@ -548,16 +553,9 @@ func validateConfig(cfg *Config) error {
 		}
 	}
 
-	// Normalize model fields before mode synthesis.
-	if strings.TrimSpace(cfg.Model.Provider) == "" {
-		cfg.Model.Provider = "anthropic"
-	}
-	if strings.TrimSpace(cfg.Model.Name) == "" {
-		cfg.Model.Name = "claude-sonnet-4-5"
-	}
-
 	// Reasoning is best-effort: invalid values warn and reset to ""
-	// rather than fail the load.
+	// rather than fail the load.  Applies to model.reasoning when set
+	// (backward compat: [model] reasoning still accepted alongside modes).
 	switch strings.ToLower(strings.TrimSpace(cfg.Model.Reasoning)) {
 	case "", "off", "low", "medium", "high":
 		cfg.Model.Reasoning = strings.ToLower(strings.TrimSpace(cfg.Model.Reasoning))
@@ -572,13 +570,31 @@ func validateConfig(cfg *Config) error {
 		cfg.Model.ReasoningBudget = 0
 	}
 
-	// Ensure Modes is always populated. When no [[modes]] are declared,
-	// synthesize a built-in "General" mode from the [model] section.
+	// Ensure Modes is always populated.
+	//
+	// When no [[modes]] are declared, synthesize a built-in "General" mode.
+	// The provider/name/reasoning come from the [model] section when set;
+	// otherwise fall back to the canonical hard-coded defaults.
+	//
+	// When [[modes]] are declared they are self-sufficient: [model] provider/
+	// name are only used as a fallback for modes that omit those fields
+	// (backward compat for configs that use modes as overrides of a base
+	// model table).
+	const defaultProvider = "anthropic"
+	const defaultModelName = "claude-sonnet-4-5"
 	if len(cfg.Modes) == 0 {
+		provider := cfg.Model.Provider
+		if strings.TrimSpace(provider) == "" {
+			provider = defaultProvider
+		}
+		name := cfg.Model.Name
+		if strings.TrimSpace(name) == "" {
+			name = defaultModelName
+		}
 		cfg.Modes = []ModeConfig{{
 			Name:        "General",
-			Provider:    cfg.Model.Provider,
-			Model:       cfg.Model.Name,
+			Provider:    provider,
+			Model:       name,
 			Reasoning:   cfg.Model.Reasoning,
 			Description: "General-purpose mode",
 		}}
