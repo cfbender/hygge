@@ -9,6 +9,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/ui/components"
+	"github.com/cfbender/hygge/internal/ui/components/anim"
 )
 
 // makeForegroundApp builds an App with a fixed foreground session id
@@ -773,5 +774,110 @@ func TestSubagentAnimLifecycle(t *testing.T) {
 	})
 	if len(app.subagentAnims) != 0 {
 		t.Errorf("expected 0 anims after SubagentCompleted, got %d", len(app.subagentAnims))
+	}
+}
+
+// TestSubagentAnimStepMsgInvalidatesMsgCache is a regression test for the bug
+// where the subagent anim.StepMsg handler advanced the animation frame but did
+// not call invalidateMsgCache(), meaning the new frame was never rendered.
+//
+// Steps:
+//  1. Start a subagent (creates Anim, seeds subagentAnims map).
+//  2. Prime the message cache by calling View() so msgCacheValid = true.
+//  3. Synthesise the correct StepMsg for the running anim (using Anim.ID()).
+//  4. Drive Update with that StepMsg — must invalidate the cache.
+//  5. Verify msgCacheValid is false (cache was invalidated).
+//  6. Verify the re-arm Cmd is non-nil (tick loop continues).
+func TestSubagentAnimStepMsgInvalidatesMsgCache(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-cache",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "cache invalidation test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	if len(app.subagentAnims) != 1 {
+		t.Fatalf("expected 1 anim after SubagentStarted, got %d", len(app.subagentAnims))
+	}
+	an := app.subagentAnims["sub-cache"]
+	if an == nil {
+		t.Fatal("expected non-nil Anim for sub-cache")
+	}
+
+	// Prime the cache: View() sets msgCacheValid = true.
+	_ = app.View()
+	if !app.msgCacheValid {
+		t.Fatal("expected msgCacheValid=true after View()")
+	}
+
+	// Synthesise a StepMsg targeting this exact Anim using the public ID() accessor.
+	step := anim.StepMsg{ID: an.ID()}
+
+	_, cmd := app.Update(step)
+
+	// The cache must be invalidated so the new animation frame is rendered.
+	if app.msgCacheValid {
+		t.Error("expected msgCacheValid=false after anim StepMsg — animation frame would not be rendered without cache invalidation")
+	}
+
+	// The re-arm Cmd must be non-nil so the tick loop continues.
+	if cmd == nil {
+		t.Error("expected non-nil Cmd after anim StepMsg — animation tick loop would stop")
+	}
+}
+
+// TestSubagentAnimStepMsgStopsAfterCompletion verifies that once a subagent
+// completes and its Anim is removed from subagentAnims, a stale StepMsg
+// targeting that Anim is silently dropped (no re-arm, no panic).
+func TestSubagentAnimStepMsgStopsAfterCompletion(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-stale",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "stale tick test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+	an := app.subagentAnims["sub-stale"]
+	if an == nil {
+		t.Fatal("expected non-nil Anim")
+	}
+	animID := an.ID()
+
+	// Complete the subagent — anim is removed from the map.
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-stale",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+	if len(app.subagentAnims) != 0 {
+		t.Fatalf("expected 0 anims after SubagentCompleted, got %d", len(app.subagentAnims))
+	}
+
+	// Prime the cache.
+	_ = app.View()
+	if !app.msgCacheValid {
+		t.Fatal("expected msgCacheValid=true after View()")
+	}
+
+	// A stale StepMsg for the now-deleted anim must be silently dropped.
+	_, cmd := app.Update(anim.StepMsg{ID: animID})
+
+	if cmd != nil {
+		t.Error("expected nil Cmd for stale StepMsg after SubagentCompleted — tick loop should not re-arm")
+	}
+	// Cache must NOT have been invalidated (no state change occurred).
+	if !app.msgCacheValid {
+		t.Error("expected msgCacheValid=true after stale StepMsg — no frame advanced, no re-render needed")
 	}
 }
