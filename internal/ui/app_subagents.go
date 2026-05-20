@@ -424,6 +424,15 @@ func (a *App) attachSubagentToSubagentMessage(state *components.SubagentState) {
 
 // onSubagentCompleted reacts to bus.SubagentCompleted. Marks EndedAt and
 // freezes the running cost/usage with the event's authoritative totals.
+//
+// When the completing subagent's parent is the foreground session and the
+// parent is still mid-turn, also append a transient "continuing…" placeholder
+// assistant bubble. The parent's next LLM call often has high time-to-first-
+// token (the subagent's full output is now in the prompt), and that latency
+// reads as a freeze if the only feedback is the busy pill on the input box.
+// The placeholder gives feedback near the chat content; the first real
+// AssistantTextDelta (or AssistantThinkingDelta) clears its content before
+// accumulating real text — see appendAssistantDelta.
 func (a *App) onSubagentCompleted(e bus.SubagentCompleted) tea.Cmd {
 	state, ok := a.subagents[e.SubSessionID]
 	if !ok {
@@ -441,7 +450,60 @@ func (a *App) onSubagentCompleted(e bus.SubagentCompleted) tea.Cmd {
 	// Stop the anim ticking for this sub-agent: delete from the map so
 	// future anim.StepMsg arrivals are silently dropped.
 	delete(a.subagentAnims, e.SubSessionID)
+
+	a.maybeAppendContinuingPlaceholder(state)
 	return nil
+}
+
+// maybeAppendContinuingPlaceholder appends a transient "continuing…" assistant
+// bubble to the foreground message list when state's parent session is the
+// active foreground and the parent is still busy. No-op when the conditions
+// for showing the placeholder are not met (see inline guards).
+func (a *App) maybeAppendContinuingPlaceholder(state *components.SubagentState) {
+	if state == nil || !a.busy {
+		return
+	}
+	// Only show the placeholder in the parent session's transcript. If the
+	// user has followed into the subagent or another session, a.messages is
+	// not the right surface.
+	fg := a.foregroundID()
+	if fg == "" || fg != state.ParentSessionID {
+		return
+	}
+	// Skip when the tail already shows a streaming assistant (the parent's
+	// next response has already started — no gap to fill).
+	if n := len(a.messages); n > 0 {
+		last := a.messages[n-1]
+		if last.Role == components.RoleAssistant && last.IsStreaming {
+			return
+		}
+	}
+	a.messages = append(a.messages, uiMessage{
+		Role:          components.RoleAssistant,
+		Raw:           "continuing…",
+		VisibleRaw:    "continuing…",
+		IsStreaming:   true,
+		IsPlaceholder: true,
+		AgentType:     a.ActiveModeName(),
+		ModelName:     a.opts.ModelName,
+		ModeColor:     a.activeModeColor(),
+	})
+}
+
+// dropContinuingPlaceholder removes the trailing "continuing…" placeholder
+// bubble if present. Called when the parent turn completes without producing
+// any text or thinking deltas (the cases that normally clear the placeholder
+// via appendAssistantDelta / appendThinkingDelta).
+func (a *App) dropContinuingPlaceholder() {
+	n := len(a.messages)
+	if n == 0 {
+		return
+	}
+	last := a.messages[n-1]
+	if !last.IsPlaceholder {
+		return
+	}
+	a.messages = a.messages[:n-1]
 }
 
 // isInForegroundChain reports whether parentSessionID is the foreground

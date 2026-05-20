@@ -881,3 +881,190 @@ func TestSubagentAnimStepMsgStopsAfterCompletion(t *testing.T) {
 		t.Error("expected msgCacheValid=true after stale StepMsg — no frame advanced, no re-render needed")
 	}
 }
+
+// TestSubagentCompleted_AppendsContinuingPlaceholder verifies that when a
+// subagent finishes and the parent is still mid-turn, a transient "continuing…"
+// assistant bubble is appended to the foreground transcript. This bridges the
+// gap between the subagent block going to "done" and the parent's next LLM
+// reply, which can otherwise leave the user staring at a static screen.
+func TestSubagentCompleted_AppendsContinuingPlaceholder(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Parent has started a turn (busy=true is what the real TurnStarted
+	// handler would set).
+	app.busy = true
+
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "tu-1",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "tu-1",
+		Type:            "general",
+		Description:     "look",
+		At:              time.Now(),
+	})
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+
+	n := len(app.messages)
+	if n == 0 {
+		t.Fatalf("expected at least one message after SubagentCompleted, got 0")
+	}
+	last := app.messages[n-1]
+	if !last.IsPlaceholder {
+		t.Fatalf("trailing message should be the continuing placeholder; got role=%v IsPlaceholder=%v",
+			last.Role, last.IsPlaceholder)
+	}
+	if !last.IsStreaming {
+		t.Errorf("placeholder must be IsStreaming=true so the assistant bubble renders")
+	}
+	if !strings.Contains(last.Raw, "continuing") {
+		t.Errorf("placeholder Raw should contain 'continuing'; got %q", last.Raw)
+	}
+}
+
+// TestContinuingPlaceholder_NotAddedWhenParentIdle verifies that the
+// placeholder is skipped when the parent is not busy. This guards against
+// stray bubbles appearing on resumed sessions where SubagentCompleted is
+// replayed via hydration without an active turn.
+func TestContinuingPlaceholder_NotAddedWhenParentIdle(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.busy = false // parent is idle
+
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		At:              time.Now(),
+	})
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+
+	for _, msg := range app.messages {
+		if msg.IsPlaceholder {
+			t.Fatalf("placeholder should not be appended when parent is idle; messages=%+v", app.messages)
+		}
+	}
+}
+
+// TestContinuingPlaceholder_ClearedByAssistantDelta verifies that the first
+// assistant text delta after SubagentCompleted clears the placeholder text
+// instead of appending to it.
+func TestContinuingPlaceholder_ClearedByAssistantDelta(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+	app.busy = true
+
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		At:              time.Now(),
+	})
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+
+	// Parent's first delta arrives.
+	app.Handle(bus.AssistantTextDelta{
+		SessionID: "fg-session",
+		Text:      "Hello",
+		At:        time.Now(),
+	})
+
+	n := len(app.messages)
+	if n == 0 {
+		t.Fatalf("expected an assistant message after the delta, got 0")
+	}
+	last := app.messages[n-1]
+	if last.IsPlaceholder {
+		t.Errorf("placeholder flag should be cleared after first delta; raw=%q", last.Raw)
+	}
+	if last.Raw != "Hello" {
+		t.Errorf("placeholder text should have been replaced by delta, got Raw=%q", last.Raw)
+	}
+}
+
+// TestContinuingPlaceholder_DroppedOnToolCallRequested verifies that a new
+// parent tool call after the placeholder removes the placeholder rather than
+// stranding it before the new tool row.
+func TestContinuingPlaceholder_DroppedOnToolCallRequested(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+	app.busy = true
+
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		At:              time.Now(),
+	})
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+
+	// Parent immediately requests another tool (no text in between).
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "bash",
+		ToolUseID: "tu-2",
+		Args:      []byte(`{"command":"ls"}`),
+	})
+
+	for _, msg := range app.messages {
+		if msg.IsPlaceholder {
+			t.Fatalf("placeholder should have been dropped before new tool row; messages=%+v", app.messages)
+		}
+	}
+}
+
+// TestContinuingPlaceholder_DroppedOnTurnCompleted verifies that an
+// unexpected turn-end after the placeholder cleans up the row rather than
+// leaving a permanent muted "continuing…" line.
+func TestContinuingPlaceholder_DroppedOnTurnCompleted(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+	app.busy = true
+	app.activeTurns = 1
+
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		At:              time.Now(),
+	})
+	app.Handle(bus.SubagentCompleted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		At:              time.Now(),
+	})
+
+	app.Handle(bus.TurnCompleted{
+		SessionID: "fg-session",
+		At:        time.Now(),
+	})
+
+	for _, msg := range app.messages {
+		if msg.IsPlaceholder {
+			t.Fatalf("placeholder should have been dropped on TurnCompleted; messages=%+v", app.messages)
+		}
+	}
+}
