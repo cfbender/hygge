@@ -586,6 +586,12 @@ type App struct {
 	// placeholder stays on through the brief gap between one turn completing
 	// and the next queued turn's TurnStarted arriving.
 	activeTurns int
+
+	// typingAnimActive is true while the typing-animation tick loop is
+	// running for the current streaming assistant message.  The loop starts
+	// on the first text delta and stops automatically when the message is
+	// fully revealed or streaming ends.
+	typingAnimActive bool
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the
@@ -786,6 +792,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.invalidateMsgCache()
 		}
 		return a, cmd
+
+	case typingTickMsg:
+		return a, a.handleTypingTick()
 
 	case workingVerbTickMsg:
 		if !a.busy {

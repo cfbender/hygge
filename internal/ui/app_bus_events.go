@@ -46,6 +46,13 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		a.finalizeTrailingThinking()
 		a.appendAssistantDelta(e.Text)
 		a.invalidateMsgCacheForStreamingDelta()
+		// Start the typing-animation tick loop on the first delta of each
+		// streaming turn.  The loop re-issues itself while typingAnimActive
+		// is true; it self-terminates when the message is fully revealed.
+		if !a.typingAnimActive {
+			a.typingAnimActive = true
+			return a.typingTick()
+		}
 
 	case bus.AssistantThinkingDelta:
 		if a.routeToSubagent(e.SessionID) {

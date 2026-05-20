@@ -133,6 +133,13 @@ type UIMessage struct {
 	// Derived from the subagent type name. When non-nil, used for both
 	// the sidebar bar and header text.
 	SubagentColor color.Color
+
+	// RevealedChars is the number of rendered body characters that have been
+	// "revealed" (no longer faint) by the typing animation. Only meaningful
+	// while IsStreaming is true on a RoleAssistant message. Zero means the
+	// animation has not yet started; when IsStreaming is false all characters are
+	// shown normally regardless of this value.
+	RevealedChars int
 }
 
 // MessageList renders the conversation history.
@@ -592,7 +599,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 		bodyParts = append(bodyParts, thinkStyle.Render(thinking))
 	}
 	if rawBody != "" {
-		bodyParts = append(bodyParts, rawBody)
+		bodyParts = append(bodyParts, applyTypingFade(rawBody, msg.IsStreaming, msg.RevealedChars))
 	}
 	body := strings.Join(bodyParts, "\n\n")
 
@@ -1175,6 +1182,32 @@ func ColorForSubagentType(typeName string) color.Color {
 		h = h*31 + uint32(c) //nolint:gosec // overflow is intentional for hash distribution
 	}
 	return lipgloss.Color(palette[h%uint32(len(palette))]) //nolint:gosec // len(palette) is a small constant
+}
+
+// applyTypingFade applies a faint overlay to unrevealed body text while a
+// message is actively streaming. The first revealedChars runes are rendered at
+// full opacity; remaining runes are rendered faint, simulating a character-level
+// fade-in as text arrives.
+//
+// When streaming is false, or revealedChars covers all characters, the body is
+// returned unchanged (no allocation overhead for completed messages).
+func applyTypingFade(body string, streaming bool, revealedChars int) string {
+	if !streaming {
+		return body
+	}
+	runes := []rune(body)
+	if revealedChars >= len(runes) {
+		return body
+	}
+	if revealedChars < 0 {
+		revealedChars = 0
+	}
+	faintStyle := lipgloss.NewStyle().Faint(true)
+	unrevealed := strings.Split(string(runes[revealedChars:]), "\n")
+	for i, line := range unrevealed {
+		unrevealed[i] = faintStyle.Render(line)
+	}
+	return string(runes[:revealedChars]) + strings.Join(unrevealed, "\n")
 }
 
 func (m MessageList) bubbleBackgroundColor() color.Color {

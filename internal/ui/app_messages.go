@@ -4,13 +4,33 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
 )
+
+// typingAnimInterval is the frame period for the typing fade-in animation.
+// At this cadence the reveal pointer advances by typingRevealStep characters
+// per tick, giving a smooth fade-in effect without spamming redraws.
+const typingAnimInterval = 60 * time.Millisecond
+
+// typingRevealStep is the number of rendered body characters revealed per tick.
+// A step of 12 at 60 ms ≈ 200 characters/second — fast enough to keep up with
+// normal streamed output while making newly-arrived text visibly fade in.
+const typingRevealStep = 12
+
+// typingTick returns the bubbletea Cmd that fires one typingTickMsg after
+// typingAnimInterval.  The tick loop runs while typingAnimActive is true.
+func (a *App) typingTick() tea.Cmd {
+	return tea.Tick(typingAnimInterval, func(time.Time) tea.Msg {
+		return typingTickMsg{}
+	})
+}
 
 func (a *App) refreshTodosCache() {
 	a.todosCache = nil
@@ -161,6 +181,55 @@ func (a *App) appendAssistantDelta(text string) {
 	})
 }
 
+// handleTypingTick advances the typing animation by one step.  It is called
+// from the Update handler when a typingTickMsg arrives.
+//
+// The function finds the current streaming assistant message and increments its
+// RevealedChars by typingRevealStep.  When the message is fully revealed (or no
+// longer streaming), typingAnimActive is cleared and no further tick is issued.
+func (a *App) handleTypingTick() tea.Cmd {
+	if !a.typingAnimActive {
+		return nil
+	}
+	// Find the current streaming assistant message.
+	idx := a.currentAssistantMessageIndex()
+	if idx < 0 {
+		// No streaming assistant message — stop the loop.
+		a.typingAnimActive = false
+		return nil
+	}
+	msg := &a.messages[idx]
+	if !msg.IsStreaming {
+		// Message was flushed between ticks — stop the loop; all lines already
+		// visible (IsStreaming=false causes applyTypingFade to be a no-op).
+		a.typingAnimActive = false
+		return nil
+	}
+
+	// Count rendered characters in the current body.
+	body := msg.FinalMarkdown
+	if body == "" {
+		body = msg.Raw
+	}
+	totalChars := len([]rune(body))
+
+	if msg.RevealedChars >= totalChars {
+		// Fully revealed.  Keep the loop alive in case new deltas arrive
+		// and push totalChars beyond the current reveal pointer.
+		// The loop terminates via the !msg.IsStreaming branch above once
+		// streaming ends.
+		return a.typingTick()
+	}
+
+	// Advance the reveal pointer.
+	msg.RevealedChars += typingRevealStep
+	if msg.RevealedChars > totalChars {
+		msg.RevealedChars = totalChars
+	}
+	a.invalidateMsgCacheForStreamingDelta()
+	return a.typingTick()
+}
+
 // flushAssistantStream marks the current assistant message as final and renders
 // it through glamour.  The messageID parameter is used to reconcile the live
 // stream with the authoritative persisted message when available.
@@ -168,6 +237,8 @@ func (a *App) flushAssistantStream(role, messageID string) {
 	if role != "assistant" {
 		return
 	}
+	// Stop the typing animation and fully reveal the message.
+	a.typingAnimActive = false
 	persisted, hasPersisted := a.persistedAssistantUIMessage(messageID)
 	if hasPersisted {
 		persisted.AgentType = a.ActiveModeName()
