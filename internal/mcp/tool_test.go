@@ -128,7 +128,7 @@ func TestMCPTool_Execute_TextContentRendered(t *testing.T) {
 		resCh <- r
 	}()
 
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tool execute read_file tools/call request")
 	if req.Method != MethodToolsCall {
 		t.Fatalf("expected tools/call, got %s", req.Method)
 	}
@@ -154,8 +154,8 @@ func TestMCPTool_Execute_TextContentRendered(t *testing.T) {
 		if got := r.Metadata["content_blocks"]; got != 2 {
 			t.Fatalf("content_blocks: %v", got)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute stalled")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for tool execute read_file result")
 	}
 }
 
@@ -175,12 +175,17 @@ func TestMCPTool_Execute_ImageContentDroppedWithPlaceholder(t *testing.T) {
 	tl := NewMCPTool(c, MCPToolDef{Name: "snapshot"}, permission.CategoryMCP)
 
 	resCh := make(chan tool.Result, 1)
+	errCh := make(chan error, 1)
 	go func() {
-		r, _ := tl.Execute(context.Background(), nil,
+		r, err := tl.Execute(context.Background(), nil,
 			tool.ExecContext{SessionID: "s1", Permission: pe, Bus: b})
+		if err != nil {
+			errCh <- err
+			return
+		}
 		resCh <- r
 	}()
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tool execute snapshot tools/call request")
 	srv.RespondOK(req.ID, CallToolResult{
 		Content: []ContentBlock{
 			{Type: "text", Text: "preface"},
@@ -188,6 +193,8 @@ func TestMCPTool_Execute_ImageContentDroppedWithPlaceholder(t *testing.T) {
 		},
 	})
 	select {
+	case err := <-errCh:
+		t.Fatalf("Execute: %v", err)
 	case r := <-resCh:
 		if !strings.Contains(r.Content, "preface") {
 			t.Fatalf("missing text: %q", r.Content)
@@ -195,8 +202,8 @@ func TestMCPTool_Execute_ImageContentDroppedWithPlaceholder(t *testing.T) {
 		if !strings.Contains(r.Content, "[image dropped") {
 			t.Fatalf("missing placeholder: %q", r.Content)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute stalled")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for tool execute snapshot result")
 	}
 }
 
@@ -220,7 +227,7 @@ func TestMCPTool_Execute_RPCErrorIsToolError(t *testing.T) {
 			tool.ExecContext{SessionID: "s1", Permission: pe, Bus: b})
 		errCh <- err
 	}()
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tool execute boom tools/call request")
 	srv.RespondErr(req.ID, -32602, "bad args")
 
 	select {
@@ -235,8 +242,8 @@ func TestMCPTool_Execute_RPCErrorIsToolError(t *testing.T) {
 		if te.Code != tool.CodeExecutionFailed {
 			t.Fatalf("Code: got %q want execution_failed", te.Code)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute stalled")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for tool execute boom error")
 	}
 }
 
@@ -263,14 +270,14 @@ func primeInit(t *testing.T, c *Client, srv *scriptedServer) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { _, err := c.Initialize(context.Background()); done <- err }()
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tool primeInit initialize request")
 	srv.RespondOK(req.ID, InitializeResult{
 		ProtocolVersion: ProtocolVersion,
 		ServerInfo:      ServerInfo{Name: "fake", Version: "0"},
 		Capabilities:    ServerCapabilities{Tools: &ToolsCapability{}},
 	})
-	<-srv.inbox // initialized notification
-	return <-done
+	_ = waitForServerRequest(t, srv, "tool primeInit initialized notification")
+	return waitForInitError(t, done, "tool primeInit Initialize completion")
 }
 
 // testEngine boots a real permission engine wired to a fresh bus.
@@ -315,7 +322,7 @@ func testEngine(t *testing.T, decide func(asked bus.PermissionAsked) bus.Permiss
 	}()
 	t.Cleanup(func() {
 		sub.Unsubscribe()
-		<-done
+		waitForDone(t, done, "permission responder shutdown")
 	})
 	return e, b
 }
