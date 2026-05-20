@@ -518,6 +518,12 @@ type App struct {
 	// Must not be set in production code.
 	testAgentClearQueueFn func(sessionID string) int
 
+	// testAgentIsSessionBusyFn, when non-nil, is called by agentSessionBusy
+	// instead of opts.Agent.IsSessionBusy.  Used exclusively by unit tests to
+	// simulate agent busy state without a concrete *agent.Agent.  Must not be
+	// set in production code.
+	testAgentIsSessionBusyFn func(sessionID string) bool
+
 	// testSendFn, when non-nil, is called by sendOutOfBand instead of
 	// program.Send.  Used exclusively by unit tests that cannot wire a
 	// *tea.Program.  Must not be set in production code.
@@ -666,6 +672,21 @@ func (a *App) sendOutOfBand(msg tea.Msg) {
 	}
 }
 
+// agentSessionBusy reports whether the agent considers the given session
+// currently active.  It is the canonical truth against which the UI
+// reconciles its own busy flag.  Uses testAgentIsSessionBusyFn when set
+// (unit tests); falls back to opts.Agent.IsSessionBusy in production;
+// returns false when no agent is configured.
+func (a *App) agentSessionBusy(sessionID string) bool {
+	if a.testAgentIsSessionBusyFn != nil {
+		return a.testAgentIsSessionBusyFn(sessionID)
+	}
+	if a.opts.Agent != nil {
+		return a.opts.Agent.IsSessionBusy(sessionID)
+	}
+	return false
+}
+
 // Handle delivers a single bus event synchronously, exactly as if it had
 // arrived via the listener. Used by tests to drive the App without goroutines.
 // Returns the same tea.Cmd Update would.
@@ -793,6 +814,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.workingVerb = components.RandomWorkingVerb()
 		return a, a.workingVerbTick()
+
+	case busyReconcileTickMsg:
+		return a, a.handleBusyReconcileTick()
 
 	case anim.StepMsg:
 		if a.compactionAnim != nil {
@@ -1230,4 +1254,70 @@ func (a *App) applyDeleteSession(id string) tea.Cmd {
 		}
 		return sessionsLoadedMsg{sessions: sessions}
 	}
+}
+
+// handleBusyReconcileTick reconciles UI busy state against the agent's
+// canonical activeRuns map.  It corrects two classes of desync that can
+// occur when bus events are dropped (e.g. during a system lock):
+//
+//   - Agent busy, UI idle  → force UI busy=true so the user sees Thinking…
+//     and new keypresses are not silently swallowed as queued sends.
+//   - Agent idle, UI busy  → force UI busy=false so the input becomes
+//     usable again (handles dropped TurnCompleted).
+//
+// The tick re-arms only while there is still something to watch; it
+// self-terminates to avoid running forever at idle.
+func (a *App) handleBusyReconcileTick() tea.Cmd {
+	sid := a.rootSessionID()
+	if sid == "" {
+		// No session yet; nothing to reconcile.  Do not re-arm.
+		return nil
+	}
+
+	agentBusy := a.agentSessionBusy(sid)
+	wasBusy := a.busy
+
+	var extraCmds []tea.Cmd
+
+	switch {
+	case agentBusy && !a.busy:
+		// Recovery case: agent is running but UI thinks it's idle.
+		// This happens when TurnStarted was dropped.
+		a.busy = true
+		if a.activeTurns == 0 {
+			a.activeTurns = 1
+		}
+		if a.workingVerb == "" {
+			a.workingVerb = components.RandomWorkingVerb()
+		}
+		suffix := ""
+		if a.queueCount > 0 {
+			suffix = fmt.Sprintf(" (%d queued)", a.queueCount)
+		}
+		a.input.SetBusy(true, suffix)
+		// Start the working-verb animation now that we've gone busy.
+		if !wasBusy {
+			extraCmds = append(extraCmds, a.workingVerbTick())
+		}
+
+	case !agentBusy && a.busy && a.activeTurns > 0 && len(a.queuedDrafts) == 0 && a.queueCount == 0:
+		// Cleanup case: agent is idle but UI still thinks it's busy.
+		// This happens when TurnCompleted was dropped.
+		// Do NOT flip busy off if there are queued sends or drafts still
+		// pending — a new TurnStarted is about to arrive.
+		a.busy = false
+		a.activeTurns = 0
+		a.workingVerb = ""
+		a.input.SetBusy(false, "")
+	}
+
+	// Re-arm only while there is something to watch.
+	if a.busy || a.queueCount > 0 || len(a.queuedDrafts) > 0 || a.inflightCancel != nil {
+		extraCmds = append(extraCmds, a.busyReconcileTick())
+	}
+
+	if len(extraCmds) == 0 {
+		return nil
+	}
+	return tea.Batch(extraCmds...)
 }

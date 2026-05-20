@@ -133,6 +133,17 @@ func TestSubagentStreamingAndCompletion(t *testing.T) {
 	if !st.Messages[0].IsStreaming {
 		t.Errorf("expected IsStreaming=true mid-stream")
 	}
+	if st.Messages[0].ModelName != "anthropic/claude-haiku-4-5" {
+		t.Errorf("streaming subagent assistant ModelName = %q", st.Messages[0].ModelName)
+	}
+
+	app.Handle(bus.MessageAppended{SessionID: "sub-1", Role: "assistant"})
+	if st.Messages[0].IsStreaming {
+		t.Errorf("expected subagent assistant message finalized")
+	}
+	if st.Messages[0].ModelName != "anthropic/claude-haiku-4-5" {
+		t.Errorf("final subagent assistant ModelName = %q", st.Messages[0].ModelName)
+	}
 
 	// Sub-session tool call.
 	app.Handle(bus.ToolCallRequested{SessionID: "sub-1", ToolName: "grep", Args: []byte(`{"pattern":"LICENSE"}`)})

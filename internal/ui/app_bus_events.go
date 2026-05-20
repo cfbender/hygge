@@ -60,7 +60,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 
 	case bus.MessageAppended:
 		if a.routeToSubagent(e.SessionID) {
-			a.flushSubagentStream(e.SessionID, e.Role)
+			a.flushSubagentStream(e.SessionID, e.Role, e.MessageID)
 			return nil
 		}
 		if !a.isForeground(e.SessionID) {
@@ -331,6 +331,12 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			}
 			a.input.SetBusy(true, suffix)
 		}
+		// If there are queued items but the UI thinks it's idle, the agent
+		// is running a turn the UI missed.  Schedule a reconcile tick so
+		// the busy state is recovered within ~1 second.
+		if e.Count > 0 && !a.busy {
+			return a.busyReconcileTick()
+		}
 
 	case bus.TodoChanged:
 		rootID := a.rootSessionID()
@@ -361,8 +367,12 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		a.input.SetBusy(true, suffix)
 		if !wasBusy {
-			return a.workingVerbTick()
+			// Also arm the reconcile ticker so any future desync during this
+			// turn is detected and corrected promptly.
+			return tea.Batch(a.workingVerbTick(), a.busyReconcileTick())
 		}
+		// Already busy: arm the reconcile ticker (cheap, idempotent).
+		return a.busyReconcileTick()
 
 	case bus.TurnCompleted:
 		// Gate on foreground session and send turn-complete notification.

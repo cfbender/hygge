@@ -134,9 +134,11 @@ func (a *App) buildSubagentStateFromSession(cs *session.Session, msgs []uiMessag
 	// instead of the parent session's active mode (which the generic
 	// hydration path stamps).
 	subColor := components.ColorForSubagentType(agentType)
+	model := cs.Model.Provider + "/" + cs.Model.Name
 	for i := range msgs {
 		if msgs[i].Role == components.RoleAssistant {
 			msgs[i].AgentType = agentType
+			msgs[i].ModelName = model
 			msgs[i].ModeColor = nil
 			msgs[i].SubagentColor = subColor
 		}
@@ -148,7 +150,7 @@ func (a *App) buildSubagentStateFromSession(cs *session.Session, msgs []uiMessag
 		ParentMessageID: cs.ParentToolUseID,
 		Type:            agentType,
 		Description:     description,
-		Model:           cs.Model.Provider + "/" + cs.Model.Name,
+		Model:           model,
 		StartedAt:       cs.CreatedAt,
 		EndedAt:         endedAt, // completed on resume
 		Cost:            cs.Totals.CostUSD,

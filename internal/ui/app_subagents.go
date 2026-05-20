@@ -512,14 +512,15 @@ func (a *App) appendSubagentDelta(subSessionID, text string) {
 		Raw:           text,
 		IsStreaming:   true,
 		AgentType:     st.Type,
+		ModelName:     st.Model,
 		SubagentColor: components.ColorForSubagentType(st.Type),
 	})
 }
 
 // flushSubagentStream marks the matching sub-agent's most recent
-// assistant message as final.  Mirrors flushAssistantStream; no
-// markdown rendering -- the nested view is plain text by design.
-func (a *App) flushSubagentStream(subSessionID, role string) {
+// assistant message as final. Mirrors flushAssistantStream for metadata, but
+// leaves markdown rendering to the nested message list view.
+func (a *App) flushSubagentStream(subSessionID, role, messageID string) {
 	if role != "assistant" {
 		return
 	}
@@ -536,6 +537,17 @@ func (a *App) flushSubagentStream(subSessionID, role string) {
 		return
 	}
 	last.IsStreaming = false
+	last.ModelName = st.Model
+	if a.opts.Store != nil && messageID != "" {
+		if msg, err := a.opts.Store.GetMessage(a.ctx, messageID); err == nil && msg != nil {
+			last.OutputTokens = msg.OutputTokens
+			last.CostUSD = msg.CostUSD
+			last.DurationMs = msg.DurationMs
+			if !msg.CreatedAt.IsZero() {
+				last.Timestamp = msg.CreatedAt
+			}
+		}
+	}
 }
 
 // appendSubagentTool appends a streaming tool entry to the matching
