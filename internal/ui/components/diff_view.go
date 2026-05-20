@@ -50,7 +50,7 @@ func (d DiffView) View() string {
 	lines, truncated := d.visibleLines(lines)
 	rows = diffRows(lines)
 	numW = diffLineNumberWidth(rows)
-	contentW := max(width-(numW*2)-5, 1)
+	contentW := max(width-(numW*2)-6, 1)
 
 	styles := diffStyles(d.Theme)
 	var out []string
