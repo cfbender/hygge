@@ -87,10 +87,22 @@ type diffPair struct {
 }
 
 // IsTruncated reports whether the diff exceeds its configured preview line limit.
+// For wide views (side-by-side), pair-preservation may extend the rendered
+// range to the end of the diff, in which case truncation is false even if the
+// raw line count exceeds MaxLines.
 func (d DiffView) IsTruncated() bool {
 	lines := strings.Split(strings.TrimRight(d.Raw, "\n"), "\n")
 	if len(lines) == 1 && lines[0] == "" {
 		return false
+	}
+	width := d.Width
+	if width <= 0 {
+		width = 80
+	}
+	if width >= sideBySideDiffMinWidth {
+		rows := diffRows(lines)
+		_, truncated := d.visibleSideBySidePairs(rows)
+		return truncated
 	}
 	_, truncated := d.visibleLines(lines)
 	return truncated
@@ -131,6 +143,11 @@ func (d DiffView) visibleSideBySidePairs(rows []diffRow) ([]diffPair, bool) {
 				end++
 			}
 		}
+	}
+	// After pair-preservation, if we reached the end of the diff there is
+	// nothing left to show — do not report truncation.
+	if end >= len(rows) {
+		return sideBySidePairs(rows), false
 	}
 	return sideBySidePairs(rows[:end]), true
 }
