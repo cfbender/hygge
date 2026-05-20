@@ -466,6 +466,146 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	}
 }
 
+// TestApplyScrollbackCap_BelowCapPassesThrough verifies that slices with
+// fewer messages than the cap are returned unchanged (no notice, no alloc).
+func TestApplyScrollbackCap_BelowCapPassesThrough(t *testing.T) {
+	t.Parallel()
+	msgs := make([]uiMessage, msgScrollbackCap)
+	for i := range msgs {
+		msgs[i] = uiMessage{Role: components.RoleAssistant, Raw: "msg"}
+	}
+	got := applyScrollbackCap(msgs)
+	if len(got) != len(msgs) {
+		t.Fatalf("len = %d, want %d (no trim at exactly cap)", len(got), len(msgs))
+	}
+	if &got[0] != &msgs[0] {
+		t.Fatal("expected the same slice to be returned (no copy) when at cap")
+	}
+}
+
+// TestApplyScrollbackCap_TrimsOldestAndPrependsNotice verifies that when
+// messages exceed the cap the oldest entries are hidden and a notice is added.
+func TestApplyScrollbackCap_TrimsOldestAndPrependsNotice(t *testing.T) {
+	t.Parallel()
+	total := msgScrollbackCap + 50
+	msgs := make([]uiMessage, total)
+	for i := range msgs {
+		msgs[i] = uiMessage{Role: components.RoleAssistant, Raw: fmt.Sprintf("msg-%d", i)}
+	}
+	got := applyScrollbackCap(msgs)
+
+	// Length: notice + msgScrollbackCap retained messages.
+	wantLen := msgScrollbackCap + 1
+	if len(got) != wantLen {
+		t.Fatalf("len = %d, want %d", len(got), wantLen)
+	}
+
+	// First entry must be the system notice.
+	if got[0].Role != components.RoleSystem {
+		t.Fatalf("got[0].Role = %q, want RoleSystem", got[0].Role)
+	}
+	if !strings.Contains(got[0].Raw, "50") {
+		t.Fatalf("notice should mention 50 hidden messages; got %q", got[0].Raw)
+	}
+	if !strings.Contains(got[0].Raw, fmt.Sprintf("%d", msgScrollbackCap)) {
+		t.Fatalf("notice should mention cap size %d; got %q", msgScrollbackCap, got[0].Raw)
+	}
+
+	// Most recent messages must be preserved in order.
+	lastVisible := got[len(got)-1]
+	if lastVisible.Raw != fmt.Sprintf("msg-%d", total-1) {
+		t.Fatalf("last visible message = %q, want msg-%d", lastVisible.Raw, total-1)
+	}
+	firstVisible := got[1]
+	if firstVisible.Raw != fmt.Sprintf("msg-%d", 50) {
+		t.Fatalf("first retained message = %q, want msg-50 (oldest after trim)", firstVisible.Raw)
+	}
+}
+
+// TestApplyScrollbackCap_StreamingTailIsNeverHidden verifies that a streaming
+// message is always present in the rendered slice even when the cap fires.
+func TestApplyScrollbackCap_StreamingTailIsNeverHidden(t *testing.T) {
+	t.Parallel()
+	msgs := make([]uiMessage, msgScrollbackCap+10)
+	for i := range msgs {
+		msgs[i] = uiMessage{Role: components.RoleAssistant, Raw: fmt.Sprintf("msg-%d", i)}
+	}
+	// Mark the last message as streaming.
+	msgs[len(msgs)-1].IsStreaming = true
+
+	got := applyScrollbackCap(msgs)
+
+	last := got[len(got)-1]
+	if !last.IsStreaming {
+		t.Fatal("streaming tail message was removed by scrollback cap")
+	}
+}
+
+// TestRenderChatContent_ScrollbackCapRendersNotice verifies that when the App
+// has more than msgScrollbackCap messages the rendered cache contains the
+// hidden-messages notice and does NOT contain the oldest messages.
+func TestRenderChatContent_ScrollbackCapRendersNotice(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.layout = app.generateLayout(120, 30)
+
+	total := msgScrollbackCap + 5
+	for i := range total {
+		app.messages = append(app.messages, uiMessage{
+			Role: components.RoleAssistant,
+			Raw:  fmt.Sprintf("unique-msg-%d", i),
+		})
+	}
+	app.invalidateMsgCache()
+	_ = app.renderChatContent()
+
+	// Inspect the full rendered cache (not the scrolled viewport view).
+	plain := ansiEscapeRE.ReplaceAllString(app.msgCache, "")
+
+	if !strings.Contains(plain, "older messages") {
+		t.Fatalf("expected scrollback cap notice in message cache; got:\n%s", plain)
+	}
+	// Oldest message (index 0) must not be rendered.
+	if strings.Contains(plain, "unique-msg-0") {
+		t.Fatalf("oldest message should be hidden by scrollback cap; got:\n%s", plain)
+	}
+	// Most recent message must be rendered.
+	last := fmt.Sprintf("unique-msg-%d", total-1)
+	if !strings.Contains(plain, last) {
+		t.Fatalf("most recent message %q missing from rendered content; got:\n%s", last, plain)
+	}
+	// The full message buffer must be preserved.
+	if len(app.messages) != total {
+		t.Fatalf("app.messages len = %d, want %d (storage must not be trimmed)", len(app.messages), total)
+	}
+}
+
+// TestRenderChatContent_CacheKeyUsesFullMessageCount verifies that the cache
+// is keyed on the total message count (not the capped count), so a new
+// message always triggers a rebuild even when the display cap is active.
+func TestRenderChatContent_CacheKeyUsesFullMessageCount(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.layout = app.generateLayout(120, 30)
+
+	for range msgScrollbackCap + 1 {
+		app.messages = append(app.messages, uiMessage{Role: components.RoleAssistant, Raw: "old"})
+	}
+	app.invalidateMsgCache()
+	_ = app.renderChatContent()
+	if app.msgCacheLen != len(app.messages) {
+		t.Fatalf("msgCacheLen = %d, want %d (full message count)", app.msgCacheLen, len(app.messages))
+	}
+
+	// Append one more message; the cache must rebuild.
+	app.messages = append(app.messages, uiMessage{Role: components.RoleUser, Raw: "new user turn"})
+	app.invalidateMsgCache()
+	_ = app.renderChatContent()
+	if !strings.Contains(ansiEscapeRE.ReplaceAllString(app.msgCache, ""), "new user turn") {
+		t.Fatal("new message not present in rebuilt cache after scrollback cap was active")
+	}
+}
+
 func TestAppendPersistedUserMessageKeepsRenderedMarkdown(t *testing.T) {
 	t.Parallel()
 	app, st, _ := newTestAppWithStore(t, nil)
