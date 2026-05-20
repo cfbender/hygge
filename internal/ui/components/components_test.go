@@ -1385,7 +1385,10 @@ func TestDiffView_NarrowWidthKeepsInlineFallback(t *testing.T) {
 
 func TestDiffView_TruncatedSideBySideKeepsReplacementPairs(t *testing.T) {
 	t.Parallel()
-	raw := "@@ -1,8 +1,8 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8"
+	// 1 meta + 8 del + 8 add + 4 body = 21 rows; MaxLines=12 cuts inside the del
+	// block. Pair-preservation extends to include all 8 adds (end=20 < 21), so
+	// the diff IS genuinely truncated — the trailing body lines are not shown.
+	raw := "@@ -1,12 +1,12 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8\n body 1\n body 2\n body 3\n body 4"
 	plain := stripANSI(DiffView{
 		Width:    96,
 		Theme:    theme.ShellTheme(),
@@ -1552,7 +1555,10 @@ func TestToolGroup_RendersBashDiffOutputAsDiff(t *testing.T) {
 
 func TestToolGroup_LongBashGitDiffCanExpand(t *testing.T) {
 	t.Parallel()
-	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,8 +1,8 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8"
+	// 3 meta + 1 hunk header + 8 del + 8 add + 4 body = 24 rows. MaxLines=12
+	// cuts inside the del block; pair-preservation extends to end=20 (end of
+	// adds), leaving 4 body rows hidden — the diff is genuinely truncated.
+	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,12 +1,12 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8\n body 1\n body 2\n body 3\n body 4"
 	ml := MessageList{
 		Width: 100,
 		Theme: theme.ShellTheme(),
@@ -1582,7 +1588,10 @@ func TestToolGroup_LongBashGitDiffCanExpand(t *testing.T) {
 
 func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 	t.Parallel()
-	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,8 +1,8 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8"
+	// 3 meta + 1 hunk header + 8 del + 8 add + 4 body = 24 rows. MaxLines=12
+	// cuts inside the del block; pair-preservation extends to end=20 (end of
+	// adds), leaving 4 body rows hidden — the diff is genuinely truncated.
+	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,12 +1,12 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8\n body 1\n body 2\n body 3\n body 4"
 	ml := MessageList{
 		Width: 100,
 		Theme: theme.ShellTheme(),
@@ -1610,5 +1619,86 @@ func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 	}
 	if strings.Contains(plainExpanded, "Click to expand") || strings.Contains(plainExpanded, "… diff truncated") {
 		t.Fatalf("expanded edit diff should not show collapsed affordances:\n%s", plainExpanded)
+	}
+}
+
+// TestDiffView_SideBySidePairPreservationToEndIsNotTruncated verifies that
+// when visibleSideBySidePairs extends `end` to keep a delete/add replacement
+// pair together and that extension reaches the last row of the diff, neither
+// the rendered view nor IsTruncated() reports truncation.
+//
+// Regression: before the fix, truncated was returned as true even when end >=
+// len(rows), causing "… diff truncated" to appear in the rendered output and
+// IsTruncated() to return true, which made MessageList show "Click to expand".
+func TestDiffView_SideBySidePairPreservationToEndIsNotTruncated(t *testing.T) {
+	t.Parallel()
+
+	// 1 hunk header + 6 del + 6 add = 13 rows; MaxLines=12 cuts inside the add
+	// block, pair-preservation extends end to 13 == len(rows).
+	raw := "@@ -1,6 +1,6 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6"
+	diff := DiffView{
+		Width:    96,
+		Theme:    theme.ShellTheme(),
+		Raw:      raw,
+		MaxLines: defaultDiffPreviewLines, // 12
+	}
+
+	if diff.IsTruncated() {
+		t.Fatal("IsTruncated() should be false when pair-preservation reaches the end of the diff")
+	}
+
+	plain := stripANSI(diff.View())
+	if strings.Contains(plain, "… diff truncated") {
+		t.Fatalf("rendered view should not contain truncation marker when all rows are shown:\n%s", plain)
+	}
+	// All replacement lines must be visible.
+	for _, want := range []string{"-old 6", "+new 6"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered view missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+// TestToolGroup_SideBySidePairPreservationToEndNoExpandHint verifies that when
+// the collapsed side-by-side diff renders the entire diff (via pair-preservation
+// reaching the end), the tool bubble does NOT show "Click to expand".
+func TestToolGroup_SideBySidePairPreservationToEndNoExpandHint(t *testing.T) {
+	t.Parallel()
+
+	// Same 13-row diff as the unit test above; at width=100 side-by-side is used.
+	raw := "@@ -1,6 +1,6 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6"
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{
+				Role:      RoleTool,
+				ToolName:  "edit",
+				ToolUseID: "edit-no-expand",
+				Target:    "a.go",
+				Raw:       raw,
+				Status:    ToolStatusCompleted,
+			},
+		},
+	}
+
+	collapsed, _, zones := ml.ViewWithHitZones()
+	plainCollapsed := stripANSI(collapsed)
+
+	// A hit zone may exist for the tool block (the infrastructure always
+	// registers edit/bash/write for click-to-expand), but the rendered output
+	// must not invite the user to click when the diff is fully visible.
+	_ = zones
+	if strings.Contains(plainCollapsed, "Click to expand") {
+		t.Fatalf("should not show 'Click to expand' when all diff rows are rendered:\n%s", plainCollapsed)
+	}
+	if strings.Contains(plainCollapsed, "… diff truncated") {
+		t.Fatalf("should not show truncation marker when all diff rows are rendered:\n%s", plainCollapsed)
+	}
+	// Both ends of the replacement must be visible.
+	for _, want := range []string{"-old 6", "+new 6"} {
+		if !strings.Contains(plainCollapsed, want) {
+			t.Fatalf("collapsed view missing %q:\n%s", want, plainCollapsed)
+		}
 	}
 }
