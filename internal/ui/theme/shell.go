@@ -25,7 +25,7 @@ func ShellTheme() *Theme {
 			// Diff hunk backgrounds.
 			// 256-color dark green/red; lipgloss degrades gracefully on 16-color
 			// terminals by mapping 256-color indices to the nearest ANSI slot.
-			AtomDiffAddBg: {kind: colorKindANSI, raw: "22"}, // dark green
+			AtomDiffAddBg: {kind: colorKindANSI, raw: "64"}, // muted olive green
 			AtomDiffDelBg: {kind: colorKindANSI, raw: "52"}, // dark red
 
 			// Status bar.
