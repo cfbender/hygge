@@ -16,6 +16,15 @@ func (a *App) workingVerbTick() tea.Cmd {
 	})
 }
 
+// busyReconcileTick schedules a single busyReconcileTickMsg one second from
+// now.  It is cheap and idempotent — duplicate in-flight ticks just cause
+// redundant (safe) checks.
+func (a *App) busyReconcileTick() tea.Cmd {
+	return tea.Tick(1*time.Second, func(time.Time) tea.Msg {
+		return busyReconcileTickMsg{}
+	})
+}
+
 // handleKey dispatches a key.  When the modal is open, only the modal
 // keybinds work; everything else is dropped.
 func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

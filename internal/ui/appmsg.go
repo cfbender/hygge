@@ -117,3 +117,11 @@ type clearCompactionToastMsg struct{}
 // dismissBannerMsg asks the App to hide the threshold suggestion banner for
 // the current crossing.  Fired when the user presses Ctrl+X.
 type dismissBannerMsg struct{}
+
+// busyReconcileTickMsg fires once per second while the App may be in a
+// busy-desync state.  The handler compares UI busy state against the agent's
+// canonical activeRuns and corrects any drift caused by dropped bus events
+// (e.g. a TurnCompleted or TurnStarted lost when the bus drops events during
+// a system lock with active streaming).  The tick re-arms itself only when
+// there is still something to watch; it self-terminates otherwise.
+type busyReconcileTickMsg struct{}

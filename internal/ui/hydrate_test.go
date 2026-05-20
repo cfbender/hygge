@@ -819,8 +819,11 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 
 	// Append a message to the child session.
 	if _, err := st.AppendMessage(ctx, child.ID, session.NewMessage{
-		Role:  session.RoleAssistant,
-		Parts: []session.Part{{Kind: session.PartText, Text: "I found it"}},
+		Role:         session.RoleAssistant,
+		Parts:        []session.Part{{Kind: session.PartText, Text: "I found it"}},
+		OutputTokens: 42,
+		CostUSD:      0.0012,
+		DurationMs:   1500,
 	}); err != nil {
 		t.Fatalf("AppendMessage child: %v", err)
 	}
@@ -879,6 +882,12 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 	}
 	if state.Messages[0].Raw != "I found it" {
 		t.Errorf("child message raw = %q, want 'I found it'", state.Messages[0].Raw)
+	}
+	if state.Messages[0].ModelName != "anthropic/test-model" {
+		t.Errorf("child message ModelName = %q, want anthropic/test-model", state.Messages[0].ModelName)
+	}
+	if state.Messages[0].OutputTokens != 42 || state.Messages[0].CostUSD != 0.0012 || state.Messages[0].DurationMs != 1500 {
+		t.Errorf("child message metadata = tokens %d cost %.4f duration %d", state.Messages[0].OutputTokens, state.Messages[0].CostUSD, state.Messages[0].DurationMs)
 	}
 }
 
