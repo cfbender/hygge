@@ -157,6 +157,41 @@ func TestSubagentTool_HappyPath(t *testing.T) {
 	}
 }
 
+func TestSubagentTool_ReturnsOnlyFinalTextToParent(t *testing.T) {
+	stub := &stubRunner{
+		types: standardTypes(),
+		res: SubagentResult{
+			SessionID: "sub_1",
+			FinalText: "final summary only",
+			Usage:     provider.Usage{InputTokens: 100, OutputTokens: 20},
+			CostUSD:   0.0123,
+			Duration:  150 * time.Millisecond,
+		},
+	}
+	tt := NewSubagentTool(stub)
+	ec := subagentExecCtx(t, func(_ bus.PermissionAsked) bus.PermissionReplied {
+		return bus.PermissionReplied{Decision: "allow", Scope: "once"}
+	})
+
+	args := mustJSON(t, map[string]any{
+		"subagent_type": "general",
+		"description":   "search for foo",
+		"prompt":        "Find every file named foo. This prompt must not be returned as transcript.",
+	})
+	res, err := tt.Execute(context.Background(), args, ec)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.Content != "final summary only" {
+		t.Fatalf("Content: %q", res.Content)
+	}
+	for _, key := range []string{"messages", "transcript", "prompt", "history"} {
+		if _, ok := res.Metadata[key]; ok {
+			t.Fatalf("metadata must not include %q: %#v", key, res.Metadata)
+		}
+	}
+}
+
 func TestSubagentTool_EmptyFinalTextHasPlaceholder(t *testing.T) {
 	stub := &stubRunner{
 		types: standardTypes(),
