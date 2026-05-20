@@ -924,6 +924,63 @@ func TestSlashCommandNewStartsFreshSessionAndClearAliases(t *testing.T) {
 	}
 }
 
+// TestSlashCommandNewCancelsInflightSend verifies that /new (and the underlying
+// applySwitchSession("")) calls inflightCancel so an in-flight send goroutine
+// is stopped before the session state is cleared.  Without this, streaming
+// events from the old session continue to arrive after the UI has moved to a
+// new empty session.
+func TestSlashCommandNewCancelsInflightSend(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	// Simulate an in-flight send by wiring a cancel func.
+	cancelled := false
+	app.inflightCancel = func() { cancelled = true }
+
+	// Invoke /new — this calls applySwitchSession("") internally.
+	typeInto(app, "/new")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !cancelled {
+		t.Error("inflightCancel was not called when /new cleared the session")
+	}
+	if app.inflightCancel != nil {
+		t.Error("inflightCancel should be nil after applySwitchSession clears it")
+	}
+	if app.opts.SessionID != "" {
+		t.Errorf("SessionID = %q, want empty after /new", app.opts.SessionID)
+	}
+	if len(app.messages) != 0 {
+		t.Errorf("messages not cleared after /new, got %d messages", len(app.messages))
+	}
+}
+
+// TestApplySwitchSessionCancelsInflightSend verifies the same cancel behaviour
+// when switching to a real session id (not just the /new empty case), so that
+// switching away from a busy session also terminates the old stream.
+func TestApplySwitchSessionCancelsInflightSend(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.opts.SessionID = "old-session"
+	app.resetForeground("old-session")
+
+	cancelled := false
+	app.inflightCancel = func() { cancelled = true }
+
+	// Switch to a different session id directly.
+	app.applySwitchSession("new-session")
+
+	if !cancelled {
+		t.Error("inflightCancel was not called when switching sessions")
+	}
+	if app.inflightCancel != nil {
+		t.Error("inflightCancel should be nil after applySwitchSession")
+	}
+	if app.opts.SessionID != "new-session" {
+		t.Errorf("SessionID = %q, want new-session", app.opts.SessionID)
+	}
+}
+
 func TestSlashCommandSessionsOpensModal(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

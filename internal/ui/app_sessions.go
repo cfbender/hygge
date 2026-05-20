@@ -210,6 +210,13 @@ func (a *App) applyMemoryModalMsg(msg components.MemoryModalMsg) tea.Cmd {
 // stack to [id] via resetForeground so the breadcrumb is cleared.  Use
 // Ctrl+G to follow into a sub-session without losing the current root.
 func (a *App) applySwitchSession(id string) tea.Cmd {
+	// Cancel any in-flight send so the old session's stream does not
+	// deliver messages into the newly-cleared or switched session.
+	if a.inflightCancel != nil {
+		a.inflightCancel()
+		a.inflightCancel = nil
+	}
+
 	// When the picker was opened on start before any session was bound,
 	// start the bus bridge now that we have a concrete session to track.
 	bridgeNeeded := a.opts.SessionID == "" && a.opts.OpenSessionsModalOnStart && id != ""
