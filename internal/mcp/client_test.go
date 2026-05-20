@@ -29,6 +29,9 @@ type fakeTransport struct {
 
 	clientRead *bufio.Reader
 
+	clientWriteMu sync.Mutex
+	serverWriteMu sync.Mutex
+
 	started atomic.Bool
 	closed  atomic.Bool
 
@@ -62,6 +65,8 @@ func (f *fakeTransport) Send(_ context.Context, body []byte) error {
 	if f.closed.Load() {
 		return ErrClosed
 	}
+	f.clientWriteMu.Lock()
+	defer f.clientWriteMu.Unlock()
 	_, err := WriteFrame(f.clientW, body)
 	return err
 }
@@ -96,6 +101,8 @@ func (f *fakeTransport) ServerLabel() string { return f.label }
 // writeServerFrame sends one frame from the server side to the Client.
 func (f *fakeTransport) writeServerFrame(t *testing.T, body []byte) {
 	t.Helper()
+	f.serverWriteMu.Lock()
+	defer f.serverWriteMu.Unlock()
 	if _, err := WriteFrame(f.serverW, body); err != nil {
 		t.Fatalf("writeServerFrame: %v", err)
 	}
@@ -186,6 +193,39 @@ func (s *scriptedServer) RespondErr(id json.RawMessage, code int, msg string) {
 	s.tr.writeServerFrame(s.t, body)
 }
 
+const testWaitTimeout = 2 * time.Second
+
+func waitForServerRequest(t *testing.T, srv *scriptedServer, label string) RPCRequest {
+	t.Helper()
+	select {
+	case req := <-srv.inbox:
+		return req
+	case <-time.After(testWaitTimeout):
+		t.Fatalf("timed out waiting for %s", label)
+		return RPCRequest{}
+	}
+}
+
+func waitForDone(t *testing.T, done <-chan struct{}, label string) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(testWaitTimeout):
+		t.Fatalf("timed out waiting for %s", label)
+	}
+}
+
+func waitForInitError(t *testing.T, done <-chan error, label string) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(testWaitTimeout):
+		t.Fatalf("timed out waiting for %s", label)
+		return nil
+	}
+}
+
 // --- Tests ------------------------------------------------------------
 
 func TestClient_InitializeAndInitialized(t *testing.T) {
@@ -214,7 +254,7 @@ func TestClient_InitializeAndInitialized(t *testing.T) {
 	}()
 
 	// Expect initialize.
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "initialize request")
 	if req.Method != MethodInitialize {
 		t.Fatalf("expected %s, got %s", MethodInitialize, req.Method)
 	}
@@ -225,7 +265,7 @@ func TestClient_InitializeAndInitialized(t *testing.T) {
 	})
 
 	// Expect initialized notification.
-	note := <-srv.inbox
+	note := waitForServerRequest(t, srv, "initialized notification")
 	if note.Method != MethodInitialized {
 		t.Fatalf("expected %s, got %s", MethodInitialized, note.Method)
 	}
@@ -240,8 +280,8 @@ func TestClient_InitializeAndInitialized(t *testing.T) {
 		if got.ServerInfo.Name != "fake-server" {
 			t.Fatalf("ServerInfo.Name: got %q want %q", got.ServerInfo.Name, "fake-server")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Initialize never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for Initialize result")
 	}
 }
 
@@ -261,7 +301,7 @@ func TestClient_InitializeTimeout(t *testing.T) {
 	go func() { _, e := c.Initialize(context.Background()); err <- e }()
 
 	// Drain the request without responding.
-	<-srv.inbox
+	_ = waitForServerRequest(t, srv, "initialize timeout request")
 
 	select {
 	case e := <-err:
@@ -271,8 +311,8 @@ func TestClient_InitializeTimeout(t *testing.T) {
 		if !strings.Contains(e.Error(), "context deadline exceeded") {
 			t.Fatalf("unexpected error: %v", e)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Initialize did not time out")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for Initialize timeout error")
 	}
 }
 
@@ -294,7 +334,7 @@ func TestClient_ListTools(t *testing.T) {
 		toolsCh <- tools
 	}()
 
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tools/list request")
 	if req.Method != MethodToolsList {
 		t.Fatalf("expected %s got %s", MethodToolsList, req.Method)
 	}
@@ -312,8 +352,8 @@ func TestClient_ListTools(t *testing.T) {
 		if len(tools) != 2 || tools[0].Name != "create_issue" {
 			t.Fatalf("unexpected tools: %+v", tools)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ListTools never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for ListTools result")
 	}
 }
 
@@ -334,7 +374,7 @@ func TestClient_CallTool_TextResult(t *testing.T) {
 		resCh <- r
 	}()
 
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tools/call create_issue request")
 	if req.Method != MethodToolsCall {
 		t.Fatalf("expected %s got %s", MethodToolsCall, req.Method)
 	}
@@ -349,8 +389,8 @@ func TestClient_CallTool_TextResult(t *testing.T) {
 		if r.IsError || len(r.Content) != 1 || r.Content[0].Text != "Created issue #42" {
 			t.Fatalf("unexpected result: %+v", r)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("CallTool never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for CallTool result")
 	}
 }
 
@@ -370,7 +410,7 @@ func TestClient_CallTool_IsErrorTrueIsNotGoError(t *testing.T) {
 		resCh <- r
 	}()
 
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tools/call x IsError request")
 	srv.RespondOK(req.ID, CallToolResult{
 		IsError: true,
 		Content: []ContentBlock{{Type: "text", Text: "missing required arg"}},
@@ -381,8 +421,8 @@ func TestClient_CallTool_IsErrorTrueIsNotGoError(t *testing.T) {
 		if !r.IsError {
 			t.Fatalf("expected IsError=true, got %+v", r)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("CallTool never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for CallTool result")
 	}
 }
 
@@ -398,7 +438,7 @@ func TestClient_CallTool_RPCErrorIsGoError(t *testing.T) {
 		errCh <- err
 	}()
 
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "tools/call x RPC error request")
 	srv.RespondErr(req.ID, -32602, "Invalid params")
 
 	select {
@@ -413,8 +453,8 @@ func TestClient_CallTool_RPCErrorIsGoError(t *testing.T) {
 		if rpcErr.Code != -32602 {
 			t.Fatalf("RPCError.Code = %d, want -32602", rpcErr.Code)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("CallTool never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for CallTool result")
 	}
 }
 
@@ -445,8 +485,8 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 
 	// Server responds to each inbound request with the same i it
 	// received (round-trip identity).
-	for range n {
-		req := <-srv.inbox
+	for i := range n {
+		req := waitForServerRequest(t, srv, "concurrent tools/call request "+itoa(i))
 		// Echo the arguments back in the result so we can verify.
 		var p CallToolParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -464,8 +504,8 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 			got[r] = true
 		case e := <-errs:
 			t.Fatalf("CallTool: %v", e)
-		case <-time.After(2 * time.Second):
-			t.Fatal("concurrent CallTool stalled")
+		case <-time.After(testWaitTimeout):
+			t.Fatal("timed out waiting for concurrent CallTool result")
 		}
 	}
 	if len(got) != n {
@@ -485,7 +525,7 @@ func TestClient_TransportEOFMidCall(t *testing.T) {
 	}()
 
 	// Drain the request, then yank the transport.
-	<-srv.inbox
+	_ = waitForServerRequest(t, srv, "slow tools/call before EOF")
 	srv.Stop()
 
 	select {
@@ -493,8 +533,8 @@ func TestClient_TransportEOFMidCall(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error after EOF; got nil")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("pending call never woke after EOF")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for pending call to wake after EOF")
 	}
 }
 
@@ -506,7 +546,7 @@ func TestClient_Ping(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- c.Ping(context.Background()) }()
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "ping request")
 	if req.Method != MethodPing {
 		t.Fatalf("expected %s got %s", MethodPing, req.Method)
 	}
@@ -516,8 +556,8 @@ func TestClient_Ping(t *testing.T) {
 		if e != nil {
 			t.Fatalf("Ping: %v", e)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Ping never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for Ping result")
 	}
 }
 
@@ -561,7 +601,7 @@ func TestClient_CtxCancellationDrainsLateResponse(t *testing.T) {
 	}()
 
 	// Drain the inbound request.
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "slow tools/call before cancellation")
 	// Cancel before responding.
 	cancel()
 
@@ -570,8 +610,8 @@ func TestClient_CtxCancellationDrainsLateResponse(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected context.Canceled, got %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("cancelled call never returned")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for cancelled CallTool result")
 	}
 
 	// Now respond late: this should be silently discarded.
@@ -587,15 +627,15 @@ func TestClient_CtxCancellationDrainsLateResponse(t *testing.T) {
 		}
 		resCh <- r
 	}()
-	req2 := <-srv.inbox
+	req2 := waitForServerRequest(t, srv, "follow-up tools/call request")
 	srv.RespondOK(req2.ID, CallToolResult{Content: []ContentBlock{{Type: "text", Text: "ok"}}})
 	select {
 	case r := <-resCh:
 		if len(r.Content) == 0 || r.Content[0].Text != "ok" {
 			t.Fatalf("unexpected result: %+v", r)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("follow-up call stalled")
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for follow-up CallTool result")
 	}
 }
 
@@ -615,15 +655,15 @@ func initOK(t *testing.T) (*Client, *scriptedServer, *fakeTransport) {
 	done := make(chan error, 1)
 	go func() { _, err := c.Initialize(context.Background()); done <- err }()
 	// initialize
-	req := <-srv.inbox
+	req := waitForServerRequest(t, srv, "initOK initialize request")
 	srv.RespondOK(req.ID, InitializeResult{
 		ProtocolVersion: ProtocolVersion,
 		ServerInfo:      ServerInfo{Name: "fake", Version: "1.0"},
 		Capabilities:    ServerCapabilities{Tools: &ToolsCapability{}},
 	})
 	// initialized notification
-	<-srv.inbox
-	if err := <-done; err != nil {
+	_ = waitForServerRequest(t, srv, "initOK initialized notification")
+	if err := waitForInitError(t, done, "initOK Initialize completion"); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	return c, srv, tr

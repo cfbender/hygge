@@ -18,8 +18,8 @@ func TestConfigExplainNoKey(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "model.provider") {
-		t.Errorf("output missing model.provider line:\n%s", got)
+	if strings.Contains(got, "model.provider") {
+		t.Errorf("output should not include synthesized model.provider provenance:\n%s", got)
 	}
 	if !strings.Contains(got, "permission.shell") {
 		t.Errorf("output missing permission.shell line:\n%s", got)
@@ -33,12 +33,12 @@ func TestConfigExplainKey(t *testing.T) {
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
-	root.SetArgs([]string{"config", "explain", "model.provider"})
+	root.SetArgs([]string{"config", "explain", "permission.shell"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "model.provider") {
+	if !strings.Contains(got, "permission.shell") {
 		t.Errorf("output missing key:\n%s", got)
 	}
 	if !strings.Contains(got, "set by:") {
