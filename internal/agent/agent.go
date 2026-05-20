@@ -152,6 +152,14 @@ type Options struct {
 	// 0 disables the suggestion.  Default 80 (supplied by cmd/hygge/cli
 	// from config.Compaction.ThresholdPct).
 	CompactionThresholdPct float64
+
+	// TurnContextDecorator, when non-nil, is called at the start of each
+	// Fantasy turn to decorate the context before it is passed to
+	// fantasy.Agent.Stream.  Callers use this to inject per-turn values
+	// (e.g. session IDs for HTTP transport middleware) without coupling the
+	// agent package to any specific provider package.  The returned context
+	// replaces the one passed in for the duration of the turn.
+	TurnContextDecorator func(ctx context.Context, sessionID string) context.Context
 }
 
 // MemoryLoader provides non-session memories in prompt-injection order.

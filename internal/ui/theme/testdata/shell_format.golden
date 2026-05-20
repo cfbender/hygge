@@ -7,8 +7,8 @@ theme: shell
   error            = ansi:1
   code.bg          = (default)
   code.fg          = ansi:7
-  diff.add.bg      = ansi:64
-  diff.del.bg      = ansi:52
+  diff.add.bg      = (default)
+  diff.del.bg      = (default)
   statusbar.bg     = ansi:8
   statusbar.fg     = ansi:15
   modal.bg         = (default)

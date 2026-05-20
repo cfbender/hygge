@@ -20,6 +20,7 @@ import (
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/provider"
+	orpkg "github.com/cfbender/hygge/internal/provider/openrouter"
 )
 
 // ProviderResolution is the Phase 2 bridge result for constructing a
@@ -30,9 +31,26 @@ type ProviderResolution struct {
 	Metadata provider.Model
 }
 
+// ProviderBuildOptions carries optional per-build overrides for
+// [ResolveProviderModel].  The zero value applies no extra configuration.
+type ProviderBuildOptions struct {
+	// OpenRouterSessionCache, when non-nil, wires an HTTP transport into the
+	// OpenRouter provider that injects x-session-id on every chat request.
+	// The session ID is read from the request context (set via
+	// [orpkg.ContextWithSessionID]); the cache resolves it to the root
+	// session ID before injection.  Only applied when providerID == "openrouter".
+	OpenRouterSessionCache *orpkg.RootIDCache
+}
+
 // ResolveProviderModel builds a fantasy provider/model pair for the given
 // hygge provider id and model id.
 func ResolveProviderModel(ctx context.Context, providerID, modelID string, opts map[string]any, cat *catalog.Catalog) (ProviderResolution, error) {
+	return ResolveProviderModelWith(ctx, providerID, modelID, opts, cat, ProviderBuildOptions{})
+}
+
+// ResolveProviderModelWith is like [ResolveProviderModel] but accepts
+// optional per-build configuration via [ProviderBuildOptions].
+func ResolveProviderModelWith(ctx context.Context, providerID, modelID string, opts map[string]any, cat *catalog.Catalog, buildOpts ProviderBuildOptions) (ProviderResolution, error) {
 	providerID = strings.ToLower(strings.TrimSpace(providerID))
 	modelID = strings.TrimSpace(modelID)
 	if providerID == "" {
@@ -50,7 +68,7 @@ func ResolveProviderModel(ctx context.Context, providerID, modelID string, opts 
 		return ProviderResolution{}, fmt.Errorf("%w: missing api_key for provider %q", provider.ErrAuth, providerID)
 	}
 
-	fp, err := newFantasyProvider(providerID, apiKey, opts)
+	fp, err := newFantasyProvider(providerID, apiKey, opts, buildOpts)
 	if err != nil {
 		return ProviderResolution{}, err
 	}
@@ -66,7 +84,7 @@ func ResolveProviderModel(ctx context.Context, providerID, modelID string, opts 
 	}, nil
 }
 
-func newFantasyProvider(providerID, apiKey string, opts map[string]any) (fantasy.Provider, error) {
+func newFantasyProvider(providerID, apiKey string, opts map[string]any, buildOpts ProviderBuildOptions) (fantasy.Provider, error) {
 	baseURL := stringOpt(opts, "base_url")
 	headers := headersOpt(opts)
 	providerID = strings.ToLower(strings.TrimSpace(providerID))
@@ -115,14 +133,38 @@ func newFantasyProvider(providerID, apiKey string, opts map[string]any) (fantasy
 		if len(headers) > 0 {
 			fopts = append(fopts, fopenrouter.WithHeaders(headers))
 		}
+		// Wire the x-session-id transport when a session cache is provided.
+		// The transport reads the session ID from the request context
+		// (injected by the agent turn runner via orpkg.ContextWithSessionID)
+		// and resolves it to the root session ID before setting the header.
+		if buildOpts.OpenRouterSessionCache != nil {
+			fopts = append(fopts, fopenrouter.WithHTTPClient(&http.Client{
+				Transport: &orpkg.SessionHeaderTransport{
+					Inner: http.DefaultTransport,
+					Cache: buildOpts.OpenRouterSessionCache,
+				},
+			}))
+		}
 		if baseURL != "" {
-			// openrouter provider defaults base URL; override through compat provider when explicit base_url is requested.
-			return fopenaicompat.New(
+			// openrouter provider defaults its base URL; override through the
+			// compat provider when an explicit base_url is requested.
+			// fopenaicompat supports WithHTTPClient, so the session-header
+			// transport is wired here too when a cache is provided.
+			compatOpts := []fopenaicompat.Option{
 				fopenaicompat.WithName("openrouter"),
 				fopenaicompat.WithAPIKey(apiKey),
 				fopenaicompat.WithBaseURL(baseURL),
 				fopenaicompat.WithHeaders(headers),
-			)
+			}
+			if buildOpts.OpenRouterSessionCache != nil {
+				compatOpts = append(compatOpts, fopenaicompat.WithHTTPClient(&http.Client{
+					Transport: &orpkg.SessionHeaderTransport{
+						Inner: http.DefaultTransport,
+						Cache: buildOpts.OpenRouterSessionCache,
+					},
+				}))
+			}
+			return fopenaicompat.New(compatOpts...)
 		}
 		return fopenrouter.New(fopts...)
 	default:

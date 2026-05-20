@@ -483,6 +483,19 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	}
 	slog.Debug("bootstrap phase", "phase", "store_open", "elapsed_ms", time.Since(t0).Milliseconds())
 
+	// Construct the OpenRouter session-ID cache.  The cache is passed to
+	// ResolveProviderModelWith so the OpenRouter HTTP transport injects
+	// x-session-id on every chat request.  Resolving the root session ID
+	// requires a store look-up, so the cache is built here where stOpen is
+	// available and threaded into every fantasy provider construction that
+	// may target OpenRouter (main model, title model, subagent model
+	// resolver).  For non-OpenRouter providers the cache is unused.
+	orBuildOpts := llm.ProviderBuildOptions{
+		OpenRouterSessionCache: openrouterShim.NewRootIDCache(func(ctx context.Context, sessionID string) (string, error) {
+			return session.ResolveRootSessionID(ctx, stOpen, sessionID)
+		}),
+	}
+
 	// Build the provider.  If a factory was injected use it directly;
 	// otherwise look up the registered factory by config name.  Before
 	// either path runs, we resolve credentials: precedence is
@@ -549,7 +562,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	} else if opts.NoConfigAuth {
 		fantasyResolved = llm.ProviderResolution{}
 	} else {
-		fantasyResolved, err = llm.ResolveProviderModel(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc)
+		fantasyResolved, err = llm.ResolveProviderModelWith(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc, orBuildOpts)
 		if err != nil {
 			// Missing credentials are non-fatal at bootstrap so CLI
 			// inspection commands work without an API key.  The TUI
@@ -572,7 +585,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		if smallProvider == "" {
 			smallProvider = cfg.Model.Provider
 		}
-		resolved, err := llm.ResolveProviderModel(ctx, smallProvider, cfg.Model.SmallModel, modelOpts, catSrc)
+		resolved, err := llm.ResolveProviderModelWith(ctx, smallProvider, cfg.Model.SmallModel, modelOpts, catSrc, orBuildOpts)
 		if err != nil {
 			slog.Warn("cli: failed to resolve small title model; using active model", "provider", smallProvider, "model", cfg.Model.SmallModel, "err", err)
 		} else {
@@ -680,7 +693,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Pwd:                  opts.Pwd,
 		ContextWindow:        contextWindow,
 		ProviderResolver:     buildProviderResolver(cfg, stateOpts, prv),
-		FantasyModelResolver: buildFantasyModelResolver(cfg, stateOpts, catSrc, fantasyResolved.Model),
+		FantasyModelResolver: buildFantasyModelResolver(cfg, stateOpts, catSrc, fantasyResolved.Model, orBuildOpts),
 		Now:                  opts.Now,
 	})
 	if err != nil {
@@ -800,6 +813,12 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		MemoryLoader:      memoryStore,
 		Reasoning:         resolveReasoning(cfg, opts.ReasoningOverride),
 		Hooks:             hookReg,
+		// TurnContextDecorator injects the current session ID into the
+		// request context so the OpenRouter HTTP transport can read it and
+		// set x-session-id on every chat request.  The decorator is always
+		// wired; it is a no-op for non-OpenRouter providers because their
+		// transports do not consult the context value.
+		TurnContextDecorator: openrouterShim.ContextWithSessionID,
 	})
 	if err != nil {
 		permEngine.Close()
@@ -1177,13 +1196,13 @@ func buildProviderResolver(cfg *config.Config, stateOpts state.LoadOptions, pare
 	}
 }
 
-func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, catSrc *catalog.Catalog, _ fantasy.LanguageModel) subagent.FantasyModelResolver {
+func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, catSrc *catalog.Catalog, _ fantasy.LanguageModel, buildOpts llm.ProviderBuildOptions) subagent.FantasyModelResolver {
 	return func(ctx context.Context, providerName, modelID string) (fantasy.LanguageModel, error) {
 		opts, err := resolveProviderOptionsFor(providerName, cfg, stateOpts)
 		if err != nil {
 			return nil, err
 		}
-		resolved, err := llm.ResolveProviderModel(ctx, providerName, modelID, opts, catSrc)
+		resolved, err := llm.ResolveProviderModelWith(ctx, providerName, modelID, opts, catSrc, buildOpts)
 		if err != nil {
 			return nil, err
 		}
