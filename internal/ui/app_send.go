@@ -179,6 +179,9 @@ func (a *App) appendPersistedUserMessage(messageID string) {
 		return
 	}
 	entry := entries[0]
+	if entry.Raw != "" {
+		entry.FinalMarkdown = renderMarkdown(a.ensureRenderer(), entry.Raw)
+	}
 	if a.optimisticUserPending && len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == components.RoleUser {
 		a.messages[len(a.messages)-1] = entry
 	} else {

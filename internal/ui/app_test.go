@@ -466,6 +466,43 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	}
 }
 
+func TestAppendPersistedUserMessageKeepsRenderedMarkdown(t *testing.T) {
+	t.Parallel()
+	app, st, _ := newTestAppWithStore(t, nil)
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	text := "show `inline code` in the prompt"
+	app.messages = []uiMessage{{
+		Role:          components.RoleUser,
+		Raw:           text,
+		FinalMarkdown: renderMarkdown(app.ensureRenderer(), text),
+		Timestamp:     app.opts.Now(),
+	}}
+	app.optimisticUserPending = true
+	before := app.renderChatContent()
+
+	msg, err := st.AppendMessage(context.Background(), app.opts.SessionID, session.NewMessage{
+		Role:  session.RoleUser,
+		Parts: []session.Part{{Kind: session.PartText, Text: text}},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	app.Handle(bus.MessageAppended{SessionID: app.opts.SessionID, MessageID: msg.ID, Role: string(session.RoleUser)})
+
+	if len(app.messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(app.messages))
+	}
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("persisted user replacement should keep FinalMarkdown populated")
+	}
+	after := app.renderChatContent()
+	if after != before {
+		t.Fatalf("user bubble changed after persisted replacement\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
 func TestFlushAssistantStreamRestoresPersistedTextWhenDeltasWereDropped(t *testing.T) {
 	t.Parallel()
 	app, st, _ := newTestAppWithStore(t, nil)
