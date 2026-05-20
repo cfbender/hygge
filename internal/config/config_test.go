@@ -78,8 +78,10 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 		t.Errorf("theme.name: got %q, want %q", cfg.Theme.Name, "shell")
 	}
 
-	// Provenance for every key should point to <defaults>.
-	for _, key := range []string{"model.provider", "model.name", "permission.shell", "theme.name"} {
+	// Provenance for permission and theme keys should point to <defaults>.
+	// model.provider and model.name are no longer in the defaults map —
+	// they come from synthesized modes or explicit [model] config.
+	for _, key := range []string{"permission.shell", "theme.name"} {
 		sources, ok := prov[key]
 		if !ok {
 			t.Errorf("no provenance for %q", key)
@@ -128,14 +130,16 @@ shell = "deny"
 		t.Errorf("permission.shell: got %q, want deny", cfg.Permission.Shell)
 	}
 
-	// Provenance for model.provider should include both defaults and user config.
+	// model.provider is no longer in defaults; provenance should show exactly
+	// the user config as the sole (and winning) source.
 	sources := prov["model.provider"]
-	if len(sources) < 2 {
-		t.Errorf("expected at least 2 sources for model.provider, got %v", sources)
-	}
-	last := sources[len(sources)-1]
-	if !strings.HasSuffix(last.File, "config.toml") {
-		t.Errorf("winning source for model.provider should be user config, got %q", last.File)
+	if len(sources) == 0 {
+		t.Errorf("no provenance for model.provider")
+	} else {
+		last := sources[len(sources)-1]
+		if !strings.HasSuffix(last.File, "config.toml") {
+			t.Errorf("winning source for model.provider should be user config, got %q", last.File)
+		}
 	}
 }
 
@@ -355,10 +359,11 @@ shell = "ask"
 		t.Errorf("model.provider: got %q, want openai", cfg.Model.Provider)
 	}
 
-	// provenance for model.name should have at least 3 entries (defaults, root, pkg-a)
+	// provenance for model.name should have at least 2 entries (root, pkg-a);
+	// model.name is no longer in defaults so the count starts at 2, not 3.
 	sources := prov["model.name"]
-	if len(sources) < 3 {
-		t.Errorf("model.name provenance: expected >=3, got %d: %v", len(sources), sources)
+	if len(sources) < 2 {
+		t.Errorf("model.name provenance: expected >=2, got %d: %v", len(sources), sources)
 	}
 	last := sources[len(sources)-1]
 	if !strings.Contains(last.File, "pkg-a") {
@@ -550,15 +555,26 @@ api_key = "$UNSET_VAR"
 func TestLoad_TypeMismatchError(t *testing.T) {
 	tmp := t.TempDir()
 
+	// A walk-up config sets model.name to a string; the user config then
+	// sets it to an integer — that should be a type mismatch.
 	cfgDir := filepath.Join(tmp, ".config", "hygge")
-	// User config sets model.name to an integer — type mismatch with defaults (string).
 	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
 [model]
 provider = "anthropic"
+name = "claude-sonnet-4-5"
+`)
+
+	// Walk-up config (higher precedence) sets model.name to an integer.
+	writeTOML(t, filepath.Join(tmp, ".hygge", "config.toml"), `
+[model]
 name = 12345
 `)
 
-	opts := hermeticOpts(t, tmp, nil)
+	opts := LoadOptions{
+		HomeDir:   tmp,
+		Pwd:       tmp,
+		EnvLookup: makeEnvLookup(nil),
+	}
 	_, _, err := Load(context.Background(), opts)
 	if err == nil {
 		t.Fatal("expected type mismatch error")
@@ -1197,5 +1213,185 @@ func TestCatalogConfig_RefreshIntervalDuration_DirectParsing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Modes-only config: [model] not required (T-modes-no-model)
+// ---------------------------------------------------------------------------
+
+// TestLoad_ModesOnlyConfig_NoModelSection verifies that a config with
+// [[modes]] entries (each with explicit provider and model) is valid even when
+// there is no [model] section at all.  The first mode becomes the default and
+// cfg.Model.Provider/Name are derived from it.
+func TestLoad_ModesOnlyConfig_NoModelSection(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[[modes]]
+name = "smart"
+provider = "openrouter"
+model = "anthropic/claude-opus-4-5"
+description = "Deep reasoning mode"
+
+[[modes]]
+name = "rush"
+provider = "openrouter"
+model = "anthropic/claude-haiku-4-5"
+`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// First mode is the default.
+	if cfg.Model.Provider != "openrouter" {
+		t.Errorf("Model.Provider: got %q, want openrouter", cfg.Model.Provider)
+	}
+	if cfg.Model.Name != "anthropic/claude-opus-4-5" {
+		t.Errorf("Model.Name: got %q, want anthropic/claude-opus-4-5", cfg.Model.Name)
+	}
+	if len(cfg.Modes) != 2 {
+		t.Fatalf("Modes len: got %d, want 2", len(cfg.Modes))
+	}
+	if cfg.Modes[0].Name != "smart" {
+		t.Errorf("Modes[0].Name: got %q, want smart", cfg.Modes[0].Name)
+	}
+	if cfg.Modes[0].Description != "Deep reasoning mode" {
+		t.Errorf("Modes[0].Description: got %q, want 'Deep reasoning mode'", cfg.Modes[0].Description)
+	}
+	if cfg.Modes[1].Name != "rush" {
+		t.Errorf("Modes[1].Name: got %q, want rush", cfg.Modes[1].Name)
+	}
+}
+
+// TestLoad_NoModelNoModes_SynthesizesGeneralMode verifies that when neither a
+// [model] section nor [[modes]] are present, a built-in "General" mode is
+// synthesized from hard-coded defaults.
+func TestLoad_NoModelNoModes_SynthesizesGeneralMode(t *testing.T) {
+	tmp := t.TempDir()
+	// Empty config dir -- no user config at all.
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.Modes) != 1 {
+		t.Fatalf("Modes len: got %d, want 1", len(cfg.Modes))
+	}
+	if cfg.Modes[0].Name != "General" {
+		t.Errorf("Modes[0].Name: got %q, want General", cfg.Modes[0].Name)
+	}
+	if cfg.Model.Provider != "anthropic" {
+		t.Errorf("Model.Provider: got %q, want anthropic", cfg.Model.Provider)
+	}
+	if cfg.Model.Name != "claude-sonnet-4-5" {
+		t.Errorf("Model.Name: got %q, want claude-sonnet-4-5", cfg.Model.Name)
+	}
+}
+
+// TestLoad_ModelSectionSynthesizesGeneralMode verifies that when a [model]
+// section is set but no [[modes]] are declared, a "General" mode is
+// synthesized from the [model] provider/name (backward compat).
+func TestLoad_ModelSectionSynthesizesGeneralMode(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+provider = "openai"
+name = "gpt-4o"
+`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.Modes) != 1 {
+		t.Fatalf("Modes len: got %d, want 1", len(cfg.Modes))
+	}
+	if cfg.Modes[0].Name != "General" {
+		t.Errorf("Modes[0].Name: got %q, want General", cfg.Modes[0].Name)
+	}
+	if cfg.Model.Provider != "openai" {
+		t.Errorf("Model.Provider: got %q, want openai", cfg.Model.Provider)
+	}
+	if cfg.Model.Name != "gpt-4o" {
+		t.Errorf("Model.Name: got %q, want gpt-4o", cfg.Model.Name)
+	}
+}
+
+// TestLoad_SmallModelOutsideModes verifies that model.small_model and
+// model.small_provider live at the top [model] level (outside modes) and are
+// loaded independently from any [[modes]] configuration.
+func TestLoad_SmallModelOutsideModes(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	// Config has modes but also sets small_model at the [model] level.
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+small_provider = "openai"
+small_model = "gpt-4o-mini"
+
+[[modes]]
+name = "smart"
+provider = "openrouter"
+model = "anthropic/claude-opus-4-5"
+`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Model.SmallProvider != "openai" {
+		t.Errorf("Model.SmallProvider: got %q, want openai", cfg.Model.SmallProvider)
+	}
+	if cfg.Model.SmallModel != "gpt-4o-mini" {
+		t.Errorf("Model.SmallModel: got %q, want gpt-4o-mini", cfg.Model.SmallModel)
+	}
+	// Main model comes from the mode, not [model].
+	if cfg.Model.Provider != "openrouter" {
+		t.Errorf("Model.Provider: got %q, want openrouter (from mode)", cfg.Model.Provider)
+	}
+	if cfg.Model.Name != "anthropic/claude-opus-4-5" {
+		t.Errorf("Model.Name: got %q, want anthropic/claude-opus-4-5 (from mode)", cfg.Model.Name)
+	}
+}
+
+// TestLoad_ModesOnlyConfig_DefaultModeIsFirst verifies that when [[modes]]
+// are declared without a [model] section, the first mode is the default and
+// cfg.Model.Provider/Name track it correctly.
+func TestLoad_ModesOnlyConfig_DefaultModeIsFirst(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[[modes]]
+name = "builder"
+provider = "anthropic"
+model = "claude-opus-4-5"
+reasoning = "high"
+
+[[modes]]
+name = "quick"
+provider = "anthropic"
+model = "claude-haiku-4-5"
+`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Modes[0].Name != "builder" {
+		t.Errorf("Modes[0].Name: got %q, want builder", cfg.Modes[0].Name)
+	}
+	// cfg.Model reflects the first (default) mode.
+	if cfg.Model.Provider != "anthropic" {
+		t.Errorf("Model.Provider: got %q, want anthropic", cfg.Model.Provider)
+	}
+	if cfg.Model.Name != "claude-opus-4-5" {
+		t.Errorf("Model.Name: got %q, want claude-opus-4-5", cfg.Model.Name)
 	}
 }
