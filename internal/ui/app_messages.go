@@ -4,33 +4,13 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
 )
-
-// typingAnimInterval is the frame period for the typing fade-in animation.
-// At this cadence the reveal pointer advances by typingRevealStep characters
-// per tick, giving a smooth fade-in effect without spamming redraws.
-const typingAnimInterval = 60 * time.Millisecond
-
-// typingRevealStep is the number of raw response characters revealed per tick.
-// Keep this at one for a true per-character typing effect; incoming provider
-// deltas are buffered in Raw and copied into VisibleRaw on each tick.
-const typingRevealStep = 1
-
-// typingTick returns the bubbletea Cmd that fires one typingTickMsg after
-// typingAnimInterval.  The tick loop runs while typingAnimActive is true.
-func (a *App) typingTick() tea.Cmd {
-	return tea.Tick(typingAnimInterval, func(time.Time) tea.Msg {
-		return typingTickMsg{}
-	})
-}
 
 func (a *App) refreshTodosCache() {
 	a.todosCache = nil
@@ -160,79 +140,34 @@ func (a *App) finalizeTrailingThinking() {
 // starts a new one if the last message isn't a streaming assistant.
 // Reuses the same streaming assistant uiMessage when thinking has already
 // accumulated on it (thinking and text share one message in Phase 2).
+//
+// Each incoming chunk is revealed immediately: VisibleRaw is kept in sync with
+// Raw on every call (chunk-level reveal). This replaces the old per-character
+// tick-based typing animation with prompt chunk-level visibility while
+// preserving the VisibleRaw/Raw separation for future fade semantics.
 func (a *App) appendAssistantDelta(text string) {
 	if n := len(a.messages); n > 0 {
 		last := &a.messages[n-1]
 		if last.Role == components.RoleAssistant && last.IsStreaming {
 			last.Raw += text
+			// Reveal the whole accumulated buffer immediately (chunk-level reveal).
+			last.VisibleRaw = last.Raw
+			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.VisibleRaw)
 			return
 		}
 	}
-	a.messages = append(a.messages, uiMessage{
-		Role:          components.RoleAssistant,
-		Raw:           text,
-		VisibleRaw:    "",
-		FinalMarkdown: "",
-		IsStreaming:   true,
-		AgentType:     a.ActiveModeName(),
-		ModelName:     a.opts.ModelName,
-		ModeColor:     a.activeModeColor(),
-	})
-}
-
-// handleTypingTick advances the typing animation by one step.  It is called
-// from the Update handler when a typingTickMsg arrives.
-//
-// The function finds the current streaming assistant message and moves a small
-// number of raw runes from the buffered Raw text into VisibleRaw. FinalMarkdown
-// is rendered from VisibleRaw, so newly-arrived provider text has time to appear
-// one character at a time instead of landing in the view immediately.
-func (a *App) handleTypingTick() tea.Cmd {
-	if !a.typingAnimActive {
-		return nil
+	// First delta of a new streaming turn: create the message and reveal immediately.
+	msg := uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         text,
+		VisibleRaw:  text,
+		IsStreaming: true,
+		AgentType:   a.ActiveModeName(),
+		ModelName:   a.opts.ModelName,
+		ModeColor:   a.activeModeColor(),
 	}
-	idx := a.currentAssistantMessageIndex()
-	if idx < 0 {
-		a.typingAnimActive = false
-		return nil
-	}
-	msg := &a.messages[idx]
-	if !msg.IsStreaming {
-		a.typingAnimActive = false
-		return nil
-	}
-
-	if revealBufferedAssistantText(a.ensureRenderer(), msg) {
-		a.invalidateMsgCacheForStreamingDelta()
-	}
-	return a.typingTick()
-}
-
-func revealBufferedAssistantText(renderer *glamour.TermRenderer, msg *uiMessage) bool {
-	full := []rune(msg.Raw)
-	visible := []rune(msg.VisibleRaw)
-	if len(visible) > len(full) {
-		visible = full
-		msg.VisibleRaw = string(visible)
-	}
-	if len(visible) >= len(full) {
-		return false
-	}
-	next := nextTypingRevealIndex(full, len(visible))
-	msg.VisibleRaw = string(full[:next])
-	msg.FinalMarkdown = renderMarkdown(renderer, msg.VisibleRaw)
-	return true
-}
-
-func nextTypingRevealIndex(full []rune, visible int) int {
-	if visible >= len(full) {
-		return len(full)
-	}
-	next := visible + typingRevealStep
-	if next > len(full) {
-		return len(full)
-	}
-	return next
+	msg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), msg.VisibleRaw)
+	a.messages = append(a.messages, msg)
 }
 
 // flushAssistantStream marks the current assistant message as final and renders
@@ -242,8 +177,6 @@ func (a *App) flushAssistantStream(role, messageID string) {
 	if role != "assistant" {
 		return
 	}
-	// Stop the typing animation and fully reveal the message.
-	a.typingAnimActive = false
 	persisted, hasPersisted := a.persistedAssistantUIMessage(messageID)
 	if hasPersisted {
 		persisted.AgentType = a.ActiveModeName()
