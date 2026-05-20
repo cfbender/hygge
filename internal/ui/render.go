@@ -28,6 +28,33 @@ func (a *App) invalidateMsgCacheForStreamingDelta() {
 	a.invalidateMsgCache()
 }
 
+// msgScrollbackCap is the maximum number of messages rendered into the
+// viewport at once. Older messages beyond this limit are hidden from the
+// rendered view only — persisted session storage and agent context are never
+// affected. The cap prevents TUI slowdown during very long sessions.
+// A notice is prepended to the visible slice when the cap is active.
+const msgScrollbackCap = 200
+
+// applyScrollbackCap trims msgs to at most msgScrollbackCap entries,
+// preserving the tail (most recent messages). When trimming occurs it
+// prepends a synthetic notice message so the user knows older content exists.
+// Streaming messages at the tail are always included regardless of the cap.
+func applyScrollbackCap(msgs []uiMessage) []uiMessage {
+	if len(msgs) <= msgScrollbackCap {
+		return msgs
+	}
+	hidden := len(msgs) - msgScrollbackCap
+	visible := msgs[hidden:]
+	notice := uiMessage{
+		Role: components.RoleSystem,
+		Raw:  fmt.Sprintf("↑ %d older messages are not shown (display capped at %d) — full history is preserved in storage", hidden, msgScrollbackCap),
+	}
+	result := make([]uiMessage, 0, msgScrollbackCap+1)
+	result = append(result, notice)
+	result = append(result, visible...)
+	return result
+}
+
 // renderChatContent produces the string content for the chat viewport.
 // Uses a cache to avoid re-rendering the full message list every frame —
 // only scroll position changes between frames during mouse/keyboard scrolling.
@@ -75,11 +102,14 @@ func (a *App) renderChatContent() string {
 	// transcript even when no new bytes arrived.
 
 	if needsRebuild {
+		// Cap rendered messages to msgScrollbackCap to bound render time for
+		// long sessions. The full history remains in a.messages and storage.
+		renderedMessages := applyScrollbackCap(visibleMessages)
 		ml := components.MessageList{
 			Width:           l.leftW,
 			Theme:           a.opts.Theme,
 			Styles:          a.styles,
-			Messages:        visibleMessages,
+			Messages:        renderedMessages,
 			Subagents:       a.subagents,
 			AnimFor:         a.subagentAnims,
 			Now:             now,
