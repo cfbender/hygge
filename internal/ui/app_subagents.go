@@ -592,6 +592,31 @@ func (a *App) finishSubagentTool(subSessionID string, e bus.ToolCallCompleted) {
 	})
 }
 
+// appendSubagentToolProgress appends a progress line from a streaming tool
+// call to the matching sub-agent's tool row, mirroring appendToolProgress but
+// scoped to the sub-agent transcript.
+func (a *App) appendSubagentToolProgress(e bus.ToolCallProgress) {
+	st, ok := a.subagents[e.SessionID]
+	if !ok {
+		return
+	}
+	for i := len(st.Messages) - 1; i >= 0; i-- {
+		msg := &st.Messages[i]
+		if msg.Role != components.RoleTool || !msg.IsStreaming {
+			continue
+		}
+		if msg.ToolUseID != e.ToolUseID {
+			continue
+		}
+		if msg.Raw == "(running…)" || msg.Raw == "" {
+			msg.Raw = e.Line
+		} else {
+			msg.Raw += "\n" + e.Line
+		}
+		return
+	}
+}
+
 // updateSubagentCost updates a sub-agent's running cost & token totals
 // from a bus.CostUpdated event.
 func (a *App) updateSubagentCost(subSessionID string, e bus.CostUpdated) {

@@ -19,7 +19,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 	// special-cased so users can scroll through large histories smoothly while
 	// the assistant is still producing text.
 	switch ev.(type) {
-	case bus.AssistantTextDelta, bus.AssistantThinkingDelta:
+	case bus.AssistantTextDelta, bus.AssistantThinkingDelta, bus.ToolCallProgress:
 		// Invalidated in the specific handlers below.
 	default:
 		a.invalidateMsgCache()
@@ -116,6 +116,17 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			Status:      components.ToolStatusPending,
 		})
 
+	case bus.ToolCallProgress:
+		if a.routeToSubagent(e.SessionID) {
+			a.appendSubagentToolProgress(e)
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		a.appendToolProgress(e)
+		a.invalidateMsgCacheForStreamingDelta()
+
 	case bus.ToolCallCompleted:
 		if a.routeToSubagent(e.SessionID) {
 			a.finishSubagentTool(e.SessionID, e)
@@ -125,7 +136,6 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		a.updateLastTool(e)
-
 	case bus.CostUpdated:
 		// T2.1 cost roll-up: always update subagent cost tracking so the
 		// nested block header stays current for any sub-session event.
