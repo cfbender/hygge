@@ -19,10 +19,10 @@ import (
 // per tick, giving a smooth fade-in effect without spamming redraws.
 const typingAnimInterval = 60 * time.Millisecond
 
-// typingRevealStep is the number of rendered body characters revealed per tick.
-// A step of 12 at 60 ms ≈ 200 characters/second — fast enough to keep up with
-// normal streamed output while making newly-arrived text visibly fade in.
-const typingRevealStep = 12
+// typingRevealStep is the number of raw response characters revealed per tick.
+// Keep this at one for a true per-character typing effect; incoming provider
+// deltas are buffered in Raw and copied into VisibleRaw on each tick.
+const typingRevealStep = 1
 
 // typingTick returns the bubbletea Cmd that fires one typingTickMsg after
 // typingAnimInterval.  The tick loop runs while typingAnimActive is true.
@@ -165,15 +165,14 @@ func (a *App) appendAssistantDelta(text string) {
 		last := &a.messages[n-1]
 		if last.Role == components.RoleAssistant && last.IsStreaming {
 			last.Raw += text
-			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.Raw)
 			return
 		}
 	}
-	raw := text
 	a.messages = append(a.messages, uiMessage{
 		Role:          components.RoleAssistant,
-		Raw:           raw,
-		FinalMarkdown: renderMarkdown(a.ensureRenderer(), raw),
+		Raw:           text,
+		VisibleRaw:    "",
+		FinalMarkdown: "",
 		IsStreaming:   true,
 		AgentType:     a.ActiveModeName(),
 		ModelName:     a.opts.ModelName,
@@ -184,50 +183,56 @@ func (a *App) appendAssistantDelta(text string) {
 // handleTypingTick advances the typing animation by one step.  It is called
 // from the Update handler when a typingTickMsg arrives.
 //
-// The function finds the current streaming assistant message and increments its
-// RevealedChars by typingRevealStep.  When the message is fully revealed (or no
-// longer streaming), typingAnimActive is cleared and no further tick is issued.
+// The function finds the current streaming assistant message and moves a small
+// number of raw runes from the buffered Raw text into VisibleRaw. FinalMarkdown
+// is rendered from VisibleRaw, so newly-arrived provider text has time to appear
+// one character at a time instead of landing in the view immediately.
 func (a *App) handleTypingTick() tea.Cmd {
 	if !a.typingAnimActive {
 		return nil
 	}
-	// Find the current streaming assistant message.
 	idx := a.currentAssistantMessageIndex()
 	if idx < 0 {
-		// No streaming assistant message — stop the loop.
 		a.typingAnimActive = false
 		return nil
 	}
 	msg := &a.messages[idx]
 	if !msg.IsStreaming {
-		// Message was flushed between ticks — stop the loop; all lines already
-		// visible (IsStreaming=false causes applyTypingFade to be a no-op).
 		a.typingAnimActive = false
 		return nil
 	}
 
-	// Count rendered characters in the current body.
-	body := msg.FinalMarkdown
-	if body == "" {
-		body = msg.Raw
+	if revealBufferedAssistantText(a.ensureRenderer(), msg) {
+		a.invalidateMsgCacheForStreamingDelta()
 	}
-	totalChars := len([]rune(body))
-
-	if msg.RevealedChars >= totalChars {
-		// Fully revealed.  Keep the loop alive in case new deltas arrive
-		// and push totalChars beyond the current reveal pointer.
-		// The loop terminates via the !msg.IsStreaming branch above once
-		// streaming ends.
-		return a.typingTick()
-	}
-
-	// Advance the reveal pointer.
-	msg.RevealedChars += typingRevealStep
-	if msg.RevealedChars > totalChars {
-		msg.RevealedChars = totalChars
-	}
-	a.invalidateMsgCacheForStreamingDelta()
 	return a.typingTick()
+}
+
+func revealBufferedAssistantText(renderer *glamour.TermRenderer, msg *uiMessage) bool {
+	full := []rune(msg.Raw)
+	visible := []rune(msg.VisibleRaw)
+	if len(visible) > len(full) {
+		visible = full
+		msg.VisibleRaw = string(visible)
+	}
+	if len(visible) >= len(full) {
+		return false
+	}
+	next := nextTypingRevealIndex(full, len(visible))
+	msg.VisibleRaw = string(full[:next])
+	msg.FinalMarkdown = renderMarkdown(renderer, msg.VisibleRaw)
+	return true
+}
+
+func nextTypingRevealIndex(full []rune, visible int) int {
+	if visible >= len(full) {
+		return len(full)
+	}
+	next := visible + typingRevealStep
+	if next > len(full) {
+		return len(full)
+	}
+	return next
 }
 
 // flushAssistantStream marks the current assistant message as final and renders
@@ -264,6 +269,7 @@ func (a *App) flushAssistantStream(role, messageID string) {
 		last.CostUSD = persisted.CostUSD
 		last.DurationMs = persisted.DurationMs
 	}
+	last.VisibleRaw = last.Raw
 	last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.Raw)
 
 	// Populate token/cost/duration from store if available.

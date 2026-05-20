@@ -402,9 +402,11 @@ func seedLargeStreamingChat(t *testing.T, app *App) {
 		})
 	}
 	app.messages = append(app.messages, uiMessage{
-		Role:        components.RoleAssistant,
-		Raw:         "streaming response",
-		IsStreaming: true,
+		Role:          components.RoleAssistant,
+		Raw:           "streaming response",
+		VisibleRaw:    "streaming response",
+		FinalMarkdown: renderMarkdown(app.ensureRenderer(), "streaming response"),
+		IsStreaming:   true,
 	})
 }
 
@@ -443,7 +445,10 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	app.userScrolled = true
 	app.msgViewport.PageUp()
 	app.appendAssistantDelta(" more")
-	app.invalidateMsgCacheForStreamingDelta()
+	app.typingAnimActive = true
+	for range len([]rune(" more")) {
+		app.handleTypingTick()
+	}
 
 	_ = app.renderChatContent()
 	if app.msgCache != baseline {
@@ -982,26 +987,50 @@ func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	}
 }
 
-func TestStreamingAssistantText(t *testing.T) {
+func TestStreamingAssistantTextBuffersThenRevealsPerCharacter(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
-	app.Handle(bus.AssistantTextDelta{Text: "hello "})
-	app.Handle(bus.AssistantTextDelta{Text: "world"})
+	app.Handle(bus.AssistantTextDelta{Text: "abc"})
 
-	out := app.View().Content
-	if !strings.Contains(out, "hello world") {
-		t.Errorf("expected streamed text in view, got:\n%s", out)
-	}
 	if got := len(app.messages); got != 1 {
 		t.Fatalf("expected 1 assistant message, got %d", got)
 	}
-	if !app.messages[0].IsStreaming {
+	msg := &app.messages[0]
+	if !msg.IsStreaming {
 		t.Errorf("expected IsStreaming=true mid-stream")
+	}
+	if msg.Raw != "abc" {
+		t.Fatalf("Raw = %q, want buffered full text", msg.Raw)
+	}
+	if msg.VisibleRaw != "" {
+		t.Fatalf("VisibleRaw before tick = %q, want empty buffered view", msg.VisibleRaw)
+	}
+	if strings.Contains(app.View().Content, "abc") {
+		t.Fatalf("buffered text should not render before a typing tick")
+	}
+
+	app.typingAnimActive = true
+	app.handleTypingTick()
+	if msg.VisibleRaw != "a" {
+		t.Fatalf("VisibleRaw after first tick = %q, want %q", msg.VisibleRaw, "a")
+	}
+	app.handleTypingTick()
+	if msg.VisibleRaw != "ab" {
+		t.Fatalf("VisibleRaw after second tick = %q, want %q", msg.VisibleRaw, "ab")
+	}
+	app.Handle(bus.AssistantTextDelta{Text: "d"})
+	if msg.Raw != "abcd" || msg.VisibleRaw != "ab" {
+		t.Fatalf("delta should buffer without immediate reveal: Raw=%q VisibleRaw=%q", msg.Raw, msg.VisibleRaw)
+	}
+	app.handleTypingTick()
+	app.handleTypingTick()
+	if msg.VisibleRaw != "abcd" {
+		t.Fatalf("VisibleRaw after ticks = %q, want full text", msg.VisibleRaw)
 	}
 }
 
-func TestStreamingAssistantMarkdownRendersBeforeFinalize(t *testing.T) {
+func TestStreamingAssistantMarkdownRendersVisibleBuffer(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
@@ -1009,13 +1038,24 @@ func TestStreamingAssistantMarkdownRendersBeforeFinalize(t *testing.T) {
 	if !app.messages[0].IsStreaming {
 		t.Fatal("expected assistant message to still be streaming")
 	}
+	if app.messages[0].FinalMarkdown != "" {
+		t.Fatal("expected streaming markdown to stay empty until typing tick reveals text")
+	}
+
+	app.typingAnimActive = true
+	for range len([]rune(app.messages[0].Raw)) {
+		app.handleTypingTick()
+	}
+	if app.messages[0].VisibleRaw != app.messages[0].Raw {
+		t.Fatalf("VisibleRaw = %q, want full raw %q", app.messages[0].VisibleRaw, app.messages[0].Raw)
+	}
 	if app.messages[0].FinalMarkdown == "" {
-		t.Fatal("expected streaming assistant markdown to be rendered")
+		t.Fatal("expected revealed streaming markdown to be rendered")
 	}
 	before := app.View().Content
 	plainBefore := ansiEscapeRE.ReplaceAllString(before, "")
 	if strings.Contains(plainBefore, "# heading") {
-		t.Fatalf("streaming view should already use markdown rendering, got:\n%s", before)
+		t.Fatalf("streaming view should use markdown rendering once buffer is revealed, got:\n%s", before)
 	}
 
 	app.Handle(bus.MessageAppended{Role: "assistant", MessageID: "m1"})
