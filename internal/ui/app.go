@@ -836,6 +836,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				// This anim consumed the message.
 				a.subagentAnims[subID] = updated
+				// Invalidate the message cache so the new animation
+				// frame is actually rendered — mirrors the compaction
+				// anim path above.
+				a.invalidateMsgCache()
 				return a, cmd
 			}
 		}

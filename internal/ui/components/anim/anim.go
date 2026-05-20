@@ -98,6 +98,13 @@ func New(opts Settings) *Anim {
 	return a
 }
 
+// ID returns the unique identifier for this Anim instance.  Use it to
+// construct a StepMsg that targets this Anim directly — useful in tests that
+// need to drive the animation loop without waiting for a real tea.Tick.
+func (a *Anim) ID() string {
+	return a.id
+}
+
 // Start returns the initial tea.Cmd that begins the animation tick loop.
 func (a *Anim) Start() tea.Cmd {
 	return a.tick()
