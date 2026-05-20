@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -158,6 +159,12 @@ func (p *luaPlugin) registerHyggeModule(L *lua.LState) {
 	cfgData := p.host.Config()
 	cfgTbl := goMapToLua(L, cfgData)
 	L.SetField(hygge, "config", cfgTbl)
+
+	// --- Plugin metadata (read-only) ---
+	pluginTbl := L.NewTable()
+	L.SetField(pluginTbl, "dir", lua.LString(filepath.Dir(p.scriptPath)))
+	L.SetField(pluginTbl, "path", lua.LString(p.scriptPath))
+	L.SetField(hygge, "plugin", pluginTbl)
 
 	// --- Session stub (populated per-handler; at module init it's empty) ---
 	sessionTbl := L.NewTable()

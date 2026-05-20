@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -601,6 +602,46 @@ hygge.register_hook("pre_tool", "not-a-function")
 	writeFile(t, dir, "plugin.lua", lua)
 	if err := reg.Install(context.Background(), "local:"+dir); err == nil {
 		t.Fatal("expected error for hook with missing function")
+	}
+}
+
+func TestLuaLoader_pluginMetadata(t *testing.T) {
+	reg, toolReg, _, _, _ := buildTestRegistry(t)
+
+	lua := `
+hygge.register_tool {
+    name = "plugin_meta",
+    description = "Return plugin metadata",
+    execute = function(ctx, input)
+        local res = hygge.exec("pwd", {}, { dir = hygge.plugin.dir })
+        return { content = hygge.plugin.dir .. "\n" .. hygge.plugin.path .. "\n" .. res.stdout }
+    end,
+}
+`
+	dir := t.TempDir()
+	writeFile(t, dir, "plugin.lua", lua)
+	if err := reg.Install(context.Background(), "local:"+dir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	toolFn, ok := toolReg.Get("plugin_meta")
+	if !ok {
+		t.Fatal("plugin_meta not registered")
+	}
+
+	result, err := toolFn.Execute(context.Background(), []byte(`{}`), tool.ExecContext{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("IsError=true: %s", result.Content)
+	}
+	wantPath := filepath.Join(dir, "plugin.lua")
+	if !strings.Contains(result.Content, dir) {
+		t.Fatalf("plugin dir missing from content %q, want %q", result.Content, dir)
+	}
+	if !strings.Contains(result.Content, wantPath) {
+		t.Fatalf("plugin path missing from content %q, want %q", result.Content, wantPath)
 	}
 }
 
