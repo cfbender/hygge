@@ -11,6 +11,7 @@ import (
 	"image/color"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,6 +20,13 @@ import (
 
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
+
+// animCounter provides monotonically-increasing unique IDs for Anim instances.
+// Using a global counter avoids the stack-address reuse that could arise from
+// fmt.Sprintf("anim-%p", &opts) when the compiler reuses the same stack slot
+// for successive calls to New — which caused the compaction anim and a
+// subagent anim to share an ID and steal each other's StepMsg.
+var animCounter atomic.Uint64
 
 // defaultFrameCount is the number of pre-rendered frames kept in the cache.
 const defaultFrameCount = 30
@@ -77,7 +85,9 @@ func New(opts Settings) *Anim {
 	c1, c2 := resolveGradientColors(opts.Theme, from, to)
 
 	// Generate a unique instance ID so concurrent Anims don't cross-trigger.
-	id := fmt.Sprintf("anim-%p", &opts)
+	// Use a monotonic counter rather than &opts (stack address) because Go
+	// may reuse the same stack slot across calls, causing ID collisions.
+	id := fmt.Sprintf("anim-%d", animCounter.Add(1))
 
 	a := &Anim{
 		id:     id,
