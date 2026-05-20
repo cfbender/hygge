@@ -196,6 +196,12 @@ Permissions can be granted once, for the session, always, or denied. Project and
 user config can tune defaults, while hooks can add policy checks before or after
 tool and message events.
 
+Add a `.aiexclude` file at the project root to hard-block Hygge's filesystem
+read and write tools from matching paths. Entries use gitignore-style patterns,
+for example `secrets/`, `.env.local`, or `*.pem`. These denies apply before
+normal permissions and yolo-mode, so approved sessions cannot read, write, or
+edit excluded files.
+
 ## MCP, hooks, and plugins
 
 MCP servers are configured through `mcp.toml` and exposed as namespaced tools.
