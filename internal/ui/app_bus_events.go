@@ -95,7 +95,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		}
 		// Finalize any trailing thinking block before a tool call.
 		a.finalizeTrailingThinking()
-		target := extractTarget(e.Args)
+		target := a.displayTargetForTool(e.ToolName, e.Args)
 		// Track files that write/edit tools are about to modify.  We record the
 		// path at request time (not completion) so the list updates as soon as
 		// the tool is dispatched, giving the sidebar something to show even

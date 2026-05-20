@@ -118,6 +118,11 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 			})
 		}
 		entries := uiEntriesFromStoreMessage(m, toolResults, toolUseIDs)
+		for i := range entries {
+			if entries[i].Role == components.RoleTool && entries[i].Target != "" && toolDisplaysPath(entries[i].ToolName) {
+				entries[i].Target = relativePathFromPwd(entries[i].Target, a.opts.ProjectDir)
+			}
+		}
 		// Wire AgentType and ModelName on assistant entries so bubbles render correctly.
 		// Also glamour-render the body text so hydrated messages look the same as
 		// finalized live messages.
