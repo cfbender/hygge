@@ -148,7 +148,7 @@ func (m QuestionModal) markdown(input string, width int) string {
 		width = 80
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStyles(ThemeGlamourStyle(m.Theme)),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {

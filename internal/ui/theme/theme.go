@@ -268,6 +268,28 @@ func Load(themeName string, opts LoadOptions) (*Theme, error) {
 	return t, nil
 }
 
+// GlamourColor returns the raw color string for the given atom in a form
+// accepted by glamour's StylePrimitive.Color / BackgroundColor fields
+// (ANSI index as a decimal string, e.g. "4", or hex string, e.g. "#FF00FF").
+// Returns nil when the atom is missing, inherits to a missing target,
+// has a cycle, or resolves to the terminal default (no override).
+// Inherit chains are followed automatically.
+func (t *Theme) GlamourColor(a Atom) *string {
+	if t == nil {
+		return nil
+	}
+	c, ok := t.Colors[a]
+	if !ok {
+		return nil
+	}
+	resolved, err := resolveColor(c, t.Colors)
+	if err != nil || resolved.IsDefault() {
+		return nil
+	}
+	s := resolved.raw
+	return &s
+}
+
 // FormatTheme returns a multi-line string showing every atom and its resolved
 // color form.  Used by `hygge theme show` (Task 13).
 //
