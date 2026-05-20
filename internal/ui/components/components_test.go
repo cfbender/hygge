@@ -1371,6 +1371,50 @@ func TestDiffView_TruncatedSideBySideKeepsReplacementPairs(t *testing.T) {
 	}
 }
 
+// TestDiffView_SideBySideLongLinesDoNotOverflow verifies that very long diff
+// lines are clipped within their pane and the combined rendered line never
+// exceeds the declared width.
+func TestDiffView_SideBySideLongLinesDoNotOverflow(t *testing.T) {
+	t.Parallel()
+	longLine := strings.Repeat("abcdefghij", 20) // 200 visible chars
+	raw := "@@ -1,2 +1,2 @@\n-" + longLine + "\n+" + longLine + "Y"
+
+	for _, width := range []int{72, 80, 96, 120} {
+		out := DiffView{
+			Width: width,
+			Theme: theme.ShellTheme(),
+			Raw:   raw,
+		}.View()
+		for i, line := range strings.Split(out, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("side-by-side width=%d: line %d width=%d exceeds limit; line=%q", width, i, got, line)
+			}
+		}
+	}
+}
+
+// TestDiffView_InlineLongLinesDoNotOverflow verifies that long lines in the
+// narrow (inline) diff fallback are clipped and never exceed the declared width.
+func TestDiffView_InlineLongLinesDoNotOverflow(t *testing.T) {
+	t.Parallel()
+	longLine := strings.Repeat("abcdefghij", 20) // 200 visible chars
+	raw := "@@ -1,2 +1,2 @@\n-" + longLine + "\n+" + longLine + "Y"
+
+	// widths below sideBySideDiffMinWidth (72) use the inline fallback
+	for _, width := range []int{40, 50, 60, 71} {
+		out := DiffView{
+			Width: width,
+			Theme: theme.ShellTheme(),
+			Raw:   raw,
+		}.View()
+		for i, line := range strings.Split(out, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("inline width=%d: line %d width=%d exceeds limit; line=%q", width, i, got, line)
+			}
+		}
+	}
+}
+
 func TestToolGroup_RendersEditReturnedDiff(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
