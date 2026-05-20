@@ -134,6 +134,9 @@ func (a *App) appendThinkingDelta(text string) {
 		ModelName:   a.opts.ModelName,
 		ModeColor:   a.activeModeColor(),
 	})
+	// A new thinking-led bubble starts a fresh assistant span; the
+	// previous flushed bubble can no longer be extended.
+	a.lastAssistantFlushIdx = -1
 }
 
 // finalizeTrailingThinking is a no-op after Phase 2: thinking and text both
@@ -175,6 +178,24 @@ func (a *App) appendAssistantDelta(text string) {
 			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.VisibleRaw)
 			return
 		}
+		// Defensive guard: a delta arrived after the trailing assistant
+		// bubble was flushed (MessageAppended) but before any event that
+		// legitimately ends an assistant span (tool requested, new user/
+		// tool message, turn completed, subagent boundary). Extend the
+		// just-flushed bubble in place rather than spawning a phantom
+		// "extra message" bubble. See lastAssistantFlushIdx comment.
+		if a.lastAssistantFlushIdx == n-1 && last.Role == components.RoleAssistant {
+			slog.Debug("ui: extending just-flushed assistant bubble with post-flush delta",
+				"bubble_index", n-1,
+				"existing_raw_bytes", len(last.Raw),
+				"delta_bytes", len(text),
+			)
+			last.IsStreaming = true
+			last.Raw += text
+			last.VisibleRaw = last.Raw
+			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.VisibleRaw)
+			return
+		}
 	}
 	// First delta of a new streaming turn: create the message and reveal immediately.
 	msg := uiMessage{
@@ -188,6 +209,7 @@ func (a *App) appendAssistantDelta(text string) {
 	}
 	msg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), msg.VisibleRaw)
 	a.messages = append(a.messages, msg)
+	a.lastAssistantFlushIdx = -1
 }
 
 // flushAssistantStream marks the current assistant message as final and renders
@@ -208,6 +230,7 @@ func (a *App) flushAssistantStream(role, messageID string) {
 	if idx < 0 {
 		if hasPersisted {
 			a.insertPersistedAssistantMessage(persisted)
+			a.lastAssistantFlushIdx = a.indexOfFinalAssistant()
 		}
 		return
 	}
@@ -220,6 +243,9 @@ func (a *App) flushAssistantStream(role, messageID string) {
 		a.messages = append(a.messages[:idx], a.messages[idx+1:]...)
 		if hasPersisted {
 			a.insertPersistedAssistantMessage(persisted)
+			a.lastAssistantFlushIdx = a.indexOfFinalAssistant()
+		} else {
+			a.lastAssistantFlushIdx = -1
 		}
 		return
 	}
@@ -248,6 +274,18 @@ func (a *App) flushAssistantStream(role, messageID string) {
 			}
 		}
 	}
+	// Remember which bubble was just finalised so a stray post-flush delta
+	// can extend it in place rather than spawn a phantom bubble.
+	a.lastAssistantFlushIdx = idx
+}
+
+// indexOfFinalAssistant returns the index of the trailing assistant message
+// in a.messages, or -1 if none is at the tail.
+func (a *App) indexOfFinalAssistant() int {
+	if n := len(a.messages); n > 0 && a.messages[n-1].Role == components.RoleAssistant {
+		return n - 1
+	}
+	return -1
 }
 
 func (a *App) currentAssistantMessageIndex() int {

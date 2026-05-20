@@ -183,16 +183,19 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 
 	var currentID string
 	var (
-		mu              sync.Mutex
-		storeMu         sync.Mutex
-		appendCond      = sync.NewCond(&mu)
-		appendingAsst   bool
-		final           *session.Message
-		textBuf         strings.Builder
-		thinkingBuf     strings.Builder
-		streamToolCalls []toolCallEvent
-		pendingUsage    provider.Usage
-		activeToolCalls = map[string]toolCallEvent{}
+		mu                     sync.Mutex
+		storeMu                sync.Mutex
+		appendCond             = sync.NewCond(&mu)
+		appendingAsst          bool
+		final                  *session.Message
+		textBuf                strings.Builder
+		thinkingBuf            strings.Builder
+		streamToolCalls        []toolCallEvent
+		pendingUsage           provider.Usage
+		activeToolCalls        = map[string]toolCallEvent{}
+		persistedTextLen       int
+		persistedThinkingLen   int
+		persistedToolCallCount int
 	)
 	upsertToolCall := func(tc toolCallEvent) {
 		for i := range streamToolCalls {
@@ -209,11 +212,37 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			appendCond.Wait()
 		}
 		if currentID != "" {
+			textLen := textBuf.Len()
+			thinkingLen := thinkingBuf.Len()
+			toolCallCount := len(streamToolCalls)
+			existing := currentID
+			grewText := textLen - persistedTextLen
+			grewThinking := thinkingLen - persistedThinkingLen
+			grewToolCalls := toolCallCount - persistedToolCallCount
 			mu.Unlock()
+			// Suppressed re-entry: a prior appendAssistant in this step
+			// already persisted. If text/thinking/tool_calls grew since
+			// that persist, it is currently dropped — log so the next
+			// phantom-bubble reproduction shows the silent loss.
+			if grewText > 0 || grewThinking > 0 || grewToolCalls > 0 {
+				slog.Debug("agent: appendAssistant dropped buffered content (currentID guard)",
+					"session", sessionID,
+					"existing_message_id", existing,
+					"new_text_bytes", grewText,
+					"new_thinking_bytes", grewThinking,
+					"new_tool_calls", grewToolCalls,
+				)
+			}
 			return nil
 		}
 		appendingAsst = true
 		parts := buildAssistantParts(textBuf.String(), thinkingBuf.String(), streamToolCalls)
+		// Snapshot what we're about to persist so subsequent re-entry can
+		// detect content that grew since this persist (and is therefore at
+		// risk of being silently dropped).
+		snapTextLen := textBuf.Len()
+		snapThinkingLen := thinkingBuf.Len()
+		snapToolCallCount := len(streamToolCalls)
 		mu.Unlock()
 		storeMu.Lock()
 		msg, err := a.opts.Store.AppendMessage(ctx, sessionID, session.NewMessage{Role: session.RoleAssistant, Parts: parts, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: a.computeCost(ctx, modelName, u).USD})
@@ -230,6 +259,9 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		mu.Lock()
 		currentID = msg.ID
 		final = msg
+		persistedTextLen = snapTextLen
+		persistedThinkingLen = snapThinkingLen
+		persistedToolCallCount = snapToolCallCount
 		appendingAsst = false
 		appendCond.Broadcast()
 		mu.Unlock()
@@ -333,6 +365,9 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 			thinkingBuf.Reset()
 			streamToolCalls = nil
 			activeToolCalls = map[string]toolCallEvent{}
+			persistedTextLen = 0
+			persistedThinkingLen = 0
+			persistedToolCallCount = 0
 			mu.Unlock()
 			return nil
 		},

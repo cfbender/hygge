@@ -488,6 +488,9 @@ func (a *App) maybeAppendContinuingPlaceholder(state *components.SubagentState) 
 		ModelName:     a.opts.ModelName,
 		ModeColor:     a.activeModeColor(),
 	})
+	// A placeholder bubble is a new assistant span; the previously flushed
+	// bubble can no longer be extended.
+	a.lastAssistantFlushIdx = -1
 }
 
 // dropContinuingPlaceholder removes the trailing "continuing…" placeholder
@@ -504,6 +507,11 @@ func (a *App) dropContinuingPlaceholder() {
 		return
 	}
 	a.messages = a.messages[:n-1]
+	// Tail shifted; the previously flushed assistant index (if any) is no
+	// longer guaranteed to point at a valid extend target.
+	if a.lastAssistantFlushIdx >= len(a.messages) {
+		a.lastAssistantFlushIdx = -1
+	}
 }
 
 // isInForegroundChain reports whether parentSessionID is the foreground

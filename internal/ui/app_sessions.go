@@ -223,6 +223,7 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 
 	a.opts.SessionID = id
 	a.messages = nil
+	a.lastAssistantFlushIdx = -1
 	a.invalidateMsgCache()
 	a.subagents = map[string]*components.SubagentState{}
 	a.subagentAnims = map[string]*anim.Anim{}

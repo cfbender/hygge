@@ -56,6 +56,7 @@ func (a *App) startSendWithAttachments(text string, attachments []promptAttachme
 			userMsg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), text)
 		}
 		a.messages = append(a.messages, userMsg)
+		a.lastAssistantFlushIdx = -1
 		a.optimisticUserPending = true
 	}
 

@@ -81,6 +81,8 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		a.finalizeTrailingThinking()
 		if e.Role == string(session.RoleUser) {
 			a.appendPersistedUserMessage(e.MessageID)
+			// A new user message ends any prior assistant span.
+			a.lastAssistantFlushIdx = -1
 			return titleCmd
 		}
 		a.flushAssistantStream(e.Role, e.MessageID)
@@ -93,6 +95,10 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		if !a.isForeground(e.SessionID) {
 			return nil
 		}
+		// A tool call ends the current assistant span; any subsequent
+		// AssistantTextDelta should not be folded back into the
+		// just-flushed assistant bubble.
+		a.lastAssistantFlushIdx = -1
 		// The parent has started its next step. Drop any "continuing…"
 		// placeholder before appending the tool row so the transcript
 		// reflows naturally.
@@ -386,6 +392,9 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// Drop any lingering "continuing…" placeholder: the turn is over, so
 		// further parent deltas (which would have cleared it) are not coming.
 		a.dropContinuingPlaceholder()
+		// Turn over: no more assistant deltas should be folded into the
+		// final bubble of this turn.
+		a.lastAssistantFlushIdx = -1
 		a.maybeNotify(notify.Notification{
 			Title:   "Hygge is waiting…",
 			Message: fmt.Sprintf("Turn completed in %q", a.sessionTitle),
