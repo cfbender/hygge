@@ -824,7 +824,7 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 				rows = append(rows, "")
 				rows = append(rows, muted.Render("$ "+cmd))
 			}
-			if !msg.IsStreaming && msg.Raw != "" && msg.Raw != "(running…)" {
+			if msg.Raw != "" && msg.Raw != "(running…)" {
 				expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
 				bodyLines := strings.Split(strings.TrimRight(msg.Raw, "\n"), "\n")
 				rows = append(rows, "")

@@ -257,6 +257,30 @@ func (a *App) persistedAssistantUIMessage(messageID string) (uiMessage, bool) {
 	return uiMessage{}, false
 }
 
+// appendToolProgress appends a progress line from a streaming tool call to the
+// pending tool row identified by ToolUseID.  If no matching streaming row is
+// found (race at startup or ToolCallRequested not yet processed), the call is
+// a no-op.  Raw accumulates all lines separated by newlines so the renderer can
+// display them incrementally while the tool is still running.
+func (a *App) appendToolProgress(e bus.ToolCallProgress) {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		msg := &a.messages[i]
+		if msg.Role != components.RoleTool || !msg.IsStreaming {
+			continue
+		}
+		if msg.ToolUseID != e.ToolUseID {
+			continue
+		}
+		// Initialise Raw from placeholder if this is the first progress line.
+		if msg.Raw == "(running…)" || msg.Raw == "" {
+			msg.Raw = e.Line
+		} else {
+			msg.Raw += "\n" + e.Line
+		}
+		return
+	}
+}
+
 // updateLastTool finds the most recent streaming tool entry with a matching
 // name and finalises it with the result/error from the event.
 func (a *App) updateLastTool(e bus.ToolCallCompleted) {

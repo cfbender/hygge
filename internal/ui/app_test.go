@@ -2345,6 +2345,153 @@ func TestToolStatus_ErrorOnFailure(t *testing.T) {
 	}
 }
 
+// --- ToolCallProgress streaming tests ---
+
+// TestToolCallProgress_AppendsToPendingRow verifies that ToolCallProgress
+// lines are appended to the streaming bash tool row before completion.
+func TestToolCallProgress_AppendsToPendingRow(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		ToolName:  "bash",
+		ToolUseID: "bash-1",
+		Args:      []byte(`{"command":"echo hello"}`),
+	})
+
+	// First progress line should replace the "(running…)" placeholder.
+	app.Handle(bus.ToolCallProgress{
+		ToolName:  "bash",
+		ToolUseID: "bash-1",
+		Stream:    "stdout",
+		Line:      "hello",
+	})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	msg := app.messages[0]
+	if msg.Raw != "hello" {
+		t.Errorf("Raw = %q, want %q", msg.Raw, "hello")
+	}
+	if !msg.IsStreaming {
+		t.Error("expected IsStreaming=true while tool is still running")
+	}
+
+	// Second progress line should be appended.
+	app.Handle(bus.ToolCallProgress{
+		ToolName:  "bash",
+		ToolUseID: "bash-1",
+		Stream:    "stdout",
+		Line:      "world",
+	})
+
+	msg = app.messages[0]
+	if msg.Raw != "hello\nworld" {
+		t.Errorf("Raw = %q, want %q", msg.Raw, "hello\nworld")
+	}
+}
+
+// TestToolCallProgress_ShownInViewWhileStreaming verifies the UI renders bash
+// progress lines while IsStreaming is true.
+func TestToolCallProgress_ShownInViewWhileStreaming(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		ToolName:  "bash",
+		ToolUseID: "bash-2",
+		Args:      []byte(`{"command":"ls"}`),
+	})
+	app.Handle(bus.ToolCallProgress{
+		ToolName:  "bash",
+		ToolUseID: "bash-2",
+		Stream:    "stdout",
+		Line:      "file_a.txt",
+	})
+	app.Handle(bus.ToolCallProgress{
+		ToolName:  "bash",
+		ToolUseID: "bash-2",
+		Stream:    "stdout",
+		Line:      "file_b.txt",
+	})
+
+	// The view must show progress lines before the tool completes.
+	out := app.View().Content
+	if !strings.Contains(out, "file_a.txt") {
+		t.Errorf("view missing progress line %q:\n%s", "file_a.txt", out)
+	}
+	if !strings.Contains(out, "file_b.txt") {
+		t.Errorf("view missing progress line %q:\n%s", "file_b.txt", out)
+	}
+}
+
+// TestToolCallProgress_CompletionOverwritesProgressWithFinalResult verifies
+// that after ToolCallCompleted the Raw field contains the authoritative final
+// result (which may differ from the accumulated progress due to truncation or
+// metadata) and IsStreaming is false.
+func TestToolCallProgress_CompletionOverwritesProgressWithFinalResult(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		ToolName:  "bash",
+		ToolUseID: "bash-3",
+		Args:      []byte(`{"command":"echo done"}`),
+	})
+	app.Handle(bus.ToolCallProgress{
+		ToolName:  "bash",
+		ToolUseID: "bash-3",
+		Stream:    "stdout",
+		Line:      "done",
+	})
+	app.Handle(bus.ToolCallCompleted{
+		ToolName:  "bash",
+		ToolUseID: "bash-3",
+		Result:    []byte("done\n"),
+	})
+
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("expected 1 message, got %d", got)
+	}
+	msg := app.messages[0]
+	if msg.IsStreaming {
+		t.Error("expected IsStreaming=false after completion")
+	}
+	if msg.Status != components.ToolStatusCompleted {
+		t.Errorf("Status = %v, want ToolStatusCompleted", msg.Status)
+	}
+	// Final result from ToolCallCompleted should be in Raw.
+	if !strings.Contains(msg.Raw, "done") {
+		t.Errorf("Raw = %q, expected to contain %q", msg.Raw, "done")
+	}
+}
+
+// TestToolCallProgress_IgnoredForNonMatchingToolUseID verifies that progress
+// events for a different ToolUseID do not affect an unrelated pending row.
+func TestToolCallProgress_IgnoredForNonMatchingToolUseID(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		ToolName:  "bash",
+		ToolUseID: "bash-4",
+		Args:      []byte(`{"command":"sleep 10"}`),
+	})
+
+	// Progress for a different ToolUseID should not mutate the row.
+	app.Handle(bus.ToolCallProgress{
+		ToolName:  "bash",
+		ToolUseID: "bash-other",
+		Stream:    "stdout",
+		Line:      "should not appear",
+	})
+
+	if app.messages[0].Raw != "(running…)" {
+		t.Errorf("Raw = %q, want %q (unrelated progress must not mutate row)", app.messages[0].Raw, "(running…)")
+	}
+}
+
 // --- Queue + notification tests ---
 
 // newTestAppWithConfig builds an App with a real bus and an injected config
