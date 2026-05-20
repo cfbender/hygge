@@ -833,7 +833,12 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 					if expanded {
 						maxLines = 10_000
 					}
-					rows = append(rows, DiffView{Raw: msg.Raw, Width: innerW, Theme: m.Theme, MaxLines: maxLines}.View())
+					diff := DiffView{Raw: msg.Raw, Width: innerW, Theme: m.Theme, MaxLines: maxLines}
+					out := diff.View()
+					if !expanded && diff.IsTruncated() {
+						out += "\n" + muted.Italic(true).Render("Click to expand")
+					}
+					rows = append(rows, out)
 					continue
 				}
 				if expanded {

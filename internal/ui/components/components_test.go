@@ -1487,6 +1487,36 @@ func TestToolGroup_RendersBashDiffOutputAsDiff(t *testing.T) {
 	}
 }
 
+func TestToolGroup_LongBashGitDiffCanExpand(t *testing.T) {
+	t.Parallel()
+	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,8 +1,8 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8"
+	ml := MessageList{
+		Width: 100,
+		Theme: theme.ShellTheme(),
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-diff", Target: "git diff", Raw: raw, Status: ToolStatusCompleted},
+		},
+	}
+
+	collapsed, _, zones := ml.ViewWithHitZones()
+	plainCollapsed := stripANSI(collapsed)
+	if len(zones) != 1 || zones[0].ToolUseID != "bash-diff" {
+		t.Fatalf("expected bash diff hit zone, got %+v", zones)
+	}
+	if !strings.Contains(plainCollapsed, "Click to expand") || !strings.Contains(plainCollapsed, "… diff truncated") {
+		t.Fatalf("long git diff should show expand affordance:\n%s", plainCollapsed)
+	}
+
+	ml.ExpandedTools = map[string]bool{"bash-diff": true}
+	plainExpanded := stripANSI(ml.View())
+	if !strings.Contains(plainExpanded, "+new 8") {
+		t.Fatalf("expanded git diff should include final line:\n%s", plainExpanded)
+	}
+	if strings.Contains(plainExpanded, "Click to expand") || strings.Contains(plainExpanded, "… diff truncated") {
+		t.Fatalf("expanded git diff should not show collapsed affordances:\n%s", plainExpanded)
+	}
+}
+
 func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 	t.Parallel()
 	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,8 +1,8 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8"
