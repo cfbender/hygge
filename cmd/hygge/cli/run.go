@@ -182,6 +182,11 @@ func configuredProvidersForRuntime(rt *appRuntime) []string {
 func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
 	// Determine whether the wizard must run before regular chat is available.
 	// The TUI always opens; onboarding replaces the main view when needed.
+	//
+	// Onboarding is required when model setup is missing or no provider auth
+	// exists. If auth already exists but no config/model has been written yet,
+	// the wizard still opens, but AuthConfiguredProviders lets it skip API-key
+	// authorization and proceed to model/mode setup.
 	needsOnboarding := rt.NoConfigAuth || !hasConfiguredModel(rt.Config, rt.Provenance) || !hasAnyProviderAuth(rt.StateOpts)
 
 	// Map CLI MCPServerStatus → UI SidebarMCPStatus so internal/ui has no
