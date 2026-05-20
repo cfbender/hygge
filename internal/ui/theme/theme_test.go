@@ -618,3 +618,90 @@ func TestLoad_ValidMinimal(t *testing.T) {
 		t.Errorf("Colors len: got %d, want %d", len(th.Colors), len(AllAtoms()))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GlamourColor
+// ---------------------------------------------------------------------------
+
+func TestGlamourColor_ShellTheme(t *testing.T) {
+	t.Parallel()
+	th := ShellTheme()
+
+	// AtomPrimary is ANSI 4 in the shell theme — raw string "4".
+	got := th.GlamourColor(AtomPrimary)
+	if got == nil {
+		t.Fatal("GlamourColor(AtomPrimary) returned nil, want \"4\"")
+	}
+	if *got != "4" {
+		t.Errorf("GlamourColor(AtomPrimary) = %q, want \"4\"", *got)
+	}
+
+	// AtomAccent is ANSI 5 — raw string "5".
+	got = th.GlamourColor(AtomAccent)
+	if got == nil {
+		t.Fatal("GlamourColor(AtomAccent) returned nil, want \"5\"")
+	}
+	if *got != "5" {
+		t.Errorf("GlamourColor(AtomAccent) = %q, want \"5\"", *got)
+	}
+
+	// AtomCodeBg is default (no override) — should return nil.
+	got = th.GlamourColor(AtomCodeBg)
+	if got != nil {
+		t.Errorf("GlamourColor(AtomCodeBg) = %q, want nil (default)", *got)
+	}
+}
+
+func TestGlamourColor_NilTheme(t *testing.T) {
+	t.Parallel()
+	var th *Theme
+	// Should not panic; returns nil for any atom.
+	if got := th.GlamourColor(AtomPrimary); got != nil {
+		t.Errorf("nil theme GlamourColor returned %q, want nil", *got)
+	}
+}
+
+func TestGlamourColor_MissingAtom(t *testing.T) {
+	t.Parallel()
+	th := &Theme{Name: "empty", Colors: map[Atom]Color{}}
+	if got := th.GlamourColor(AtomPrimary); got != nil {
+		t.Errorf("missing atom GlamourColor returned %q, want nil", *got)
+	}
+}
+
+func TestGlamourColor_HexColor(t *testing.T) {
+	t.Parallel()
+	// Build a minimal theme with a hex primary.
+	th := &Theme{
+		Name: "test",
+		Colors: map[Atom]Color{
+			AtomPrimary: {kind: colorKindHex, raw: "#7AA2F7"},
+		},
+	}
+	got := th.GlamourColor(AtomPrimary)
+	if got == nil {
+		t.Fatal("GlamourColor returned nil for hex color")
+	}
+	if *got != "#7AA2F7" {
+		t.Errorf("GlamourColor = %q, want \"#7AA2F7\"", *got)
+	}
+}
+
+func TestGlamourColor_InheritChain(t *testing.T) {
+	t.Parallel()
+	// AtomCodeFg inherits from AtomPrimary (ANSI 4).
+	th := &Theme{
+		Name: "test",
+		Colors: map[Atom]Color{
+			AtomPrimary: {kind: colorKindANSI, raw: "4"},
+			AtomCodeFg:  {kind: colorKindInherit, inheritAtom: AtomPrimary},
+		},
+	}
+	got := th.GlamourColor(AtomCodeFg)
+	if got == nil {
+		t.Fatal("GlamourColor via inherit returned nil")
+	}
+	if *got != "4" {
+		t.Errorf("GlamourColor via inherit = %q, want \"4\"", *got)
+	}
+}
