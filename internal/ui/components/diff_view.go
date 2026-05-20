@@ -34,8 +34,6 @@ func (d DiffView) View() string {
 		return ""
 	}
 
-	lines, truncated := d.visibleLines(lines)
-
 	width := d.Width
 	if width <= 0 {
 		width = 80
@@ -45,8 +43,13 @@ func (d DiffView) View() string {
 	rows := diffRows(lines)
 	numW := diffLineNumberWidth(rows)
 	if width >= sideBySideDiffMinWidth {
-		return renderSideBySideDiff(rows, numW, width, truncated, diffStyles(d.Theme))
+		pairs, truncated := d.visibleSideBySidePairs(rows)
+		return renderSideBySideDiff(pairs, numW, width, truncated, diffStyles(d.Theme))
 	}
+
+	lines, truncated := d.visibleLines(lines)
+	rows = diffRows(lines)
+	numW = diffLineNumberWidth(rows)
 	contentW := max(width-(numW*2)-5, 1)
 
 	styles := diffStyles(d.Theme)
@@ -86,11 +89,38 @@ func (d DiffView) visibleLines(lines []string) ([]string, bool) {
 	return lines[:maxLines], true
 }
 
-func renderSideBySideDiff(rows []diffRow, numW, width int, truncated bool, s diffLineStyles) string {
+func (d DiffView) visibleSideBySidePairs(rows []diffRow) ([]diffPair, bool) {
+	maxLines := d.MaxLines
+	if maxLines <= 0 {
+		maxLines = defaultDiffPreviewLines
+	}
+	if len(rows) <= maxLines {
+		return sideBySidePairs(rows), false
+	}
+
+	end := maxLines
+	if end > 0 {
+		switch rows[end-1].kind {
+		case diffRowDel:
+			for end < len(rows) && rows[end].kind == diffRowDel {
+				end++
+			}
+			for end < len(rows) && rows[end].kind == diffRowAdd {
+				end++
+			}
+		case diffRowAdd:
+			for end < len(rows) && rows[end].kind == diffRowAdd {
+				end++
+			}
+		}
+	}
+	return sideBySidePairs(rows[:end]), true
+}
+
+func renderSideBySideDiff(pairs []diffPair, numW, width int, truncated bool, s diffLineStyles) string {
 	separatorW := lipgloss.Width(diffPaneSeparator)
 	paneW := max((width-separatorW)/2, numW+4)
 	contentW := max(paneW-numW-3, 1)
-	pairs := sideBySidePairs(rows)
 	out := make([]string, 0, len(pairs)+1)
 	for _, pair := range pairs {
 		if pair.old.kind == diffRowMeta || pair.new.kind == diffRowMeta {

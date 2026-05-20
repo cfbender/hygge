@@ -1351,6 +1351,26 @@ func TestDiffView_NarrowWidthKeepsInlineFallback(t *testing.T) {
 	assertNoDiffConnectorGlyphs(t, plain)
 }
 
+func TestDiffView_TruncatedSideBySideKeepsReplacementPairs(t *testing.T) {
+	t.Parallel()
+	raw := "@@ -1,8 +1,8 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8"
+	plain := stripANSI(DiffView{
+		Width:    96,
+		Theme:    theme.ShellTheme(),
+		Raw:      raw,
+		MaxLines: defaultDiffPreviewLines,
+	}.View())
+
+	for _, want := range []string{"+new 7", "+new 8", "… diff truncated"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("truncated side-by-side replacement diff missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "-old 8") && !strings.Contains(diffLineContaining(plain, "-old 8"), "+new 8") {
+		t.Fatalf("side-by-side truncation should not render replacement deletion without its addition:\n%s", plain)
+	}
+}
+
 func TestToolGroup_RendersEditReturnedDiff(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
@@ -1442,8 +1462,8 @@ func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 	if !strings.Contains(plainCollapsed, "Click to expand") || !strings.Contains(plainCollapsed, "… diff truncated") {
 		t.Fatalf("long edit diff should show expand affordance:\n%s", plainCollapsed)
 	}
-	if strings.Contains(plainCollapsed, "+new 8") {
-		t.Fatalf("collapsed edit diff should hide final line:\n%s", plainCollapsed)
+	if !strings.Contains(plainCollapsed, "+new 8") {
+		t.Fatalf("collapsed edit diff should keep replacement right side visible:\n%s", plainCollapsed)
 	}
 
 	ml.ExpandedTools = map[string]bool{"edit-diff": true}

@@ -1,2 +1,2 @@
 # TODOs
-- diff view when truncated tends to cut off the right side entirely until expanded
+- messages continue to be received after /new
