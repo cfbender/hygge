@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/config"
 )
 
@@ -123,22 +124,26 @@ func runInit(cmd *cobra.Command, opts initOptions, styleName string) error {
 		return die(cmd, "provider %q is not configured or authenticated (run `hygge provider auth %s`)", providerName, providerName)
 	}
 
-	modelName := strings.TrimSpace(opts.model)
-	if modelName == "" {
+	// Collect per-component model selections. When --model is provided, all
+	// components share that model. When running interactively, the user picks
+	// a model for each mode and subagent independently.
+	flagModel := strings.TrimSpace(opts.model)
+	var componentModels map[string]string // component key → model name
+	if flagModel != "" {
+		// Non-interactive: use the same model for all components.
+		componentModels = initUniformModels(style, flagModel)
+	} else {
 		cat := rt.Catalog.Source()
 		if cat == nil {
 			return die(cmd, "model is required (pass --model; no catalog available to pick from)")
 		}
-		modelName, err = pickModel(cmd, reader, isTTY, cat, providerName)
+		componentModels, err = pickInitComponentModels(cmd, reader, isTTY, cat, providerName, style)
 		if err != nil {
 			return err
 		}
 	}
-	if modelName == "" {
-		return die(cmd, "model is required (pass --model or run interactively)")
-	}
 
-	resolved, err := materializeInitStyle(rt.XDGConfigHome, style, providerName, modelName)
+	resolved, err := materializeInitStyle(rt.XDGConfigHome, style, providerName, componentModels)
 	if err != nil {
 		return err
 	}
@@ -152,7 +157,7 @@ func runInit(cmd *cobra.Command, opts initOptions, styleName string) error {
 		return err
 	}
 
-	printInitSuccess(cmd, style, providerName, modelName, configPath, filepath.Join(rt.XDGConfigHome, "hygge", "prompts", style.Name), len(resolved.Subagents) > 0, filepath.Join(rt.XDGConfigHome, "hygge", "subagents.toml"))
+	printInitSuccess(cmd, style, providerName, configPath, filepath.Join(rt.XDGConfigHome, "hygge", "prompts", style.Name))
 	return nil
 }
 
@@ -292,13 +297,11 @@ func pickInitStyleInteractive(cmd *cobra.Command, styles []initStyle) (initStyle
 	for _, style := range styles {
 		items = append(items, initStyleSelectItem{style: style})
 	}
-	delegate := list.NewDefaultDelegate()
-	delegate.SetSpacing(0)
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(initAccentColor())
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(initMutedColor())
+	delegate := newInitListDelegate()
 
 	l := list.New(items, delegate, 76, min(12, max(8, len(items)+5)))
-	l.Title = initTitleStyle().Render("Initialize Hygge")
+	l.Title = "Initialize Hygge"
+	styleInitList(&l)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(true)
@@ -358,13 +361,11 @@ func pickInitProviderInteractive(cmd *cobra.Command, providers []string) (string
 	for _, provider := range providers {
 		items = append(items, initProviderSelectItem{name: provider})
 	}
-	delegate := list.NewDefaultDelegate()
-	delegate.SetSpacing(0)
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(initAccentColor())
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(initMutedColor())
+	delegate := newInitListDelegate()
 
 	l := list.New(items, delegate, 76, min(14, max(8, len(items)+5)))
-	l.Title = initTitleStyle().Render("Choose a configured provider")
+	l.Title = "Choose a configured provider"
+	styleInitList(&l)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
 	l.SetShowHelp(true)
@@ -424,16 +425,13 @@ func (m initProviderSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m initProviderSelectModel) View() tea.View { return tea.NewView(m.list.View()) }
 
-func printInitSuccess(cmd *cobra.Command, style initStyle, providerName, modelName, configPath, promptDir string, wroteSubagents bool, subagentsPath string) {
+func printInitSuccess(cmd *cobra.Command, style initStyle, providerName, configPath, promptDir string) {
 	styles := initCLIStyles()
 	writeln(out(cmd), styles.Title.Render("✓ Hygge initialized"))
 	printf(out(cmd), "%s %s %s\n", styles.Label.Render("Style"), styles.Value.Render(style.Name), styles.Muted.Render(style.Description))
-	printf(out(cmd), "%s %s\n", styles.Label.Render("Model"), styles.Value.Render(providerName+"/"+modelName))
+	printf(out(cmd), "%s %s\n", styles.Label.Render("Provider"), styles.Value.Render(providerName))
 	printf(out(cmd), "%s %s\n", styles.Label.Render("Config"), styles.Path.Render(configPath))
 	printf(out(cmd), "%s %s\n", styles.Label.Render("Prompts"), styles.Path.Render(promptDir))
-	if wroteSubagents {
-		printf(out(cmd), "%s %s\n", styles.Label.Render("Subagents"), styles.Path.Render(subagentsPath))
-	}
 	writeln(out(cmd), styles.Muted.Render("Edit the generated prompt files any time to tune the style."))
 }
 
@@ -458,12 +456,42 @@ func initCLIStyles() initStyles {
 func initTitleStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Foreground(initAccentColor())
 }
+
+func newInitListDelegate() list.DefaultDelegate {
+	delegate := list.NewDefaultDelegate()
+	delegate.SetSpacing(0)
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(initSelectedForegroundColor())
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(initSelectedMutedForegroundColor())
+	return delegate
+}
+
+func styleInitList(l *list.Model) {
+	l.Styles.TitleBar = lipgloss.NewStyle().Padding(0, 0, 1, 2)
+	l.Styles.Title = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(initAccentColor()).
+		Padding(0, 1)
+	l.Styles.HelpStyle = lipgloss.NewStyle().
+		Foreground(initHelpColor()).
+		Padding(1, 0, 0, 2)
+	l.Styles.PaginationStyle = lipgloss.NewStyle().
+		Foreground(initMutedColor()).
+		PaddingLeft(2)
+	l.Styles.ActivePaginationDot = lipgloss.NewStyle().Foreground(initAccentColor()).SetString("•")
+	l.Styles.InactivePaginationDot = lipgloss.NewStyle().Foreground(initHelpColor()).SetString("•")
+	l.Styles.DividerDot = lipgloss.NewStyle().Foreground(initHelpColor()).SetString(" • ")
+}
+
 func initMutedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(initMutedColor()) }
 func initAccentColor() color.Color   { return lipgloss.Color("#A78BFA") }
 func initMutedColor() color.Color    { return lipgloss.Color("#9CA3AF") }
 func initSuccessColor() color.Color  { return lipgloss.Color("#22C55E") }
+func initHelpColor() color.Color     { return lipgloss.Color("#6B7280") }
 
-func materializeInitStyle(xdgConfigHome string, style initStyle, providerName, modelName string) (config.InitStyleConfig, error) {
+func initSelectedForegroundColor() color.Color      { return lipgloss.Color("#F8FAFC") }
+func initSelectedMutedForegroundColor() color.Color { return lipgloss.Color("#D1D5DB") }
+
+func materializeInitStyle(xdgConfigHome string, style initStyle, providerName string, componentModels map[string]string) (config.InitStyleConfig, error) {
 	promptDir := filepath.Join(xdgConfigHome, "hygge", "prompts", style.Name)
 	if err := os.MkdirAll(promptDir, 0o700); err != nil {
 		return config.InitStyleConfig{}, fmt.Errorf("init: create prompts dir: %w", err)
@@ -474,6 +502,7 @@ func materializeInitStyle(xdgConfigHome string, style initStyle, providerName, m
 		if err != nil {
 			return config.InitStyleConfig{}, err
 		}
+		modelName := componentModels[initModeKey(mode.Name)]
 		outStyle.Modes = append(outStyle.Modes, config.ModeConfig{
 			Name:        mode.Name,
 			Provider:    providerName,
@@ -484,12 +513,13 @@ func materializeInitStyle(xdgConfigHome string, style initStyle, providerName, m
 			Color:       mode.Color,
 		})
 	}
-	modelRef := providerName + "/" + modelName
 	for _, sub := range style.Subagents {
 		promptRef, err := writeInitPrompt(promptDir, sub.PromptFile)
 		if err != nil {
 			return config.InitStyleConfig{}, err
 		}
+		modelName := componentModels[initSubagentKey(sub.Name)]
+		modelRef := providerName + "/" + modelName
 		outStyle.Subagents = append(outStyle.Subagents, config.OnboardingSubagent{
 			Name:        sub.Name,
 			Description: sub.Description,
@@ -499,6 +529,172 @@ func materializeInitStyle(xdgConfigHome string, style initStyle, providerName, m
 	}
 	return outStyle, nil
 }
+
+// initModeKey returns the component map key for a mode by name.
+func initModeKey(name string) string { return "mode:" + name }
+
+// initSubagentKey returns the component map key for a subagent by name.
+func initSubagentKey(name string) string { return "subagent:" + name }
+
+// initUniformModels builds a componentModels map that assigns the same model
+// to every mode and subagent in the style (used when --model is given).
+func initUniformModels(style initStyle, modelName string) map[string]string {
+	m := make(map[string]string, len(style.Modes)+len(style.Subagents))
+	for _, mode := range style.Modes {
+		m[initModeKey(mode.Name)] = modelName
+	}
+	for _, sub := range style.Subagents {
+		m[initSubagentKey(sub.Name)] = modelName
+	}
+	return m
+}
+
+// pickInitComponentModels asks the user to pick a model for each mode and
+// subagent in the style, using a BubbleTea list picker.  It returns a
+// componentModels map keyed by initModeKey / initSubagentKey.
+func pickInitComponentModels(cmd *cobra.Command, reader *bufio.Reader, isTTY bool, cat *catalog.Catalog, providerName string, style initStyle) (map[string]string, error) {
+	models := cat.Models(providerName)
+	result := make(map[string]string, len(style.Modes)+len(style.Subagents))
+	for _, mode := range style.Modes {
+		label := fmt.Sprintf("mode: %s (%s)", mode.Name, mode.Description)
+		m, err := pickInitModel(cmd, reader, isTTY, models, providerName, label)
+		if err != nil {
+			return nil, err
+		}
+		if m == "" {
+			return nil, die(cmd, "model is required for mode %q (pass --model or run interactively)", mode.Name)
+		}
+		result[initModeKey(mode.Name)] = m
+	}
+	for _, sub := range style.Subagents {
+		label := fmt.Sprintf("subagent: %s (%s)", sub.Name, sub.Description)
+		m, err := pickInitModel(cmd, reader, isTTY, models, providerName, label)
+		if err != nil {
+			return nil, err
+		}
+		if m == "" {
+			return nil, die(cmd, "model is required for subagent %q (pass --model or run interactively)", sub.Name)
+		}
+		result[initSubagentKey(sub.Name)] = m
+	}
+	return result, nil
+}
+
+// pickInitModel selects a model for a single component, using a BubbleTea list
+// picker on TTY or plain line input otherwise.
+func pickInitModel(cmd *cobra.Command, reader *bufio.Reader, isTTY bool, models []catalog.Entry, providerName, componentLabel string) (string, error) {
+	if len(models) == 0 {
+		if isTTY {
+			printf(out(cmd), "No catalog models found for %s (component: %s). Enter a model name: ", providerName, componentLabel)
+		}
+		line, err := readLineWithContext(cmd.Context(), reader)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+				return "", errInitCancelled
+			}
+			return "", fmt.Errorf("read model name: %w", err)
+		}
+		return strings.TrimSpace(line), nil
+	}
+	if isTTY {
+		return pickInitModelInteractive(cmd, models, componentLabel)
+	}
+	return readInitModelFromLine(cmd, reader, models)
+}
+
+func pickInitModelInteractive(cmd *cobra.Command, models []catalog.Entry, componentLabel string) (string, error) {
+	items := make([]list.Item, 0, len(models))
+	for _, e := range models {
+		items = append(items, initModelSelectItem{entry: e})
+	}
+	delegate := newInitListDelegate()
+
+	height := min(18, max(8, len(items)+5))
+	l := list.New(items, delegate, 76, height)
+	l.Title = "Choose a model — " + componentLabel
+	styleInitList(&l)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.SetShowHelp(true)
+	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
+	l.AdditionalShortHelpKeys = func() []key.Binding { return nil }
+
+	m := initModelSelectModel{list: l}
+	p := tea.NewProgram(m, tea.WithInput(cmd.InOrStdin()), tea.WithOutput(out(cmd)), tea.WithContext(cmd.Context()))
+	finalModel, err := p.Run()
+	if err != nil {
+		return "", fmt.Errorf("init model picker: %w", err)
+	}
+	selected, ok := finalModel.(initModelSelectModel)
+	if !ok || selected.cancelled || selected.choice == "" {
+		writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+		return "", errInitCancelled
+	}
+	return selected.choice, nil
+}
+
+func readInitModelFromLine(cmd *cobra.Command, reader *bufio.Reader, models []catalog.Entry) (string, error) {
+	line, err := readLineWithContext(cmd.Context(), reader)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+			return "", errInitCancelled
+		}
+		return "", fmt.Errorf("read model selection: %w", err)
+	}
+	choice := strings.TrimSpace(line)
+	if choice == "" {
+		return "", nil
+	}
+	if n, convErr := strconv.Atoi(choice); convErr == nil {
+		if n < 1 || n > len(models) {
+			return "", fmt.Errorf("selection %d out of range [1, %d]", n, len(models))
+		}
+		return models[n-1].ID, nil
+	}
+	return choice, nil
+}
+
+type initModelSelectItem struct{ entry catalog.Entry }
+
+func (i initModelSelectItem) FilterValue() string { return i.entry.ID }
+func (i initModelSelectItem) Title() string       { return i.entry.ID }
+func (i initModelSelectItem) Description() string {
+	ctx := formatContext(i.entry.Limit.ContextWindow)
+	if ctx != "" {
+		return ctx + " context"
+	}
+	return ""
+}
+
+type initModelSelectModel struct {
+	list      list.Model
+	choice    string
+	cancelled bool
+}
+
+func (m initModelSelectModel) Init() tea.Cmd { return nil }
+
+func (m initModelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.Keystroke() {
+		case "ctrl+c", "esc":
+			m.cancelled = true
+			return m, tea.Quit
+		case "enter":
+			if item, ok := m.list.SelectedItem().(initModelSelectItem); ok {
+				m.choice = item.entry.ID
+				return m, tea.Quit
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m initModelSelectModel) View() tea.View { return tea.NewView(m.list.View()) }
 
 func writeInitPrompt(promptDir, embeddedName string) (string, error) {
 	data, err := fs.ReadFile(initStylePrompts, "initstyles/"+embeddedName)

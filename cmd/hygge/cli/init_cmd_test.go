@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/cfbender/hygge/internal/auth"
+	"github.com/cfbender/hygge/internal/catalog"
 )
 
 func TestInitRequiresConfiguredProvider(t *testing.T) {
@@ -71,7 +72,7 @@ func TestInitGeneralWritesPromptFileAndSingleMode(t *testing.T) {
 	}
 }
 
-func TestInitAmpWritesModesAndSubagents(t *testing.T) {
+func TestInitAmpWritesModesAndConfigSubagents(t *testing.T) {
 	home := hermeticHome(t)
 	seedInitAuth(t, home, "anthropic")
 
@@ -95,15 +96,13 @@ func TestInitAmpWritesModesAndSubagents(t *testing.T) {
 		}
 	}
 
-	subData, err := os.ReadFile(filepath.Join(home, ".config", "hygge", "subagents.toml")) //nolint:gosec // hermetic test config path
-	if err != nil {
-		t.Fatalf("read subagents: %v", err)
-	}
-	subs := string(subData)
 	for _, want := range []string{`[subagents.carpenter]`, `model = 'anthropic/claude-test'`, `prompt = 'file:prompts/amp/carpenter.md'`, `[subagents.search]`} {
-		if !strings.Contains(subs, want) {
-			t.Fatalf("subagents missing %q:\n%s", want, subs)
+		if !strings.Contains(config, want) {
+			t.Fatalf("config subagents missing %q:\n%s", want, config)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "hygge", "subagents.toml")); !os.IsNotExist(err) {
+		t.Fatalf("init should not create legacy subagents.toml, err=%v", err)
 	}
 }
 
@@ -131,15 +130,41 @@ func TestInitOpenCodeWritesBuiltInInspiredDefaults(t *testing.T) {
 		}
 	}
 
-	subData, err := os.ReadFile(filepath.Join(home, ".config", "hygge", "subagents.toml")) //nolint:gosec // hermetic test config path
-	if err != nil {
-		t.Fatalf("read subagents: %v", err)
-	}
-	subs := string(subData)
 	for _, want := range []string{`[subagents.general]`, `[subagents.explore]`, `[subagents.scout]`, `model = 'openai/gpt-test'`} {
-		if !strings.Contains(subs, want) {
-			t.Fatalf("subagents missing %q:\n%s", want, subs)
+		if !strings.Contains(config, want) {
+			t.Fatalf("config subagents missing %q:\n%s", want, config)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "hygge", "subagents.toml")); !os.IsNotExist(err) {
+		t.Fatalf("init should not create legacy subagents.toml, err=%v", err)
+	}
+}
+
+func TestMaterializeInitStyleAssignsPerComponentModels(t *testing.T) {
+	home := t.TempDir()
+	style := initStyle{
+		Name: "general",
+		Modes: []initModeDefault{{
+			Name:       "general",
+			PromptFile: "general/general.md",
+		}},
+		Subagents: []initSubagentDefault{{
+			Name:       "helper",
+			PromptFile: "general/general.md",
+		}},
+	}
+	resolved, err := materializeInitStyle(filepath.Join(home, ".config"), style, "anthropic", map[string]string{
+		initModeKey("general"):    "claude-main",
+		initSubagentKey("helper"): "claude-helper",
+	})
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if got := resolved.Modes[0].Model; got != "claude-main" {
+		t.Fatalf("mode model = %q, want claude-main", got)
+	}
+	if got := resolved.Subagents[0].Model; got != "anthropic/claude-helper" {
+		t.Fatalf("subagent model = %q, want anthropic/claude-helper", got)
 	}
 }
 
@@ -156,6 +181,13 @@ func TestInitPickerModelsCancelOnCtrlC(t *testing.T) {
 	gotProvider, ok := updatedProvider.(initProviderSelectModel)
 	if !ok || !gotProvider.cancelled {
 		t.Fatalf("provider picker did not cancel on ctrl+c: %#v", updatedProvider)
+	}
+
+	modelModel := initModelSelectModel{list: list.New([]list.Item{initModelSelectItem{entry: catalog.Entry{ID: "claude-test"}}}, list.NewDefaultDelegate(), 40, 8)}
+	updatedModel, _ := modelModel.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	gotModel, ok := updatedModel.(initModelSelectModel)
+	if !ok || !gotModel.cancelled {
+		t.Fatalf("model picker did not cancel on ctrl+c: %#v", updatedModel)
 	}
 }
 

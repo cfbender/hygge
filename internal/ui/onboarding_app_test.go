@@ -34,6 +34,29 @@ func TestInitOpensOnboardingWhenNeeded(t *testing.T) {
 	}
 }
 
+func TestOnboardingConfiguredProviderSkipsAPIKey(t *testing.T) {
+	b := bus.New()
+	app, err := New(AppOptions{
+		Bus:                     b,
+		Theme:                   theme.ShellTheme(),
+		ProjectDir:              t.TempDir(),
+		NeedsOnboarding:         true,
+		KnownProviders:          []string{"openai"},
+		AuthConfiguredProviders: []string{"openai"},
+		Now:                     func() time.Time { return time.Unix(0, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close(); b.Close() })
+
+	_ = app.Init()
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if app.onboardingWizard.Step != components.OnboardStepPickModel {
+		t.Fatalf("step = %v, want pick model", app.onboardingWizard.Step)
+	}
+}
+
 func TestOnboardingPasteAPIKey(t *testing.T) {
 	b := bus.New()
 	app, err := New(AppOptions{

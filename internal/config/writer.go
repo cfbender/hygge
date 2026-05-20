@@ -307,10 +307,12 @@ type InitStyleConfig struct {
 	Subagents []OnboardingSubagent
 }
 
-// WriteInitStyle persists all modes for an init style to the user config and
-// any subagents to the user subagents.toml. Existing unrelated config fields
-// are preserved. Existing modes are replaced because init is a bootstrap/reset
-// operation for the user's agent layout.
+// WriteInitStyle persists all modes for an init style to the user config at
+// $XDG_CONFIG_HOME/hygge/config.toml. Subagents are written into the
+// [subagents.<name>] tables inside config.toml (the config-defined subagent
+// path) rather than the legacy subagents.toml. Existing unrelated config
+// fields are preserved. Existing modes and subagents are replaced because init
+// is a bootstrap/reset operation for the user's agent layout.
 func WriteInitStyle(opts WriteInitStyleOptions, style InitStyleConfig) (string, error) {
 	if len(style.Modes) == 0 {
 		return "", fmt.Errorf("config: init style requires at least one mode")
@@ -368,15 +370,36 @@ func WriteInitStyle(opts WriteInitStyleOptions, style InitStyleConfig) (string, 
 	}
 	m["modes"] = modes
 
+	// Write subagents into [subagents.<name>] tables in config.toml rather
+	// than the legacy subagents.toml so both modes and subagents live in one
+	// place and are managed by the same config machinery.
+	if len(style.Subagents) > 0 {
+		subMap, ok := m["subagents"].(map[string]any)
+		if !ok {
+			subMap = map[string]any{}
+		}
+		for _, ag := range style.Subagents {
+			if ag.Name == "" {
+				continue
+			}
+			entry := map[string]any{
+				"description": ag.Description,
+				"prompt":      ag.Prompt,
+			}
+			if ag.Model != "" {
+				entry["model"] = ag.Model
+			}
+			subMap[ag.Name] = entry
+		}
+		m["subagents"] = subMap
+	}
+
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
 		return target, fmt.Errorf("config: encode init target: %w", err)
 	}
 	if err := atomicWriteConfig(target, buf.Bytes()); err != nil {
 		return target, fmt.Errorf("config: write init target: %w", err)
-	}
-	if err := WriteSubagentsToml(WriteSubagentsTomlOptions{HomeDir: opts.HomeDir, XDGConfigHome: opts.XDGConfigHome}, style.Subagents); err != nil {
-		return target, err
 	}
 	return target, nil
 }
