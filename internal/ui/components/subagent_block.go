@@ -45,8 +45,8 @@ type SubagentState struct {
 	// Description is the short mission label shown in the heading.
 	Description string
 
-	// Model is the resolved provider/model string.  Kept for the
-	// detail view accessed via Ctrl+G; not rendered in the compact block.
+	// Model is the resolved provider/model string shown in the compact block
+	// and detail view accessed via Ctrl+G.
 	Model string
 
 	// StartedAt and EndedAt bound the wall-clock elapsed time.
@@ -178,12 +178,18 @@ func (b SubagentBlock) subtitle() string {
 		// DONE state.
 		toolCount := b.toolCallCount()
 		parts := []string{fmt.Sprintf("%d toolcalls", toolCount)}
-		elapsed := b.elapsed()
-		if elapsed > 0 {
-			parts = append(parts, formatElapsed(elapsed))
+		if b.State.Model != "" {
+			parts = append(parts, b.State.Model)
+		}
+		if b.State.OutputTokens > 0 {
+			parts = append(parts, fmt.Sprintf("%d tokens", b.State.OutputTokens))
 		}
 		if b.State.Cost > 0 {
 			parts = append(parts, formatDollars(b.State.Cost))
+		}
+		elapsed := b.elapsed()
+		if elapsed > 0 {
+			parts = append(parts, formatElapsed(elapsed))
 		}
 		return b.muted().Render(strings.Join(parts, " \u00b7 "))
 	}

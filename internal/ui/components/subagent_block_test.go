@@ -19,7 +19,9 @@ func TestSubagentBlockDoneState(t *testing.T) {
 		Description:  "ping test",
 		StartedAt:    start,
 		EndedAt:      end,
+		Model:        "test-model",
 		Cost:         0.0042,
+		OutputTokens: 123,
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read"},
 			{Role: RoleTool, ToolName: "bash"},
@@ -30,8 +32,10 @@ func TestSubagentBlockDoneState(t *testing.T) {
 	for _, want := range []string{
 		"General Subagent \u2014 ping test", // heading with em dash
 		"3 toolcalls",                       // tool count
-		"4.2s",                              // duration
+		"test-model",                        // model
+		"123 tokens",                        // output tokens
 		"$0.0042",                           // cost
+		"4.2s",                              // duration
 		"ctrl+g",                            // hint
 		"view subagent",                     // hint label
 	} {
@@ -48,7 +52,6 @@ func TestSubagentBlockDoneState(t *testing.T) {
 		"subagent[general]",
 		"\u25b8", // ▸ old chevron
 		"running",
-		"tokens",
 	} {
 		if strings.Contains(out, bad) {
 			t.Errorf("DONE view should not contain %q in:\n%s", bad, out)
@@ -159,7 +162,9 @@ func TestMessageListSubagentWithSubagentRendersBlockOnly(t *testing.T) {
 		Description:  "find LICENSE",
 		StartedAt:    start,
 		EndedAt:      end,
+		Model:        "test-model",
 		Cost:         0.001,
+		OutputTokens: 42,
 		Messages:     []UIMessage{{Role: RoleTool, ToolName: "grep"}},
 	}
 	ml := MessageList{
@@ -184,6 +189,9 @@ func TestMessageListSubagentWithSubagentRendersBlockOnly(t *testing.T) {
 	for _, want := range []string{
 		"General Subagent \u2014 find LICENSE",
 		"1 toolcalls",
+		"test-model",
+		"42 tokens",
+		"$0.0010",
 		"ctrl+g",
 	} {
 		if !strings.Contains(out, want) {
