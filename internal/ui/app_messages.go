@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -420,6 +421,15 @@ func relativePathFromPwd(path, pwd string) string {
 }
 
 func extractTarget(args []byte) string {
+	var m map[string]any
+	if err := json.Unmarshal(args, &m); err == nil {
+		for _, key := range []string{"path", "file", "command", "url", "target"} {
+			if v, ok := m[key].(string); ok {
+				return v
+			}
+		}
+	}
+
 	s := string(args)
 	for _, key := range []string{`"path"`, `"file"`, `"command"`, `"url"`, `"target"`} {
 		if _, after, ok := strings.Cut(s, key); ok {
