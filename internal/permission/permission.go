@@ -6,8 +6,8 @@
 // Each [Request] flows through a fixed sequence of layers, evaluated in this
 // order with first-match-wins semantics:
 //
-//  1. Secrets denylist (hard-coded; matches → deny).  User config CANNOT
-//     override this layer.
+//  1. Hard denies: secrets denylist and project .aiexclude entries. User
+//     config CANNOT override this layer.
 //  2. Persisted state allowances ([state.State.AllowedRules]).  These are
 //     the "always-allow" decisions the user has previously made through a
 //     prompt.
@@ -337,10 +337,11 @@ func (e *Engine) Ask(ctx context.Context, req Request) (Decision, error) {
 		return Decision{}, ErrEngineClosed
 	}
 
+	if rule := hardDenyRule(req); rule != nil {
+		return Decision{Action: ActionDeny, Scope: ScopeOnce, Reason: reasonFromRule(rule)}, nil
+	}
+
 	if yolo {
-		if rule := secretDenyRule(req); rule != nil {
-			return Decision{Action: ActionDeny, Scope: ScopeOnce, Reason: reasonFromRule(rule)}, nil
-		}
 		return Decision{Action: ActionAllow, Scope: ScopeOnce, Reason: "yolo mode"}, nil
 	}
 
@@ -368,6 +369,13 @@ func (e *Engine) Ask(ctx context.Context, req Request) (Decision, error) {
 	default:
 		return Decision{}, fmt.Errorf("permission: unknown action %q from matcher", action)
 	}
+}
+
+func hardDenyRule(req Request) *Rule {
+	if rule := secretDenyRule(req); rule != nil {
+		return rule
+	}
+	return aiExcludeDenyRule(req)
 }
 
 func secretDenyRule(req Request) *Rule {
