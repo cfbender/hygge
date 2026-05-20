@@ -1381,8 +1381,28 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 // entry in the per-machine auth.json store.  Used by the TUI entrypoint
 // to refuse to start when there is no way to talk to a model — every
 // other CLI command tolerates a missing credential.
-func hasConfiguredModel(prov config.Provenance) bool {
-	return hasRealConfigSource(prov["model.provider"]) && hasRealConfigSource(prov["model.name"])
+func hasConfiguredModel(cfg *config.Config, prov config.Provenance) bool {
+	if hasRealConfigSource(prov["model.provider"]) && hasRealConfigSource(prov["model.name"]) {
+		return true
+	}
+	if cfg == nil {
+		return false
+	}
+	providerName := strings.TrimSpace(cfg.Model.Provider)
+	modelName := strings.TrimSpace(cfg.Model.Name)
+	if providerName == "" || modelName == "" {
+		return false
+	}
+	for _, mode := range cfg.Modes {
+		if strings.TrimSpace(mode.Provider) != providerName || strings.TrimSpace(mode.Model) != modelName {
+			continue
+		}
+		prefix := "modes." + mode.Name
+		if (hasRealConfigSource(prov[prefix+".provider"]) && hasRealConfigSource(prov[prefix+".model"])) || hasRealConfigSource(prov["modes"]) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasRealConfigSource(sources []config.Source) bool {

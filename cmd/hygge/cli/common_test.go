@@ -406,7 +406,7 @@ func TestBootstrapNoConfigAuthIgnoresConfigAndAuth(t *testing.T) {
 	if rt.Config.Model.Provider != "anthropic" || rt.Config.Model.Name != "claude-sonnet-4-5" {
 		t.Fatalf("model = %s/%s, want defaults", rt.Config.Model.Provider, rt.Config.Model.Name)
 	}
-	if hasConfiguredModel(rt.Provenance) {
+	if hasConfiguredModel(rt.Config, rt.Provenance) {
 		t.Fatalf("hasConfiguredModel = true; provenance = %v", rt.Provenance)
 	}
 	if got := captured.snapshot(); got != nil {

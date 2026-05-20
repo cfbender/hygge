@@ -64,6 +64,34 @@ func TestRunNoArgsBuildsAppAndSkipsTea(t *testing.T) {
 	}
 }
 
+func TestRunNoArgsWithModesOnlyConfigDoesNotNeedOnboarding(t *testing.T) {
+	home := hermeticHome(t)
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir cfg: %v", err)
+	}
+	cfgBody := `[[modes]]
+name = "smart"
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Len() > 0 {
+		t.Fatalf("expected no startup output, got:\n%s", out.String())
+	}
+}
+
 func TestResumeWithSeed(t *testing.T) {
 	home := hermeticHomeWithModel(t)
 	id := seedSession(t, home)
