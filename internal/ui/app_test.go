@@ -759,7 +759,7 @@ func TestScrollBarDragScrollsChatViewport(t *testing.T) {
 	}
 
 	app.Update(tea.MouseClickMsg{X: geom.X, Y: geom.ThumbY, Button: tea.MouseLeft})
-	app.Update(tea.MouseMotionMsg{X: geom.X, Y: 0})
+	app.Update(tea.MouseMotionMsg{X: geom.X, Y: 0, Button: tea.MouseLeft})
 	app.Update(tea.MouseReleaseMsg{X: geom.X, Y: 0, Button: tea.MouseLeft})
 
 	if app.scrollDragActive {
@@ -770,6 +770,52 @@ func TestScrollBarDragScrollsChatViewport(t *testing.T) {
 	}
 	if !app.userScrolled {
 		t.Fatal("dragging upward should pause auto-scroll")
+	}
+}
+
+func TestScrollBarDragMissingReleaseStopsOnButtonlessMotion(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for i := range 80 {
+		app.messages = append(app.messages, uiMessage{
+			Role: components.RoleAssistant,
+			Raw:  "message line " + string(rune('a'+(i%26))),
+		})
+	}
+	app.invalidateMsgCache()
+	_ = app.View()
+
+	geom, ok := app.scrollBarGeometry()
+	if !ok {
+		t.Fatal("expected scrollbar geometry")
+	}
+	bottomOffset := app.msgViewport.YOffset()
+
+	app.Update(tea.MouseClickMsg{X: geom.X, Y: geom.ThumbY, Button: tea.MouseLeft})
+	app.Update(tea.MouseMotionMsg{X: geom.X, Y: 0})
+
+	if app.scrollDragActive {
+		t.Fatal("buttonless motion should clear a stale scrollbar drag")
+	}
+	if got := app.msgViewport.YOffset(); got != bottomOffset {
+		t.Fatalf("buttonless motion changed viewport offset = %d, want %d", got, bottomOffset)
+	}
+}
+
+func TestSelectionMissingReleaseStopsOnButtonlessMotion(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	app.Update(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})
+	app.Update(tea.MouseMotionMsg{X: 10, Y: 1})
+
+	if app.sel.active {
+		t.Fatal("buttonless motion should clear stale text selection drag")
+	}
+	if app.sel.hasRange {
+		t.Fatal("buttonless motion should not create a selection range")
 	}
 }
 
@@ -793,7 +839,7 @@ func TestScrollBarDragToBottomResumesAutoScroll(t *testing.T) {
 		t.Fatal("expected scrollbar geometry")
 	}
 	app.Update(tea.MouseClickMsg{X: geom.X, Y: geom.ThumbY, Button: tea.MouseLeft})
-	app.Update(tea.MouseMotionMsg{X: geom.X, Y: app.height - 1})
+	app.Update(tea.MouseMotionMsg{X: geom.X, Y: app.height - 1, Button: tea.MouseLeft})
 	app.Update(tea.MouseReleaseMsg{X: geom.X, Y: app.height - 1, Button: tea.MouseLeft})
 
 	if !app.msgViewport.AtBottom() {

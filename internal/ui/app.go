@@ -1125,8 +1125,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMotionMsg:
 		if !a.anyOverlayOpen() {
 			if a.scrollDragActive {
-				a.dragScrollBar(m.Y)
-				return a, nil
+				if m.Button != tea.MouseLeft {
+					a.scrollDragActive = false
+				} else {
+					a.dragScrollBar(m.Y)
+					return a, nil
+				}
+			}
+			if a.sel.active && m.Button != tea.MouseLeft {
+				a.sel.active = false
 			}
 			// Track hover over subagent bubbles.
 			prev := a.hoverSubagentID
