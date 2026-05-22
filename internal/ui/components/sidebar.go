@@ -84,11 +84,12 @@ type Sidebar struct {
 	SessionTitle string
 
 	// Usage and context data.
-	UsedTokens   int64
-	MaxTokens    int64
-	PctUsed      float64
-	CostUSD      float64
-	BilledTokens int64
+	UsedTokens         int64
+	MaxTokens          int64
+	PctUsed            float64
+	CostUSD            float64
+	BilledInputTokens  int64 // cumulative input+cache tokens billed
+	BilledOutputTokens int64 // cumulative output tokens billed
 
 	// MCPs is the list of configured MCP server statuses.
 	MCPs []SidebarMCPStatus
@@ -141,11 +142,12 @@ func (s Sidebar) View() string {
 	}
 
 	// ── Usage section ─────────────────────────────────────────────────────
-	if s.BilledTokens > 0 || s.CostUSD > 0 {
+	if s.BilledInputTokens > 0 || s.BilledOutputTokens > 0 || s.CostUSD > 0 {
 		lines = append(lines, sectionStyle.Render(sidebarTruncate("Usage", innerW)))
-		if s.BilledTokens > 0 {
+		if s.BilledInputTokens > 0 || s.BilledOutputTokens > 0 {
+			billedLine := compactTokens(s.BilledInputTokens) + " ↑ / " + compactTokens(s.BilledOutputTokens) + " ↓"
 			lines = append(lines, s.atomStyle(styles.AtomSidebarValue).Render(
-				sidebarTruncate(formatTokens(s.BilledTokens)+" billed", innerW)))
+				sidebarTruncate(billedLine, innerW)))
 		}
 		if s.CostUSD > 0 {
 			lines = append(lines, s.atomStyle(styles.AtomSidebarValue).Render(
@@ -511,4 +513,36 @@ func formatTokens(n int64) string {
 		result = append(result, s[i])
 	}
 	return string(result)
+}
+
+// compactTokens formats a token count in a compact human-readable form.
+// Numbers under 1,000 are shown as-is; thousands are shown as e.g. "12.7k";
+// millions are shown as e.g. "1.37M". Fractional digits are truncated
+// (not rounded) so the displayed value never overstates the token count.
+//
+// Examples:
+//
+//	0       → "0"
+//	999     → "999"
+//	1000    → "1.0k"
+//	12788   → "12.7k"
+//	1374982 → "1.37M"
+func compactTokens(n int64) string {
+	if n < 0 {
+		n = 0
+	}
+	if n < 1_000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n < 1_000_000 {
+		// Truncate to one decimal place (floor, not round).
+		tenths := n / 100 // e.g. 12788 / 100 = 127
+		if tenths%10 == 0 {
+			return fmt.Sprintf("%dk", tenths/10)
+		}
+		return fmt.Sprintf("%d.%dk", tenths/10, tenths%10)
+	}
+	// Truncate to two decimal places (floor, not round).
+	hundredths := n / 10_000 // e.g. 1374982 / 10000 = 137
+	return fmt.Sprintf("%d.%02dM", hundredths/100, hundredths%100)
 }

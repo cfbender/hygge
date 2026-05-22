@@ -160,7 +160,8 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		rootID := a.rootSessionID()
 		if rootID == "" || e.SessionID == rootID {
 			a.costDollars = e.DollarsTotal
-			a.billedTok = e.InputTokens + e.OutputTokens + e.CacheReadTokens + e.CacheWriteTokens
+			a.billedInputTok = e.InputTokens + e.CacheReadTokens + e.CacheWriteTokens
+			a.billedOutputTok = e.OutputTokens
 		}
 
 	case bus.ContextUsageUpdated:
