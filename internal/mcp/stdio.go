@@ -99,9 +99,8 @@ type stdioTransport struct {
 	sendMu sync.Mutex
 
 	// waitDone is closed when the wait goroutine finishes.
-	waitDone   chan struct{}
-	stderrDone chan struct{}
-	waitErr    error
+	waitDone chan struct{}
+	waitErr  error
 }
 
 // NewStdio constructs a stdio Transport.  The subprocess is not
@@ -156,17 +155,17 @@ func (t *stdioTransport) Start(_ context.Context) error {
 		_ = stdin.Close()
 		return fmt.Errorf("mcp: stdio: stdout pipe: %w", err)
 	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return fmt.Errorf("mcp: stdio: stderr pipe: %w", err)
-	}
+	// Wire stderr directly to the ring buffer so cmd.Wait drains it
+	// synchronously with the child's exit.  Using StderrPipe + a
+	// reader goroutine races: Wait closes the read end of the pipe
+	// to "see the command exit", which can interrupt an in-flight
+	// io.Copy before the final buffered bytes are read.
+	stderrBuf := newRingBuffer(stderrRingSize)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
-		_ = stderrPipe.Close()
 		return fmt.Errorf("mcp: stdio: start %q: %w", t.opts.Command, err)
 	}
 
@@ -174,15 +173,8 @@ func (t *stdioTransport) Start(_ context.Context) error {
 	t.stdinW = stdin
 	t.stdoutR = stdout
 	t.stdoutBR = bufio.NewReader(stdout)
-	t.stderrW = newRingBuffer(stderrRingSize)
+	t.stderrW = stderrBuf
 	t.waitDone = make(chan struct{})
-	t.stderrDone = make(chan struct{})
-
-	// Pump stderr into the ring buffer.
-	go func() {
-		defer close(t.stderrDone)
-		_, _ = io.Copy(t.stderrW, stderrPipe)
-	}()
 
 	go func() {
 		t.waitErr = cmd.Wait()
@@ -252,7 +244,6 @@ func (t *stdioTransport) Close() error {
 	stdin := t.stdinW
 	stdout := t.stdoutR
 	waitDone := t.waitDone
-	stderrDone := t.stderrDone
 	stderrBuf := t.stderrW
 	t.mu.Unlock()
 
@@ -283,9 +274,6 @@ func (t *stdioTransport) Close() error {
 
 	if stdout != nil {
 		_ = stdout.Close()
-	}
-	if stderrDone != nil {
-		<-stderrDone
 	}
 
 	werr := t.waitErr
