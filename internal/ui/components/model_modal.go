@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/catalog"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // ModelOption is one selectable catalog model in the model picker.
@@ -34,7 +34,7 @@ func ConfiguredModelOption(provider, model string) ModelOption {
 // ModelModal renders and updates the model-selection dialog.
 type ModelModal struct {
 	Width, Height int
-	Theme         *theme.Theme
+	Theme         *styles.Styles
 	Current       string
 	Query         string
 	Cursor        int
@@ -127,10 +127,10 @@ func (m ModelModal) View() string {
 	muted := lipgloss.NewStyle().Faint(true)
 	highlight := lipgloss.NewStyle().Bold(true)
 	if m.Theme != nil {
-		border = border.BorderForeground(m.Theme.Style(theme.AtomModalBorder).GetForeground())
-		primary = m.Theme.Style(theme.AtomPrimary).Bold(true)
-		muted = m.Theme.Style(theme.AtomMuted)
-		highlight = m.Theme.Style(theme.AtomAccent).Bold(true)
+		border = border.BorderForeground(m.Theme.Style(styles.AtomModalBorder).GetForeground())
+		primary = m.Theme.Style(styles.AtomPrimary).Bold(true)
+		muted = m.Theme.Style(styles.AtomMuted)
+		highlight = m.Theme.Style(styles.AtomAccent).Bold(true)
 	}
 	filtered := m.Filtered()
 	var b strings.Builder

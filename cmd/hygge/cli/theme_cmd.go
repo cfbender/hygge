@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // newThemeCmd builds the `hygge theme` subcommand group.
@@ -38,10 +38,10 @@ func newThemeShowCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
-			printRaw(out(cmd), theme.FormatTheme(rt.Theme))
+			printRaw(out(cmd), rt.Theme.FormatTheme())
 			writeln(out(cmd))
 			writeln(out(cmd), "preview:")
-			for _, atom := range theme.AllAtoms() {
+			for _, atom := range styles.AllAtoms() {
 				style := rt.Theme.Style(atom)
 				printf(out(cmd), "  %-16s %s\n",
 					string(atom),

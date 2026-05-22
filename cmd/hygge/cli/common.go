@@ -50,7 +50,7 @@ import (
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/subagent"
 	"github.com/cfbender/hygge/internal/tool"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // runtime is the wired graph of every component the CLI needs.  Returned
@@ -71,7 +71,7 @@ type appRuntime struct {
 	Catalog         *cost.Catalog
 	Agent           *agent.Agent
 	MemoryStore     *memory.FileStore
-	Theme           *theme.Theme
+	Theme           *styles.Styles
 	Skills          *skill.Registry
 	Subagents       *subagent.Registry
 	SubagentRunner  *subagent.Runner
@@ -599,16 +599,16 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	})
 	slog.Debug("bootstrap phase", "phase", "catalog_load", "elapsed_ms", time.Since(t0).Milliseconds())
 
-	thm, err := theme.Load(cfg.Theme.Name, theme.LoadOptions{
+	thm, err := styles.Load(cfg.Theme.Name, styles.LoadOptions{
 		ConfigHome: xdgConfig,
 		HomeDir:    opts.HomeDir,
 	})
 	if err != nil {
 		// A missing or malformed user theme should never block the CLI
-		// — fall back to the shell theme and warn.
-		slog.Warn("cli: theme load failed; falling back to shell theme",
+		// — fall back to styles.DefaultTheme() (Claret) and warn.
+		slog.Warn("cli: theme load failed; falling back to styles.DefaultTheme()",
 			"name", cfg.Theme.Name, "err", err)
-		thm = theme.ShellTheme()
+		thm = styles.DefaultTheme()
 	}
 
 	contextWindow := lookupContextWindow(ctx, prv, cfg.Model.Name)

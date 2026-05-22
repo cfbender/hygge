@@ -18,7 +18,7 @@ import (
 	"charm.land/lipgloss/v2"
 	colorful "github.com/lucasb-eyer/go-colorful"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // animCounter provides monotonically-increasing unique IDs for Anim instances.
@@ -47,11 +47,11 @@ type Settings struct {
 	// Width is the rendered column count. Default: 8.
 	Width int
 	// Theme provides gradient colors. Optional; falls back to the built-in ramp.
-	Theme *theme.Theme
-	// GradFrom is the theme atom for the gradient start. Default: theme.AtomAccent.
-	GradFrom theme.Atom
-	// GradTo is the theme atom for the gradient end. Default: theme.AtomWarn.
-	GradTo theme.Atom
+	Theme *styles.Styles
+	// GradFrom is the theme atom for the gradient start. Default: styles.AtomAccent.
+	GradFrom styles.Atom
+	// GradTo is the theme atom for the gradient end. Default: styles.AtomWarn.
+	GradTo styles.Atom
 }
 
 // Anim is a pre-rendered, frame-cycling colored-runes spinner.
@@ -74,11 +74,11 @@ func New(opts Settings) *Anim {
 
 	from := opts.GradFrom
 	if from == "" {
-		from = theme.AtomAccent
+		from = styles.AtomAccent
 	}
 	to := opts.GradTo
 	if to == "" {
-		to = theme.AtomWarn
+		to = styles.AtomWarn
 	}
 
 	// Resolve the two gradient endpoint colors.
@@ -165,7 +165,7 @@ func (a *Anim) preRender(c1, c2 colorful.Color) {
 // resolveGradientColors extracts the two colorful.Color values for the
 // gradient.  Falls back to a built-in magenta→yellow ramp when the theme
 // is nil or a color cannot be resolved.
-func resolveGradientColors(t *theme.Theme, from, to theme.Atom) (colorful.Color, colorful.Color) {
+func resolveGradientColors(t *styles.Styles, from, to styles.Atom) (colorful.Color, colorful.Color) {
 	fallbackFrom, _ := colorful.Hex("#c678dd") // soft magenta
 	fallbackTo, _ := colorful.Hex("#e5c07b")   // warm yellow
 
@@ -180,7 +180,7 @@ func resolveGradientColors(t *theme.Theme, from, to theme.Atom) (colorful.Color,
 
 // atomToColorful converts a theme atom's lipgloss color to a colorful.Color.
 // Falls back to fb on any failure.
-func atomToColorful(t *theme.Theme, a theme.Atom, fb colorful.Color) colorful.Color {
+func atomToColorful(t *styles.Styles, a styles.Atom, fb colorful.Color) colorful.Color {
 	style := t.Style(a)
 	fg := style.GetForeground()
 	if fg == nil {

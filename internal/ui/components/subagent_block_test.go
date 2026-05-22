@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // TestSubagentBlockDoneState verifies the DONE compact layout.
@@ -28,7 +28,7 @@ func TestSubagentBlockDoneState(t *testing.T) {
 			{Role: RoleTool, ToolName: "grep"},
 		},
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Now: end}.View()
 	for _, want := range []string{
 		"General Subagent \u2014 ping test", // heading with em dash
 		"3 toolcalls",                       // tool count
@@ -72,7 +72,7 @@ func TestSubagentBlockRunningState(t *testing.T) {
 			{Role: RoleTool, ToolName: "read", Target: "internal/ui/app.go"},
 		},
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: now}.View()
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Now: now}.View()
 	for _, want := range []string{
 		"General Subagent \u2014 ping test",
 		"read internal/ui/app.go", // latest tool label
@@ -95,7 +95,7 @@ func TestSubagentBlockRunningNoToolsPlaceholder(t *testing.T) {
 		Description:  "go",
 		StartedAt:    now.Add(-time.Second),
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: now}.View()
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Now: now}.View()
 	if !strings.Contains(out, "working") {
 		t.Errorf("RUNNING with no tools should show working placeholder; got:\n%s", out)
 	}
@@ -112,7 +112,7 @@ func TestSubagentBlockEmptyDescriptionFallback(t *testing.T) {
 		StartedAt:    start,
 		EndedAt:      end,
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Now: end}.View()
 	if !strings.Contains(out, "General Subagent") {
 		t.Errorf("empty-description view should contain 'General Subagent'; got:\n%s", out)
 	}
@@ -134,7 +134,7 @@ func TestSubagentBlockLongDescriptionTruncated(t *testing.T) {
 		StartedAt:    start,
 		EndedAt:      end,
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Width: 60, Now: end}.View()
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Width: 60, Now: end}.View()
 	if !strings.Contains(out, "\u2026") { // ellipsis
 		t.Errorf("long description should be truncated with ellipsis; got:\n%s", out)
 	}
@@ -169,7 +169,7 @@ func TestMessageListSubagentWithSubagentRendersBlockOnly(t *testing.T) {
 	}
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Now:   now,
 		Messages: []UIMessage{
 			{Role: RoleUser, Raw: "find LICENSE"},
@@ -225,7 +225,7 @@ func TestMessageListSubagentWithSubagentNoGutter(t *testing.T) {
 	}
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Now:   now,
 		Messages: []UIMessage{
 			{
@@ -247,7 +247,7 @@ func TestMessageListNoNestedWhenSubagentIDMissing(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "subagent", Raw: "(running…)"},
 		},

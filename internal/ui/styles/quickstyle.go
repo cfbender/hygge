@@ -51,6 +51,8 @@ func quickStyle(o quickStyleOpts) Styles {
 		s      Styles
 	)
 
+	s.Colors = paletteAtoms(o)
+
 	s.Background = o.bgBase
 	s.BubbleBg = o.bgLessVisible
 	s.SidebarBg = o.bgLessVisible

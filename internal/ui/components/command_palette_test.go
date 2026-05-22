@@ -8,7 +8,7 @@ import (
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // stubApp is the minimum command.App impl needed for the palette
@@ -44,7 +44,7 @@ func TestPaletteNoMatchesWithQuery(t *testing.T) {
 	t.Parallel()
 	p := CommandPalette{
 		Width:           60,
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		Matches:         nil,
 		QueryAfterSlash: "qwerty",
 	}
@@ -63,7 +63,7 @@ func TestPaletteRendersFilteredBuiltins(t *testing.T) {
 	}
 	p := CommandPalette{
 		Width:           60,
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		Matches:         matches,
 		Highlight:       0,
 		QueryAfterSlash: "co",
@@ -82,7 +82,7 @@ func TestPaletteRendersFuzzyBuiltins(t *testing.T) {
 	matches := r.LookupPrefix("cpct")
 	p := CommandPalette{
 		Width:           60,
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		Matches:         matches,
 		Highlight:       0,
 		QueryAfterSlash: "cpct",
@@ -99,7 +99,7 @@ func TestPaletteHighlightMarker(t *testing.T) {
 	matches := r.LookupPrefix("co")
 	p := CommandPalette{
 		Width:     60,
-		Theme:     theme.ShellTheme(),
+		Theme:     styles.DefaultTheme(),
 		Matches:   matches,
 		Highlight: 1, // /cost
 	}
@@ -129,7 +129,7 @@ func TestPaletteOverflowIndicator(t *testing.T) {
 	}
 	p := CommandPalette{
 		Width:   60,
-		Theme:   theme.ShellTheme(),
+		Theme:   styles.DefaultTheme(),
 		Matches: matches,
 	}
 	out := p.View()
@@ -157,7 +157,7 @@ func TestPaletteHighlightOutOfRangeIsClamped(t *testing.T) {
 	matches := r.LookupPrefix("co")
 	p := CommandPalette{
 		Width:     60,
-		Theme:     theme.ShellTheme(),
+		Theme:     styles.DefaultTheme(),
 		Matches:   matches,
 		Highlight: 99,
 	}

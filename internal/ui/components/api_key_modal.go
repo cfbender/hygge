@@ -6,13 +6,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // APIKeyModal renders and updates the provider API-key dialog.
 type APIKeyModal struct {
 	Width, Height int
-	Theme         *theme.Theme
+	Theme         *styles.Styles
 	Provider      string
 	HasExisting   bool
 	Value         string
@@ -74,9 +74,9 @@ func (m APIKeyModal) View() string {
 	primary := lipgloss.NewStyle().Bold(true)
 	muted := lipgloss.NewStyle().Faint(true)
 	if m.Theme != nil {
-		border = border.BorderForeground(m.Theme.Style(theme.AtomModalBorder).GetForeground())
-		primary = m.Theme.Style(theme.AtomPrimary).Bold(true)
-		muted = m.Theme.Style(theme.AtomMuted)
+		border = border.BorderForeground(m.Theme.Style(styles.AtomModalBorder).GetForeground())
+		primary = m.Theme.Style(styles.AtomPrimary).Bold(true)
+		muted = m.Theme.Style(styles.AtomMuted)
 	}
 	existing := "not configured"
 	if m.HasExisting {

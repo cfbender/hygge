@@ -32,6 +32,13 @@ const (
 
 // Styles is the resolved set of all UI styles for the current theme.
 type Styles struct {
+	// Name identifies the theme (e.g. "claret" or a user-defined name).
+	Name string
+
+	// Colors maps every Atom to its resolved color in this theme. Components
+	// that previously called Theme.Style(atom) now call Styles.Style(atom).
+	Colors map[Atom]color.Color
+
 	// Background is the base terminal background for the theme.
 	Background color.Color
 

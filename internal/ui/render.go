@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // invalidateMsgCache marks the message content cache as stale so the next
@@ -387,14 +387,14 @@ func (a *App) renderChromeContent() string {
 	if a.notice != "" {
 		style := lipgloss.NewStyle()
 		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(theme.AtomMuted)
+			style = a.opts.Theme.Style(styles.AtomMuted)
 		}
 		sections = append(sections, style.Render(a.notice))
 	}
 	if a.compactionToast != "" {
 		style := lipgloss.NewStyle()
 		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(theme.AtomMuted)
+			style = a.opts.Theme.Style(styles.AtomMuted)
 		}
 		sections = append(sections, style.Render(a.compactionToast))
 	}

@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // CompactionModal renders the confirmation dialog shown when the user runs
@@ -21,7 +21,7 @@ import (
 type CompactionModal struct {
 	Width  int
 	Height int
-	Theme  *theme.Theme
+	Theme  *styles.Styles
 	Toast  string // optional transient line (e.g. warning text)
 
 	// SessionID is the foreground session being compacted.
@@ -65,9 +65,9 @@ func (m CompactionModal) renderBox() string {
 		Border(lipgloss.RoundedBorder()).
 		Padding(1, 2)
 	if m.Theme != nil {
-		bs := m.Theme.Style(theme.AtomModalBorder)
+		bs := m.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := m.Theme.Style(theme.AtomModalBg)
+		modal := m.Theme.Style(styles.AtomModalBg)
 		if modal.GetBackground() != nil {
 			border = border.Background(modal.GetBackground())
 		}
@@ -122,18 +122,18 @@ func (m CompactionModal) bold() lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle().Bold(true)
 	}
-	return m.Theme.Style(theme.AtomPrimary).Bold(true)
+	return m.Theme.Style(styles.AtomPrimary).Bold(true)
 }
 
 func (m CompactionModal) warnStyle() lipgloss.Style {
-	return m.style(theme.AtomWarn)
+	return m.style(styles.AtomWarn)
 }
 
 func (m CompactionModal) muted() lipgloss.Style {
-	return m.style(theme.AtomMuted)
+	return m.style(styles.AtomMuted)
 }
 
-func (m CompactionModal) style(a theme.Atom) lipgloss.Style {
+func (m CompactionModal) style(a styles.Atom) lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle()
 	}

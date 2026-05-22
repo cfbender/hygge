@@ -7,14 +7,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 func TestInitOpensOnboardingWhenNeeded(t *testing.T) {
 	b := bus.New()
 	app, err := New(AppOptions{
 		Bus:             b,
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		ProjectDir:      t.TempDir(),
 		NeedsOnboarding: true,
 		KnownProviders:  []string{"openai"},
@@ -38,7 +38,7 @@ func TestOnboardingConfiguredProviderSkipsAPIKey(t *testing.T) {
 	b := bus.New()
 	app, err := New(AppOptions{
 		Bus:                     b,
-		Theme:                   theme.ShellTheme(),
+		Theme:                   styles.DefaultTheme(),
 		ProjectDir:              t.TempDir(),
 		NeedsOnboarding:         true,
 		KnownProviders:          []string{"openai"},
@@ -61,7 +61,7 @@ func TestOnboardingPasteAPIKey(t *testing.T) {
 	b := bus.New()
 	app, err := New(AppOptions{
 		Bus:             b,
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		ProjectDir:      t.TempDir(),
 		NeedsOnboarding: true,
 		KnownProviders:  []string{"openai"},
