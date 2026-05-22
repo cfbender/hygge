@@ -749,5 +749,30 @@ func (a *App) gitBranch() string {
 	return appstate.GitBranch(a.opts.ProjectDir)
 }
 
+// foregroundTranscriptID returns a stable key identifying which transcript is
+// currently being rendered. When viewing a subagent, this is the subagent's
+// SubSessionID; otherwise it is the root session ID (foreground stack bottom).
+// Used as the outer key into a.expandedThinking.
+func (a *App) foregroundTranscriptID() string {
+	foreID := a.foregroundID()
+	rootID := a.rootSessionID()
+	if foreID != rootID && foreID != "" {
+		return foreID // subagent transcript
+	}
+	return rootID // root session transcript
+}
+
+// expandedThinkingFor returns the per-transcript map[int]bool for transcriptID,
+// creating it if absent. The caller must not hold a stale reference across
+// operations that could replace the outer map.
+func (a *App) expandedThinkingFor(transcriptID string) map[int]bool {
+	if m, ok := a.expandedThinking[transcriptID]; ok {
+		return m
+	}
+	m := make(map[int]bool)
+	a.expandedThinking[transcriptID] = m
+	return m
+}
+
 // refreshTodosCache loads the foreground session's todo list from the store
 // into todosCache.  Called when the foreground session changes or when a

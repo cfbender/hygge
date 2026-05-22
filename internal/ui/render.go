@@ -121,7 +121,7 @@ func (a *App) renderChatContent() string {
 			Now:                now,
 			HoverSubagentID:    a.hoverSubagentID,
 			ExpandedTools:      a.expandedTools,
-			ExpandedThinking:   a.expandedThinking,
+			ExpandedThinking:   a.expandedThinkingFor(a.foregroundTranscriptID()),
 			MessageIndexOffset: messageIndexOffset,
 		}
 		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones = ml.ViewWithHitZones()

@@ -215,7 +215,7 @@ func New(opts AppOptions) (*App, error) {
 		subagents:             make(map[string]*components.SubagentState),
 		subagentAnims:         make(map[string]*anim.Anim),
 		expandedTools:         make(map[string]bool),
-		expandedThinking:      make(map[int]bool),
+		expandedThinking:      make(map[string]map[int]bool),
 		msgViewport:           viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		touched:               appstate.NewTouchedFiles(),
 		focused:               true,
@@ -298,8 +298,10 @@ type App struct {
 	expandedTools map[string]bool
 
 	// expandedThinking tracks which assistant messages have their thinking block
-	// fully expanded (not truncated). Keyed by message index in a.messages.
-	expandedThinking map[int]bool
+	// fully expanded (not truncated). Keyed first by transcript ID (root session
+	// ID or subagent SubSessionID), then by message index within that transcript.
+	// This ensures root and subagent transcripts never share indices.
+	expandedThinking map[string]map[int]bool
 
 	// sel tracks mouse-driven text selection.
 	sel selection
@@ -1148,7 +1150,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check for thinking block click (expand/collapse).
 			if idx := a.thinkingAtScreen(m.X, m.Y); idx >= 0 {
 				a.clearSelection()
-				a.expandedThinking[idx] = !a.expandedThinking[idx]
+				tid := a.foregroundTranscriptID()
+				etm := a.expandedThinkingFor(tid)
+				etm[idx] = !etm[idx]
 				a.invalidateMsgCache()
 				return a, nil
 			}
