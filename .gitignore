@@ -37,5 +37,6 @@ go.work.sum
 
 .crush/
 .claude/
-.hygge/
+.hygge/*
 !.hygge/skills/
+!.hygge/skills/**
