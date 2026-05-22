@@ -185,28 +185,41 @@ func TestDryRunBootstrapIgnoresExternalConfig(t *testing.T) {
 	}
 }
 
-// dirSnapshot returns a map of filename → file contents for every
-// regular file directly inside dir.  Subdirectories are ignored.
-// If dir does not exist the map is empty.
+// dirSnapshot returns a map of relative filename → file contents for every
+// regular file inside dir. If dir does not exist the map is empty.
 func dirSnapshot(t *testing.T, dir string) map[string][]byte {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
+	snap := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // path is provided by WalkDir under the test-controlled dir.
+		if err != nil {
+			return err
+		}
+		snap[rel] = data
+		return nil
+	})
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string][]byte{}
 		}
-		t.Fatalf("dirSnapshot ReadDir %s: %v", dir, err)
-	}
-	snap := make(map[string][]byte, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			t.Fatalf("dirSnapshot ReadFile %s: %v", e.Name(), err)
-		}
-		snap[e.Name()] = data
+		t.Fatalf("dirSnapshot WalkDir %s: %v", dir, err)
 	}
 	return snap
 }
