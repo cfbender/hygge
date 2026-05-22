@@ -186,7 +186,7 @@ func TestThemeModalViewUsesCandidatePreviewThemes(t *testing.T) {
 		Height:  20,
 		Theme:   styles.DefaultTheme(),
 		Current: "claret",
-		Themes:  []string{"claret", "iterm-dracula"},
+		Themes:  []string{"claret", "dracula"},
 		PreviewTheme: func(name string) *styles.Styles {
 			calls[name] = true
 			return styles.ThemeByName(name)
@@ -194,11 +194,11 @@ func TestThemeModalViewUsesCandidatePreviewThemes(t *testing.T) {
 	}
 	out := m.View()
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "iterm-dracula") || !strings.Contains(plain, "Aa") {
+	if !strings.Contains(plain, "dracula") || !strings.Contains(plain, "Aa") {
 		t.Fatalf("theme preview missing row/sample text:\n%s", plain)
 	}
-	if !calls["iterm-dracula"] {
-		t.Fatalf("preview callback was not called for iterm-dracula")
+	if !calls["dracula"] {
+		t.Fatalf("preview callback was not called for dracula")
 	}
 }
 

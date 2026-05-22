@@ -14,18 +14,18 @@ func TestKnownNamesIncludesGeneratedItermThemes(t *testing.T) {
 	if !slices.Contains(names, "claret") {
 		t.Fatalf("KnownNames missing claret")
 	}
-	if !slices.Contains(names, "iterm-dracula") {
-		t.Fatalf("KnownNames missing iterm-dracula")
+	if !slices.Contains(names, "dracula") {
+		t.Fatalf("KnownNames missing dracula")
 	}
 }
 
 func TestLoadGeneratedItermTheme(t *testing.T) {
 	t.Parallel()
-	th, err := Load("iterm-dracula", LoadOptions{ConfigHome: t.TempDir(), HomeDir: t.TempDir()})
+	th, err := Load("dracula", LoadOptions{ConfigHome: t.TempDir(), HomeDir: t.TempDir()})
 	if err != nil {
-		t.Fatalf("Load(iterm-dracula) error = %v", err)
+		t.Fatalf("Load(dracula) error = %v", err)
 	}
-	if th.Name != "iterm-dracula" {
+	if th.Name != "dracula" {
 		t.Fatalf("theme name = %q", th.Name)
 	}
 	if th.Style(AtomPrimary).GetForeground() == nil {

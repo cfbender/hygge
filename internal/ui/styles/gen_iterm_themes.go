@@ -129,9 +129,9 @@ func themeSlug(s string) string {
 	s = slugRE.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-._")
 	if s == "" {
-		return "iterm-theme"
+		return "theme"
 	}
-	return "iterm-" + s
+	return s
 }
 
 func norm(s string) string {
