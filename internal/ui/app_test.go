@@ -64,7 +64,7 @@ func TestColdStartEmptyState(t *testing.T) {
 	// Sidebar: app name, project path (no session yet so no session title).
 	// Footer: agent identity.
 	// MessageList: empty-state welcome text.
-	for _, want := range []string{"Hygge", "~/proj", "Ask anything", "███████", "General", "claude-sonnet-4-5"} {
+	for _, want := range []string{"Hygge", "~/proj", "Ask anything", "hygge", "General", "claude-sonnet-4-5"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("cold-start view missing %q in:\n%s", want, out)
 		}
@@ -116,7 +116,7 @@ func TestTypingKeepsSplashInputCentered(t *testing.T) {
 	typeInto(app, "j")
 	out := app.View().Content
 	plain := ansiEscapeRE.ReplaceAllString(out, "")
-	for _, want := range []string{"███████", "Ctrl+E opens this prompt", "j"} {
+	for _, want := range []string{"hygge", "Ctrl+E opens this prompt", "j"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("typing should keep splash prompt visible; missing %q in:\n%s", want, out)
 		}
@@ -133,7 +133,7 @@ func TestNoticeKeepsSplashInputCentered(t *testing.T) {
 
 	out := app.View().Content
 	plain := ansiEscapeRE.ReplaceAllString(out, "")
-	for _, want := range []string{"███████", "Ctrl+E opens this prompt"} {
+	for _, want := range []string{"hygge", "Ctrl+E opens this prompt"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("notice should keep splash prompt visible; missing %q in:\n%s", want, out)
 		}
@@ -143,18 +143,22 @@ func TestNoticeKeepsSplashInputCentered(t *testing.T) {
 	}
 }
 
-func TestSplashSmokeAnimates(t *testing.T) {
+func TestSplashFogAnimates(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
-	first := ansiEscapeRE.ReplaceAllString(app.renderSplashSmoke(), "")
-	if !strings.Contains(first, "┌─┐") || !strings.Contains(first, "(  )") {
-		t.Fatalf("splash smoke should render chimney and smoke:\n%s", first)
-	}
 
-	app.spinnerTick = splashFrameSlowdown
-	second := ansiEscapeRE.ReplaceAllString(app.renderSplashSmoke(), "")
+	app.fogStart = time.Now()
+	first := app.renderSplashFog(80, 16)
+
+	app.fogStart = app.fogStart.Add(-500 * time.Millisecond)
+	second := app.renderSplashFog(80, 16)
+
 	if first == second {
-		t.Fatalf("splash smoke should change between frames:\nfirst:\n%s\nsecond:\n%s", first, second)
+		t.Fatalf("fog banner should differ across time steps:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	plain := ansiEscapeRE.ReplaceAllString(first, "")
+	if !strings.Contains(plain, "hygge") {
+		t.Fatalf("fog banner should embed the hygge wordmark:\n%s", plain)
 	}
 }
 

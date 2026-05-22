@@ -118,6 +118,11 @@ type clearCompactionToastMsg struct{}
 // the current crossing.  Fired when the user presses Ctrl+X.
 type dismissBannerMsg struct{}
 
+// splashFogTickMsg fires at ~30fps while the splash is on screen to drive the
+// fog animation. The tick self-terminates when the splash is no longer
+// active; the spinner tick handler re-arms it when the splash returns.
+type splashFogTickMsg struct{}
+
 // busyReconcileTickMsg fires once per second while the App may be in a
 // busy-desync state.  The handler compares UI busy state against the agent's
 // canonical activeRuns and corrects any drift caused by dropped bus events

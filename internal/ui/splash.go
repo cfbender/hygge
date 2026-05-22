@@ -2,13 +2,24 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
-const splashFrameSlowdown = 8
+// Splash layout sizing.
+//
+// The fog banner expands to fill the chat region minus the space reserved for
+// the input + tip stack plus a small breathing margin. A floor keeps the fog
+// visually substantial on short windows.
+const (
+	splashFogMinHeight  = 14
+	splashFogVMargin    = 3 // rows reserved above input + below tip
+	splashTipHeight     = 1
+	splashInputReserved = 5 // input box (~3 rows + 2 border)
+)
 
 func (a *App) splashActive() bool {
 	return !a.viewingSubagent() &&
@@ -19,10 +30,6 @@ func (a *App) splashActive() bool {
 		len(a.messages) == 0 &&
 		a.queueCount == 0 &&
 		len(a.queuedDrafts) == 0
-}
-
-func (a *App) splashFrame() int {
-	return a.spinnerTick / splashFrameSlowdown
 }
 
 func (a *App) renderSplashContent() string {
@@ -39,12 +46,16 @@ func (a *App) renderSplashContent() string {
 	input := a.input.View()
 	a.input.Textarea.Placeholder = placeholder
 
-	smoke := a.renderSplashSmoke()
-	logo := a.renderSplashLogo()
+	fogW := max(1, w)
+	available := h - splashInputReserved - splashTipHeight - splashFogVMargin
+	// Hold the fog to roughly 60% of the vertical room below the chrome, with
+	// a sensible floor so it stays visually substantial on short windows.
+	fogH := max(splashFogMinHeight, available*3/5)
+	fog := a.renderSplashFog(fogW, fogH)
 	tip := a.splashTipStyle().Render("• Tip") + a.splashMutedStyle().Render("  Ctrl+E opens this prompt in your external editor")
 
-	content := strings.Join([]string{smoke, logo, input, tip}, "\n")
-	content = centerBlock(w, content)
+	inputBlock := centerBlock(w, strings.Join([]string{input, tip}, "\n"))
+	content := strings.Join([]string{fog, inputBlock}, "\n")
 	padTop := max((h-lipgloss.Height(content))/2, 0)
 	content = strings.Repeat("\n", padTop) + content
 	padBottom := max(h-lipgloss.Height(content), 0)
@@ -58,35 +69,22 @@ func splashInputWidth(width int) int {
 	return min(max(width*3/5, 56), min(width-6, 88))
 }
 
-func (a *App) renderSplashLogo() string {
-	frames := []string{
-		"██╗  ██╗██╗   ██╗ ██████╗  ██████╗ ███████╗\n██║  ██║╚██╗ ██╔╝██╔════╝ ██╔════╝ ██╔════╝\n███████║ ╚████╔╝ ██║  ███╗██║  ███╗█████╗  \n██╔══██║  ╚██╔╝  ██║   ██║██║   ██║██╔══╝  \n██║  ██║   ██║   ╚██████╔╝╚██████╔╝███████╗\n╚═╝  ╚═╝   ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝",
-		"▓▓╗  ▓▓╗▓▓╗   ▓▓╗ ▓▓▓▓▓▓╗  ▓▓▓▓▓▓╗ ▓▓▓▓▓▓▓╗\n▓▓║  ▓▓║╚▓▓╗ ▓▓╔╝▓▓╔════╝ ▓▓╔════╝ ▓▓╔════╝\n▓▓▓▓▓▓▓║ ╚▓▓▓▓╔╝ ▓▓║  ▓▓▓╗▓▓║  ▓▓▓╗▓▓▓▓▓╗  \n▓▓╔══▓▓║  ╚▓▓╔╝  ▓▓║   ▓▓║▓▓║   ▓▓║▓▓╔══╝  \n▓▓║  ▓▓║   ▓▓║   ╚▓▓▓▓▓▓╔╝╚▓▓▓▓▓▓╔╝▓▓▓▓▓▓▓╗\n╚═╝  ╚═╝   ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝",
-		"▒▒╗  ▒▒╗▒▒╗   ▒▒╗ ▒▒▒▒▒▒╗  ▒▒▒▒▒▒╗ ▒▒▒▒▒▒▒╗\n▒▒║  ▒▒║╚▒▒╗ ▒▒╔╝▒▒╔════╝ ▒▒╔════╝ ▒▒╔════╝\n▒▒▒▒▒▒▒║ ╚▒▒▒▒╔╝ ▒▒║  ▒▒▒╗▒▒║  ▒▒▒╗▒▒▒▒▒╗  \n▒▒╔══▒▒║  ╚▒▒╔╝  ▒▒║   ▒▒║▒▒║   ▒▒║▒▒╔══╝  \n▒▒║  ▒▒║   ▒▒║   ╚▒▒▒▒▒▒╔╝╚▒▒▒▒▒▒╔╝▒▒▒▒▒▒▒╗\n╚═╝  ╚═╝   ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝",
+// renderSplashFog renders the animated fog banner with the lowercase "hygge"
+// wordmark overlaid inside the cloud body (inset from the right edge so it
+// sits among visible glyphs rather than drifting into the vignetted corner).
+func (a *App) renderSplashFog(width, height int) string {
+	if width < 1 {
+		width = 1
 	}
-	frame := frames[a.splashFrame()%len(frames)]
-	return a.splashLogoStyle().Render(frame)
-}
-
-func (a *App) renderSplashSmoke() string {
-	frames := []string{
-		"      (  )       \n    (    )       \n      ┌─┐        ",
-		"    (    )       \n       (  )      \n      ┌─┐        ",
-		"       (  )      \n     (    )      \n      ┌─┐        ",
-		"     (    )      \n        (  )     \n      ┌─┐        ",
+	if height < 1 {
+		height = 1
 	}
-	style := a.splashMutedStyle()
-	if a.opts.Theme != nil {
-		style = a.opts.Theme.Style(theme.AtomMuted).Italic(true)
+	if a.fogStart.IsZero() {
+		a.fogStart = time.Now()
 	}
-	return style.Render(frames[a.splashFrame()%len(frames)])
-}
-
-func (a *App) splashLogoStyle() lipgloss.Style {
-	if a.opts.Theme != nil {
-		return a.opts.Theme.Style(theme.AtomAccent).Bold(true)
-	}
-	return lipgloss.NewStyle().Bold(true)
+	t := time.Since(a.fogStart).Seconds()
+	accent := resolveAccentRGB(a.styles, a.opts.Theme)
+	return renderFogBanner(width, height, t, accent, "hygge")
 }
 
 func (a *App) splashMutedStyle() lipgloss.Style {
