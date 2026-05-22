@@ -40,3 +40,5 @@ go.work.sum
 .hygge/*
 !.hygge/skills/
 !.hygge/skills/**
+
+.worktrees/
