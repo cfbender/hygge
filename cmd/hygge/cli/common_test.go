@@ -374,7 +374,7 @@ func stateLoadOptionsForTest() state.LoadOptions {
 // TestBootstrap_AuthStoreInjectsAPIKey verifies that with no
 // model.options.api_key in config and no env var set, a stored
 // auth.json credential is injected into the provider factory's opts.
-func TestBootstrapNoConfigAuthIgnoresConfigAndAuth(t *testing.T) {
+func TestBootstrapDryRunIgnoresConfigAndAuth(t *testing.T) {
 	home := t.TempDir()
 	xdgState := filepath.Join(home, ".local", "state")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env-should-be-ignored")
@@ -394,15 +394,15 @@ func TestBootstrapNoConfigAuthIgnoresConfigAndAuth(t *testing.T) {
 		ProviderFactory: captured.factory,
 		FantasyModel:    nil,
 		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
-		NoConfigAuth:    true,
+		DryRun:          true,
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	defer func() { _ = rt.Close() }()
 
-	if !rt.NoConfigAuth {
-		t.Fatal("rt.NoConfigAuth = false, want true")
+	if !rt.DryRun {
+		t.Fatal("rt.DryRun = false, want true")
 	}
 	if rt.Config.Model.Provider != "anthropic" || rt.Config.Model.Name != "claude-sonnet-4-5" {
 		t.Fatalf("model = %s/%s, want defaults", rt.Config.Model.Provider, rt.Config.Model.Name)
