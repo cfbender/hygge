@@ -87,7 +87,13 @@ func run() error {
 		}
 		schemes = append(schemes, s)
 	}
-	sort.Slice(schemes, func(i, j int) bool { return themeSlug(schemes[i].Name) < themeSlug(schemes[j].Name) })
+	sort.SliceStable(schemes, func(i, j int) bool {
+		left, right := themeSlug(schemes[i].Name), themeSlug(schemes[j].Name)
+		if left != right {
+			return left < right
+		}
+		return schemes[i].Name < schemes[j].Name
+	})
 	return os.WriteFile("iterm_themes_generated.go", []byte(render(schemes)), 0o644)
 }
 

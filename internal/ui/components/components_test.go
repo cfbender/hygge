@@ -189,7 +189,7 @@ func TestThemeModalViewUsesCandidatePreviewThemes(t *testing.T) {
 		Themes:  []string{"claret", "dracula"},
 		PreviewTheme: func(name string) *styles.Styles {
 			calls[name] = true
-			return styles.ThemeByName(name)
+			return styles.DefaultTheme()
 		},
 	}
 	out := m.View()
