@@ -12,7 +12,7 @@ import (
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // newTestAppWithStore builds an App wired to a file-based store in a temp
@@ -51,7 +51,7 @@ func newTestAppWithStore(
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -168,7 +168,7 @@ func TestHydrate_NoStoreNoPanic(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
 	app, err := New(AppOptions{
 		Bus:           b,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -228,7 +228,7 @@ func TestHydrate_SwitchSessionPopulatesMessages(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -281,7 +281,7 @@ func TestHydrate_SwitchSessionPopulatesTodoSummary(t *testing.T) {
 		t.Fatalf("ReplaceSessionTodos: %v", err)
 	}
 	b := bus.New()
-	app, err := New(AppOptions{Bus: b, Store: st, Theme: theme.ShellTheme(), ProjectDir: "/tmp/proj", ModelProvider: "anthropic", ModelName: "test-model", Now: func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }})
+	app, err := New(AppOptions{Bus: b, Store: st, Theme: styles.DefaultTheme(), ProjectDir: "/tmp/proj", ModelProvider: "anthropic", ModelName: "test-model", Now: func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestHydrate_CompactionMarkerInjectsRoleMarkerEntry(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -833,7 +833,7 @@ func TestHydrate_SubagentReconstructsFromStore(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -972,7 +972,7 @@ func TestHydrate_SubagentRecursiveTwoLevels(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -1392,7 +1392,7 @@ func TestHydrate_SplitRowSubagentTaskRow(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",

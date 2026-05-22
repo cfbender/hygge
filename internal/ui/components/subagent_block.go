@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/components/anim"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // SubagentState is the rendering view of one in-flight or completed
@@ -96,7 +96,7 @@ func (s *SubagentState) IsRunning() bool {
 type SubagentBlock struct {
 	State   *SubagentState
 	Width   int
-	Theme   *theme.Theme
+	Theme   *styles.Styles
 	Now     time.Time
 	Anim    *anim.Anim
 	Hovered bool
@@ -263,9 +263,9 @@ func (b SubagentBlock) headingStyle() lipgloss.Style {
 		return lipgloss.NewStyle().Bold(true)
 	}
 	if b.State.IsRunning() {
-		return b.Theme.Style(theme.AtomAccent).Bold(true)
+		return b.Theme.Style(styles.AtomAccent).Bold(true)
 	}
-	return b.Theme.Style(theme.AtomPrimary).Bold(true)
+	return b.Theme.Style(styles.AtomPrimary).Bold(true)
 }
 
 // muted returns the muted style for gutter lines and subtitles.
@@ -278,9 +278,9 @@ func (b SubagentBlock) muted() lipgloss.Style {
 		return lipgloss.NewStyle().Faint(true)
 	}
 	if b.Hovered {
-		return b.Theme.Style(theme.AtomPrimary)
+		return b.Theme.Style(styles.AtomPrimary)
 	}
-	return b.Theme.Style(theme.AtomMuted)
+	return b.Theme.Style(styles.AtomMuted)
 }
 
 // keyStyle returns a slightly-highlighted style for keybinding text.
@@ -289,9 +289,9 @@ func (b SubagentBlock) keyStyle() lipgloss.Style {
 		return lipgloss.NewStyle().Bold(true)
 	}
 	if b.Hovered {
-		return b.Theme.Style(theme.AtomPrimary).Bold(true)
+		return b.Theme.Style(styles.AtomPrimary).Bold(true)
 	}
-	return b.Theme.Style(theme.AtomMuted).Bold(true)
+	return b.Theme.Style(styles.AtomMuted).Bold(true)
 }
 
 // titleCase uppercases the first letter of s (ASCII only).

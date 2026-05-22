@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/styles"
-	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 // Fog banner parameters. Direct port of the ascii-clouds preset
@@ -307,14 +306,14 @@ func splitRGB(c color.Color) (r, g, b uint8) {
 // resolveAccentRGB picks the color the fog should be tinted with. The new
 // styles.Styles layer (Claret + user themes) is authoritative — its
 // WorkingGradFromColor is the theme's brand primary. The legacy
-// theme.Theme.AtomAccent is used as a fallback (it resolves to ANSI 5 in the
+// styles.Styles.AtomAccent is used as a fallback (it resolves to ANSI 5 in the
 // shell theme, which is not what user-configured themes intend).
-func resolveAccentRGB(s *styles.Styles, t *theme.Theme) color.Color {
+func resolveAccentRGB(s *styles.Styles, t *styles.Styles) color.Color {
 	if s != nil && s.WorkingGradFromColor != nil {
 		return s.WorkingGradFromColor
 	}
 	if t != nil {
-		if c := t.Style(theme.AtomAccent).GetForeground(); c != nil {
+		if c := t.Style(styles.AtomAccent).GetForeground(); c != nil {
 			return c
 		}
 	}

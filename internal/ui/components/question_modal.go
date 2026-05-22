@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // QuestionOption is one selectable answer in a question modal.
@@ -29,7 +29,7 @@ type QuestionRequest struct {
 type QuestionModal struct {
 	Width         int
 	Height        int
-	Theme         *theme.Theme
+	Theme         *styles.Styles
 	Request       QuestionRequest
 	SelectedIndex int
 }
@@ -54,9 +54,9 @@ func (m QuestionModal) renderBox() string {
 		Padding(1, 2).
 		Width(contentW)
 	if m.Theme != nil {
-		bs := m.Theme.Style(theme.AtomModalBorder)
+		bs := m.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := m.Theme.Style(theme.AtomModalBg)
+		modal := m.Theme.Style(styles.AtomModalBg)
 		if modal.GetBackground() != nil {
 			border = border.Background(modal.GetBackground())
 		}
@@ -65,7 +65,7 @@ func (m QuestionModal) renderBox() string {
 	var b strings.Builder
 	b.WriteString(m.bold().Render("question"))
 	b.WriteString(" ")
-	b.WriteString(m.style(theme.AtomMuted).Render("choose an answer"))
+	b.WriteString(m.style(styles.AtomMuted).Render("choose an answer"))
 	b.WriteString("\n\n")
 	if m.Request.ToolName != "" {
 		b.WriteString(m.field("Tool", m.Request.ToolName))
@@ -84,16 +84,16 @@ func (m QuestionModal) renderBox() string {
 		}
 	}
 	b.WriteString("\n\n")
-	b.WriteString(m.style(theme.AtomMuted).Render("↑/↓ move  enter select  1-9 quick select  esc cancel"))
+	b.WriteString(m.style(styles.AtomMuted).Render("↑/↓ move  enter select  1-9 quick select  esc cancel"))
 	return border.Render(b.String())
 }
 
 func (m QuestionModal) field(label, value string) string {
-	return m.style(theme.AtomMuted).Render(label+": ") + value
+	return m.style(styles.AtomMuted).Render(label+": ") + value
 }
 
 func (m QuestionModal) sectionLabel(label string) string {
-	return m.style(theme.AtomMuted).Bold(true).Render(label)
+	return m.style(styles.AtomMuted).Bold(true).Render(label)
 }
 
 func (m QuestionModal) optionRow(index int, option QuestionOption, width int) string {
@@ -104,12 +104,12 @@ func (m QuestionModal) optionRow(index int, option QuestionOption, width int) st
 	selected := index == m.clampedSelectedIndex()
 
 	marker := " "
-	markerStyle := m.style(theme.AtomMuted)
-	badgeStyle := m.style(theme.AtomMuted)
+	markerStyle := m.style(styles.AtomMuted)
+	badgeStyle := m.style(styles.AtomMuted)
 	if selected {
 		marker = "›"
-		markerStyle = m.style(theme.AtomAccent).Bold(true)
-		badgeStyle = m.style(theme.AtomAccent).Bold(true)
+		markerStyle = m.style(styles.AtomAccent).Bold(true)
+		badgeStyle = m.style(styles.AtomAccent).Bold(true)
 	}
 	prefix := markerStyle.Render(marker) + " " + badgeStyle.Render("["+key+"]") + " "
 	labelW := max(width-lipgloss.Width(prefix)-4, 20)
@@ -129,12 +129,12 @@ func (m QuestionModal) optionRow(index int, option QuestionOption, width int) st
 
 	row := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(m.style(theme.AtomMuted).GetForeground()).
+		BorderForeground(m.style(styles.AtomMuted).GetForeground()).
 		Padding(0, 1).
 		Width(width)
 	if selected {
 		row = row.
-			BorderForeground(m.style(theme.AtomAccent).GetForeground())
+			BorderForeground(m.style(styles.AtomAccent).GetForeground())
 	}
 	return row.Render(strings.Join(lines, "\n"))
 }
@@ -247,10 +247,10 @@ func (m QuestionModal) bold() lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle().Bold(true)
 	}
-	return m.Theme.Style(theme.AtomPrimary).Bold(true)
+	return m.Theme.Style(styles.AtomPrimary).Bold(true)
 }
 
-func (m QuestionModal) style(a theme.Atom) lipgloss.Style {
+func (m QuestionModal) style(a styles.Atom) lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle()
 	}

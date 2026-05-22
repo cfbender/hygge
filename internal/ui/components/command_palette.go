@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/command"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // commandPaletteMaxRows is the cap on visible rows in the popover.
@@ -35,7 +35,7 @@ type CommandPalette struct {
 	// Theme is the active theme.  Nil falls back to default lipgloss
 	// styles — the palette stays usable but loses muted/accent
 	// distinction.
-	Theme *theme.Theme
+	Theme *styles.Styles
 
 	// Matches is the prefix-filtered command list, sorted by Name.
 	Matches []command.Command
@@ -81,7 +81,7 @@ func (p CommandPalette) View() string {
 		if p.QueryAfterSlash == "" {
 			return ""
 		}
-		return p.box(p.style(theme.AtomMuted).Render(
+		return p.box(p.style(styles.AtomMuted).Render(
 			fmt.Sprintf("no commands match /%s", p.QueryAfterSlash),
 		), width)
 	}
@@ -110,7 +110,7 @@ func (p CommandPalette) View() string {
 
 	rows := make([]string, 0, len(visible)+2)
 	if overflowBefore > 0 {
-		rows = append(rows, p.style(theme.AtomMuted).Render(
+		rows = append(rows, p.style(styles.AtomMuted).Render(
 			fmt.Sprintf("  ↑ %d more", overflowBefore),
 		))
 	}
@@ -121,18 +121,18 @@ func (p CommandPalette) View() string {
 
 		var row string
 		if start+i == selected {
-			accent := p.style(theme.AtomAccent)
+			accent := p.style(styles.AtomAccent)
 			rowText := fmt.Sprintf("▶ %s  %s", nameCol, descCol)
 			row = accent.Render(rowText)
 		} else {
-			muted := p.style(theme.AtomMuted)
+			muted := p.style(styles.AtomMuted)
 			rowText := fmt.Sprintf("  %s  %s", muted.Render(nameCol), descCol)
 			row = rowText
 		}
 		rows = append(rows, row)
 	}
 	if overflowAfter > 0 {
-		rows = append(rows, p.style(theme.AtomMuted).Render(
+		rows = append(rows, p.style(styles.AtomMuted).Render(
 			fmt.Sprintf("  ↓ %d more — keep typing to narrow", overflowAfter),
 		))
 	}
@@ -162,13 +162,13 @@ func (p CommandPalette) box(body string, width int) string {
 		Padding(0, 1).
 		Width(width - 2) // border consumes 2 cells
 	if p.Theme != nil {
-		bs := p.Theme.Style(theme.AtomModalBorder)
+		bs := p.Theme.Style(styles.AtomModalBorder)
 		style = style.BorderForeground(bs.GetForeground())
 	}
 	return style.Render(body)
 }
 
-func (p CommandPalette) style(a theme.Atom) lipgloss.Style {
+func (p CommandPalette) style(a styles.Atom) lipgloss.Style {
 	if p.Theme == nil {
 		return lipgloss.NewStyle()
 	}

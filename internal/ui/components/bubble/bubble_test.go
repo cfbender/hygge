@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // stripANSI is a naive ANSI escape stripper for test assertions.
@@ -66,7 +66,7 @@ func TestBubble_RendersWithHeader(t *testing.T) {
 		HeaderLeft:  "General",
 		HeaderRight: "Claude Opus 4.7",
 		Body:        "Hello, world!",
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 	}
 	out := b.View()
 	plain := stripANSI(out)
@@ -94,7 +94,7 @@ func TestBubble_NoHeaderOmitsSeparator(t *testing.T) {
 	b := Bubble{
 		Width: 80,
 		Body:  "just a body",
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 	}
 	out := b.View()
 	plain := stripANSI(out)
@@ -126,7 +126,7 @@ func TestBubble_MaxBodyHeight_Truncates(t *testing.T) {
 		Width:         80,
 		Body:          strings.Join(lines, "\n"),
 		MaxBodyHeight: 5,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 	}
 	out := b.View()
 	plain := stripANSI(out)
@@ -153,7 +153,7 @@ func TestBubble_MaxBodyHeight_NoTruncateWhenFits(t *testing.T) {
 		Width:         80,
 		Body:          "line0\nline1\nline2",
 		MaxBodyHeight: 10,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 	}
 	out := b.View()
 	plain := stripANSI(out)
@@ -173,7 +173,7 @@ func TestBubble_AlignRight_PadsLeft(t *testing.T) {
 		BubbleWidth: 40,
 		Alignment:   AlignRight,
 		Body:        "right aligned",
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 	}
 	out := b.View()
 	// The output must start with at least one space (left padding).
@@ -194,7 +194,7 @@ func TestBubble_AlignLeft_PadsRight(t *testing.T) {
 		BubbleWidth: 40,
 		Alignment:   AlignLeft,
 		Body:        "left aligned",
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 	}
 	out := b.View()
 	gotW := lipgloss.Width(out)
@@ -209,7 +209,7 @@ func TestBubble_StyleDistinct_UsesNormalBorder(t *testing.T) {
 		Width:    80,
 		Body:     "subdued content",
 		SubStyle: StyleDistinct,
-		Theme:    theme.ShellTheme(),
+		Theme:    styles.DefaultTheme(),
 	}
 	// We can only check the output is non-empty and contains the body.
 	out := b.View()
@@ -228,7 +228,7 @@ func TestBubble_AccentColor_Seam(t *testing.T) {
 		Width:       80,
 		Body:        "colored",
 		AccentColor: lipgloss.Color("2"),
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 	}
 	out := b.View()
 	if !strings.Contains(stripANSI(out), "colored") {
@@ -258,7 +258,7 @@ func TestBubble_AutoBubbleWidth(t *testing.T) {
 	b := Bubble{
 		Width: 80,
 		Body:  "auto width",
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 	}
 	out := b.View()
 	// Auto for width=80 → int(80*0.70)=56 bubble width.
@@ -276,7 +276,7 @@ func TestBubble_ShowTail_RightAligned(t *testing.T) {
 		BubbleWidth: 40,
 		Alignment:   AlignRight,
 		Body:        "user message",
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 		ShowTail:    true,
 	}
 	out := b.View()
@@ -297,7 +297,7 @@ func TestBubble_ShowTail_LeftAligned(t *testing.T) {
 		BubbleWidth: 40,
 		Alignment:   AlignLeft,
 		Body:        "assistant message",
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 		ShowTail:    true,
 	}
 	out := b.View()
@@ -316,7 +316,7 @@ func TestBubble_ShowTailFalse_NoTail(t *testing.T) {
 	b := Bubble{
 		Width:    80,
 		Body:     "no tail",
-		Theme:    theme.ShellTheme(),
+		Theme:    styles.DefaultTheme(),
 		ShowTail: false,
 	}
 	out := b.View()
@@ -332,7 +332,7 @@ func TestBubble_BackgroundColor_Applied(t *testing.T) {
 		Width:           80,
 		BubbleWidth:     40,
 		Body:            "bg tinted",
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		AccentColor:     lipgloss.Color("5"),
 		BackgroundColor: lipgloss.Color("5"),
 	}
@@ -396,7 +396,7 @@ func TestBubble_AllLinesEqualWidth(t *testing.T) {
 		HeaderLeft:      "Agent",
 		HeaderRight:     "model",
 		Body:            "short\na much longer line that is still within inner width\nend",
-		Theme:           theme.ShellTheme(),
+		Theme:           styles.DefaultTheme(),
 		AccentColor:     lipgloss.Color("5"),
 		BackgroundColor: lipgloss.Color("5"),
 	}

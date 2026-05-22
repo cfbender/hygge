@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // PermissionRequest is the data the modal needs to render.  Mirrors
@@ -22,7 +22,7 @@ type PermissionRequest struct {
 type PermissionModal struct {
 	Width   int
 	Height  int
-	Theme   *theme.Theme
+	Theme   *styles.Styles
 	Request PermissionRequest
 	Toast   string // optional transient line (e.g. "edit not yet implemented")
 }
@@ -49,9 +49,9 @@ func (m PermissionModal) renderBox() string {
 		Border(lipgloss.RoundedBorder()).
 		Padding(1, 2)
 	if m.Theme != nil {
-		bs := m.Theme.Style(theme.AtomModalBorder)
+		bs := m.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := m.Theme.Style(theme.AtomModalBg)
+		modal := m.Theme.Style(styles.AtomModalBg)
 		if modal.GetBackground() != nil {
 			border = border.Background(modal.GetBackground())
 		}
@@ -82,13 +82,13 @@ func (m PermissionModal) renderBox() string {
 
 // field renders a "Label: value" pair with the label muted.
 func (m PermissionModal) field(label, value string) string {
-	muted := m.style(theme.AtomMuted)
+	muted := m.style(styles.AtomMuted)
 	return muted.Render(label+": ") + value
 }
 
 // options renders the keybind hint block.
 func (m PermissionModal) options() string {
-	muted := m.style(theme.AtomMuted)
+	muted := m.style(styles.AtomMuted)
 	lines := []string{
 		muted.Render("[y]") + " allow once    " + muted.Render("[Y]") + " allow session",
 		muted.Render("[A]") + " allow always   " + muted.Render("[n]") + " deny",
@@ -102,15 +102,15 @@ func (m PermissionModal) bold() lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle().Bold(true)
 	}
-	return m.Theme.Style(theme.AtomPrimary).Bold(true)
+	return m.Theme.Style(styles.AtomPrimary).Bold(true)
 }
 
 // warnStyle returns the warn atom style.
 func (m PermissionModal) warnStyle() lipgloss.Style {
-	return m.style(theme.AtomWarn)
+	return m.style(styles.AtomWarn)
 }
 
-func (m PermissionModal) style(a theme.Atom) lipgloss.Style {
+func (m PermissionModal) style(a styles.Atom) lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle()
 	}

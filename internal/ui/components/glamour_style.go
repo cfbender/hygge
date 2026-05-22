@@ -4,7 +4,7 @@ import (
 	glamouransi "github.com/charmbracelet/glamour/ansi"
 	glamourstyles "github.com/charmbracelet/glamour/styles"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // ThemeGlamourStyle builds a glamour ansi.StyleConfig from the active Hygge
@@ -20,32 +20,32 @@ import (
 //   - Inline code bg  ← AtomCodeBg
 //
 // When t is nil the unmodified DarkStyleConfig is returned.
-func ThemeGlamourStyle(t *theme.Theme) glamouransi.StyleConfig {
+func ThemeGlamourStyle(t *styles.Styles) glamouransi.StyleConfig {
 	cfg := glamourstyles.DarkStyleConfig
 	if t == nil {
 		return cfg
 	}
 
 	// Heading color (general heading)
-	if c := t.GlamourColor(theme.AtomPrimary); c != nil {
+	if c := t.GlamourColor(styles.AtomPrimary); c != nil {
 		cfg.Heading.Color = c
 	}
 
 	// H1 background and link color: use the accent atom
-	if c := t.GlamourColor(theme.AtomAccent); c != nil {
+	if c := t.GlamourColor(styles.AtomAccent); c != nil {
 		cfg.Link.Color = c
 		cfg.H1.BackgroundColor = c
 	}
 	// LinkText color: primary
-	if c := t.GlamourColor(theme.AtomPrimary); c != nil {
+	if c := t.GlamourColor(styles.AtomPrimary); c != nil {
 		cfg.LinkText.Color = c
 	}
 
 	// Inline code fg/bg
-	if c := t.GlamourColor(theme.AtomCodeFg); c != nil {
+	if c := t.GlamourColor(styles.AtomCodeFg); c != nil {
 		cfg.Code.Color = c
 	}
-	if c := t.GlamourColor(theme.AtomCodeBg); c != nil {
+	if c := t.GlamourColor(styles.AtomCodeBg); c != nil {
 		cfg.Code.BackgroundColor = c
 	}
 

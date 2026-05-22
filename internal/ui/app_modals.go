@@ -11,7 +11,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 func (a *App) updateInputFocus() {
@@ -86,7 +86,7 @@ type apiKeySaveResult struct {
 
 type themeSwitchResult struct {
 	name    string
-	theme   *theme.Theme
+	theme   *styles.Styles
 	err     error
 	saveErr error
 }
@@ -100,7 +100,7 @@ func (a *App) themeNames() []string {
 	return []string{"shell"}
 }
 
-func currentThemeName(t *theme.Theme) string {
+func currentThemeName(t *styles.Styles) string {
 	if t == nil || t.Name == "" {
 		return "shell"
 	}
@@ -109,7 +109,7 @@ func currentThemeName(t *theme.Theme) string {
 
 func (a *App) switchThemeCmd(name string) tea.Cmd {
 	return func() tea.Msg {
-		var th *theme.Theme
+		var th *styles.Styles
 		if a.opts.LoadTheme != nil {
 			loaded, err := a.opts.LoadTheme(a.ctx, name)
 			if err != nil {
@@ -117,7 +117,7 @@ func (a *App) switchThemeCmd(name string) tea.Cmd {
 			}
 			th = loaded
 		} else if name == currentThemeName(a.opts.Theme) || name == "shell" {
-			th = theme.ShellTheme()
+			th = styles.DefaultTheme()
 		} else {
 			return themeSwitchResult{name: name, err: fmt.Errorf("unknown theme %q", name)}
 		}
@@ -354,9 +354,9 @@ func (a *App) handleModelModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) renderHelpOverlay(width, height int) string {
 	border := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
 	if a.opts.Theme != nil {
-		bs := a.opts.Theme.Style(theme.AtomModalBorder)
+		bs := a.opts.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := a.opts.Theme.Style(theme.AtomModalBg)
+		modal := a.opts.Theme.Style(styles.AtomModalBg)
 		if modal.GetBackground() != nil {
 			border = border.Background(modal.GetBackground())
 		}
@@ -364,8 +364,8 @@ func (a *App) renderHelpOverlay(width, height int) string {
 	primary := lipgloss.NewStyle().Bold(true)
 	muted := lipgloss.NewStyle()
 	if a.opts.Theme != nil {
-		primary = a.opts.Theme.Style(theme.AtomPrimary).Bold(true)
-		muted = a.opts.Theme.Style(theme.AtomMuted)
+		primary = a.opts.Theme.Style(styles.AtomPrimary).Bold(true)
+		muted = a.opts.Theme.Style(styles.AtomMuted)
 	}
 	body := primary.Render("Help") + "\n\n" +
 		"Type / to open command completions.\n" +

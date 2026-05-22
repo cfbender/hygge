@@ -7,13 +7,13 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/session"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // RememberScopeModal lets the user choose where a no-scope /remember should save.
 type RememberScopeModal struct {
 	Width, Height int
-	Theme         *theme.Theme
+	Theme         *styles.Styles
 	Content       string
 	Cursor        int
 }
@@ -72,10 +72,10 @@ func (m RememberScopeModal) View() string {
 	muted := lipgloss.NewStyle().Faint(true)
 	highlight := lipgloss.NewStyle().Bold(true)
 	if m.Theme != nil {
-		border = border.BorderForeground(m.Theme.Style(theme.AtomModalBorder).GetForeground())
-		primary = m.Theme.Style(theme.AtomPrimary).Bold(true)
-		muted = m.Theme.Style(theme.AtomMuted)
-		highlight = m.Theme.Style(theme.AtomAccent).Bold(true)
+		border = border.BorderForeground(m.Theme.Style(styles.AtomModalBorder).GetForeground())
+		primary = m.Theme.Style(styles.AtomPrimary).Bold(true)
+		muted = m.Theme.Style(styles.AtomMuted)
+		highlight = m.Theme.Style(styles.AtomAccent).Bold(true)
 	}
 
 	var b strings.Builder

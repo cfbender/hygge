@@ -21,7 +21,7 @@ import (
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 func newTestApp(t *testing.T) (*App, *bus.Bus) {
@@ -30,7 +30,7 @@ func newTestApp(t *testing.T) (*App, *bus.Bus) {
 	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
 	app, err := New(AppOptions{
 		Bus:           b,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "~/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "claude-sonnet-4-5",
@@ -957,7 +957,7 @@ func TestAtMentionPaletteCompletesFilesAndSubagents(t *testing.T) {
 	b := bus.New()
 	app, err := New(AppOptions{
 		Bus:           b,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    dir,
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -1009,7 +1009,7 @@ func TestAtMentionPaletteMouseWheelScrollsRenderedWindow(t *testing.T) {
 	}
 	app, err := New(AppOptions{
 		Bus:           b,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
 		Subagents:     subagents,
@@ -1043,7 +1043,7 @@ func TestAtMentionPaletteOverlaysChatWithoutMovingEditor(t *testing.T) {
 	b := bus.New()
 	app, err := New(AppOptions{
 		Bus:           b,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    dir,
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -1096,7 +1096,7 @@ func TestAtFileMentionAddsFileToPromptContext(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    dir,
 		ModelProvider: "anthropic",
 		ModelName:     "test-model",
@@ -2030,7 +2030,7 @@ func TestEnsureSessionLazilyCreates(t *testing.T) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "claude-sonnet-4-5",
@@ -2123,7 +2123,7 @@ func newTestAppWithPicker(t *testing.T, st session.Store) (*App, *bus.Bus) {
 	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
 	opts := AppOptions{
 		Bus:                      b,
-		Theme:                    theme.ShellTheme(),
+		Theme:                    styles.DefaultTheme(),
 		ProjectDir:               "~/proj",
 		ModelProvider:            "anthropic",
 		ModelName:                "claude-sonnet-4-5",
@@ -2310,7 +2310,7 @@ func newTestAppWithSendFn(
 	app, err := New(AppOptions{
 		Bus:           b,
 		Store:         st,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "/tmp/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "claude-sonnet-4-5",
@@ -2787,7 +2787,7 @@ func newTestAppWithConfig(t *testing.T, cfg *config.Config) (*App, *bus.Bus) {
 	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
 	app, err := New(AppOptions{
 		Bus:           b,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "~/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "claude-sonnet-4-5",
@@ -3193,44 +3193,17 @@ func TestRendererRebuildAfterThemeChange(t *testing.T) {
 	}
 	redThemePath := filepath.Join(themeDir, "red.toml")
 	if err := os.WriteFile(redThemePath, []byte(`name = "red"
-[colors]
-primary        = "1"
-accent         = "5"
-muted          = "8"
-success        = "2"
-warn           = "3"
-error          = "1"
-"code.fg"      = "7"
-"code.bg"      = ""
-"diff.add.bg"  = "64"
-"diff.del.bg"  = "52"
-"statusbar.fg" = "15"
-"statusbar.bg" = "8"
-"modal.bg"     = ""
-"modal.border" = "8"
-"bubble.border"         = "5"
-"bubble.border.distinct" = "8"
-"bubble.header"         = "5"
-"bubble.header.muted"   = "7"
-"bubble.body.muted"     = "7"
-"bubble.bg"             = "235"
-"bubble.user.border"    = "4"
-"bubble.agent.border"   = "5"
-"sidebar.border"        = "8"
-"sidebar.section"       = "7"
-"sidebar.value"         = ""
-"sidebar.accent"        = "5"
-"sidebar.muted"         = "7"
-"sidebar.bg"            = "235"
+[palette]
+primary = "#ff0000"
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile theme: %v", err)
 	}
-	redTheme, err := theme.Load("red", theme.LoadOptions{ConfigHome: configHome})
+	redTheme, err := styles.Load("red", styles.LoadOptions{ConfigHome: configHome})
 	if err != nil {
 		t.Fatalf("Load red theme: %v", err)
 	}
-	if got := redTheme.GlamourColor(theme.AtomPrimary); got == nil || *got != "1" {
-		t.Fatalf("red theme primary = %v, want 1", got)
+	if got := redTheme.GlamourColor(styles.AtomPrimary); got == nil || *got != "#ff0000" {
+		t.Fatalf("red theme primary = %v, want #ff0000", got)
 	}
 	app.opts.Theme = redTheme
 	r2 := app.ensureRenderer()

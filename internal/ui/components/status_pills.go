@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 const maxQueuedPromptRows = 3
@@ -14,7 +14,7 @@ const maxQueuedPromptRows = 3
 // StatusPills renders compact input-adjacent status chips.
 type StatusPills struct {
 	Width          int
-	Theme          *theme.Theme
+	Theme          *styles.Styles
 	QueueCount     int
 	QueuedPrompts  []string
 	QueuedEditable bool
@@ -29,7 +29,7 @@ func (p StatusPills) View() string {
 		if p.QueuedEditable {
 			label += " · click to edit"
 		}
-		pills = append(pills, p.pill(label, theme.AtomAccent))
+		pills = append(pills, p.pill(label, styles.AtomAccent))
 	}
 	if len(pills) == 0 {
 		return ""
@@ -47,7 +47,7 @@ func (p StatusPills) View() string {
 	return strings.Join(rows, "\n")
 }
 
-func (p StatusPills) pill(label string, atom theme.Atom) string {
+func (p StatusPills) pill(label string, atom styles.Atom) string {
 	style := lipgloss.NewStyle().Padding(0, 1)
 	if p.Theme != nil {
 		style = style.Foreground(p.Theme.Style(atom).GetForeground())
@@ -83,7 +83,7 @@ func (p StatusPills) queuedPromptRow(index int, prompt string) string {
 	}
 	style := lipgloss.NewStyle().PaddingLeft(2)
 	if p.Theme != nil {
-		style = style.Foreground(p.Theme.Style(theme.AtomMuted).GetForeground())
+		style = style.Foreground(p.Theme.Style(styles.AtomMuted).GetForeground())
 	}
 	return style.Render(label)
 }

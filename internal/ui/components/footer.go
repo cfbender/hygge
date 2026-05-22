@@ -6,7 +6,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/styles"
-	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 // Footer renders the bottom-of-screen identity line.
@@ -16,7 +15,7 @@ import (
 //	{AgentType Capitalized} · {ModelName} · {Provider Capitalized} · {ReasoningLevel}
 type Footer struct {
 	Width          int
-	Theme          *theme.Theme
+	Theme          *styles.Styles
 	Styles         *styles.Styles
 	AgentType      string
 	ModelName      string
@@ -109,7 +108,7 @@ func (f Footer) muted() lipgloss.Style {
 		return f.Styles.Header.Muted
 	}
 	if f.Theme != nil {
-		return f.Theme.Style(theme.AtomMuted)
+		return f.Theme.Style(styles.AtomMuted)
 	}
 	return lipgloss.NewStyle()
 }

@@ -14,7 +14,7 @@
 //   - Left or right alignment within a parent width budget.
 //   - ShowTail field retained for forward-compatibility but never set to true.
 //   - Bar color is the configured accent atom directly — no saturation boost.
-//   - Optional interior background fill, supplied by theme.AtomBubbleBg.
+//   - Optional interior background fill, supplied by styles.AtomBubbleBg.
 package bubble
 
 import (
@@ -23,7 +23,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // Alignment controls which side of the parent width the bubble is flush with.
@@ -59,7 +59,7 @@ const (
 //   - Optionally cap BubbleWidth; 0 = auto (~70% of Width, max 100).
 //   - Pre-wrap and pre-render Body content; Bubble does NOT reflow it.
 //   - AccentColor is the seam for future per-agent color theming.  Nil value
-//     falls back to theme.AtomBubbleBorder (or monochrome when Theme == nil).
+//     falls back to styles.AtomBubbleBorder (or monochrome when Theme == nil).
 //
 // The AccentColor field accepts a color.Color value produced by lipgloss.Color,
 // e.g. lipgloss.Color("5") or lipgloss.Color("#FF8800").  This is the seam for
@@ -87,10 +87,10 @@ type Bubble struct {
 
 	// Theme is the active theme.  Nil is accepted; a built-in monochrome
 	// style is used instead.
-	Theme *theme.Theme
+	Theme *styles.Styles
 
 	// AccentColor is the side bar and header accent color.
-	// Nil falls back to theme.AtomBubbleBorder.
+	// Nil falls back to styles.AtomBubbleBorder.
 	// This is the seam for future per-agent-mode color; assign the agent's
 	// color (via lipgloss.Color("N") or lipgloss.Color("#RRGGBB")) here once
 	// per-agent theming lands.
@@ -246,7 +246,7 @@ func (b Bubble) renderTail(accentColor color.Color, pad, composedW, width int) s
 	if accentColor != nil {
 		style = style.Foreground(accentColor)
 	} else if b.Theme != nil {
-		style = b.Theme.Style(theme.AtomBubbleBorder)
+		style = b.Theme.Style(styles.AtomBubbleBorder)
 	}
 
 	if b.Alignment == AlignRight {
@@ -267,7 +267,7 @@ func (b Bubble) resolveAccentColor() color.Color {
 		return b.AccentColor
 	}
 	if b.Theme != nil {
-		style := b.Theme.Style(theme.AtomBubbleBorder)
+		style := b.Theme.Style(styles.AtomBubbleBorder)
 		fg := style.GetForeground()
 		if _, isNoColor := fg.(lipgloss.NoColor); !isNoColor && fg != nil {
 			return fg
@@ -283,7 +283,7 @@ func (b Bubble) resolveBackgroundColor() color.Color {
 		return b.BackgroundColor
 	}
 	if b.Theme != nil {
-		style := b.Theme.Style(theme.AtomBubbleBg)
+		style := b.Theme.Style(styles.AtomBubbleBg)
 		bg := style.GetBackground()
 		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor && bg != nil {
 			return bg
@@ -345,7 +345,7 @@ func (b Bubble) renderFrame(inner string, borderColor, _ color.Color, _ int) str
 // resolveDistinctColor returns the muted/distinct border color.
 func (b Bubble) resolveDistinctColor() color.Color {
 	if b.Theme != nil {
-		style := b.Theme.Style(theme.AtomBubbleBorderDistinct)
+		style := b.Theme.Style(styles.AtomBubbleBorderDistinct)
 		fg := style.GetForeground()
 		if _, isNoColor := fg.(lipgloss.NoColor); !isNoColor && fg != nil {
 			return fg
@@ -361,8 +361,8 @@ func (b Bubble) renderHeader(innerW int, accentColor color.Color) string {
 	rightStyle := lipgloss.NewStyle()
 
 	if b.Theme != nil {
-		leftStyle = b.Theme.Style(theme.AtomBubbleHeader)
-		rightStyle = b.Theme.Style(theme.AtomBubbleHeaderMuted)
+		leftStyle = b.Theme.Style(styles.AtomBubbleHeader)
+		rightStyle = b.Theme.Style(styles.AtomBubbleHeaderMuted)
 	} else if accentColor != nil {
 		leftStyle = lipgloss.NewStyle().Foreground(accentColor)
 	}
@@ -387,7 +387,7 @@ func (b Bubble) renderSeparator(innerW int, accentColor color.Color) string {
 	line := strings.Repeat("─", innerW)
 	style := lipgloss.NewStyle()
 	if b.Theme != nil {
-		style = b.Theme.Style(theme.AtomBubbleHeaderMuted)
+		style = b.Theme.Style(styles.AtomBubbleHeaderMuted)
 	} else if accentColor != nil {
 		style = lipgloss.NewStyle().Foreground(accentColor)
 	}
@@ -419,7 +419,7 @@ func (b Bubble) renderMoreIndicator(overflow int) string {
 	text := "… +" + itoa(overflow) + " more"
 	style := lipgloss.NewStyle()
 	if b.Theme != nil {
-		style = b.Theme.Style(theme.AtomBubbleBodyMuted)
+		style = b.Theme.Style(styles.AtomBubbleBodyMuted)
 	}
 	return style.Render(text)
 }

@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/session"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // SessionsModal is the bubbletea-style component for the session management
@@ -67,7 +67,7 @@ type SessionsModal struct {
 	Height int
 
 	// Theme is the active theme.
-	Theme *theme.Theme
+	Theme *styles.Styles
 
 	// Now is the wall-clock used for "N ago" labels.
 	Now time.Time
@@ -359,9 +359,9 @@ func (m SessionsModal) renderBox(termWidth int) string {
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 1)
 	if m.Theme != nil {
-		bs := m.Theme.Style(theme.AtomModalBorder)
+		bs := m.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := m.Theme.Style(theme.AtomModalBg)
+		modal := m.Theme.Style(styles.AtomModalBg)
 		if modal.GetBackground() != nil {
 			border = border.Background(modal.GetBackground())
 		}
@@ -385,11 +385,11 @@ func (m SessionsModal) renderBox(termWidth int) string {
 	if m.FilterFocused {
 		filterLine += "█"
 	}
-	b.WriteString(m.style(theme.AtomMuted).Render(filterLine))
+	b.WriteString(m.style(styles.AtomMuted).Render(filterLine))
 	b.WriteString("\n\n")
 
 	// Column header.
-	b.WriteString(m.style(theme.AtomMuted).Render(
+	b.WriteString(m.style(styles.AtomMuted).Render(
 		fmt.Sprintf("  %-40s %-24s %-10s %5s  %7s  %s",
 			"NAME", "MODEL", "UPDATED", "TURNS", "COST", "KIND",
 		),
@@ -400,13 +400,13 @@ func (m SessionsModal) renderBox(termWidth int) string {
 	if len(filtered) == 0 {
 		b.WriteString("\n  ")
 		if m.AllowNew {
-			b.WriteString(m.style(theme.AtomMuted).Italic(true).Render("No sessions yet."))
+			b.WriteString(m.style(styles.AtomMuted).Italic(true).Render("No sessions yet."))
 			b.WriteString("  ")
-			b.WriteString(m.style(theme.AtomAccent).Render("[n] new session"))
+			b.WriteString(m.style(styles.AtomAccent).Render("[n] new session"))
 			b.WriteString("   ")
-			b.WriteString(m.style(theme.AtomMuted).Render("[esc] cancel"))
+			b.WriteString(m.style(styles.AtomMuted).Render("[esc] cancel"))
 		} else {
-			b.WriteString(m.style(theme.AtomMuted).Italic(true).Render("no sessions match"))
+			b.WriteString(m.style(styles.AtomMuted).Italic(true).Render("no sessions match"))
 		}
 		b.WriteString("\n")
 	} else {
@@ -418,13 +418,13 @@ func (m SessionsModal) renderBox(termWidth int) string {
 	// Toast.
 	if m.Toast != "" {
 		b.WriteString("\n")
-		b.WriteString(m.style(theme.AtomWarn).Render("  " + m.Toast))
+		b.WriteString(m.style(styles.AtomWarn).Render("  " + m.Toast))
 		b.WriteString("\n")
 	}
 
 	// Help.
 	b.WriteString("\n")
-	b.WriteString(m.style(theme.AtomMuted).Render("  [↑/k↓/j] nav  [enter] switch  [r] rename  [f] fork  [x] delete  [s] subagents  [/] filter  [?] help  [esc] close"))
+	b.WriteString(m.style(styles.AtomMuted).Render("  [↑/k↓/j] nav  [enter] switch  [r] rename  [f] fork  [x] delete  [s] subagents  [/] filter  [?] help  [esc] close"))
 
 	if m.ShowHelp {
 		b.WriteString("\n")
@@ -474,15 +474,15 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 	rowStyle := lipgloss.NewStyle()
 	switch {
 	case isDeleted:
-		rowStyle = m.style(theme.AtomMuted).Strikethrough(true)
+		rowStyle = m.style(styles.AtomMuted).Strikethrough(true)
 	case isFG && isCursor:
-		rowStyle = m.style(theme.AtomAccent).Bold(true)
+		rowStyle = m.style(styles.AtomAccent).Bold(true)
 	case isFG:
-		rowStyle = m.style(theme.AtomSuccess).Bold(true)
+		rowStyle = m.style(styles.AtomSuccess).Bold(true)
 	case isCursor:
-		rowStyle = m.style(theme.AtomPrimary)
+		rowStyle = m.style(styles.AtomPrimary)
 	case isSubagent:
-		rowStyle = m.style(theme.AtomMuted)
+		rowStyle = m.style(styles.AtomMuted)
 	}
 
 	// The cost column is %7s wide.  When we have a rolled-up suffix we
@@ -500,7 +500,7 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 			kind,
 		)
 		b.WriteString(rowStyle.Render(row))
-		b.WriteString(m.style(theme.AtomMuted).Render(" (" + rolledUp + ")"))
+		b.WriteString(m.style(styles.AtomMuted).Render(" (" + rolledUp + ")"))
 	} else {
 		row := fmt.Sprintf("%s %-38s %-22s %-10s %5s  %7s  %s",
 			prefix,
@@ -517,7 +517,7 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 
 	// Inline rename.
 	if m.RenameMode && isCursor {
-		b.WriteString(m.style(theme.AtomAccent).Render(
+		b.WriteString(m.style(styles.AtomAccent).Render(
 			fmt.Sprintf("   rename: %s█", m.RenameValue),
 		))
 		b.WriteString("\n")
@@ -525,7 +525,7 @@ func (m SessionsModal) renderRow(i int, s *session.Session, _ []*session.Session
 
 	// Delete confirmation.
 	if m.ConfirmDelete && isCursor {
-		b.WriteString(m.style(theme.AtomWarn).Render(
+		b.WriteString(m.style(styles.AtomWarn).Render(
 			"   Delete this session? [y/n]",
 		))
 		b.WriteString("\n")
@@ -554,7 +554,7 @@ func (m SessionsModal) renderHelp() string {
 		"  /    filter        ?    toggle help",
 		"  esc  close",
 	}
-	return m.style(theme.AtomMuted).Render(strings.Join(lines, "\n"))
+	return m.style(styles.AtomMuted).Render(strings.Join(lines, "\n"))
 }
 
 // --- Style helpers ----------------------------------------------------------
@@ -563,10 +563,10 @@ func (m SessionsModal) bold() lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle().Bold(true)
 	}
-	return m.Theme.Style(theme.AtomPrimary).Bold(true)
+	return m.Theme.Style(styles.AtomPrimary).Bold(true)
 }
 
-func (m SessionsModal) style(a theme.Atom) lipgloss.Style {
+func (m SessionsModal) style(a styles.Atom) lipgloss.Style {
 	if m.Theme == nil {
 		return lipgloss.NewStyle()
 	}
