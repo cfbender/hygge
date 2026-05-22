@@ -1023,6 +1023,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.theme != nil {
 			a.opts.Theme = m.theme
+			a.styles = m.theme
 			a.input.SetStyles(m.theme)
 			a.renderer = nil
 			a.rendererW = 0

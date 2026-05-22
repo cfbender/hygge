@@ -68,7 +68,13 @@ func KnownNames(opts LoadOptions) []string {
 				if entry.IsDir() || filepath.Ext(entry.Name()) != ".toml" {
 					continue
 				}
-				names[strings.TrimSuffix(entry.Name(), ".toml")] = true
+				base := strings.TrimSuffix(entry.Name(), ".toml")
+				// Mirror the Load-side validation so KnownNames never
+				// advertises a name that Load would refuse.
+				if !themeNameRE.MatchString(base) {
+					continue
+				}
+				names[base] = true
 			}
 		}
 	}
