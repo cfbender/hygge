@@ -178,6 +178,30 @@ func TestThemeModalFilterNavigateApplyCancel(t *testing.T) {
 	}
 }
 
+func TestThemeModalViewUsesCandidatePreviewThemes(t *testing.T) {
+	t.Parallel()
+	calls := map[string]bool{}
+	m := ThemeModal{
+		Width:   80,
+		Height:  20,
+		Theme:   styles.DefaultTheme(),
+		Current: "claret",
+		Themes:  []string{"claret", "dracula"},
+		PreviewTheme: func(name string) *styles.Styles {
+			calls[name] = true
+			return styles.DefaultTheme()
+		},
+	}
+	out := m.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "dracula") || !strings.Contains(plain, "Aa") {
+		t.Fatalf("theme preview missing row/sample text:\n%s", plain)
+	}
+	if !calls["dracula"] {
+		t.Fatalf("preview callback was not called for dracula")
+	}
+}
+
 func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	t.Parallel()
 	var lines []string

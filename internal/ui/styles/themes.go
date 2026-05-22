@@ -20,9 +20,6 @@ func DefaultTheme() *Styles {
 // ThemeByName returns the Styles for the given theme name, loading from disk
 // if the name is not the built-in default. Falls back to Claret on failure.
 func ThemeByName(name string) *Styles {
-	if name == "" || name == "claret" {
-		return DefaultTheme()
-	}
 	if s, err := Load(name, LoadOptions{}); err == nil {
 		return s
 	}

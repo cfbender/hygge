@@ -18,6 +18,7 @@ type ThemeModal struct {
 	Query         string
 	Cursor        int
 	Themes        []string
+	PreviewTheme  func(string) *styles.Styles
 }
 
 // ThemeKey is the dialog-local key event shape used by tests and the UI app.
@@ -125,12 +126,16 @@ func (m ThemeModal) View() string {
 		}
 		for i := start; i < len(filtered) && i < start+limit; i++ {
 			name := filtered[i]
-			line := fmt.Sprintf("%-10s %s %s %s", name, primary.Render("primary"), muted.Render("muted"), highlight.Render("accent"))
+			nameCell := fmt.Sprintf("%-24.24s", name)
+			if i == m.Cursor {
+				nameCell = highlight.Render(nameCell)
+			}
+			line := fmt.Sprintf("%s %s", nameCell, m.previewFor(name))
 			if name == m.Current {
 				line += "  " + muted.Render("current")
 			}
 			if i == m.Cursor {
-				line = highlight.Render("› " + line)
+				line = highlight.Render("› ") + line
 			} else {
 				line = "  " + line
 			}
@@ -139,4 +144,25 @@ func (m ThemeModal) View() string {
 	}
 	b.WriteString("\n" + muted.Render("↑/↓ ctrl+n/ctrl+p navigate   enter select   esc close"))
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, border.Render(b.String()))
+}
+
+func (m ThemeModal) previewFor(name string) string {
+	th := m.Theme
+	if m.PreviewTheme != nil {
+		if preview := m.PreviewTheme(name); preview != nil {
+			th = preview
+		}
+	}
+	if th == nil {
+		th = styles.DefaultTheme()
+	}
+	bg := th.Background
+	return strings.Join([]string{
+		lipgloss.NewStyle().Foreground(th.Style(styles.AtomPrimary).GetForeground()).Render("●"),
+		lipgloss.NewStyle().Foreground(th.Style(styles.AtomMuted).GetForeground()).Render("●"),
+		lipgloss.NewStyle().Foreground(th.Style(styles.AtomSuccess).GetForeground()).Render("●"),
+		lipgloss.NewStyle().Foreground(th.Style(styles.AtomWarn).GetForeground()).Render("●"),
+		lipgloss.NewStyle().Foreground(th.Style(styles.AtomError).GetForeground()).Render("●"),
+		lipgloss.NewStyle().Foreground(th.Style(styles.AtomCodeFg).GetForeground()).Background(bg).Render(" Aa "),
+	}, " ")
 }
