@@ -701,7 +701,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 	}
 	if !msg.IsStreaming {
 		if msg.OutputTokens > 0 {
-			headerRightParts = append(headerRightParts, fmt.Sprintf("%d tokens", msg.OutputTokens))
+			headerRightParts = append(headerRightParts, compactTokens(msg.OutputTokens)+" ↓")
 		}
 		if msg.CostUSD > 0 {
 			headerRightParts = append(headerRightParts, fmt.Sprintf("$%.4f", msg.CostUSD))
