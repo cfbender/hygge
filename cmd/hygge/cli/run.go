@@ -409,7 +409,15 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}, name)
 			if err == nil {
 				rt.Config.Theme.Name = name
-				rt.Theme, _ = styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				newTheme, loadErr := styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				if loadErr != nil {
+					// The selection was persisted; warn but keep rt.Theme on
+					// the previous value rather than blanking it.
+					slog.Warn("cli: theme save succeeded but reload failed",
+						"name", name, "err", loadErr)
+				} else {
+					rt.Theme = newTheme
+				}
 			}
 			return err
 		},

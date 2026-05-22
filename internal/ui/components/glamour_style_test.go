@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
@@ -45,25 +47,21 @@ func TestThemeGlamourStyle_DefaultTheme(t *testing.T) {
 // distinctive hex primary color overrides the heading color accordingly.
 func TestThemeGlamourStyle_DistinctiveTheme(t *testing.T) {
 	t.Parallel()
+	const customPrimary = "#abcdef"
 	th := &styles.Styles{
-		Name:   "custom",
-		Colors: map[styles.Atom]color.Color{},
+		Name: "custom",
+		Colors: map[styles.Atom]color.Color{
+			styles.AtomPrimary: lipgloss.Color(customPrimary),
+		},
 	}
-	// Use a hex primary color not present in the dark baseline.
-	// We access via the exported GlamourColor method which validates the raw
-	// string.  Build the theme via ShellTheme override approach instead.
-	//
-	// Use a TOML-free approach: derive from shell and call GlamourColor directly.
-	cfg := ThemeGlamourStyle(styles.DefaultTheme())
+	cfg := ThemeGlamourStyle(th)
 
-	// Confirm heading color is NOT the dark-baseline "39" (shell primary overrides it to "4").
 	if cfg.Heading.Color == nil {
 		t.Fatal("Heading.Color is nil")
 	}
-	if *cfg.Heading.Color == "39" {
-		t.Errorf("Heading.Color still has dark-baseline value \"39\"; theme override did not apply")
+	if *cfg.Heading.Color != customPrimary {
+		t.Errorf("Heading.Color = %q, want %q (custom override should win)", *cfg.Heading.Color, customPrimary)
 	}
-	_ = th // th is unused in this path; the above checks cover the requirement.
 }
 
 // TestThemeGlamourStyle_CodeFg verifies code fg is applied from AtomCodeFg.

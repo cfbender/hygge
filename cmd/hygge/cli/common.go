@@ -605,8 +605,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	})
 	if err != nil {
 		// A missing or malformed user theme should never block the CLI
-		// — fall back to the shell theme and warn.
-		slog.Warn("cli: theme load failed; falling back to shell theme",
+		// — fall back to styles.DefaultTheme() (Claret) and warn.
+		slog.Warn("cli: theme load failed; falling back to styles.DefaultTheme()",
 			"name", cfg.Theme.Name, "err", err)
 		thm = styles.DefaultTheme()
 	}

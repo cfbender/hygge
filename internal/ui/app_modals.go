@@ -97,14 +97,24 @@ func (a *App) themeNames() []string {
 		copy(out, a.opts.ThemeNames)
 		return out
 	}
-	return []string{"shell"}
+	return []string{defaultThemeName()}
 }
 
 func currentThemeName(t *styles.Styles) string {
 	if t == nil || t.Name == "" {
-		return "shell"
+		return defaultThemeName()
 	}
 	return t.Name
+}
+
+// defaultThemeName returns the built-in fallback theme name, derived from
+// styles.DefaultTheme() so renames flow through automatically.
+func defaultThemeName() string {
+	name := styles.DefaultTheme().Name
+	if name == "" {
+		return "claret"
+	}
+	return name
 }
 
 func (a *App) switchThemeCmd(name string) tea.Cmd {
@@ -116,7 +126,7 @@ func (a *App) switchThemeCmd(name string) tea.Cmd {
 				return themeSwitchResult{name: name, err: err}
 			}
 			th = loaded
-		} else if name == currentThemeName(a.opts.Theme) || name == "shell" {
+		} else if name == currentThemeName(a.opts.Theme) || name == defaultThemeName() {
 			th = styles.DefaultTheme()
 		} else {
 			return themeSwitchResult{name: name, err: fmt.Errorf("unknown theme %q", name)}

@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -83,6 +84,9 @@ func resolveConfigHome(opts LoadOptions) string {
 	if opts.ConfigHome != "" {
 		return opts.ConfigHome
 	}
+	if env := os.Getenv("XDG_CONFIG_HOME"); env != "" {
+		return env
+	}
 	home := opts.HomeDir
 	if home == "" {
 		h, err := os.UserHomeDir()
@@ -94,7 +98,16 @@ func resolveConfigHome(opts LoadOptions) string {
 	return filepath.Join(home, ".config")
 }
 
+// themeNameRE constrains theme names to a safe basename token. This rules
+// out path separators, traversal segments, and shell-special characters
+// before we touch the filesystem.
+var themeNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 func resolveThemePath(name string, opts LoadOptions) (string, error) {
+	if name == "" || name == "." || name == ".." || filepath.IsAbs(name) ||
+		strings.ContainsAny(name, `/\`) || !themeNameRE.MatchString(name) {
+		return "", fmt.Errorf("%w: invalid theme name %q", ErrThemeNotFound, name)
+	}
 	configHome := resolveConfigHome(opts)
 	if configHome == "" {
 		return "", fmt.Errorf("styles: no config home available")

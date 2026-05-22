@@ -38,7 +38,6 @@ var readyPlaceholders = []string{
 type Input struct {
 	Textarea         textarea.Model
 	Styles           *styles.Styles
-	Theme            *styles.Styles // kept for gradual migration
 	PasteMarkerStyle lipgloss.Style
 	BorderColor      color.Color
 	VerticalPadding  int
@@ -74,7 +73,7 @@ func NewInput(t *styles.Styles) *Input {
 
 	return &Input{
 		Textarea: ta,
-		Theme:    t,
+		Styles:   t,
 		Focused:  true,
 		prevH:    inputMinTextRows,
 	}
@@ -126,8 +125,8 @@ func (i *Input) View() string {
 	if i.PasteMarkerStyle.GetForeground() != nil || i.PasteMarkerStyle.GetBackground() != nil {
 		content = HighlightPastedInputMarkers(content, i.PasteMarkerStyle)
 	}
-	if i.Theme != nil {
-		content = HighlightMentions(content, i.Theme.Style(styles.AtomAccent))
+	if i.Styles != nil {
+		content = HighlightMentions(content, i.Styles.Style(styles.AtomAccent))
 	}
 	if i.Styles == nil {
 		return content

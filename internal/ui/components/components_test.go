@@ -950,6 +950,9 @@ func TestSidebar_BackgroundFill_ReassertedAfterStyledFragments(t *testing.T) {
 	}
 	out := sb.View()
 	bgOpen := sidebarBackgroundOpenSequence(thm.Colors[styles.AtomSidebarBg])
+	if bgOpen == "" {
+		t.Fatalf("sidebarBackgroundOpenSequence returned empty for atom %q; substring assertions below would vacuously pass", styles.AtomSidebarBg)
+	}
 	if !strings.Contains(out, bgOpen) {
 		t.Fatalf("sidebar should emit themed background fill.\nOutput: %q", out)
 	}
