@@ -438,7 +438,12 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
 				printf(errOut(cmd), "[dry-run] would write theme to %s: name=%s\n", target, name)
 				rt.Config.Theme.Name = name
-				rt.Theme, _ = theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				newTheme, loadErr := styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				if loadErr != nil {
+					printf(errOut(cmd), "hygge: warning: dry-run theme load failed: %v\n", loadErr)
+				} else {
+					rt.Theme = newTheme
+				}
 				return nil
 			}
 			_, err := config.WriteThemeSelection(config.WriteThemeSelectionOptions{

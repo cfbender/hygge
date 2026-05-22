@@ -185,6 +185,32 @@ func TestDryRunBootstrapIgnoresExternalConfig(t *testing.T) {
 	}
 }
 
+// dirSnapshot returns a map of filename → file contents for every
+// regular file directly inside dir.  Subdirectories are ignored.
+// If dir does not exist the map is empty.
+func dirSnapshot(t *testing.T, dir string) map[string][]byte {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string][]byte{}
+		}
+		t.Fatalf("dirSnapshot ReadDir %s: %v", dir, err)
+	}
+	snap := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("dirSnapshot ReadFile %s: %v", e.Name(), err)
+		}
+		snap[e.Name()] = data
+	}
+	return snap
+}
+
 // TestDryRunFlagEndToEndNoConfigWritten exercises the full `hygge --dry-run`
 // cobra path and verifies that no config file is written even though a hermetic
 // config directory exists.
@@ -192,8 +218,8 @@ func TestDryRunFlagEndToEndNoConfigWritten(t *testing.T) {
 	home := hermeticHome(t)
 	cfgDir := filepath.Join(home, ".config", "hygge")
 
-	// Capture the state of the config dir before execution.
-	before, _ := os.ReadDir(cfgDir)
+	// Snapshot file name→content before execution.
+	before := dirSnapshot(t, cfgDir)
 
 	root := NewRootCmd()
 	var out bytes.Buffer
@@ -204,14 +230,25 @@ func TestDryRunFlagEndToEndNoConfigWritten(t *testing.T) {
 		t.Fatalf("hygge --dry-run: %v", err)
 	}
 
-	// The config dir must not have gained any new files (no config was written).
-	after, _ := os.ReadDir(cfgDir)
+	// Snapshot after execution and assert identical contents (no new files,
+	// no in-place modifications).
+	after := dirSnapshot(t, cfgDir)
 	if len(after) != len(before) {
 		names := make([]string, 0, len(after))
-		for _, e := range after {
-			names = append(names, e.Name())
+		for name := range after {
+			names = append(names, name)
 		}
 		t.Fatalf("unexpected files written under %s during --dry-run: %v", cfgDir, names)
+	}
+	for name, beforeData := range before {
+		afterData, ok := after[name]
+		if !ok {
+			t.Errorf("--dry-run removed file %s", name)
+			continue
+		}
+		if !bytes.Equal(beforeData, afterData) {
+			t.Errorf("--dry-run modified %s:\nbefore: %q\nafter:  %q", name, beforeData, afterData)
+		}
 	}
 }
 func TestRoot_ContinueFlagPresent(t *testing.T) {
