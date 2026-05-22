@@ -15,6 +15,7 @@ import (
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // noticeLifetime is how long an ephemeral slash-command notice
@@ -141,7 +142,7 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			a.openOverlay(overlayAPIKey)
 			a.updateInputFocus()
 		case command.ModalTheme:
-			a.themeModal = components.ThemeModal{Theme: a.opts.Theme, Current: currentThemeName(a.opts.Theme), Themes: a.themeNames()}
+			a.themeModal = components.ThemeModal{Theme: a.opts.Theme, Current: currentThemeName(a.opts.Theme), Themes: a.themeNames(), PreviewTheme: styles.ThemeByName}
 			a.openOverlay(overlayTheme)
 			a.updateInputFocus()
 		default:
