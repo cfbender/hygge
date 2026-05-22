@@ -31,7 +31,7 @@ var animCounter atomic.Uint64
 // defaultFrameCount is the number of pre-rendered frames kept in the cache.
 const defaultFrameCount = 30
 
-// tickInterval is the frame-rate target (≈16 fps).
+// tickInterval is the visual animation cadence (≈16 fps).
 const tickInterval = 62 * time.Millisecond
 
 // runePool is the block-element rune pool used for the animation.

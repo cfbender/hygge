@@ -444,6 +444,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		// manipulated before this point.
 		tea.WithEnvironment(os.Environ()),
 		tea.WithContext(ctx),
+		tea.WithFPS(60),
 		// Force a concrete color profile so lipgloss/v2 never sends an OSC 11
 		// background-color query to the terminal. Without this, the auto-detect
 		// probe can leak terminal responses into stdin. Default macOS Terminal
