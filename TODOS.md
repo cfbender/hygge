@@ -1,5 +1,4 @@
 # TODOs
-- beautify permission modal using fang or other bubbletea components
 - split tokens billed into in/out (up/down)
   - shorten at breakpoints (eg. 12,788 -> 12.7k, 1,374,982 -> 1.37M)
   - 1,374,982 becomes (500k ↑ / 874k ↓)

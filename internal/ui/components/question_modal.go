@@ -230,17 +230,7 @@ func (m QuestionModal) clampedSelectedIndex() int {
 }
 
 func (m QuestionModal) contentWidth() int {
-	width := m.Width - 12
-	if width <= 0 {
-		width = 80
-	}
-	if width > 96 {
-		width = 96
-	}
-	if width < 36 {
-		width = 36
-	}
-	return width
+	return ModalContentWidth(m.Width)
 }
 
 func (m QuestionModal) bold() lipgloss.Style {
