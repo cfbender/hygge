@@ -34,25 +34,9 @@ func (a *App) subagentAtScreen(screenX, screenY int) string {
 		return ""
 	}
 
-	// The left column content flow is:
-	//   [breadcrumb + "\n" if present]  <- outside viewport
-	//   viewport content (chatH rows)
-	//   ...rest...
-	//
-	// The viewport content starts at screen row = breadcrumb rows.
-	// The breadcrumb is rendered above the viewport View() output in renderChatContent.
 	viewportTop := headerHeight
-	breadcrumbLines := 0
-	if !a.viewingSubagent() {
-		if segs := a.breadcrumbSegments(); len(segs) > 0 {
-			// Breadcrumb is one rendered line + "\n" separator = 2 screen rows.
-			breadcrumbLines = 2
-			viewportTop += breadcrumbLines
-		}
-	}
-
 	chatH := a.layout.chat.Dy()
-	viewportBottom := viewportTop + chatH - breadcrumbLines
+	viewportBottom := viewportTop + chatH
 	if screenY < viewportTop || screenY >= viewportBottom {
 		return ""
 	}
@@ -97,6 +81,35 @@ func (a *App) toolAtScreen(screenX, screenY int) string {
 		}
 	}
 	return ""
+}
+
+// thinkingAtScreen returns the message index of a thinking block at the given
+// screen coordinates, or -1 if none.  Uses the same coordinate translation as
+// subagentAtScreen.
+func (a *App) thinkingAtScreen(screenX, screenY int) int {
+	if len(a.thinkingHitZones) == 0 {
+		return -1
+	}
+	bubbleW := int(float64(a.layout.leftW) * 0.80)
+	if screenX > bubbleW {
+		return -1
+	}
+	viewportTop := headerHeight
+	chatH := a.layout.chat.Dy()
+	viewportBottom := viewportTop + chatH
+	if screenY < viewportTop || screenY >= viewportBottom {
+		return -1
+	}
+	contentLine := (screenY - viewportTop) + a.msgViewport.YOffset()
+	if contentLine < 0 {
+		return -1
+	}
+	for _, zone := range a.thinkingHitZones {
+		if contentLine >= zone.StartLine && contentLine < zone.EndLine {
+			return zone.MsgIndex
+		}
+	}
+	return -1
 }
 
 // viewingSubagent reports whether the user is viewing a subagent's
@@ -718,6 +731,31 @@ func (a *App) gitBranch() string {
 		return ""
 	}
 	return appstate.GitBranch(a.opts.ProjectDir)
+}
+
+// foregroundTranscriptID returns a stable key identifying which transcript is
+// currently being rendered. When viewing a subagent, this is the subagent's
+// SubSessionID; otherwise it is the root session ID (foreground stack bottom).
+// Used as the outer key into a.expandedThinking.
+func (a *App) foregroundTranscriptID() string {
+	foreID := a.foregroundID()
+	rootID := a.rootSessionID()
+	if foreID != rootID && foreID != "" {
+		return foreID // subagent transcript
+	}
+	return rootID // root session transcript
+}
+
+// expandedThinkingFor returns the per-transcript map[int]bool for transcriptID,
+// creating it if absent. The caller must not hold a stale reference across
+// operations that could replace the outer map.
+func (a *App) expandedThinkingFor(transcriptID string) map[int]bool {
+	if m, ok := a.expandedThinking[transcriptID]; ok {
+		return m
+	}
+	m := make(map[int]bool)
+	a.expandedThinking[transcriptID] = m
+	return m
 }
 
 // refreshTodosCache loads the foreground session's todo list from the store

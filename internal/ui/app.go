@@ -215,6 +215,7 @@ func New(opts AppOptions) (*App, error) {
 		subagents:             make(map[string]*components.SubagentState),
 		subagentAnims:         make(map[string]*anim.Anim),
 		expandedTools:         make(map[string]bool),
+		expandedThinking:      make(map[string]map[int]bool),
 		msgViewport:           viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		touched:               appstate.NewTouchedFiles(),
 		focused:               true,
@@ -296,6 +297,12 @@ type App struct {
 	// expandedTools tracks which tool results are fully expanded (not truncated).
 	expandedTools map[string]bool
 
+	// expandedThinking tracks which assistant messages have their thinking block
+	// fully expanded (not truncated). Keyed first by transcript ID (root session
+	// ID or subagent SubSessionID), then by message index within that transcript.
+	// This ensures root and subagent transcripts never share indices.
+	expandedThinking map[string]map[int]bool
+
 	// sel tracks mouse-driven text selection.
 	sel selection
 	// lastCanvas is the most recently rendered screen buffer, kept for
@@ -333,6 +340,7 @@ type App struct {
 	msgCacheTime           time.Time // time at which cache was rendered (for relative timestamps)
 	subagentHitZones       []components.SubagentHitZone
 	toolHitZones           []components.ToolHitZone
+	thinkingHitZones       []components.ThinkingHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
@@ -1136,6 +1144,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if id := a.toolAtScreen(m.X, m.Y); id != "" {
 				a.clearSelection()
 				a.expandedTools[id] = !a.expandedTools[id]
+				a.invalidateMsgCache()
+				return a, nil
+			}
+			// Check for thinking block click (expand/collapse).
+			if idx := a.thinkingAtScreen(m.X, m.Y); idx >= 0 {
+				a.clearSelection()
+				tid := a.foregroundTranscriptID()
+				etm := a.expandedThinkingFor(tid)
+				etm[idx] = !etm[idx]
 				a.invalidateMsgCache()
 				return a, nil
 			}
