@@ -25,6 +25,14 @@ func (a *App) busyReconcileTick() tea.Cmd {
 	})
 }
 
+// splashFogTick schedules the next fog-animation frame ~33ms out (≈30 fps).
+// Caller is responsible for setting a.fogTickRunning before invoking.
+func (a *App) splashFogTick() tea.Cmd {
+	return tea.Tick(33*time.Millisecond, func(time.Time) tea.Msg {
+		return splashFogTickMsg{}
+	})
+}
+
 // handleKey dispatches a key.  When the modal is open, only the modal
 // keybinds work; everything else is dropped.
 func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

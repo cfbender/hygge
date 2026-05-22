@@ -366,6 +366,11 @@ type App struct {
 	spinnerTick int
 	workingVerb string
 
+	// splash fog animation state. fogStart is set on first render. The
+	// 30fps fog tick is gated by fogTickRunning so it does not double-up.
+	fogStart       time.Time
+	fogTickRunning bool
+
 	// cost / context state
 	costDollars float64
 	billedTok   int64
@@ -618,6 +623,9 @@ func (a *App) Init() tea.Cmd {
 		tea.RequestBackgroundColor,
 		tea.RequestForegroundColor,
 	}
+	a.fogStart = time.Now()
+	a.fogTickRunning = true
+	cmds = append(cmds, a.splashFogTick())
 	// Only start the bus listener when the bridge is running (i.e. a
 	// foreground session is already bound or OpenSessionsModalOnStart
 	// is false).
@@ -821,7 +829,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(a.messages) == 0 {
 			a.invalidateMsgCache()
 		}
+		// Restart the fog tick if the splash is back on screen (e.g. the
+		// user cleared the conversation).
+		if a.splashActive() && !a.fogTickRunning {
+			a.fogTickRunning = true
+			return a, tea.Batch(cmd, a.splashFogTick())
+		}
 		return a, cmd
+
+	case splashFogTickMsg:
+		if !a.splashActive() {
+			a.fogTickRunning = false
+			return a, nil
+		}
+		return a, a.splashFogTick()
 
 	case workingVerbTickMsg:
 		if !a.busy {
