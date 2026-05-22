@@ -11,7 +11,7 @@ import (
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/components/anim"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 func (a *App) handleBusEvent(ev any) tea.Cmd {
@@ -285,8 +285,8 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		a.compactionAnim = anim.New(anim.Settings{
 			Width:    14,
 			Theme:    a.opts.Theme,
-			GradFrom: theme.AtomWarn,
-			GradTo:   theme.AtomAccent,
+			GradFrom: styles.AtomWarn,
+			GradTo:   styles.AtomAccent,
 		})
 		a.invalidateMsgCache()
 		return a.compactionAnim.Start()

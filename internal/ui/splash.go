@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // Splash layout sizing.
@@ -89,14 +89,14 @@ func (a *App) renderSplashFog(width, height int) string {
 
 func (a *App) splashMutedStyle() lipgloss.Style {
 	if a.opts.Theme != nil {
-		return a.opts.Theme.Style(theme.AtomMuted)
+		return a.opts.Theme.Style(styles.AtomMuted)
 	}
 	return lipgloss.NewStyle().Faint(true)
 }
 
 func (a *App) splashTipStyle() lipgloss.Style {
 	if a.opts.Theme != nil {
-		return a.opts.Theme.Style(theme.AtomWarn).Bold(true)
+		return a.opts.Theme.Style(styles.AtomWarn).Bold(true)
 	}
 	return lipgloss.NewStyle().Bold(true)
 }

@@ -21,7 +21,7 @@ import (
 	"github.com/cfbender/hygge/internal/llm"
 	"github.com/cfbender/hygge/internal/state"
 	"github.com/cfbender/hygge/internal/ui"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // supportsProgressBar reports whether the current terminal can render an
@@ -396,9 +396,9 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 		ForgetMemory:                  rt.MemoryStore.Forget,
 		ListMemories:                  rt.MemoryStore.ListMemories,
 		ProjectMemoryGitignoreWarning: rt.MemoryStore.ProjectMemoryGitignoreWarning,
-		ThemeNames:                    theme.KnownNames(theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir}),
-		LoadTheme: func(_ context.Context, name string) (*theme.Theme, error) {
-			return theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+		ThemeNames:                    styles.KnownNames(styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir}),
+		LoadTheme: func(_ context.Context, name string) (*styles.Styles, error) {
+			return styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
 		},
 		SaveTheme: func(_ context.Context, name string) error {
 			_, err := config.WriteThemeSelection(config.WriteThemeSelectionOptions{
@@ -409,7 +409,15 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			}, name)
 			if err == nil {
 				rt.Config.Theme.Name = name
-				rt.Theme, _ = theme.Load(name, theme.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				newTheme, loadErr := styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				if loadErr != nil {
+					// The selection was persisted; warn but keep rt.Theme on
+					// the previous value rather than blanking it.
+					slog.Warn("cli: theme save succeeded but reload failed",
+						"name", name, "err", loadErr)
+				} else {
+					rt.Theme = newTheme
+				}
 			}
 			return err
 		},

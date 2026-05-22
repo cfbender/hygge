@@ -53,7 +53,6 @@ import (
 	"github.com/cfbender/hygge/internal/ui/components"
 	"github.com/cfbender/hygge/internal/ui/components/anim"
 	"github.com/cfbender/hygge/internal/ui/styles"
-	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 // AppOptions configures the App.
@@ -62,7 +61,7 @@ type AppOptions struct {
 	Agent   *agent.Agent
 	Store   session.Store
 	Catalog *cost.Catalog
-	Theme   *theme.Theme
+	Theme   *styles.Styles
 	// StyleTheme selects the built-in color theme for the new styles system.
 	StyleTheme string
 
@@ -142,7 +141,7 @@ type AppOptions struct {
 	// write when .hygge/ may become untracked.
 	ProjectMemoryGitignoreWarning func(ctx context.Context) (string, error)
 	ThemeNames                    []string
-	LoadTheme                     func(ctx context.Context, name string) (*theme.Theme, error)
+	LoadTheme                     func(ctx context.Context, name string) (*styles.Styles, error)
 	SaveTheme                     func(ctx context.Context, name string) error
 	// EditPrompt opens the current prompt in an external editor and returns the
 	// edited prompt. Tests may inject this seam; production falls back to
@@ -183,7 +182,7 @@ func New(opts AppOptions) (*App, error) {
 		return nil, errors.New("ui: New: Bus is required")
 	}
 	if opts.Theme == nil {
-		opts.Theme = theme.ShellTheme()
+		opts.Theme = styles.DefaultTheme()
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -200,11 +199,11 @@ func New(opts AppOptions) (*App, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	inp := components.NewInput(opts.Theme)
-	inp.SetStyles(&themeStyles)
+	inp.SetStyles(themeStyles)
 
 	a := &App{
 		opts:                  opts,
-		styles:                &themeStyles,
+		styles:                themeStyles,
 		ctx:                   ctx,
 		cancel:                cancel,
 		busCh:                 make(chan any, 256),
@@ -1024,7 +1023,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.theme != nil {
 			a.opts.Theme = m.theme
-			a.input.Theme = m.theme
+			a.styles = m.theme
+			a.input.SetStyles(m.theme)
 			a.renderer = nil
 			a.rendererW = 0
 		}

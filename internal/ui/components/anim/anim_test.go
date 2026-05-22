@@ -6,12 +6,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 func TestAnimRenderWidth(t *testing.T) {
 	t.Parallel()
-	a := New(Settings{Width: 8, Theme: theme.ShellTheme()})
+	a := New(Settings{Width: 8, Theme: styles.DefaultTheme()})
 	got := a.Render()
 	// Strip ANSI escapes by counting visible rune-count is non-trivial, but
 	// we know Render() returns exactly Width styled characters, so the raw
@@ -27,7 +27,7 @@ func TestAnimRenderWidth(t *testing.T) {
 
 func TestAnimFramesCycle(t *testing.T) {
 	t.Parallel()
-	a := New(Settings{Width: 6, Theme: theme.ShellTheme()})
+	a := New(Settings{Width: 6, Theme: styles.DefaultTheme()})
 	first := a.Render()
 	// Advance by advancing frame directly.
 	_, cmd := a.Update(StepMsg{ID: a.id})
@@ -87,7 +87,7 @@ func TestAnimStartReturnsCmd(t *testing.T) {
 
 func TestAnimPreRenderedFrameCount(t *testing.T) {
 	t.Parallel()
-	a := New(Settings{Width: 4, Theme: theme.ShellTheme()})
+	a := New(Settings{Width: 4, Theme: styles.DefaultTheme()})
 	if len(a.frames) != defaultFrameCount {
 		t.Errorf("expected %d pre-rendered frames, got %d", defaultFrameCount, len(a.frames))
 	}

@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/config"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // OnboardingStep enumerates the wizard steps.
@@ -41,7 +41,7 @@ type OnboardingSubagentDraft struct {
 // View renders the current step.
 type OnboardingWizard struct {
 	Width, Height int
-	Theme         *theme.Theme
+	Theme         *styles.Styles
 	Providers     []string // known provider names
 
 	Step OnboardingStep
@@ -677,11 +677,11 @@ func (w OnboardingWizard) View() string {
 	accent := lipgloss.NewStyle().Bold(true)
 	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	if w.Theme != nil {
-		border = border.BorderForeground(w.Theme.Style(theme.AtomModalBorder).GetForeground())
-		primary = w.Theme.Style(theme.AtomPrimary).Bold(true)
-		muted = w.Theme.Style(theme.AtomMuted)
-		accent = w.Theme.Style(theme.AtomAccent).Bold(true)
-		warn = w.Theme.Style(theme.AtomWarn)
+		border = border.BorderForeground(w.Theme.Style(styles.AtomModalBorder).GetForeground())
+		primary = w.Theme.Style(styles.AtomPrimary).Bold(true)
+		muted = w.Theme.Style(styles.AtomMuted)
+		accent = w.Theme.Style(styles.AtomAccent).Bold(true)
+		warn = w.Theme.Style(styles.AtomWarn)
 	}
 
 	var body strings.Builder

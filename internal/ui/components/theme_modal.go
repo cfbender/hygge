@@ -7,13 +7,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // ThemeModal renders and updates the theme-selection dialog.
 type ThemeModal struct {
 	Width, Height int
-	Theme         *theme.Theme
+	Theme         *styles.Styles
 	Current       string
 	Query         string
 	Cursor        int
@@ -104,10 +104,10 @@ func (m ThemeModal) View() string {
 	muted := lipgloss.NewStyle().Faint(true)
 	highlight := lipgloss.NewStyle().Bold(true)
 	if m.Theme != nil {
-		border = border.BorderForeground(m.Theme.Style(theme.AtomModalBorder).GetForeground())
-		primary = m.Theme.Style(theme.AtomPrimary).Bold(true)
-		muted = m.Theme.Style(theme.AtomMuted)
-		highlight = m.Theme.Style(theme.AtomAccent).Bold(true)
+		border = border.BorderForeground(m.Theme.Style(styles.AtomModalBorder).GetForeground())
+		primary = m.Theme.Style(styles.AtomPrimary).Bold(true)
+		muted = m.Theme.Style(styles.AtomMuted)
+		highlight = m.Theme.Style(styles.AtomAccent).Bold(true)
 	}
 	filtered := m.Filtered()
 	var b strings.Builder

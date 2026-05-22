@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/glamour"
 
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // newRenderer constructs a glamour TermRenderer for the given theme and word-wrap width.
@@ -19,7 +19,7 @@ import (
 // unresolvable).
 //
 // If width is non-positive, glamour's default wrapping (80) is used.
-func newRenderer(t *theme.Theme, width int) (*glamour.TermRenderer, error) {
+func newRenderer(t *styles.Styles, width int) (*glamour.TermRenderer, error) {
 	opts := []glamour.TermRendererOption{
 		glamour.WithStyles(components.ThemeGlamourStyle(t)),
 	}

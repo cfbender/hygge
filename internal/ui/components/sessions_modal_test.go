@@ -7,7 +7,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // --- helpers ----------------------------------------------------------------
@@ -40,7 +40,7 @@ func defaultModal(sessions []*session.Session) components.SessionsModal {
 	return components.SessionsModal{
 		Sessions:     sessions,
 		ForegroundID: "sess-a",
-		Theme:        theme.ShellTheme(),
+		Theme:        styles.DefaultTheme(),
 		Width:        100,
 		Height:       30,
 		Now:          time.Now(),

@@ -20,7 +20,7 @@ import (
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // newSlashApp builds an App with a real command.Registry wired in.
@@ -38,7 +38,7 @@ func newSlashApp(t *testing.T) (*App, *bus.Bus, *command.Registry) {
 	app, err := New(AppOptions{
 		Bus:           b,
 		Catalog:       cost.NewCatalog(cost.CatalogOptions{Now: now}),
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		ProjectDir:    "~/proj",
 		ModelProvider: "anthropic",
 		ModelName:     "claude-sonnet-4-5",
@@ -503,7 +503,7 @@ func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testi
 func TestThemeSwitchResultShowsToast(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
-	app.Update(themeSwitchResult{name: "shell", theme: theme.ShellTheme()})
+	app.Update(themeSwitchResult{name: "shell", theme: styles.DefaultTheme()})
 	if app.notice != "" {
 		t.Fatalf("notice = %q, want toast notification", app.notice)
 	}

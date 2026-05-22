@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 func TestThemeShow(t *testing.T) {
@@ -20,7 +20,7 @@ func TestThemeShow(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	got := out.String()
-	for _, atom := range theme.AllAtoms() {
+	for _, atom := range styles.AllAtoms() {
 		if !strings.Contains(got, string(atom)) {
 			t.Errorf("output missing atom %q in:\n%s", atom, got)
 		}

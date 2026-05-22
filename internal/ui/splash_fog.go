@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/styles"
-	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 // Fog banner parameters. Direct port of the ascii-clouds preset
@@ -21,10 +20,10 @@ import (
 //	t1=0.25  t2=0.3  t3=0.4  t4=0.5  t5=0.65
 //	sd=mp0tew
 const (
-	fogWaveAmplitude    = 0.15
-	fogWaveSpeed        = 0.50
-	fogNoiseIntensity   = 0.0
-	fogVignetteAmount   = 1.0
+	fogWaveAmplitude  = 0.15
+	fogWaveSpeed      = 0.50
+	fogNoiseIntensity = 0.0
+	fogVignetteAmount = 1.0
 	// Bumped from the demo's 0.45 so the visible cloud spreads further toward
 	// the panel edges and gives the wordmark room to sit inside the body.
 	fogVignetteRadius   = 0.55
@@ -138,8 +137,8 @@ func computeFogCells(w, h int, t float64, hue, sat float64) []fogCell {
 	driftRY := driftRXBase * 0.15
 	warpZ := warpTime + fogNoiseSeed
 
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			u := (float64(x) + 0.5) * invH * fogCellAspect
 			v := (float64(y) + 0.5) * invH
 
@@ -224,10 +223,7 @@ func overlayLabel(cells []fogCell, w, h int, label string, lr, lg, lb uint8) {
 	// Place the label two rows up from the bottom so the lowest row (most
 	// vignetted) doesn't host text. Compute the right-edge column at that
 	// row by solving the vignette ellipse for dist == vignetteRadius.
-	row := h - 2
-	if row < 0 {
-		row = 0
-	}
+	row := max(h-2, 0)
 	dy := (float64(row) + 0.5 - cy) * rowToCol / halfDiag
 	r2 := fogVignetteRadius*fogVignetteRadius - dy*dy
 	if r2 < 0 {
@@ -235,14 +231,8 @@ func overlayLabel(cells []fogCell, w, h int, label string, lr, lg, lb uint8) {
 	}
 	dxEdge := math.Sqrt(r2)
 	endF := cx + dxEdge*halfDiag
-	end := int(endF)
-	if end > w {
-		end = w
-	}
-	start := end - len(runes)
-	if start < 0 {
-		start = 0
-	}
+	end := min(int(endF), w)
+	start := max(end-len(runes), 0)
 	for i, r := range runes {
 		idx := row*w + start + i
 		if idx >= len(cells) {
@@ -259,12 +249,12 @@ func serializeFogCells(cells []fogCell, w, h int) string {
 	var sb strings.Builder
 	sb.Grow(w * h * 6)
 
-	for y := 0; y < h; y++ {
+	for y := range h {
 		var (
 			open       bool
 			cr, cg, cb uint8
 		)
-		for x := 0; x < w; x++ {
+		for x := range w {
 			c := cells[y*w+x]
 			if c.r == 0 {
 				if open {
@@ -307,14 +297,14 @@ func splitRGB(c color.Color) (r, g, b uint8) {
 // resolveAccentRGB picks the color the fog should be tinted with. The new
 // styles.Styles layer (Claret + user themes) is authoritative — its
 // WorkingGradFromColor is the theme's brand primary. The legacy
-// theme.Theme.AtomAccent is used as a fallback (it resolves to ANSI 5 in the
+// styles.Styles.AtomAccent is used as a fallback (it resolves to ANSI 5 in the
 // shell theme, which is not what user-configured themes intend).
-func resolveAccentRGB(s *styles.Styles, t *theme.Theme) color.Color {
+func resolveAccentRGB(s *styles.Styles, t *styles.Styles) color.Color {
 	if s != nil && s.WorkingGradFromColor != nil {
 		return s.WorkingGradFromColor
 	}
 	if t != nil {
-		if c := t.Style(theme.AtomAccent).GetForeground(); c != nil {
+		if c := t.Style(styles.AtomAccent).GetForeground(); c != nil {
 			return c
 		}
 	}
@@ -394,7 +384,7 @@ func fbm3(x, y, z float64) float64 {
 	value := 0.0
 	amp := 0.5
 	freq := 1.0
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		value += amp * snoise3(x*freq, y*freq, z*freq)
 		amp *= 0.5
 		freq *= 2.0
@@ -494,7 +484,7 @@ var perm = func() [512]int {
 		222, 114, 67, 29, 24, 72, 243, 141, 128, 195, 78, 66, 215, 61, 156, 180,
 	}
 	var p [512]int
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		p[i] = base[i]
 		p[i+256] = base[i]
 	}

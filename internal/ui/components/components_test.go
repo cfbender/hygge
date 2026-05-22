@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/command"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 type stubCommand struct {
@@ -32,7 +32,7 @@ func TestMessageListRendersRoles(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleUser, Raw: "hello"},
 			{Role: RoleAssistant, Raw: "hi back", AgentType: "General"},
@@ -58,7 +58,7 @@ func TestMessageListCompactionMarkerStaysWithinWidth(t *testing.T) {
 	const width = 44
 	ml := MessageList{
 		Width: width,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{{
 			Role:              RoleMarker,
 			MarkerTokensSaved: 1234,
@@ -113,8 +113,8 @@ func TestMentionPaletteScrollsHighlightedMatchIntoView(t *testing.T) {
 
 func TestMentionTokensHighlightedInInputAndUserBubble(t *testing.T) {
 	t.Parallel()
-	th := theme.ShellTheme()
-	accentMention := th.Style(theme.AtomAccent).Render("@internal/ui/app.go")
+	th := styles.DefaultTheme()
+	accentMention := th.Style(styles.AtomAccent).Render("@internal/ui/app.go")
 
 	in := NewInput(th)
 	in.Textarea.SetValue("read @internal/ui/app.go")
@@ -187,7 +187,7 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	ml := MessageList{
 		Width:         80,
 		CollapseLines: 5,
-		Theme:         theme.ShellTheme(),
+		Theme:         styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "somefile.go", Raw: strings.Join(lines, "\n")},
 		},
@@ -209,7 +209,7 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 
 func TestMessageListEmpty(t *testing.T) {
 	t.Parallel()
-	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
 	out := ml.View()
 	if out != "" {
 		t.Errorf("empty message list should render blank; got:\n%s", out)
@@ -222,7 +222,7 @@ func TestMessageListEmpty(t *testing.T) {
 
 func TestMessageListEmptyState_NoMessagesStaysBlank(t *testing.T) {
 	t.Parallel()
-	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
 	out := ml.View()
 	for _, unexpected := range []string{"│h│", "Type a message", "ctrl+e", "tab"} {
 		if strings.Contains(out, unexpected) {
@@ -237,7 +237,7 @@ func TestMessageListEmptyState_DisappearsWithMessage(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleUser, Raw: "hello"},
 		},
@@ -260,7 +260,7 @@ func TestThinkingTruncation(t *testing.T) {
 	for i := range 12 {
 		thinkLines = append(thinkLines, "thought line "+itoa(i))
 	}
-	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
 	result := ml.truncateThinking(strings.Join(thinkLines, "\n"))
 	plain := stripANSI(result)
 
@@ -284,7 +284,7 @@ func TestThinkingTruncation(t *testing.T) {
 // rendered in full without a truncation indicator.
 func TestThinkingTruncation_NoIndicatorWhenFits(t *testing.T) {
 	t.Parallel()
-	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
 	thinking := "line1\nline2\nline3"
 	result := ml.truncateThinking(thinking)
 	plain := stripANSI(result)
@@ -304,7 +304,7 @@ func TestThinkingTruncation_ExactlyAtMaxNoIndicator(t *testing.T) {
 	for range thinkingMaxLines {
 		lines = append(lines, "line")
 	}
-	ml := MessageList{Width: 80, Theme: theme.ShellTheme()}
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
 	result := ml.truncateThinking(strings.Join(lines, "\n"))
 	plain := stripANSI(result)
 	if strings.Contains(plain, "more lines (thinking)") {
@@ -318,7 +318,7 @@ func TestBubbleTail_UserBubble(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleUser, Raw: "hello"},
 		},
@@ -336,7 +336,7 @@ func TestBubbleTail_AssistantBubble(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleAssistant, Raw: "hi there", AgentType: "General"},
 		},
@@ -353,7 +353,7 @@ func TestBubbleTail_ToolGroupNoTail(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "/tmp/x"},
 		},
@@ -369,7 +369,7 @@ func TestBubbleTail_ToolGroupNoTail(t *testing.T) {
 // contains the typed text.
 func TestInput_FocusedRendersText(t *testing.T) {
 	t.Parallel()
-	in := NewInput(theme.ShellTheme())
+	in := NewInput(styles.DefaultTheme())
 	in.Focused = true
 	in.SetWidth(60)
 	in.Textarea.SetValue("test input")
@@ -382,7 +382,7 @@ func TestInput_FocusedRendersText(t *testing.T) {
 // TestInputBorder_BlurredAccepted verifies blurred input renders without panic.
 func TestInputBorder_BlurredAccepted(t *testing.T) {
 	t.Parallel()
-	in := NewInput(theme.ShellTheme())
+	in := NewInput(styles.DefaultTheme())
 	in.Focused = false
 	in.SetWidth(60)
 	view := in.View()
@@ -393,7 +393,7 @@ func TestInputBorder_BlurredAccepted(t *testing.T) {
 
 func TestStatusPillsRendersQueueCount(t *testing.T) {
 	t.Parallel()
-	out := StatusPills{Width: 60, Theme: theme.ShellTheme(), QueueCount: 2}.View()
+	out := StatusPills{Width: 60, Theme: styles.DefaultTheme(), QueueCount: 2}.View()
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "2 queued") {
 		t.Errorf("status pills missing queue count; got:\n%s", plain)
@@ -404,7 +404,7 @@ func TestStatusPillsRendersQueuedPrompts(t *testing.T) {
 	t.Parallel()
 	out := StatusPills{
 		Width:          60,
-		Theme:          theme.ShellTheme(),
+		Theme:          styles.DefaultTheme(),
 		QueueCount:     4,
 		QueuedPrompts:  []string{"first prompt", "second\nline", "third prompt", "fourth prompt"},
 		QueuedEditable: true,
@@ -422,7 +422,7 @@ func TestStatusPillsRendersQueuedPrompts(t *testing.T) {
 
 func TestStatusPillsNoQueueEmpty(t *testing.T) {
 	t.Parallel()
-	out := StatusPills{Width: 60, Theme: theme.ShellTheme()}.View()
+	out := StatusPills{Width: 60, Theme: styles.DefaultTheme()}.View()
 	if out != "" {
 		t.Errorf("status pills should be empty without queue state; got %q", out)
 	}
@@ -440,7 +440,7 @@ func TestSubagentBlock_NoGutter(t *testing.T) {
 		StartedAt:    start,
 		EndedAt:      end,
 	}
-	out := SubagentBlock{State: st, Theme: theme.ShellTheme(), Now: end}.View()
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Now: end}.View()
 	if strings.Contains(out, "\u2502") { // │
 		t.Errorf("subagent block must not contain │ gutter; got:\n%s", out)
 	}
@@ -454,7 +454,7 @@ func TestFooterRendersIdentity(t *testing.T) {
 	t.Parallel()
 	f := Footer{
 		Width:          80,
-		Theme:          theme.ShellTheme(),
+		Theme:          styles.DefaultTheme(),
 		AgentType:      "general",
 		ModelName:      "Claude Opus 4.7",
 		Provider:       "openrouter",
@@ -478,7 +478,7 @@ func TestFooterNoSession(t *testing.T) {
 	t.Parallel()
 	f := Footer{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 	}
 	out := f.View()
 	if !strings.Contains(out, "(no session)") {
@@ -490,7 +490,7 @@ func TestFooterCapitalizesAgentAndProvider(t *testing.T) {
 	t.Parallel()
 	f := Footer{
 		Width:     80,
-		Theme:     theme.ShellTheme(),
+		Theme:     styles.DefaultTheme(),
 		AgentType: "general",
 		Provider:  "anthropic",
 	}
@@ -507,7 +507,7 @@ func TestFooterTruncatesMetadataToWidth(t *testing.T) {
 	t.Parallel()
 	f := Footer{
 		Width:          24,
-		Theme:          theme.ShellTheme(),
+		Theme:          styles.DefaultTheme(),
 		AgentType:      "general",
 		ModelName:      "claude-sonnet-with-a-very-long-name",
 		Provider:       "openrouter",
@@ -527,7 +527,7 @@ func TestPermissionModalRendersRequest(t *testing.T) {
 	m := PermissionModal{
 		Width:  100,
 		Height: 24,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 		Request: PermissionRequest{
 			RequestID: "req-1",
 			ToolName:  "read",
@@ -547,7 +547,7 @@ func TestPermissionModalRendersRequest(t *testing.T) {
 func TestPermissionModalRendersToast(t *testing.T) {
 	t.Parallel()
 	m := PermissionModal{
-		Width: 80, Height: 20, Theme: theme.ShellTheme(),
+		Width: 80, Height: 20, Theme: styles.DefaultTheme(),
 		Request: PermissionRequest{ToolName: "write", Category: "file.write", Target: "/tmp"},
 		Toast:   "edit not yet implemented",
 	}
@@ -559,7 +559,7 @@ func TestPermissionModalRendersToast(t *testing.T) {
 
 func TestInputBuildsAndReports(t *testing.T) {
 	t.Parallel()
-	in := NewInput(theme.ShellTheme())
+	in := NewInput(styles.DefaultTheme())
 	in.SetWidth(40)
 	in.Textarea.SetValue("hello world")
 	if in.Value() != "hello world" {
@@ -583,7 +583,7 @@ func TestToolGroupBubble_ThreeCallGroup(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "/tmp/a.go"},
 			{Role: RoleTool, ToolName: "grep", Target: "func Main"},
@@ -616,7 +616,7 @@ func TestToolGroupBubble_BashEditWriteAreStandaloneBlocks(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "main.go"},
 			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-1", Target: "go test ./...", Raw: "ok"},
@@ -641,7 +641,7 @@ func TestToolGroupBubble_StandaloneBashHitZonesDoNotShareCombinedBlock(t *testin
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "main.go"},
 			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-1", Target: "go test ./...", Raw: "line 1\nline 2\nline 3\nline 4\nline 5"},
@@ -668,7 +668,7 @@ func TestToolGroupBubble_SingleCall(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "/etc/hosts"},
 		},
@@ -689,7 +689,7 @@ func TestToolGroupBubble_SkillShowsLoadedName(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "skill", ToolArgs: []byte(`{"name":"diagnose"}`)},
 		},
@@ -706,7 +706,7 @@ func TestToolGroupBubble_HasTopPaddingInsideBlock(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "/etc/hosts"},
 		},
@@ -738,7 +738,7 @@ func TestToolGroupBubble_ErrorToolStyling(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "bash", Target: "make test", IsError: true},
 		},
@@ -769,7 +769,7 @@ func TestToolGroupBubble_InterleavedWithTask(t *testing.T) {
 	}
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Now:   now,
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "read", Target: "main.go"},
@@ -814,7 +814,7 @@ func TestSubagentBubbleWrap(t *testing.T) {
 	}
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Now:   now,
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "subagent", Target: "find LICENSE", SubagentID: "sub-1"},
@@ -904,7 +904,7 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 		GitBranch:   "main",
 		AppName:     "Hygge",
 		Version:     "v0.1.0-dev",
-		Theme:       theme.ShellTheme(),
+		Theme:       styles.DefaultTheme(),
 		NerdFonts:   false,
 	}
 	out := sb.View()
@@ -940,15 +940,19 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 
 func TestSidebar_BackgroundFill_ReassertedAfterStyledFragments(t *testing.T) {
 	t.Parallel()
+	thm := styles.DefaultTheme()
 	sb := Sidebar{
 		Width:        32,
 		Height:       12,
 		SessionTitle: "styled title",
 		MCPs:         []SidebarMCPStatus{{Name: "server-a", Ready: true, ToolCount: 3}},
-		Theme:        theme.ShellTheme(),
+		Theme:        thm,
 	}
 	out := sb.View()
-	bgOpen := sidebarBackgroundOpenSequence(lipgloss.Color("235"))
+	bgOpen := sidebarBackgroundOpenSequence(thm.Colors[styles.AtomSidebarBg])
+	if bgOpen == "" {
+		t.Fatalf("sidebarBackgroundOpenSequence returned empty for atom %q; substring assertions below would vacuously pass", styles.AtomSidebarBg)
+	}
 	if !strings.Contains(out, bgOpen) {
 		t.Fatalf("sidebar should emit themed background fill.\nOutput: %q", out)
 	}
@@ -962,7 +966,7 @@ func TestSidebar_NoMCPs_ShowsNone(t *testing.T) {
 	sb := Sidebar{
 		Width:  32,
 		Height: 20,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 	}
 	out := stripANSI(sb.View())
 	if !strings.Contains(out, "None") {
@@ -975,7 +979,7 @@ func TestSidebar_HidesUsageAndContextWhenZero(t *testing.T) {
 	sb := Sidebar{
 		Width:  32,
 		Height: 20,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 	}
 	out := stripANSI(sb.View())
 	if strings.Contains(out, "Context") || strings.Contains(out, "Usage") {
@@ -989,7 +993,7 @@ func TestSidebar_HidesSessionTitleWhenEmpty(t *testing.T) {
 		Width:        32,
 		Height:       20,
 		SessionTitle: "",
-		Theme:        theme.ShellTheme(),
+		Theme:        styles.DefaultTheme(),
 	}
 	out := sb.View()
 	// Just verify no panic and output is non-empty.
@@ -1023,7 +1027,7 @@ func TestSidebar_MCPStatus_Markers(t *testing.T) {
 			{Name: "not-ready", Ready: false},
 			{Name: "broken", Error: "connection refused"},
 		},
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 	}
 	out := stripANSI(sb.View())
 	for _, name := range []string{"ok", "not-ready", "broken"} {
@@ -1058,7 +1062,7 @@ func TestSidebarTodos_Empty(t *testing.T) {
 	sb := Sidebar{
 		Width:  32,
 		Height: 30,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 	}
 	out := stripANSI(sb.View())
 	if !strings.Contains(out, "Todos") {
@@ -1078,7 +1082,7 @@ func TestSidebarTodos_WithItems(t *testing.T) {
 	sb := Sidebar{
 		Width:  40,
 		Height: 35,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 		Todos: []SidebarTodo{
 			{Title: "Investigate config merge warning", Status: SidebarTodoCompleted},
 			{Title: "Replace sidebar with todos", Status: SidebarTodoInProgress},
@@ -1107,7 +1111,7 @@ func TestSidebarTodos_WrapsLongTitles(t *testing.T) {
 	sb := Sidebar{
 		Width:  22,
 		Height: 35,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 		Todos: []SidebarTodo{
 			{Title: "Implement sidebar todo wrapping without truncating details", Status: SidebarTodoInProgress},
 		},
@@ -1135,7 +1139,7 @@ func TestSidebarTodos_TruncatesAt6(t *testing.T) {
 	sb := Sidebar{
 		Width:  40,
 		Height: 40,
-		Theme:  theme.ShellTheme(),
+		Theme:  styles.DefaultTheme(),
 		Todos:  items,
 	}
 	out := stripANSI(sb.View())
@@ -1158,7 +1162,7 @@ func TestToolGroup_RendersAwaitingPermissionText(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1180,7 +1184,7 @@ func TestToolGroup_RendersWaitingForResponseText(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1202,7 +1206,7 @@ func TestToolGroup_NoStatusTextWhenCompleted(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1230,7 +1234,7 @@ func TestToolGroup_ErrorText(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1253,7 +1257,7 @@ func TestToolGroup_CancelledText(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1273,7 +1277,7 @@ func TestDiffView_StylesUnifiedDiff(t *testing.T) {
 	t.Parallel()
 	out := DiffView{
 		Width: 80,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Raw:   "--- a/main.go\n+++ b/main.go\n@@ -12,1 +12,1 @@\n-old\n+new",
 	}.View()
 	plain := stripANSI(out)
@@ -1295,7 +1299,7 @@ func TestDiffView_SideBySideSeparatesInsertionsAndDeletions(t *testing.T) {
 	t.Parallel()
 	out := DiffView{
 		Width: 96,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Raw:   "@@ -1,3 +1,3 @@\n keep\n-delete\n+insert\n+added",
 	}.View()
 	plain := stripANSI(out)
@@ -1314,7 +1318,7 @@ func TestDiffView_SideBySidePairsContiguousReplacementRuns(t *testing.T) {
 	t.Parallel()
 	plain := stripANSI(DiffView{
 		Width: 104,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Raw:   "@@ -10,3 +10,4 @@\n-old one\n-old two\n+new one\n+new two\n+new three",
 	}.View())
 
@@ -1333,7 +1337,7 @@ func TestDiffView_SideBySideUsesNewLineNumbersOnRightContextPane(t *testing.T) {
 	t.Parallel()
 	plain := stripANSI(DiffView{
 		Width: 96,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Raw:   "@@ -1,2 +1,3 @@\n keep\n+inserted\n next",
 	}.View())
 
@@ -1374,7 +1378,7 @@ func TestDiffView_NarrowWidthKeepsInlineFallback(t *testing.T) {
 	t.Parallel()
 	plain := stripANSI(DiffView{
 		Width: 60,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Raw:   "@@ -1,1 +1,1 @@\n-old\n+new",
 	}.View())
 	if !strings.Contains(plain, "1 │   │ -old") || !strings.Contains(plain, "  │ 1 │ +new") {
@@ -1391,7 +1395,7 @@ func TestDiffView_TruncatedSideBySideKeepsReplacementPairs(t *testing.T) {
 	raw := "@@ -1,12 +1,12 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8\n body 1\n body 2\n body 3\n body 4"
 	plain := stripANSI(DiffView{
 		Width:    96,
-		Theme:    theme.ShellTheme(),
+		Theme:    styles.DefaultTheme(),
 		Raw:      raw,
 		MaxLines: defaultDiffPreviewLines,
 	}.View())
@@ -1417,7 +1421,7 @@ func TestDiffView_SideBySideLongLinesDoNotOverflow(t *testing.T) {
 	for _, width := range []int{72, 80, 96, 120} {
 		out := DiffView{
 			Width: width,
-			Theme: theme.ShellTheme(),
+			Theme: styles.DefaultTheme(),
 			Raw:   raw,
 		}.View()
 		for i, line := range strings.Split(out, "\n") {
@@ -1439,7 +1443,7 @@ func TestDiffView_InlineLongLinesDoNotOverflow(t *testing.T) {
 	for _, width := range []int{40, 50, 60, 71} {
 		out := DiffView{
 			Width: width,
-			Theme: theme.ShellTheme(),
+			Theme: styles.DefaultTheme(),
 			Raw:   raw,
 		}.View()
 		for i, line := range strings.Split(out, "\n") {
@@ -1464,7 +1468,7 @@ func TestDiffView_TabsExpandedSoLinesDoNotOverflow(t *testing.T) {
 	for _, width := range []int{72, 96, 117, 150} {
 		out := DiffView{
 			Width: width,
-			Theme: theme.ShellTheme(),
+			Theme: styles.DefaultTheme(),
 			Raw:   raw,
 		}.View()
 		for i, line := range strings.Split(out, "\n") {
@@ -1485,7 +1489,7 @@ func TestToolGroup_RendersEditReturnedDiff(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1509,7 +1513,7 @@ func TestToolGroup_DoesNotRenderSyntheticArgDiff(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:     RoleTool,
@@ -1530,7 +1534,7 @@ func TestToolGroup_RendersBashDiffOutputAsDiff(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:      RoleTool,
@@ -1561,7 +1565,7 @@ func TestToolGroup_LongBashGitDiffCanExpand(t *testing.T) {
 	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,12 +1,12 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8\n body 1\n body 2\n body 3\n body 4"
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "bash", ToolUseID: "bash-diff", Target: "git diff", Raw: raw, Status: ToolStatusCompleted},
 		},
@@ -1594,7 +1598,7 @@ func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,12 +1,12 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n-old 7\n-old 8\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6\n+new 7\n+new 8\n body 1\n body 2\n body 3\n body 4"
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{Role: RoleTool, ToolName: "edit", ToolUseID: "edit-diff", Target: "a.go", Raw: raw, Status: ToolStatusCompleted},
 		},
@@ -1638,7 +1642,7 @@ func TestDiffView_SideBySidePairPreservationToEndIsNotTruncated(t *testing.T) {
 	raw := "@@ -1,6 +1,6 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6"
 	diff := DiffView{
 		Width:    96,
-		Theme:    theme.ShellTheme(),
+		Theme:    styles.DefaultTheme(),
 		Raw:      raw,
 		MaxLines: defaultDiffPreviewLines, // 12
 	}
@@ -1669,7 +1673,7 @@ func TestToolGroup_SideBySidePairPreservationToEndNoExpandHint(t *testing.T) {
 	raw := "@@ -1,6 +1,6 @@\n-old 1\n-old 2\n-old 3\n-old 4\n-old 5\n-old 6\n+new 1\n+new 2\n+new 3\n+new 4\n+new 5\n+new 6"
 	ml := MessageList{
 		Width: 100,
-		Theme: theme.ShellTheme(),
+		Theme: styles.DefaultTheme(),
 		Messages: []UIMessage{
 			{
 				Role:      RoleTool,

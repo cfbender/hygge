@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // Breadcrumb renders a navigation path of the form "root › child › grandchild".
@@ -32,7 +32,7 @@ type Breadcrumb struct {
 	Width int
 
 	// Theme is the active theme; nil is accepted (plain style used).
-	Theme *theme.Theme
+	Theme *styles.Styles
 }
 
 const breadcrumbSep = " › "
@@ -51,7 +51,7 @@ func (b Breadcrumb) View() string {
 		width = 80
 	}
 
-	muted := b.style(theme.AtomMuted)
+	muted := b.style(styles.AtomMuted)
 
 	// Build the full rendering to see if it fits.
 	full := strings.Join(b.Segments, breadcrumbSep)
@@ -80,7 +80,7 @@ func (b Breadcrumb) View() string {
 
 // style returns a lipgloss.Style for the given atom, or a blank style when
 // no theme is configured.
-func (b Breadcrumb) style(a theme.Atom) lipgloss.Style {
+func (b Breadcrumb) style(a styles.Atom) lipgloss.Style {
 	if b.Theme == nil {
 		return lipgloss.NewStyle()
 	}

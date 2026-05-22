@@ -10,7 +10,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // startSend launches a goroutine that calls Agent.Send and returns a tea.Cmd
@@ -229,7 +229,7 @@ func (a *App) renderAttachmentChips(width int) string {
 	}
 	style := lipgloss.NewStyle().Padding(0, 1)
 	if a.opts.Theme != nil {
-		style = a.opts.Theme.Style(theme.AtomMuted).Padding(0, 1)
+		style = a.opts.Theme.Style(styles.AtomMuted).Padding(0, 1)
 	}
 	chips := make([]string, 0, len(a.pendingAttachments)+1)
 	for _, att := range a.pendingAttachments {

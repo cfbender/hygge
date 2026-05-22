@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // CompactionBanner is the thin advisory banner shown above the input when
@@ -19,7 +19,7 @@ import (
 //	CompactionCompleted event — auto-cleared by the App.
 type CompactionBanner struct {
 	Width   int
-	Theme   *theme.Theme
+	Theme   *styles.Styles
 	Visible bool
 	Pct     float64 // context usage percentage (0–100)
 }
@@ -37,8 +37,8 @@ func (b CompactionBanner) View() string {
 	warnSt := lipgloss.NewStyle()
 	mutedSt := lipgloss.NewStyle()
 	if b.Theme != nil {
-		warnSt = b.Theme.Style(theme.AtomWarn)
-		mutedSt = b.Theme.Style(theme.AtomMuted)
+		warnSt = b.Theme.Style(styles.AtomWarn)
+		mutedSt = b.Theme.Style(styles.AtomMuted)
 	}
 
 	text := fmt.Sprintf("⚠  Context usage at %.0f%%. /compact to summarise older messages.", b.Pct)

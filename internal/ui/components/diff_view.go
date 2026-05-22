@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 const defaultDiffPreviewLines = 12
@@ -41,7 +41,7 @@ var hunkHeaderPattern = regexp.MustCompile(`@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,
 type DiffView struct {
 	Raw      string
 	Width    int
-	Theme    *theme.Theme
+	Theme    *styles.Styles
 	MaxLines int
 }
 
@@ -364,7 +364,7 @@ type diffLineStyles struct {
 	gutter lipgloss.Style
 }
 
-func diffStyles(t *theme.Theme) diffLineStyles {
+func diffStyles(t *styles.Styles) diffLineStyles {
 	if t == nil {
 		return diffLineStyles{
 			add:    lipgloss.NewStyle(),
@@ -374,20 +374,20 @@ func diffStyles(t *theme.Theme) diffLineStyles {
 			gutter: lipgloss.NewStyle().Faint(true),
 		}
 	}
-	add := t.Style(theme.AtomSuccess)
-	if bg := t.Style(theme.AtomDiffAddBg).GetBackground(); hasColor(bg) {
+	add := t.Style(styles.AtomSuccess)
+	if bg := t.Style(styles.AtomDiffAddBg).GetBackground(); hasColor(bg) {
 		add = add.Background(bg)
 	}
-	del := t.Style(theme.AtomError)
-	if bg := t.Style(theme.AtomDiffDelBg).GetBackground(); hasColor(bg) {
+	del := t.Style(styles.AtomError)
+	if bg := t.Style(styles.AtomDiffDelBg).GetBackground(); hasColor(bg) {
 		del = del.Background(bg)
 	}
 	return diffLineStyles{
 		add:    add,
 		del:    del,
-		meta:   t.Style(theme.AtomMuted).Faint(true),
-		body:   t.Style(theme.AtomCodeFg),
-		gutter: t.Style(theme.AtomMuted).Faint(true),
+		meta:   t.Style(styles.AtomMuted).Faint(true),
+		body:   t.Style(styles.AtomCodeFg),
+		gutter: t.Style(styles.AtomMuted).Faint(true),
 	}
 }
 

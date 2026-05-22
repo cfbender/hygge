@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/styles"
-	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 const (
@@ -39,7 +38,6 @@ var readyPlaceholders = []string{
 type Input struct {
 	Textarea         textarea.Model
 	Styles           *styles.Styles
-	Theme            *theme.Theme // kept for gradual migration
 	PasteMarkerStyle lipgloss.Style
 	BorderColor      color.Color
 	VerticalPadding  int
@@ -48,7 +46,7 @@ type Input struct {
 }
 
 // NewInput builds a configured textarea with dynamic height and custom prompts.
-func NewInput(t *theme.Theme) *Input {
+func NewInput(t *styles.Styles) *Input {
 	ta := textarea.New()
 	ta.Placeholder = randomPlaceholder(readyPlaceholders)
 	ta.ShowLineNumbers = false
@@ -64,7 +62,7 @@ func NewInput(t *theme.Theme) *Input {
 
 	// Apply theme-aware styles.
 	if t != nil {
-		muted := t.Style(theme.AtomMuted)
+		muted := t.Style(styles.AtomMuted)
 		s := ta.Styles()
 		s.Focused.Placeholder = muted
 		s.Blurred.Placeholder = muted
@@ -75,7 +73,7 @@ func NewInput(t *theme.Theme) *Input {
 
 	return &Input{
 		Textarea: ta,
-		Theme:    t,
+		Styles:   t,
 		Focused:  true,
 		prevH:    inputMinTextRows,
 	}
@@ -127,8 +125,8 @@ func (i *Input) View() string {
 	if i.PasteMarkerStyle.GetForeground() != nil || i.PasteMarkerStyle.GetBackground() != nil {
 		content = HighlightPastedInputMarkers(content, i.PasteMarkerStyle)
 	}
-	if i.Theme != nil {
-		content = HighlightMentions(content, i.Theme.Style(theme.AtomAccent))
+	if i.Styles != nil {
+		content = HighlightMentions(content, i.Styles.Style(styles.AtomAccent))
 	}
 	if i.Styles == nil {
 		return content

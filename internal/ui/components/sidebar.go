@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/styles"
-	"github.com/cfbender/hygge/internal/ui/theme"
 )
 
 // SidebarMCPStatus is the UI-side representation of one MCP server's runtime
@@ -108,7 +107,7 @@ type Sidebar struct {
 	Version string
 
 	// Theme is the active theme. Nil is accepted (plain styles used).
-	Theme  *theme.Theme
+	Theme  *styles.Styles
 	Styles *styles.Styles
 	// NerdFonts controls whether to use the nerd-font git-branch glyph.
 	NerdFonts bool
@@ -128,9 +127,9 @@ func (s Sidebar) View() string {
 	//   innerW = Width - 1 (border) - 1 (left pad) - 1 (right pad)
 	innerW := max(s.Width-3, 1)
 
-	sectionStyle := s.atomStyle(theme.AtomSidebarSection).Bold(true)
-	mutedStyle := s.atomStyle(theme.AtomSidebarMuted)
-	accentStyle := s.atomStyle(theme.AtomSidebarAccent)
+	sectionStyle := s.atomStyle(styles.AtomSidebarSection).Bold(true)
+	mutedStyle := s.atomStyle(styles.AtomSidebarMuted)
+	accentStyle := s.atomStyle(styles.AtomSidebarAccent)
 
 	var lines []string
 
@@ -145,11 +144,11 @@ func (s Sidebar) View() string {
 	if s.BilledTokens > 0 || s.CostUSD > 0 {
 		lines = append(lines, sectionStyle.Render(sidebarTruncate("Usage", innerW)))
 		if s.BilledTokens > 0 {
-			lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
+			lines = append(lines, s.atomStyle(styles.AtomSidebarValue).Render(
 				sidebarTruncate(formatTokens(s.BilledTokens)+" billed", innerW)))
 		}
 		if s.CostUSD > 0 {
-			lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
+			lines = append(lines, s.atomStyle(styles.AtomSidebarValue).Render(
 				sidebarTruncate(fmt.Sprintf("$%.4f", s.CostUSD), innerW)))
 		}
 		lines = append(lines, "")
@@ -158,13 +157,13 @@ func (s Sidebar) View() string {
 	// ── Context section ───────────────────────────────────────────────────
 	if s.UsedTokens > 0 {
 		lines = append(lines, sectionStyle.Render(sidebarTruncate("Context", innerW)))
-		lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
+		lines = append(lines, s.atomStyle(styles.AtomSidebarValue).Render(
 			sidebarTruncate(formatTokens(s.UsedTokens)+" tokens", innerW)))
 		pct := "limit unknown"
 		if s.MaxTokens > 0 {
 			pct = fmt.Sprintf("%d%% used", int(s.PctUsed*100))
 		}
-		lines = append(lines, s.atomStyle(theme.AtomSidebarValue).Render(
+		lines = append(lines, s.atomStyle(styles.AtomSidebarValue).Render(
 			sidebarTruncate(pct, innerW)))
 		lines = append(lines, "")
 	}
@@ -230,9 +229,9 @@ func (s Sidebar) View() string {
 func (s Sidebar) renderMCP(m SidebarMCPStatus, _ int, mutedStyle lipgloss.Style) string {
 	var dotRendered string
 	if m.Error != "" {
-		dotRendered = s.atomStyle(theme.AtomError).Render("✕")
+		dotRendered = s.atomStyle(styles.AtomError).Render("✕")
 	} else if m.Ready {
-		dotRendered = s.atomStyle(theme.AtomSidebarAccent).Render("●")
+		dotRendered = s.atomStyle(styles.AtomSidebarAccent).Render("●")
 	} else {
 		dotRendered = mutedStyle.Render("○")
 	}
@@ -282,20 +281,20 @@ func (s Sidebar) renderTodoRow(t SidebarTodo, innerW int, mutedStyle lipgloss.St
 	switch t.Status {
 	case SidebarTodoCompleted:
 		glyph = "✓"
-		glyphStyle = s.atomStyle(theme.AtomSuccess)
+		glyphStyle = s.atomStyle(styles.AtomSuccess)
 		titleStyle = mutedStyle
 	case SidebarTodoInProgress:
 		glyph = "→"
-		glyphStyle = s.atomStyle(theme.AtomSidebarAccent)
-		titleStyle = s.atomStyle(theme.AtomSidebarValue).Bold(true)
+		glyphStyle = s.atomStyle(styles.AtomSidebarAccent)
+		titleStyle = s.atomStyle(styles.AtomSidebarValue).Bold(true)
 	case SidebarTodoCancelled:
 		glyph = "✕"
-		glyphStyle = s.atomStyle(theme.AtomError)
+		glyphStyle = s.atomStyle(styles.AtomError)
 		titleStyle = mutedStyle
 	default: // pending or unknown
 		glyph = "○"
 		glyphStyle = mutedStyle
-		titleStyle = s.atomStyle(theme.AtomSidebarValue)
+		titleStyle = s.atomStyle(styles.AtomSidebarValue)
 	}
 
 	// Normalize manual line breaks and repeated spaces before wrapping.
@@ -394,7 +393,7 @@ func (s Sidebar) wrapTitle(title string, w int) []string {
 	if w <= 0 {
 		return nil
 	}
-	boldStyle := s.atomStyle(theme.AtomSidebarValue).Bold(true)
+	boldStyle := s.atomStyle(styles.AtomSidebarValue).Bold(true)
 
 	runes := []rune(title)
 	if len(runes) <= w {
@@ -417,7 +416,7 @@ func (s Sidebar) sidebarBorderFg() color.Color {
 	if s.Theme == nil {
 		return lipgloss.Color("8")
 	}
-	style := s.Theme.Style(theme.AtomSidebarBorder)
+	style := s.Theme.Style(styles.AtomSidebarBorder)
 	fg := style.GetForeground()
 	if fg == nil {
 		return lipgloss.Color("8")
@@ -435,7 +434,7 @@ func (s Sidebar) sidebarBackgroundColor() color.Color {
 	if s.Theme == nil {
 		return nil
 	}
-	bg := s.Theme.Style(theme.AtomSidebarBg).GetBackground()
+	bg := s.Theme.Style(styles.AtomSidebarBg).GetBackground()
 	if _, isNo := bg.(lipgloss.NoColor); bg == nil || isNo {
 		return nil
 	}
@@ -467,7 +466,7 @@ func sidebarReassertBackgroundAfterReset(s, bgOpen string) string {
 // atomStyle returns the lipgloss.Style for the given atom, or a blank style
 // when no theme is configured. Sidebar text also receives the sidebar
 // background so styled fragments do not punch transparent holes in the fill.
-func (s Sidebar) atomStyle(a theme.Atom) lipgloss.Style {
+func (s Sidebar) atomStyle(a styles.Atom) lipgloss.Style {
 	if s.Theme == nil {
 		return lipgloss.NewStyle()
 	}

@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/cfbender/hygge/internal/ui/theme"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 const mentionPaletteMaxRows = 8
@@ -22,7 +22,7 @@ type MentionItem struct {
 // while the user is typing an @ mention.
 type MentionPalette struct {
 	Width     int
-	Theme     *theme.Theme
+	Theme     *styles.Styles
 	Matches   []MentionItem
 	Highlight int
 	Query     string
@@ -40,7 +40,7 @@ func (p MentionPalette) View() string {
 		if p.Query == "" {
 			return ""
 		}
-		return p.box(p.style(theme.AtomMuted).Render(
+		return p.box(p.style(styles.AtomMuted).Render(
 			fmt.Sprintf("no mentions match @%s", p.Query),
 		), width)
 	}
@@ -68,7 +68,7 @@ func (p MentionPalette) View() string {
 
 	rows := make([]string, 0, len(visible)+2)
 	if overflowBefore > 0 {
-		rows = append(rows, p.style(theme.AtomMuted).Render(
+		rows = append(rows, p.style(styles.AtomMuted).Render(
 			fmt.Sprintf("  ↑ %d more", overflowBefore),
 		))
 	}
@@ -81,15 +81,15 @@ func (p MentionPalette) View() string {
 		descCol := truncate(desc, innerWidth-labelWidth-2)
 
 		if start+i == selected {
-			accent := p.style(theme.AtomAccent)
+			accent := p.style(styles.AtomAccent)
 			rows = append(rows, accent.Render(fmt.Sprintf("▶ %s  %s", labelCol, descCol)))
 		} else {
-			muted := p.style(theme.AtomMuted)
+			muted := p.style(styles.AtomMuted)
 			rows = append(rows, fmt.Sprintf("  %s  %s", muted.Render(labelCol), descCol))
 		}
 	}
 	if overflowAfter > 0 {
-		rows = append(rows, p.style(theme.AtomMuted).Render(
+		rows = append(rows, p.style(styles.AtomMuted).Render(
 			fmt.Sprintf("  ↓ %d more — keep typing to narrow", overflowAfter),
 		))
 	}
@@ -103,13 +103,13 @@ func (p MentionPalette) box(body string, width int) string {
 		Padding(0, 1).
 		Width(width - 2)
 	if p.Theme != nil {
-		bs := p.Theme.Style(theme.AtomModalBorder)
+		bs := p.Theme.Style(styles.AtomModalBorder)
 		style = style.BorderForeground(bs.GetForeground())
 	}
 	return style.Render(body)
 }
 
-func (p MentionPalette) style(a theme.Atom) lipgloss.Style {
+func (p MentionPalette) style(a styles.Atom) lipgloss.Style {
 	if p.Theme == nil {
 		return lipgloss.NewStyle()
 	}
