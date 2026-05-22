@@ -45,9 +45,11 @@ func (m PermissionModal) View() string {
 
 // renderBox renders the modal content with its chrome.
 func (m PermissionModal) renderBox() string {
+	contentW := m.contentWidth()
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		Padding(1, 2)
+		Padding(1, 2).
+		Width(contentW)
 	if m.Theme != nil {
 		bs := m.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
@@ -58,20 +60,40 @@ func (m PermissionModal) renderBox() string {
 	}
 
 	var b strings.Builder
-	header := m.bold().Render("permission request")
-	b.WriteString(header)
+
+	// Title + subtitle row (matches question_modal pattern).
+	b.WriteString(m.bold().Render("permission request"))
+	b.WriteString(" ")
+	b.WriteString(m.style(styles.AtomMuted).Render("approve or deny tool access"))
 	b.WriteString("\n\n")
+
+	// Request Details section.
+	b.WriteString(m.sectionLabel("Request Details"))
+	b.WriteString("\n")
 	b.WriteString(m.field("Tool", m.Request.ToolName))
 	b.WriteString("\n")
 	b.WriteString(m.field("Category", m.Request.Category))
 	b.WriteString("\n")
 	b.WriteString(m.field("Target", m.Request.Target))
 	if m.Request.Why != "" {
-		b.WriteString("\n\n")
+		b.WriteString("\n")
 		b.WriteString(m.field("Why", m.Request.Why))
 	}
 	b.WriteString("\n\n")
-	b.WriteString(m.options())
+
+	// Actions section.
+	b.WriteString(m.sectionLabel("Actions"))
+	b.WriteString("\n")
+	b.WriteString(m.actionRow(
+		[][2]string{{"[y]", "allow once"}, {"[Y]", "allow session"}, {"[A]", "allow always"}, {"[e]", "edit (v0.2)"}},
+		false, contentW,
+	))
+	b.WriteString("\n")
+	b.WriteString(m.actionRow(
+		[][2]string{{"[n]", "deny"}, {"[esc]", "deny"}},
+		true, contentW,
+	))
+
 	if m.Toast != "" {
 		b.WriteString("\n\n")
 		b.WriteString(m.warnStyle().Render(m.Toast))
@@ -80,21 +102,41 @@ func (m PermissionModal) renderBox() string {
 	return border.Render(b.String())
 }
 
-// field renders a "Label: value" pair with the label muted.
-func (m PermissionModal) field(label, value string) string {
-	muted := m.style(styles.AtomMuted)
-	return muted.Render(label+": ") + value
+// sectionLabel renders a bold muted section header (matches question_modal).
+func (m PermissionModal) sectionLabel(label string) string {
+	return m.style(styles.AtomMuted).Bold(true).Render(label)
 }
 
-// options renders the keybind hint block.
-func (m PermissionModal) options() string {
-	muted := m.style(styles.AtomMuted)
-	lines := []string{
-		muted.Render("[y]") + " allow once    " + muted.Render("[Y]") + " allow session",
-		muted.Render("[A]") + " allow always   " + muted.Render("[n]") + " deny",
-		muted.Render("[e]") + " edit (v0.2)    " + muted.Render("[esc]") + " deny",
+// field renders a "Label: value" pair with the label muted.
+func (m PermissionModal) field(label, value string) string {
+	return m.style(styles.AtomMuted).Render(label+": ") + value
+}
+
+// actionRow renders a horizontal group of key-description pairs inside a
+// left-bordered row, using warn color for deny actions and accent for allow.
+// pairs is a slice of [key, description] tuples.
+func (m PermissionModal) actionRow(pairs [][2]string, isDeny bool, width int) string {
+	var parts []string
+	for _, kv := range pairs {
+		keyStyle := m.style(styles.AtomAccent).Bold(true)
+		if isDeny {
+			keyStyle = m.style(styles.AtomWarn).Bold(true)
+		}
+		parts = append(parts, keyStyle.Render(kv[0])+" "+kv[1])
 	}
-	return strings.Join(lines, "\n")
+	content := strings.Join(parts, "   ")
+
+	borderColor := m.style(styles.AtomAccent).GetForeground()
+	if isDeny {
+		borderColor = m.style(styles.AtomWarn).GetForeground()
+	}
+
+	row := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(borderColor).
+		Padding(0, 1).
+		Width(width)
+	return row.Render(content)
 }
 
 // bold returns a bold style anchored to the primary atom.
@@ -115,4 +157,8 @@ func (m PermissionModal) style(a styles.Atom) lipgloss.Style {
 		return lipgloss.NewStyle()
 	}
 	return m.Theme.Style(a)
+}
+
+func (m PermissionModal) contentWidth() int {
+	return ModalContentWidth(m.Width)
 }
