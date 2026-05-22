@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -191,12 +192,7 @@ func isHexDigit(r rune) bool {
 }
 
 func isKnownAtom(a Atom) bool {
-	for _, k := range allAtoms {
-		if k == a {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allAtoms, a)
 }
 
 // applyPaletteRole sets the named palette role on opts. Returns false for
