@@ -34,25 +34,9 @@ func (a *App) subagentAtScreen(screenX, screenY int) string {
 		return ""
 	}
 
-	// The left column content flow is:
-	//   [breadcrumb + "\n" if present]  <- outside viewport
-	//   viewport content (chatH rows)
-	//   ...rest...
-	//
-	// The viewport content starts at screen row = breadcrumb rows.
-	// The breadcrumb is rendered above the viewport View() output in renderChatContent.
 	viewportTop := headerHeight
-	breadcrumbLines := 0
-	if !a.viewingSubagent() {
-		if segs := a.breadcrumbSegments(); len(segs) > 0 {
-			// Breadcrumb is one rendered line + "\n" separator = 2 screen rows.
-			breadcrumbLines = 2
-			viewportTop += breadcrumbLines
-		}
-	}
-
 	chatH := a.layout.chat.Dy()
-	viewportBottom := viewportTop + chatH - breadcrumbLines
+	viewportBottom := viewportTop + chatH
 	if screenY < viewportTop || screenY >= viewportBottom {
 		return ""
 	}
