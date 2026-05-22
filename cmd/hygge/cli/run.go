@@ -68,20 +68,21 @@ var newFlag bool
 // configurable permission checks are bypassed while secrets remain denied.
 var yoloFlag bool
 
-// noConfigAuthFlag starts the TUI as if no user/project config or provider
-// credentials exist. It is intended for onboarding/manual testing.
-var noConfigAuthFlag bool
+// dryRunFlag launches the TUI without loading any user/project config or
+// provider credentials, writes no config, and prints a preview of what
+// would be written instead of persisting it.
+var dryRunFlag bool
 
 // init binds --resume, --reasoning, --continue, and --new.
 // Called from NewRootCmd via wireRunFlags below.
 func wireRunFlags(root *cobra.Command) {
-	noConfigAuthFlag = false
+	dryRunFlag = false
 	root.Flags().StringVar(&resumeFlag, "resume", "", "resume the most recent session whose id starts with this prefix")
 	root.Flags().StringVar(&reasoningFlag, "reasoning", "", "reasoning depth for the run: off | low | medium | high (overrides [model] reasoning)")
 	root.Flags().BoolVarP(&continueFlag, "continue", "c", false, "resume the most recent session for the current directory")
 	root.Flags().BoolVar(&newFlag, "new", false, "start a fresh session (overrides resume_default = continue)")
 	root.Flags().BoolVar(&yoloFlag, "yolo", false, "allow non-secret tool actions without prompting")
-	root.Flags().BoolVar(&noConfigAuthFlag, "no-config-auth", false, "start without loading user/project config or provider auth (for onboarding testing)")
+	root.Flags().BoolVar(&dryRunFlag, "dry-run", false, "start without loading user/project config or provider auth; show what config would be written instead of persisting it")
 }
 
 // runRun is the body of `hygge` (no subcommand).  Bootstraps the
@@ -110,7 +111,7 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		ReasoningOverride: reasoningFlag,
 		Yolo:              yoloFlag,
 		AsyncMCP:          true,
-		NoConfigAuth:      noConfigAuthFlag,
+		DryRun:            dryRunFlag,
 	})
 	if err != nil {
 		return err
@@ -170,7 +171,7 @@ func runRun(cmd *cobra.Command, _ []string) error {
 // immediately after the first render (used by resume_default="ask" and
 // `hygge resume` with multiple cwd sessions).
 func configuredProvidersForRuntime(rt *appRuntime) []string {
-	if rt != nil && rt.NoConfigAuth {
+	if rt != nil && rt.DryRun {
 		return nil
 	}
 	if rt == nil {
@@ -179,7 +180,7 @@ func configuredProvidersForRuntime(rt *appRuntime) []string {
 	return authConfiguredProviders(rt.StateOpts)
 }
 
-func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
+func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
 	// Determine whether the wizard must run before regular chat is available.
 	// The TUI always opens; onboarding replaces the main view when needed.
 	//
@@ -187,7 +188,7 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 	// exists. If auth already exists but no config/model has been written yet,
 	// the wizard still opens, but AuthConfiguredProviders lets it skip API-key
 	// authorization and proceed to model/mode setup.
-	needsOnboarding := rt.NoConfigAuth || !hasConfiguredModel(rt.Config, rt.Provenance) || !hasAnyProviderAuth(rt.StateOpts)
+	needsOnboarding := rt.DryRun || !hasConfiguredModel(rt.Config, rt.Provenance) || !hasAnyProviderAuth(rt.StateOpts)
 
 	// Map CLI MCPServerStatus → UI SidebarMCPStatus so internal/ui has no
 	// dependency on cmd/.
@@ -244,8 +245,12 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 				if apiKey == "" {
 					continue
 				}
-				if err := auth.Set(providerName, auth.Credential{Type: auth.CredAPIKey, APIKey: apiKey, AddedAt: time.Now()}, auth.LoadOptions{HomeDir: rt.StateOpts.HomeDir, XDGStateHome: rt.StateOpts.XDGStateHome}); err != nil {
-					return fmt.Errorf("onboarding: save api key for %s: %w", providerName, err)
+				if rt.DryRun {
+					printf(errOut(cmd), "[dry-run] would save auth: provider=%s api_key=%s\n", providerName, maskKey(apiKey))
+				} else {
+					if err := auth.Set(providerName, auth.Credential{Type: auth.CredAPIKey, APIKey: apiKey, AddedAt: time.Now()}, auth.LoadOptions{HomeDir: rt.StateOpts.HomeDir, XDGStateHome: rt.StateOpts.XDGStateHome}); err != nil {
+						return fmt.Errorf("onboarding: save api key for %s: %w", providerName, err)
+					}
 				}
 				if providerName == result.Mode.Provider {
 					if rt.Config.Model.Options == nil {
@@ -255,13 +260,18 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 				}
 			}
 			// 2. Persist mode (model selection + inline prompt) to user config.
-			if _, err := config.WriteOnboardingMode(config.WriteOnboardingModeOptions{
-				HomeDir:       rt.StateOpts.HomeDir,
-				XDGConfigHome: rt.XDGConfigHome,
-				Pwd:           rt.Pwd,
-				Provenance:    rt.Provenance,
-			}, result.Mode); err != nil {
-				return fmt.Errorf("onboarding: save mode: %w", err)
+			if rt.DryRun {
+				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
+				printf(errOut(cmd), "[dry-run] would write onboarding mode to %s: provider=%s model=%s\n", target, result.Mode.Provider, result.Mode.Model)
+			} else {
+				if _, err := config.WriteOnboardingMode(config.WriteOnboardingModeOptions{
+					HomeDir:       rt.StateOpts.HomeDir,
+					XDGConfigHome: rt.XDGConfigHome,
+					Pwd:           rt.Pwd,
+					Provenance:    rt.Provenance,
+				}, result.Mode); err != nil {
+					return fmt.Errorf("onboarding: save mode: %w", err)
+				}
 			}
 			rt.Config.Model.Provider = result.Mode.Provider
 			rt.Config.Model.Name = result.Mode.Model
@@ -279,11 +289,16 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 						Prompt:      draft.Prompt,
 					})
 				}
-				if err := config.WriteSubagentsToml(config.WriteSubagentsTomlOptions{
-					HomeDir:       rt.StateOpts.HomeDir,
-					XDGConfigHome: rt.XDGConfigHome,
-				}, agents); err != nil {
-					return fmt.Errorf("onboarding: save subagents: %w", err)
+				if rt.DryRun {
+					target := filepath.Join(rt.XDGConfigHome, "hygge", "subagents.toml")
+					printf(errOut(cmd), "[dry-run] would write %d subagent(s) to %s\n", len(agents), target)
+				} else {
+					if err := config.WriteSubagentsToml(config.WriteSubagentsTomlOptions{
+						HomeDir:       rt.StateOpts.HomeDir,
+						XDGConfigHome: rt.XDGConfigHome,
+					}, agents); err != nil {
+						return fmt.Errorf("onboarding: save subagents: %w", err)
+					}
 				}
 			}
 
@@ -365,6 +380,13 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			return nil
 		},
 		SaveModel: func(_ context.Context, providerName, modelName string) error {
+			if rt.DryRun {
+				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
+				printf(errOut(cmd), "[dry-run] would write model to %s: provider=%s model=%s\n", target, providerName, modelName)
+				rt.Config.Model.Provider = providerName
+				rt.Config.Model.Name = modelName
+				return nil
+			}
 			_, err := config.WriteModelSelection(config.WriteModelOptions{
 				HomeDir:       rt.StateOpts.HomeDir,
 				XDGConfigHome: rt.XDGConfigHome,
@@ -378,6 +400,17 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			return err
 		},
 		SaveAPIKey: func(_ context.Context, providerName, apiKey string) error {
+			if rt.DryRun {
+				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
+				printf(errOut(cmd), "[dry-run] would write api_key to %s: provider=%s api_key=%s\n", target, providerName, maskKey(apiKey))
+				if providerName == rt.Config.Model.Provider {
+					if rt.Config.Model.Options == nil {
+						rt.Config.Model.Options = map[string]any{}
+					}
+					rt.Config.Model.Options["api_key"] = apiKey
+				}
+				return nil
+			}
 			_, err := config.WriteProviderAPIKey(config.WriteProviderAPIKeyOptions{
 				HomeDir:       rt.StateOpts.HomeDir,
 				XDGConfigHome: rt.XDGConfigHome,
@@ -401,6 +434,18 @@ func runTUI(ctx context.Context, _ *cobra.Command, rt *appRuntime, sessionID str
 			return styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
 		},
 		SaveTheme: func(_ context.Context, name string) error {
+			if rt.DryRun {
+				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
+				printf(errOut(cmd), "[dry-run] would write theme to %s: name=%s\n", target, name)
+				rt.Config.Theme.Name = name
+				newTheme, loadErr := styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
+				if loadErr != nil {
+					printf(errOut(cmd), "hygge: warning: dry-run theme load failed: %v\n", loadErr)
+				} else {
+					rt.Theme = newTheme
+				}
+				return nil
+			}
 			_, err := config.WriteThemeSelection(config.WriteThemeSelectionOptions{
 				HomeDir:       rt.StateOpts.HomeDir,
 				XDGConfigHome: rt.XDGConfigHome,
