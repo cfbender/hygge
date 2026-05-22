@@ -179,9 +179,27 @@ func (a *App) renderFooterContent() string {
 		ReasoningLevel: a.opts.Reasoning.Effort,
 		ModeIndicator:  a.formatModeIndicator(),
 		Busy:           a.busy,
-		SpinnerView:    a.spinner.View(),
+		SpinnerView:    a.renderFooterFogSpinner(),
 		WorkingVerb:    a.workingVerb,
 	}.View()
+}
+
+func (a *App) renderFooterFogSpinner() string {
+	if !a.busy {
+		return ""
+	}
+	if a.fogStart.IsZero() {
+		a.fogStart = time.Now()
+	}
+	frame := renderFogBanner(15, 5, time.Since(a.fogStart).Seconds(), resolveAccentRGB(a.styles, a.opts.Theme), "")
+	lines := strings.Split(frame, "\n")
+	densest := ""
+	for _, line := range lines {
+		if lipgloss.Width(strings.ReplaceAll(line, " ", "")) > lipgloss.Width(strings.ReplaceAll(densest, " ", "")) {
+			densest = line
+		}
+	}
+	return densest
 }
 
 // renderSidebarContent produces the string content for the sidebar.
