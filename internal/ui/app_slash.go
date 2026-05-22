@@ -15,6 +15,7 @@ import (
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // noticeLifetime is how long an ephemeral slash-command notice
@@ -141,7 +142,26 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			a.openOverlay(overlayAPIKey)
 			a.updateInputFocus()
 		case command.ModalTheme:
-			a.themeModal = components.ThemeModal{Theme: a.opts.Theme, Current: currentThemeName(a.opts.Theme), Themes: a.themeNames()}
+			themeNames := a.themeNames()
+			previewThemes := make(map[string]*styles.Styles, len(themeNames)+1)
+			if a.opts.Theme != nil {
+				previewThemes[currentThemeName(a.opts.Theme)] = a.opts.Theme
+			}
+			for _, name := range themeNames {
+				if _, ok := previewThemes[name]; ok {
+					continue
+				}
+				if a.opts.LoadTheme != nil {
+					if th, err := a.opts.LoadTheme(a.ctx, name); err == nil {
+						previewThemes[name] = th
+						continue
+					}
+				}
+				if th, err := styles.Load(name, styles.LoadOptions{}); err == nil {
+					previewThemes[name] = th
+				}
+			}
+			a.themeModal = components.ThemeModal{Theme: a.opts.Theme, Current: currentThemeName(a.opts.Theme), Themes: themeNames, PreviewTheme: func(name string) *styles.Styles { return previewThemes[name] }}
 			a.openOverlay(overlayTheme)
 			a.updateInputFocus()
 		default:

@@ -126,8 +126,8 @@ func (a *App) switchThemeCmd(name string) tea.Cmd {
 				return themeSwitchResult{name: name, err: err}
 			}
 			th = loaded
-		} else if name == currentThemeName(a.opts.Theme) || name == defaultThemeName() {
-			th = styles.DefaultTheme()
+		} else if loaded, err := styles.Load(name, styles.LoadOptions{}); err == nil {
+			th = loaded
 		} else {
 			return themeSwitchResult{name: name, err: fmt.Errorf("unknown theme %q", name)}
 		}

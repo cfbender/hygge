@@ -36,8 +36,8 @@ type LoadOptions struct {
 // User themes override Claret's palette role-by-role; any role not specified
 // in the TOML inherits the Claret value.
 func Load(name string, opts LoadOptions) (*Styles, error) {
-	if name == "" || name == "claret" {
-		return DefaultTheme(), nil
+	if s, ok := builtinTheme(name); ok {
+		return s, nil
 	}
 	path, err := resolveThemePath(name, opts)
 	if err != nil {
@@ -60,7 +60,10 @@ func Load(name string, opts LoadOptions) (*Styles, error) {
 // KnownNames returns the set of theme names available to Load: the built-in
 // "claret" plus any *.toml files under <config>/hygge/themes/.
 func KnownNames(opts LoadOptions) []string {
-	names := map[string]bool{"claret": true}
+	names := make(map[string]bool, len(builtinItermThemes)+1)
+	for _, name := range builtinThemeNames() {
+		names[name] = true
+	}
 	if configHome := resolveConfigHome(opts); configHome != "" {
 		entries, err := os.ReadDir(filepath.Join(configHome, "hygge", "themes"))
 		if err == nil {
