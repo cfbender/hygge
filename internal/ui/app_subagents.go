@@ -99,6 +99,35 @@ func (a *App) toolAtScreen(screenX, screenY int) string {
 	return ""
 }
 
+// thinkingAtScreen returns the message index of a thinking block at the given
+// screen coordinates, or -1 if none.  Uses the same coordinate translation as
+// subagentAtScreen.
+func (a *App) thinkingAtScreen(screenX, screenY int) int {
+	if len(a.thinkingHitZones) == 0 {
+		return -1
+	}
+	bubbleW := int(float64(a.layout.leftW) * 0.80)
+	if screenX > bubbleW {
+		return -1
+	}
+	viewportTop := headerHeight
+	chatH := a.layout.chat.Dy()
+	viewportBottom := viewportTop + chatH
+	if screenY < viewportTop || screenY >= viewportBottom {
+		return -1
+	}
+	contentLine := (screenY - viewportTop) + a.msgViewport.YOffset()
+	if contentLine < 0 {
+		return -1
+	}
+	for _, zone := range a.thinkingHitZones {
+		if contentLine >= zone.StartLine && contentLine < zone.EndLine {
+			return zone.MsgIndex
+		}
+	}
+	return -1
+}
+
 // viewingSubagent reports whether the user is viewing a subagent's
 // transcript (foreground stack depth > 1).
 func (a *App) viewingSubagent() bool {

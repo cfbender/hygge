@@ -178,6 +178,15 @@ type MessageList struct {
 	// ExpandedTools is the set of ToolUseIDs whose output is fully expanded
 	// (not truncated). Nil means all tools are collapsed.
 	ExpandedTools map[string]bool
+
+	// ExpandedThinking is the set of message indices whose thinking block is
+	// fully expanded (not truncated). Nil means all thinking is collapsed.
+	ExpandedThinking map[int]bool
+
+	// MessageIndexOffset is added to rendered message indices before looking up
+	// ExpandedThinking. It keeps expansion state stable when scrollback is capped
+	// and a synthetic notice is prepended to the rendered slice.
+	MessageIndexOffset int
 }
 
 // now returns the reference time for relative timestamps.
@@ -228,9 +237,10 @@ const (
 
 // renderChunk is one item in the pre-pass output slice.
 type renderChunk struct {
-	kind   renderChunkKind
-	single UIMessage   // valid when kind == chunkSingle
-	group  []UIMessage // valid when kind == chunkToolGroup
+	kind      renderChunkKind
+	single    UIMessage   // valid when kind == chunkSingle
+	singleIdx int         // index of single in m.Messages; valid when kind == chunkSingle
+	group     []UIMessage // valid when kind == chunkToolGroup
 }
 
 // emptyStateMaxWidth is the column width of the empty-state panel used when
@@ -248,24 +258,44 @@ func (m MessageList) renderEmptyState() string {
 // section before appending a truncation indicator.
 const thinkingMaxLines = 8
 
-// truncateThinking caps thinking text to thinkingMaxLines lines.
-// When truncation occurs a faint "… +N more lines (thinking)" indicator is
-// appended.  Returns the original string unchanged when it fits.
-func (m MessageList) truncateThinking(thinking string) string {
-	lines := strings.Split(thinking, "\n")
-	if len(lines) <= thinkingMaxLines {
-		return thinking
+// hasExpandableThinking reports whether the given thinking text is long enough
+// to need an expand/collapse affordance.
+func hasExpandableThinking(thinking string) bool {
+	if thinking == "" {
+		return false
 	}
-	visible := lines[:thinkingMaxLines-1]
-	extra := len(lines) - (thinkingMaxLines - 1)
+	return strings.Count(thinking, "\n")+1 > thinkingMaxLines
+}
 
-	indicator := "… +" + itoa(extra) + " more lines (thinking)"
+// truncateThinking caps thinking text to thinkingMaxLines lines.
+// When truncation occurs a faint "… +N more lines (thinking) · click to expand"
+// indicator is appended.  When expanded is true the full text is returned with
+// a "click to collapse" affordance appended instead.
+// Returns the original string unchanged when it fits within thinkingMaxLines.
+func (m MessageList) truncateThinking(thinking string, expanded bool) string {
+	lines := strings.Split(thinking, "\n")
 	var indicatorStyle lipgloss.Style
 	if m.Theme != nil {
 		indicatorStyle = m.Theme.Style(styles.AtomBubbleBodyMuted).Faint(true)
 	} else {
 		indicatorStyle = lipgloss.NewStyle().Faint(true)
 	}
+	if len(lines) <= thinkingMaxLines {
+		if expanded {
+			// Was expanded but now fits — show collapse affordance.
+			indicator := "… click to collapse thinking"
+			return thinking + "\n" + indicatorStyle.Render(indicator)
+		}
+		return thinking
+	}
+	if expanded {
+		indicator := "… click to collapse thinking"
+		return thinking + "\n" + indicatorStyle.Render(indicator)
+	}
+	visible := lines[:thinkingMaxLines-1]
+	extra := len(lines) - (thinkingMaxLines - 1)
+
+	indicator := "… +" + itoa(extra) + " more lines (thinking) · click to expand"
 	return strings.Join(visible, "\n") + "\n" + indicatorStyle.Render(indicator)
 }
 
@@ -274,6 +304,17 @@ type ToolHitZone struct {
 	StartLine int
 	EndLine   int
 	ToolUseID string
+	partIndex int
+}
+
+// ThinkingHitZone maps a range of content lines to a message index for
+// click-to-expand thinking blocks.  MsgIndex is the index of the UIMessage in
+// the slice that was passed to ViewWithHitZones; it is used as a stable key
+// into App.expandedThinking.
+type ThinkingHitZone struct {
+	StartLine int
+	EndLine   int
+	MsgIndex  int
 	partIndex int
 }
 
@@ -290,15 +331,15 @@ type SubagentHitZone struct {
 // tool-calls bubble. Bash, edit, and write tools render as standalone tool
 // blocks so expandable output and large file diffs have their own hit zone.
 func (m MessageList) View() string {
-	content, _, _ := m.ViewWithHitZones()
+	content, _, _, _ := m.ViewWithHitZones()
 	return content
 }
 
 // ViewWithHitZones renders all messages and returns both the rendered content
 // and the line ranges of clickable subagent bubbles.
-func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZone) {
+func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZone, []ThinkingHitZone) {
 	if len(m.Messages) == 0 {
-		return m.renderEmptyState(), nil, nil
+		return m.renderEmptyState(), nil, nil, nil
 	}
 	collapseLimit := m.CollapseLines
 	if collapseLimit <= 0 {
@@ -310,6 +351,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 	var parts []string
 	var zones []SubagentHitZone
 	var toolZones []ToolHitZone
+	var thinkingZones []ThinkingHitZone
 
 	for _, chunk := range chunks {
 		var text string
@@ -327,9 +369,20 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 				}
 			}
 		default:
-			text = m.renderOne(chunk.single, collapseLimit)
+			msgIdx := chunk.singleIdx + m.MessageIndexOffset
+			text = m.renderOne(chunk.single, msgIdx, collapseLimit)
 			if chunk.single.Role == RoleTool && chunk.single.ToolName == "subagent" && chunk.single.SubagentID != "" {
 				subID = chunk.single.SubagentID
+			}
+			// Track assistant thinking blocks for click-to-expand.
+			if chunk.single.Role == RoleAssistant {
+				thinking := strings.TrimRight(chunk.single.Thinking, "\n")
+				if hasExpandableThinking(thinking) {
+					thinkingZones = append(thinkingZones, ThinkingHitZone{
+						MsgIndex:  msgIdx,
+						partIndex: len(parts),
+					})
+				}
 			}
 		}
 		if text == "" {
@@ -347,7 +400,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 	joined := strings.Join(parts, "\n\n")
 
 	// Walk the joined string to compute actual line offsets for each zone.
-	if len(zones) > 0 || len(toolZones) > 0 {
+	if len(zones) > 0 || len(toolZones) > 0 || len(thinkingZones) > 0 {
 		line := 0
 		for i, part := range parts {
 			partLines := strings.Count(part, "\n") + 1
@@ -363,6 +416,12 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 					toolZones[zi].EndLine = line + partLines
 				}
 			}
+			for zi := range thinkingZones {
+				if thinkingZones[zi].partIndex == i {
+					thinkingZones[zi].StartLine = line
+					thinkingZones[zi].EndLine = line + partLines
+				}
+			}
 			line += partLines
 			if i < len(parts)-1 {
 				line++
@@ -370,7 +429,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 		}
 	}
 
-	return joined, zones, toolZones
+	return joined, zones, toolZones, thinkingZones
 }
 
 // buildChunks walks m.Messages and produces a slice of renderChunks.
@@ -401,8 +460,9 @@ func (m MessageList) buildChunks() []renderChunk {
 			i = j
 		} else {
 			chunks = append(chunks, renderChunk{
-				kind:   chunkSingle,
-				single: msg,
+				kind:      chunkSingle,
+				single:    msg,
+				singleIdx: i,
 			})
 			i++
 		}
@@ -441,8 +501,9 @@ func isExpandableToolBlock(msg UIMessage) bool {
 }
 
 // renderOne renders a single message with its gutter, plus any nested
-// subagent block bound to it.
-func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
+// subagent block bound to it.  msgIdx is the index of msg in m.Messages and
+// is used to look up per-message expansion state (e.g. thinking).
+func (m MessageList) renderOne(msg UIMessage, msgIdx int, collapseLimit int) string {
 	// RoleUser: right-aligned chat bubble with timestamp header.
 	if msg.Role == RoleUser {
 		return m.renderUserBubble(msg)
@@ -451,7 +512,7 @@ func (m MessageList) renderOne(msg UIMessage, collapseLimit int) string {
 	// RoleAssistant: left-aligned chat bubble with agent/model/metadata header
 	// and optional inline thinking above the response body.
 	if msg.Role == RoleAssistant {
-		return m.renderAssistantBubble(msg)
+		return m.renderAssistantBubble(msg, msgIdx)
 	}
 
 	// RoleMarker: prominent banner-style compaction section break.
@@ -557,8 +618,10 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 
 // renderAssistantBubble renders a RoleAssistant message as a left-aligned
 // chat bubble with optional inline thinking in muted italic style.
+// msgIdx is the index of msg in m.Messages and is used to look up
+// ExpandedThinking state.
 // Returns "" when both Thinking and body are empty (skips empty bubbles).
-func (m MessageList) renderAssistantBubble(msg UIMessage) string {
+func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 	width := m.Width
 	if width <= 0 {
 		width = 80
@@ -595,8 +658,9 @@ func (m MessageList) renderAssistantBubble(msg UIMessage) string {
 	// Compose body: thinking (muted italic) + blank line + response text.
 	var bodyParts []string
 	if thinking != "" {
-		// Apply max-height cap before rendering.
-		thinking = m.truncateThinking(thinking)
+		// Apply max-height cap before rendering, respecting per-message expansion.
+		expanded := m.ExpandedThinking != nil && m.ExpandedThinking[msgIdx]
+		thinking = m.truncateThinking(thinking, expanded)
 		// Render thinking in muted italic style.
 		var thinkStyle lipgloss.Style
 		if m.Theme != nil {

@@ -105,18 +105,26 @@ func (a *App) renderChatContent() string {
 		// Cap rendered messages to msgScrollbackCap to bound render time for
 		// long sessions. The full history remains in a.messages and storage.
 		renderedMessages := applyScrollbackCap(visibleMessages)
-		ml := components.MessageList{
-			Width:           l.leftW,
-			Theme:           a.opts.Theme,
-			Styles:          a.styles,
-			Messages:        renderedMessages,
-			Subagents:       a.subagents,
-			AnimFor:         a.subagentAnims,
-			Now:             now,
-			HoverSubagentID: a.hoverSubagentID,
-			ExpandedTools:   a.expandedTools,
+		messageIndexOffset := 0
+		if len(visibleMessages) > msgScrollbackCap {
+			// Rendered index 0 is the synthetic cap notice. Rendered index 1 maps
+			// to original message index hidden, so add hidden-1 to rendered indices.
+			messageIndexOffset = len(visibleMessages) - msgScrollbackCap - 1
 		}
-		a.msgCache, a.subagentHitZones, a.toolHitZones = ml.ViewWithHitZones()
+		ml := components.MessageList{
+			Width:              l.leftW,
+			Theme:              a.opts.Theme,
+			Styles:             a.styles,
+			Messages:           renderedMessages,
+			Subagents:          a.subagents,
+			AnimFor:            a.subagentAnims,
+			Now:                now,
+			HoverSubagentID:    a.hoverSubagentID,
+			ExpandedTools:      a.expandedTools,
+			ExpandedThinking:   a.expandedThinking,
+			MessageIndexOffset: messageIndexOffset,
+		}
+		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
 		a.msgCacheStreamingDirty = false
 		a.msgCacheW = l.leftW

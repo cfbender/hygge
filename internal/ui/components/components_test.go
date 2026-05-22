@@ -261,7 +261,7 @@ func TestThinkingTruncation(t *testing.T) {
 		thinkLines = append(thinkLines, "thought line "+itoa(i))
 	}
 	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
-	result := ml.truncateThinking(strings.Join(thinkLines, "\n"))
+	result := ml.truncateThinking(strings.Join(thinkLines, "\n"), false)
 	plain := stripANSI(result)
 
 	// First 7 lines (thinkingMaxLines-1=7) must appear.
@@ -286,7 +286,7 @@ func TestThinkingTruncation_NoIndicatorWhenFits(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
 	thinking := "line1\nline2\nline3"
-	result := ml.truncateThinking(thinking)
+	result := ml.truncateThinking(thinking, false)
 	plain := stripANSI(result)
 	if strings.Contains(plain, "more lines (thinking)") {
 		t.Errorf("expected no indicator when thinking fits within max lines; got: %q", plain)
@@ -305,7 +305,7 @@ func TestThinkingTruncation_ExactlyAtMaxNoIndicator(t *testing.T) {
 		lines = append(lines, "line")
 	}
 	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
-	result := ml.truncateThinking(strings.Join(lines, "\n"))
+	result := ml.truncateThinking(strings.Join(lines, "\n"), false)
 	plain := stripANSI(result)
 	if strings.Contains(plain, "more lines (thinking)") {
 		t.Errorf("expected no indicator at exactly thinkingMaxLines lines; got: %q", plain)
@@ -650,7 +650,7 @@ func TestToolGroupBubble_StandaloneBashHitZonesDoNotShareCombinedBlock(t *testin
 		},
 	}
 
-	_, _, zones := ml.ViewWithHitZones()
+	_, _, zones, _ := ml.ViewWithHitZones()
 	if len(zones) != 2 {
 		t.Fatalf("expected one hit zone per standalone bash block, got %d", len(zones))
 	}
@@ -1571,7 +1571,7 @@ func TestToolGroup_LongBashGitDiffCanExpand(t *testing.T) {
 		},
 	}
 
-	collapsed, _, zones := ml.ViewWithHitZones()
+	collapsed, _, zones, _ := ml.ViewWithHitZones()
 	plainCollapsed := stripANSI(collapsed)
 	if len(zones) != 1 || zones[0].ToolUseID != "bash-diff" {
 		t.Fatalf("expected bash diff hit zone, got %+v", zones)
@@ -1604,7 +1604,7 @@ func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 		},
 	}
 
-	collapsed, _, zones := ml.ViewWithHitZones()
+	collapsed, _, zones, _ := ml.ViewWithHitZones()
 	plainCollapsed := stripANSI(collapsed)
 	if len(zones) != 1 || zones[0].ToolUseID != "edit-diff" {
 		t.Fatalf("expected edit diff hit zone, got %+v", zones)
@@ -1686,7 +1686,7 @@ func TestToolGroup_SideBySidePairPreservationToEndNoExpandHint(t *testing.T) {
 		},
 	}
 
-	collapsed, _, zones := ml.ViewWithHitZones()
+	collapsed, _, zones, _ := ml.ViewWithHitZones()
 	plainCollapsed := stripANSI(collapsed)
 
 	// A hit zone may exist for the tool block (the infrastructure always
@@ -1704,5 +1704,247 @@ func TestToolGroup_SideBySidePairPreservationToEndNoExpandHint(t *testing.T) {
 		if !strings.Contains(plainCollapsed, want) {
 			t.Fatalf("collapsed view missing %q:\n%s", want, plainCollapsed)
 		}
+	}
+}
+
+// TestThinkingClickToExpand_AffordancePresent verifies that an assistant
+// message whose Thinking field exceeds thinkingMaxLines renders a
+// "click to expand" affordance and produces a ThinkingHitZone.
+func TestThinkingClickToExpand_AffordancePresent(t *testing.T) {
+	t.Parallel()
+	// Build thinking longer than thinkingMaxLines.
+	var thinkLines []string
+	for i := range thinkingMaxLines + 4 {
+		thinkLines = append(thinkLines, "thought "+itoa(i))
+	}
+	thinking := strings.Join(thinkLines, "\n")
+
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleAssistant,
+				Raw:      "response",
+				Thinking: thinking,
+			},
+		},
+	}
+
+	content, _, _, thinkingZones := ml.ViewWithHitZones()
+	plain := stripANSI(content)
+
+	// Affordance must appear.
+	if !strings.Contains(plain, "click to expand") {
+		t.Fatalf("expected 'click to expand' affordance in truncated thinking; got:\n%s", plain)
+	}
+	// ThinkingHitZone must be registered.
+	if len(thinkingZones) != 1 {
+		t.Fatalf("expected 1 ThinkingHitZone, got %d", len(thinkingZones))
+	}
+	if thinkingZones[0].MsgIndex != 0 {
+		t.Errorf("expected ThinkingHitZone.MsgIndex == 0, got %d", thinkingZones[0].MsgIndex)
+	}
+	if thinkingZones[0].StartLine >= thinkingZones[0].EndLine {
+		t.Errorf("ThinkingHitZone has invalid line range: %+v", thinkingZones[0])
+	}
+}
+
+// TestThinkingClickToExpand_NoZoneWhenShort verifies that assistant messages
+// with thinking that fits within thinkingMaxLines do NOT produce a
+// ThinkingHitZone (no click-to-expand needed).
+func TestThinkingClickToExpand_NoZoneWhenShort(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleAssistant,
+				Raw:      "response",
+				Thinking: "short thinking",
+			},
+		},
+	}
+
+	_, _, _, thinkingZones := ml.ViewWithHitZones()
+	if len(thinkingZones) != 0 {
+		t.Fatalf("expected no ThinkingHitZone for short thinking, got %d", len(thinkingZones))
+	}
+}
+
+// TestThinkingClickToExpand_ToggleExpanded verifies that setting
+// ExpandedThinking for a message index shows the full thinking content,
+// a "click to collapse" affordance, and a ThinkingHitZone for collapsing.
+func TestThinkingClickToExpand_ToggleExpanded(t *testing.T) {
+	t.Parallel()
+	var thinkLines []string
+	for i := range thinkingMaxLines + 4 {
+		thinkLines = append(thinkLines, "thought "+itoa(i))
+	}
+	thinking := strings.Join(thinkLines, "\n")
+
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:     RoleAssistant,
+				Raw:      "response",
+				Thinking: thinking,
+			},
+		},
+		ExpandedThinking: map[int]bool{0: true},
+	}
+
+	content, _, _, thinkingZones := ml.ViewWithHitZones()
+	plain := stripANSI(content)
+
+	// All thinking lines should be visible.
+	for i := range thinkingMaxLines + 4 {
+		if !strings.Contains(plain, "thought "+itoa(i)) {
+			t.Errorf("expected thinking line %d visible when expanded; got:\n%s", i, plain)
+		}
+	}
+	// Collapse affordance should appear.
+	if !strings.Contains(plain, "click to collapse thinking") {
+		t.Errorf("expected 'click to collapse thinking' affordance when expanded; got:\n%s", plain)
+	}
+	// No expand affordance.
+	if strings.Contains(plain, "click to expand") {
+		t.Errorf("unexpected 'click to expand' affordance when already expanded; got:\n%s", plain)
+	}
+	// Expanded messages still produce a ThinkingHitZone so the user can click
+	// to collapse.
+	if len(thinkingZones) != 1 {
+		t.Fatalf("expected 1 ThinkingHitZone for expanded thinking collapse, got %d", len(thinkingZones))
+	}
+	if thinkingZones[0].MsgIndex != 0 {
+		t.Errorf("expected ThinkingHitZone.MsgIndex == 0, got %d", thinkingZones[0].MsgIndex)
+	}
+}
+
+// TestThinkingClickToExpand_MultipleMessages verifies that per-message
+// ThinkingHitZone indices are distinct and point to the correct messages.
+func TestThinkingClickToExpand_MultipleMessages(t *testing.T) {
+	t.Parallel()
+	var longLines []string
+	for i := range thinkingMaxLines + 2 {
+		longLines = append(longLines, "thought "+itoa(i))
+	}
+	longThinking := strings.Join(longLines, "\n")
+
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			// msg 0: user (no thinking)
+			{Role: RoleUser, Raw: "hi"},
+			// msg 1: assistant with short thinking (no zone expected)
+			{Role: RoleAssistant, Raw: "a", Thinking: "short"},
+			// msg 2: assistant with long thinking (zone expected, MsgIndex==2)
+			{Role: RoleAssistant, Raw: "b", Thinking: longThinking},
+			// msg 3: assistant with long thinking (zone expected, MsgIndex==3)
+			{Role: RoleAssistant, Raw: "c", Thinking: longThinking},
+		},
+	}
+
+	_, _, _, thinkingZones := ml.ViewWithHitZones()
+	if len(thinkingZones) != 2 {
+		t.Fatalf("expected 2 ThinkingHitZones for 2 long-thinking messages, got %d: %+v", len(thinkingZones), thinkingZones)
+	}
+	if thinkingZones[0].MsgIndex != 2 {
+		t.Errorf("first ThinkingHitZone should reference msg index 2, got %d", thinkingZones[0].MsgIndex)
+	}
+	if thinkingZones[1].MsgIndex != 3 {
+		t.Errorf("second ThinkingHitZone should reference msg index 3, got %d", thinkingZones[1].MsgIndex)
+	}
+	// Zones must not overlap.
+	if thinkingZones[0].StartLine >= thinkingZones[0].EndLine {
+		t.Errorf("zone 0 has invalid range: %+v", thinkingZones[0])
+	}
+	if thinkingZones[1].StartLine < thinkingZones[0].EndLine {
+		t.Errorf("zones overlap: %+v vs %+v", thinkingZones[0], thinkingZones[1])
+	}
+}
+
+// TestThinkingClickToExpand_MessageIndexOffset verifies that hit zones and
+// expansion state can use indices from the full message slice even when the
+// rendered message slice has been shifted by a scrollback cap notice.
+func TestThinkingClickToExpand_MessageIndexOffset(t *testing.T) {
+	t.Parallel()
+	var longLines []string
+	for i := range thinkingMaxLines + 2 {
+		longLines = append(longLines, "thought "+itoa(i))
+	}
+	longThinking := strings.Join(longLines, "\n")
+
+	ml := MessageList{
+		Width:              80,
+		Theme:              styles.DefaultTheme(),
+		MessageIndexOffset: 49,
+		Messages: []UIMessage{
+			{Role: RoleSystem, Raw: "cap notice"},
+			{Role: RoleAssistant, Raw: "response", Thinking: longThinking},
+		},
+		ExpandedThinking: map[int]bool{50: true},
+	}
+
+	content, _, _, thinkingZones := ml.ViewWithHitZones()
+	plain := stripANSI(content)
+	if !strings.Contains(plain, "click to collapse thinking") {
+		t.Fatalf("expected expanded thinking looked up by offset message index; got:\n%s", plain)
+	}
+	if len(thinkingZones) != 1 {
+		t.Fatalf("expected 1 ThinkingHitZone, got %d", len(thinkingZones))
+	}
+	if thinkingZones[0].MsgIndex != 50 {
+		t.Fatalf("expected ThinkingHitZone.MsgIndex == 50, got %d", thinkingZones[0].MsgIndex)
+	}
+}
+
+// TestTruncateThinking_ExpandedAffordance verifies that truncateThinking with
+// expanded=true always shows a "click to collapse" affordance regardless of
+// line count.
+func TestTruncateThinking_ExpandedAffordance(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
+
+	// Long text expanded.
+	var longLines []string
+	for i := range thinkingMaxLines + 5 {
+		longLines = append(longLines, "line "+itoa(i))
+	}
+	result := stripANSI(ml.truncateThinking(strings.Join(longLines, "\n"), true))
+	if !strings.Contains(result, "click to collapse thinking") {
+		t.Errorf("expanded long thinking should have collapse affordance; got:\n%s", result)
+	}
+	if strings.Contains(result, "click to expand") {
+		t.Errorf("expanded long thinking should not have expand affordance; got:\n%s", result)
+	}
+	// All lines must be visible.
+	for i := range thinkingMaxLines + 5 {
+		if !strings.Contains(result, "line "+itoa(i)) {
+			t.Errorf("expected line %d visible in expanded output; got:\n%s", i, result)
+		}
+	}
+}
+
+// TestTruncateThinking_CollapsedAffordance verifies that truncateThinking with
+// expanded=false (collapsed) shows "click to expand" for long thinking.
+func TestTruncateThinking_CollapsedAffordance(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
+
+	var longLines []string
+	for i := range thinkingMaxLines + 5 {
+		longLines = append(longLines, "line "+itoa(i))
+	}
+	result := stripANSI(ml.truncateThinking(strings.Join(longLines, "\n"), false))
+	if !strings.Contains(result, "click to expand") {
+		t.Errorf("collapsed long thinking should have expand affordance; got:\n%s", result)
+	}
+	if strings.Contains(result, "click to collapse") {
+		t.Errorf("collapsed long thinking should not have collapse affordance; got:\n%s", result)
 	}
 }
