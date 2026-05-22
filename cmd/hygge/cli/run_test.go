@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -130,7 +131,89 @@ func TestRoot_ReasoningFlagPresent(t *testing.T) {
 // T2.4 — new flag tests
 // ---------------------------------------------------------------------------
 
-// TestRoot_ContinueFlagPresent confirms --continue / -c is wired.
+// TestRoot_DryRunFlagPresent confirms --dry-run is wired and --no-config-auth
+// is no longer exposed.
+func TestRoot_DryRunFlagPresent(t *testing.T) {
+	root := NewRootCmd()
+	f := root.Flags().Lookup("dry-run")
+	if f == nil {
+		t.Fatal("--dry-run flag missing from root command")
+	}
+	if strings.Contains(f.Usage, "no-config-auth") {
+		t.Errorf("--dry-run usage should not mention no-config-auth, got %q", f.Usage)
+	}
+	// --no-config-auth must no longer be exposed.
+	if old := root.Flags().Lookup("no-config-auth"); old != nil {
+		t.Fatal("--no-config-auth flag must not be exposed; use --dry-run instead")
+	}
+}
+
+// TestDryRunBootstrapIgnoresExternalConfig verifies that --dry-run bootstraps
+// with only default config (IgnoreExternalSources) and sets rt.DryRun.
+func TestDryRunBootstrapIgnoresExternalConfig(t *testing.T) {
+	home := t.TempDir()
+	xdgState := filepath.Join(home, ".local", "state")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-should-be-ignored-in-dry-run")
+	seedHermeticModelConfig(t, home)
+
+	captured := &optsCapture{}
+	rt, err := bootstrap(context.Background(), bootstrapOptions{
+		HomeDir:         home,
+		XDGConfigHome:   filepath.Join(home, ".config"),
+		XDGStateHome:    xdgState,
+		Pwd:             home,
+		ProviderFactory: captured.factory,
+		FantasyModel:    fakeFantasyLanguageModel{},
+		Now:             func() time.Time { return time.Unix(0, 0).UTC() },
+		DryRun:          true,
+	})
+	if err != nil {
+		t.Fatalf("bootstrap with DryRun=true: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if !rt.DryRun {
+		t.Fatal("rt.DryRun = false, want true")
+	}
+	// With DryRun the stub provider is used and the factory is never called.
+	if got := captured.snapshot(); got != nil {
+		t.Fatalf("provider factory should not have been called with DryRun=true; got opts %#v", got)
+	}
+	// Config should use built-in defaults only (no real provenance sources).
+	if hasConfiguredModel(rt.Config, rt.Provenance) {
+		t.Fatalf("hasConfiguredModel = true; provenance should be defaults-only in dry-run")
+	}
+}
+
+// TestDryRunFlagEndToEndNoConfigWritten exercises the full `hygge --dry-run`
+// cobra path and verifies that no config file is written even though a hermetic
+// config directory exists.
+func TestDryRunFlagEndToEndNoConfigWritten(t *testing.T) {
+	home := hermeticHome(t)
+	cfgDir := filepath.Join(home, ".config", "hygge")
+
+	// Capture the state of the config dir before execution.
+	before, _ := os.ReadDir(cfgDir)
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"--dry-run"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("hygge --dry-run: %v", err)
+	}
+
+	// The config dir must not have gained any new files (no config was written).
+	after, _ := os.ReadDir(cfgDir)
+	if len(after) != len(before) {
+		names := make([]string, 0, len(after))
+		for _, e := range after {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("unexpected files written under %s during --dry-run: %v", cfgDir, names)
+	}
+}
 func TestRoot_ContinueFlagPresent(t *testing.T) {
 	root := NewRootCmd()
 	f := root.Flags().Lookup("continue")

@@ -98,9 +98,9 @@ type appRuntime struct {
 	// PluginPM is the package manager used by the plugins registry.
 	// Exposed for CLI commands that need to inspect cache directories.
 	PluginPM *plugin.PackageManager
-	// NoConfigAuth is true when this runtime was bootstrapped without loading
+	// DryRun is true when this runtime was bootstrapped without loading
 	// user/project config or provider auth.
-	NoConfigAuth bool
+	DryRun bool
 	// catalogSrc is the raw catalog.Catalog closed by Close to stop
 	// any periodic-refresh ticker goroutine.
 	catalogSrc *catalog.Catalog
@@ -175,10 +175,10 @@ type bootstrapOptions struct {
 	// Yolo bypasses configurable permission prompts/default denies while keeping
 	// hard-coded secrets denied.
 	Yolo bool
-	// NoConfigAuth ignores user/project config files, HYGGE_* config env vars,
+	// DryRun ignores user/project config files, HYGGE_* config env vars,
 	// provider env vars, and auth.json during bootstrap. It is intended for
 	// onboarding/manual testing and still permits saving new onboarding config.
-	NoConfigAuth bool
+	DryRun bool
 	// FantasyModel injects a no-network language model for bootstrap tests. When
 	// nil, production resolves the configured provider/model through Fantasy.
 	FantasyModel fantasy.LanguageModel
@@ -450,7 +450,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Profile:               opts.ProfileName,
 		HomeDir:               opts.HomeDir,
 		EnvLookup:             cfgEnv,
-		IgnoreExternalSources: opts.NoConfigAuth,
+		IgnoreExternalSources: opts.DryRun,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cli: load config: %w", err)
@@ -507,14 +507,14 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	//
 	// The provider adapter's own resolveAPIKey chain is preserved
 	// unchanged; this code is purely about feeding it the right input.
-	modelOpts, err := resolveProviderOptionsForWithAuth(cfg.Model.Provider, cfg, stateOpts, !opts.NoConfigAuth)
+	modelOpts, err := resolveProviderOptionsForWithAuth(cfg.Model.Provider, cfg, stateOpts, !opts.DryRun)
 	if err != nil {
 		_ = stOpen.Close()
 		b.Close()
 		return nil, err
 	}
 	var prv provider.Provider
-	if opts.NoConfigAuth {
+	if opts.DryRun {
 		prv = stubProvider{}
 	} else {
 		prv, err = buildProvider(opts.ProviderFactory, cfg, modelOpts)
@@ -559,7 +559,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	var fantasyResolved llm.ProviderResolution
 	if opts.FantasyModel != nil {
 		fantasyResolved.Model = opts.FantasyModel
-	} else if opts.NoConfigAuth {
+	} else if opts.DryRun {
 		fantasyResolved = llm.ProviderResolution{}
 	} else {
 		fantasyResolved, err = llm.ResolveProviderModelWith(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc, orBuildOpts)
@@ -580,7 +580,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		}
 	}
 	var titleFantasyModel fantasy.LanguageModel
-	if opts.FantasyModel == nil && !opts.NoConfigAuth && cfg.Model.SmallModel != "" {
+	if opts.FantasyModel == nil && !opts.DryRun && cfg.Model.SmallModel != "" {
 		smallProvider := cfg.Model.SmallProvider
 		if smallProvider == "" {
 			smallProvider = cfg.Model.Provider
@@ -870,7 +870,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Pwd:              opts.Pwd,
 		Plugins:          pluginReg,
 		PluginPM:         pluginPM,
-		NoConfigAuth:     opts.NoConfigAuth,
+		DryRun:           opts.DryRun,
 		catalogSrc:       catSrc,
 		logCloser:        logCloser,
 	}
