@@ -888,14 +888,15 @@ func stripANSI(s string) string {
 func TestSidebar_AllSectionsPresent(t *testing.T) {
 	t.Parallel()
 	sb := Sidebar{
-		Width:        32,
-		Height:       30,
-		SessionTitle: "fix the auth bug",
-		UsedTokens:   97229,
-		MaxTokens:    1_000_000,
-		PctUsed:      0.10,
-		CostUSD:      0.0042,
-		BilledTokens: 123456,
+		Width:              32,
+		Height:             30,
+		SessionTitle:       "fix the auth bug",
+		UsedTokens:         97229,
+		MaxTokens:          1_000_000,
+		PctUsed:            0.10,
+		CostUSD:            0.0042,
+		BilledInputTokens:  500_000,
+		BilledOutputTokens: 874_000,
 		MCPs: []SidebarMCPStatus{
 			{Name: "server-a", Ready: true, ToolCount: 3},
 			{Name: "server-b", Ready: false},
@@ -915,7 +916,7 @@ func TestSidebar_AllSectionsPresent(t *testing.T) {
 		t.Errorf("sidebar missing session title; got:\n%s", plain)
 	}
 	// Usage and context sections.
-	for _, want := range []string{"Usage", "123,456 billed", "$0.0042", "Context", "97,229 tokens", "10% used"} {
+	for _, want := range []string{"Usage", "500k ↑ / 874k ↓", "$0.0042", "Context", "97,229 tokens", "10% used"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("sidebar missing usage/context %q; got:\n%s", want, plain)
 		}
@@ -1054,6 +1055,152 @@ func TestFormatTokens(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("formatTokens(%d) = %q, want %q", tc.n, got, tc.want)
 		}
+	}
+}
+
+func TestCompactTokens(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"},
+		{1, "1"},
+		{999, "999"},
+		{1000, "1k"},
+		{1500, "1.5k"},
+		{12788, "12.7k"},
+		{12700, "12.7k"},
+		{999000, "999k"},
+		{999900, "999.9k"},
+		{1_000_000, "1.00M"},
+		{1_374_982, "1.37M"},
+		{500_000, "500k"},
+		{874_000, "874k"},
+		{-1, "0"},
+	}
+	for _, tc := range cases {
+		got := compactTokens(tc.n)
+		if got != tc.want {
+			t.Errorf("compactTokens(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestSidebar_UsageSplitInputOutput(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:              40,
+		Height:             30,
+		BilledInputTokens:  500_000,
+		BilledOutputTokens: 874_000,
+		CostUSD:            0.0042,
+		Theme:              styles.DefaultTheme(),
+	}
+	plain := stripANSI(sb.View())
+	// Must contain split up/down display.
+	if !strings.Contains(plain, "500k ↑ / 874k ↓") {
+		t.Errorf("sidebar missing split usage display; got:\n%s", plain)
+	}
+	// Must NOT contain old "billed" format.
+	if strings.Contains(plain, "billed") {
+		t.Errorf("sidebar must not show old 'billed' text; got:\n%s", plain)
+	}
+	// Cost must still appear.
+	if !strings.Contains(plain, "$0.0042") {
+		t.Errorf("sidebar missing cost display; got:\n%s", plain)
+	}
+}
+
+func TestSidebar_UsageHiddenWhenBothZero(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:  40,
+		Height: 20,
+		Theme:  styles.DefaultTheme(),
+	}
+	plain := stripANSI(sb.View())
+	if strings.Contains(plain, "Usage") {
+		t.Errorf("sidebar should hide Usage section when all zero; got:\n%s", plain)
+	}
+}
+
+func TestSidebar_UsageShownWithCostOnly(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		Width:   40,
+		Height:  20,
+		CostUSD: 0.001,
+		Theme:   styles.DefaultTheme(),
+	}
+	plain := stripANSI(sb.View())
+	if !strings.Contains(plain, "Usage") {
+		t.Errorf("sidebar should show Usage section when cost is non-zero; got:\n%s", plain)
+	}
+}
+
+func TestMessageList_AssistantCompactTokens(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:         RoleAssistant,
+				Raw:          "Here is the answer.",
+				AgentType:    "General",
+				OutputTokens: 12788,
+			},
+		},
+	}
+	plain := stripANSI(ml.View())
+	// Compact format with down arrow.
+	if !strings.Contains(plain, "12.7k ↓") {
+		t.Errorf("assistant bubble missing compact token display; got:\n%s", plain)
+	}
+	// Old plain format must not appear.
+	if strings.Contains(plain, "12788 tokens") {
+		t.Errorf("assistant bubble must not use old plain token format; got:\n%s", plain)
+	}
+}
+
+func TestMessageList_AssistantCompactTokensSmall(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:         RoleAssistant,
+				Raw:          "short",
+				AgentType:    "General",
+				OutputTokens: 42,
+			},
+		},
+	}
+	plain := stripANSI(ml.View())
+	if !strings.Contains(plain, "42 ↓") {
+		t.Errorf("assistant bubble missing small compact token display; got:\n%s", plain)
+	}
+}
+
+func TestMessageList_AssistantCompactTokensMillion(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 100,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:         RoleAssistant,
+				Raw:          "long response",
+				AgentType:    "General",
+				OutputTokens: 1_374_982,
+			},
+		},
+	}
+	plain := stripANSI(ml.View())
+	if !strings.Contains(plain, "1.37M ↓") {
+		t.Errorf("assistant bubble missing million compact token display; got:\n%s", plain)
 	}
 }
 

@@ -1,8 +1,4 @@
 # TODOs
-- split tokens billed into in/out (up/down)
-  - shorten at breakpoints (eg. 12,788 -> 12.7k, 1,374,982 -> 1.37M)
-  - 1,374,982 becomes (500k ↑ / 874k ↓)
-  - ideally user messages show usage up and assistant messages show usage down as well in place of token count now (these should also shorten)
 - port all of https://iterm2colorschemes.com/ to built-in themes
   - maybe do this through a pipeline action? so that it isn't just hard coded into the repo
   - clean up /theme picker to make prettier and better preview

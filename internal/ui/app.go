@@ -379,11 +379,12 @@ type App struct {
 	fogTickRunning bool
 
 	// cost / context state
-	costDollars float64
-	billedTok   int64
-	usedTok     int64
-	maxTok      int64
-	pctUsed     float64
+	costDollars     float64
+	billedInputTok  int64 // cumulative input+cache billed tokens
+	billedOutputTok int64 // cumulative output billed tokens
+	usedTok         int64
+	maxTok          int64
+	pctUsed         float64
 
 	// Terminal colours reported by Bubble Tea. For the shell theme, Hygge uses
 	// these to derive a subtle surface fill close to the user's real terminal bg.

@@ -1961,7 +1961,8 @@ func TestCostUpdatesSidebar(t *testing.T) {
 	app, _ := newTestApp(t)
 	app.Handle(bus.CostUpdated{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 25, DollarsTotal: 0.1234})
 	out := app.View().Content
-	for _, want := range []string{"Usage", "175 billed", "$0.1234"} {
+	// Input billed = InputTokens + CacheReadTokens = 125; Output billed = 50.
+	for _, want := range []string{"Usage", "125 ↑ / 50 ↓", "$0.1234"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in sidebar, got:\n%s", want, out)
 		}
