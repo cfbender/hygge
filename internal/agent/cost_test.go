@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -522,5 +523,187 @@ func TestThreshold_RefiresAfterCompaction(t *testing.T) {
 	events := collectThresholdEvents(reqSub, env.sessionID, 100*time.Millisecond)
 	if len(events) < 2 {
 		t.Errorf("expected ≥2 threshold suggestions (one before, one after compact), got %d", len(events))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Context-usage storage tests
+// ---------------------------------------------------------------------------
+
+// TestRecordUsage_StoresLatestUsagePerSession verifies that after recordUsage,
+// latestUsageFor returns the expected usedTokens and pctUsed for the session.
+func TestRecordUsage_StoresLatestUsagePerSession(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+	})
+
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 300, CacheReadTokens: 100, OutputTokens: 200})
+
+	usedTokens, pctUsed := a.latestUsageFor(env.sessionID)
+	if usedTokens != 600 {
+		t.Errorf("latestUsageFor.usedTokens = %d, want 600", usedTokens)
+	}
+	// 600/1000 = 0.6. Cache-read tokens occupy context and count toward usage.
+	if pctUsed != 0.6 {
+		t.Errorf("latestUsageFor.pctUsed = %v, want 0.6", pctUsed)
+	}
+}
+
+// TestRecordUsage_LatestUsageUpdatesOnSubsequentCalls verifies that the stored
+// usage is replaced (not accumulated) on subsequent calls.
+func TestRecordUsage_LatestUsageUpdatesOnSubsequentCalls(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+	})
+
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 100, OutputTokens: 50})
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 400, OutputTokens: 100})
+
+	usedTokens, _ := a.latestUsageFor(env.sessionID)
+	// Latest call: 400+100 = 500 (not cumulative 650).
+	if usedTokens != 500 {
+		t.Errorf("latestUsageFor.usedTokens = %d, want 500 (last call only)", usedTokens)
+	}
+}
+
+// TestRecordUsage_NoStorageWhenContextWindowZero verifies that when
+// ContextWindow is 0 the pct stored is also 0.
+func TestRecordUsage_NoStorageWhenContextWindowZero(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov) // default ContextWindow == 0
+
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 300, OutputTokens: 200})
+
+	usedTokens, pctUsed := a.latestUsageFor(env.sessionID)
+	if usedTokens != 500 {
+		t.Errorf("latestUsageFor.usedTokens = %d, want 500", usedTokens)
+	}
+	// pct should be 0 when window is 0 (division skipped).
+	if pctUsed != 0 {
+		t.Errorf("latestUsageFor.pctUsed = %v, want 0 when ContextWindow=0", pctUsed)
+	}
+}
+
+// TestCompact_ClearsLatestUsage verifies that a successful Compact resets the
+// stored latest usage so the first post-compaction envelope is clean.
+func TestCompact_ClearsLatestUsage(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake",
+		scriptText("a1", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a2", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		scriptText("a3", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+		fakeScript{events: []provider.Event{
+			{Type: provider.EventTextDelta, Text: "compact summary"},
+			{Type: provider.EventUsage, Usage: provider.Usage{InputTokens: 20}},
+			{Type: provider.EventDone},
+		}},
+	)
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+	})
+
+	for i := range 3 {
+		if _, err := a.Send(ctx, env.sessionID, userText(fmt.Sprintf("q%d", i))); err != nil {
+			t.Fatalf("Send %d: %v", i, err)
+		}
+	}
+
+	// After sends there should be some usage stored.
+	usedBefore, _ := a.latestUsageFor(env.sessionID)
+	if usedBefore == 0 {
+		t.Fatal("expected non-zero latestUsage after sends")
+	}
+
+	if _, err := a.Compact(ctx, env.sessionID); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+
+	usedAfter, pctAfter := a.latestUsageFor(env.sessionID)
+	if usedAfter != 0 || pctAfter != 0 {
+		t.Errorf("latestUsage not cleared after Compact: usedTokens=%d pctUsed=%v", usedAfter, pctAfter)
+	}
+}
+
+// TestSend_ContextUsageAppearsInEnvelope verifies the end-to-end threading:
+// after the first turn the second Send's model-facing user message should
+// include latest-known usage inside <context_window>.
+func TestSend_ContextUsageAppearsInEnvelope(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake",
+		scriptText("turn1 reply", provider.Usage{InputTokens: 300, OutputTokens: 200}),
+		scriptText("turn2 reply", provider.Usage{InputTokens: 400, OutputTokens: 100}),
+	)
+	// Set a context window so pctUsed is meaningful.
+	model := &fakeFantasyModel{provider: "fake", model: "fake-model", streamBatches: [][]fantasy.StreamPart{
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "turn1 reply"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 300, CacheReadTokens: 100, OutputTokens: 200}},
+		},
+		{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "txt"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "txt", Delta: "turn2 reply"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "txt"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 400, OutputTokens: 100}},
+		},
+	}}
+	a := env.newAgent(prov, func(o *Options) {
+		o.FantasyModel = model
+		o.ContextWindow = 1000
+	})
+
+	// Turn 1 — no prior usage, so envelope should not have latest-known usage.
+	var firstEnvelope string
+	model.onStream = func(call fantasy.Call) {
+		for _, msg := range call.Prompt {
+			if msg.Role == fantasy.MessageRoleUser {
+				if text, ok := msg.Content[0].(fantasy.TextPart); ok {
+					firstEnvelope = text.Text
+				}
+			}
+		}
+	}
+	if _, err := a.Send(ctx, env.sessionID, userText("turn 1")); err != nil {
+		t.Fatalf("Send turn 1: %v", err)
+	}
+	if strings.Contains(firstEnvelope, "<latest_known_used_tokens>") {
+		t.Fatalf("first turn envelope should not have latest-known usage (no prior usage):\n%s", firstEnvelope)
+	}
+
+	// Turn 2 — should include usage from turn 1 (300+100+200 = 600 tokens = 60.0%).
+	var secondEnvelope string
+	model.onStream = func(call fantasy.Call) {
+		for _, msg := range call.Prompt {
+			if msg.Role == fantasy.MessageRoleUser {
+				if text, ok := msg.Content[0].(fantasy.TextPart); ok {
+					secondEnvelope = text.Text
+				}
+			}
+		}
+	}
+	if _, err := a.Send(ctx, env.sessionID, userText("turn 2")); err != nil {
+		t.Fatalf("Send turn 2: %v", err)
+	}
+	if !strings.Contains(secondEnvelope, "<latest_known_used_tokens>600</latest_known_used_tokens>") {
+		t.Errorf("second turn envelope missing <latest_known_used_tokens>600</latest_known_used_tokens>:\n%s", secondEnvelope)
+	}
+	if !strings.Contains(secondEnvelope, "<latest_known_used_percent>60.0</latest_known_used_percent>") {
+		t.Errorf("second turn envelope missing <latest_known_used_percent>60.0</latest_known_used_percent>:\n%s", secondEnvelope)
 	}
 }
