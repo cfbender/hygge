@@ -729,8 +729,15 @@ func TestDryRunSaveOnboardingResultNoErrorForGemini(t *testing.T) {
 	}
 
 	// Verify [dry-run] messages were written to the buffer (not to a real output).
-	if !strings.Contains(dryRunBuf.String(), "[dry-run]") {
-		t.Errorf("expected [dry-run] log in buffer, got: %q", dryRunBuf.String())
+	dryRunLog := dryRunBuf.String()
+	if !strings.Contains(dryRunLog, "[dry-run]") {
+		t.Errorf("expected [dry-run] log in buffer, got: %q", dryRunLog)
+	}
+	if !strings.Contains(dryRunLog, "gemini") {
+		t.Errorf("expected provider %q in dry-run log, got: %q", "gemini", dryRunLog)
+	}
+	if !strings.Contains(dryRunLog, "gemini-2.5-pro") {
+		t.Errorf("expected model %q in dry-run log, got: %q", "gemini-2.5-pro", dryRunLog)
 	}
 }
 

@@ -557,6 +557,9 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 	}()
 
 	if _, err := prog.Run(); err != nil {
+		if dryRunLog.Len() > 0 {
+			printf(out(cmd), "%s", dryRunLog.String())
+		}
 		return fmt.Errorf("cli: tea run: %w", err)
 	}
 	if dryRunLog.Len() > 0 {

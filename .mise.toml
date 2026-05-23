@@ -1,7 +1,7 @@
 [tools]
 go = "1.26"
 golangci-lint = "2"
-staticcheck = "latest"
+staticcheck = "2026.1"
 
 [tasks.build]
 description = "Compile the hygge binary to ./bin/hygge"
