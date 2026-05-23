@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1182,9 +1183,7 @@ func TestLookupProviderEmbedded_DefaultHeadersMutationIsolated(t *testing.T) {
 
 	// Capture the original header values from the snapshot directly.
 	origHeaders := make(map[string]string, len(snap.ProvidersMeta[targetID].DefaultHeaders))
-	for k, v := range snap.ProvidersMeta[targetID].DefaultHeaders {
-		origHeaders[k] = v
-	}
+	maps.Copy(origHeaders, snap.ProvidersMeta[targetID].DefaultHeaders)
 
 	pm, ok := LookupProviderEmbedded(targetID)
 	if !ok {

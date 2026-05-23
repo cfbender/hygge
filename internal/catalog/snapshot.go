@@ -3,6 +3,7 @@ package catalog
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -61,9 +62,7 @@ func cloneProviderMeta(pm ProviderMeta) ProviderMeta {
 	clone := pm
 	if pm.DefaultHeaders != nil {
 		clone.DefaultHeaders = make(map[string]string, len(pm.DefaultHeaders))
-		for k, v := range pm.DefaultHeaders {
-			clone.DefaultHeaders[k] = v
-		}
+		maps.Copy(clone.DefaultHeaders, pm.DefaultHeaders)
 	}
 	return clone
 }
