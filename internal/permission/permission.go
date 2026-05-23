@@ -34,15 +34,19 @@
 // The Engine is safe for concurrent Asks from many goroutines.  Each Ask
 // gets its own bus subscription so replies cannot cross-pollinate.  The
 // session cache uses a sync.RWMutex.  Closing the engine cancels all
-// pending Asks via the engine's internal context.
+// pending Asks via the engine's internal context.  Persisted "always" rules
+// use the state package's read/modify/write helpers, which are atomic but not
+// locked across concurrent process instances.
 package permission
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -51,6 +55,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
+	"github.com/cfbender/hygge/internal/gitexec"
 	"github.com/cfbender/hygge/internal/state"
 )
 
@@ -162,7 +167,21 @@ type EngineOptions struct {
 
 	// State controls where persisted "always" approvals are loaded from
 	// and saved to.  Pass-through to [state.Load] and [state.Save].
+	//
+	// Deprecated for allow-always writes: prefer ProjectDir.  State is
+	// still used to load pre-existing user-global rules on startup.
 	State state.LoadOptions
+
+	// ProjectDir is the working directory of the current project.  When
+	// non-empty, "allow always" decisions are persisted to
+	// <ProjectDir>/.hygge/permissions.json rather than the user-global
+	// state file, and those project-scoped rules are loaded at engine
+	// construction time.
+	ProjectDir string
+
+	// Git executes git commands for project-local safety checks.  When nil,
+	// [gitexec.DefaultRunner] is used. Tests may inject a fake.
+	Git gitexec.Runner
 
 	// Clock is an injectable time source used for the At fields of
 	// published bus events and for AllowRule timestamps.  Defaults to
@@ -199,9 +218,11 @@ var SecretsDenylist = []string{
 // Engine evaluates Requests.  Construct with [New]; the zero value is not
 // usable.
 type Engine struct {
-	bus       *bus.Bus
-	stateOpts state.LoadOptions
-	clock     func() time.Time
+	bus        *bus.Bus
+	stateOpts  state.LoadOptions
+	projectDir string // may be empty; if set, "always" rules persist here
+	git        gitexec.Runner
+	clock      func() time.Time
 
 	matcher *Matcher
 
@@ -229,8 +250,12 @@ func New(opts EngineOptions) (*Engine, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	git := opts.Git
+	if git == nil {
+		git = gitexec.DefaultRunner{}
+	}
 
-	rules, err := buildRules(opts.Config, opts.State)
+	rules, err := buildRules(opts.Config, opts.State, opts.ProjectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +267,8 @@ func New(opts EngineOptions) (*Engine, error) {
 	return &Engine{
 		bus:          opts.Bus,
 		stateOpts:    opts.State,
+		projectDir:   opts.ProjectDir,
+		git:          git,
 		clock:        clock,
 		matcher:      matcher,
 		yolo:         opts.Yolo,
@@ -269,10 +296,11 @@ func (e *Engine) Yolo() bool {
 }
 
 // buildRules assembles the full ordered rule set for the engine.  The order
-// is: secrets denylist → persisted state allowances → default policy.  User
-// TOML-declared "[[permission.rules]]" entries would go between state and
-// defaults; this slot is reserved for a future config extension.
-func buildRules(cfg *config.Config, stateOpts state.LoadOptions) ([]Rule, error) {
+// is: secrets denylist → project-scoped allowances → persisted state
+// allowances → default policy.  User TOML-declared "[[permission.rules]]"
+// entries would go between state and defaults; this slot is reserved for a
+// future config extension.
+func buildRules(cfg *config.Config, stateOpts state.LoadOptions, projectDir string) ([]Rule, error) {
 	var rules []Rule
 
 	// 1. Secrets denylist (file.read + file.write).
@@ -283,7 +311,23 @@ func buildRules(cfg *config.Config, stateOpts state.LoadOptions) ([]Rule, error)
 		)
 	}
 
-	// 2. Persisted state allowances.
+	// 2a. Project-scoped allowances (from <projectDir>/.hygge/permissions.json).
+	if projectDir != "" {
+		projectRules, err := state.LoadProjectAllowRules(projectDir)
+		if err != nil {
+			return nil, fmt.Errorf("permission: load project allow rules: %w", err)
+		}
+		for _, r := range projectRules {
+			rules = append(rules, Rule{
+				Category: Category(r.Category),
+				Pattern:  r.Pattern,
+				Action:   ActionAllow,
+				Source:   "project-state",
+			})
+		}
+	}
+
+	// 2b. Persisted user-global state allowances.
 	st, err := state.Load(stateOpts)
 	if err != nil {
 		return nil, fmt.Errorf("permission: load state: %w", err)
@@ -456,13 +500,30 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 			Pattern:   pattern,
 			CreatedAt: e.clock().UnixMilli(),
 		}
-		if err := state.AddAllowRule(rule, e.stateOpts); err != nil {
-			slog.Warn("permission: persist always-allow rule failed",
-				"category", req.Category,
-				"target", req.Target,
-				"pattern", pattern,
-				"err", err,
-			)
+		if e.projectDir != "" {
+			// Persist to the project-scoped .hygge/permissions.json so the
+			// rule is hermetic to this project and does not leak into the
+			// user's global state.
+			e.warnIfProjectHyggeTracked(req, pattern)
+			if err := state.AddProjectAllowRule(rule, e.projectDir); err != nil {
+				slog.Warn("permission: persist always-allow project rule failed",
+					"category", req.Category,
+					"target", req.Target,
+					"pattern", pattern,
+					"project_dir", e.projectDir,
+					"err", err,
+				)
+			}
+		} else {
+			// Fallback: no project dir configured, write to user-global state.
+			if err := state.AddAllowRule(rule, e.stateOpts); err != nil {
+				slog.Warn("permission: persist always-allow rule failed",
+					"category", req.Category,
+					"target", req.Target,
+					"pattern", pattern,
+					"err", err,
+				)
+			}
 		}
 	}
 
@@ -475,6 +536,34 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 		e.storeSession(promoted, decision)
 	}
 	return decision
+}
+
+func (e *Engine) warnIfProjectHyggeTracked(req Request, pattern string) {
+	if e.projectDir == "" || e.git == nil {
+		return
+	}
+	ctx := context.Background()
+	if _, err := e.git.Run(ctx, e.projectDir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return
+	}
+	_, err := e.git.Run(ctx, e.projectDir, "check-ignore", "-q", ".hygge/")
+	if err == nil {
+		return
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		slog.Warn("permission: .hygge/ is not ignored; add .hygge/ to .gitignore to keep project permissions local",
+			"category", req.Category,
+			"target", req.Target,
+			"pattern", pattern,
+			"project_dir", e.projectDir,
+		)
+		return
+	}
+	slog.Warn("permission: check .hygge gitignore failed",
+		"project_dir", e.projectDir,
+		"err", err,
+	)
 }
 
 // promoteTarget widens a specific file path to a directory glob so that
