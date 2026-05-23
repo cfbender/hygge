@@ -2,8 +2,7 @@
 --
 -- PURPOSE
 -- -------
--- This plugin is the Hygge equivalent of the OpenCode openrouter-session.ts
--- plugin.  It logs a confirmation at the start of each turn so you can see
+-- This plugin logs a confirmation at the start of each turn so you can see
 -- that the Go-side x-session-id injection machinery is active.
 --
 -- WHAT ACTUALLY INJECTS THE HEADER

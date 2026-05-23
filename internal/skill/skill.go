@@ -3,6 +3,14 @@
 // YAML-like frontmatter block; the loader assembles a Registry by
 // reading every file from a layered search path.
 //
+// # Built-in skills
+//
+// Hygge ships a small set of built-in skills embedded directly in the
+// binary (see internal/skill/builtin/).  They are loaded first and have
+// the lowest priority: any user or project skill with the same name
+// overrides the built-in.  Built-in skills are always available,
+// regardless of the user's ~/.agents or ~/.config/hygge paths.
+//
 // # The .agents convention
 //
 // Hygge follows the vendor-neutral `.agents` directory convention as the
@@ -37,8 +45,10 @@
 package skill
 
 import (
+	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -46,6 +56,9 @@ import (
 	"strings"
 	"time"
 )
+
+//go:embed builtin/*.md
+var builtinFS embed.FS
 
 // Skill is a single named procedure the agent can invoke.
 type Skill struct {
@@ -74,15 +87,18 @@ type Skill struct {
 
 	// Path is the absolute path the skill file was loaded from.  For
 	// directory-style skills this points at the SKILL.md inside the
-	// skill's directory.
+	// skill's directory.  Built-in skills are embedded in the binary and
+	// have no on-disk file, so SourceBuiltin skills leave Path empty.
 	Path string
 
 	// Dir is the absolute path to the skill's directory.  For flat
 	// `<name>.md` skills this is the parent directory.  For
 	// directory-style `<name>/SKILL.md` skills this is the skill's
 	// own directory and is where auxiliary scripts / reference files
-	// live.  The `skill` tool exposes this so the model can resolve
-	// relative paths inside the skill body.
+	// live.  Built-in skills use the virtual Dir token "builtin" for
+	// diagnostics; callers must not treat it as a filesystem path.
+	// The `skill` tool exposes this so the model can resolve relative
+	// paths inside the skill body for filesystem-backed skills.
 	Dir string
 
 	// Source identifies which compatibility layer this skill came from.
@@ -97,8 +113,15 @@ type Source int
 
 // Source values, ordered by precedence (lower-priority first).
 const (
+	// SourceBuiltin is the set of skills embedded in the Hygge binary.
+	// Built-ins are loaded before any user or project layer and therefore
+	// have the lowest priority: any skill with the same name in a later
+	// layer overrides the built-in.  SourceBuiltin skills have no real
+	// filesystem Path and use Dir == "builtin" only as a virtual source
+	// label for diagnostics.
+	SourceBuiltin Source = iota
 	// SourceUserClaude is ~/.claude/skills/.
-	SourceUserClaude Source = iota
+	SourceUserClaude
 	// SourceUserAgents is ~/.agents/skills/.
 	SourceUserAgents
 	// SourceUserHygge is ~/.config/hygge/skills/.
@@ -114,6 +137,8 @@ const (
 // String returns a short diagnostic token for the source.
 func (s Source) String() string {
 	switch s {
+	case SourceBuiltin:
+		return "builtin"
 	case SourceUserClaude:
 		return "user/.claude"
 	case SourceUserAgents:
@@ -178,6 +203,10 @@ func Load(opts LoadOptions) (*Registry, error) {
 	}
 
 	reg := &Registry{byName: make(map[string]Skill)}
+
+	// Built-in skills are loaded first and have the lowest priority.
+	// Any user or project skill with the same name will overwrite them.
+	loadBuiltins(reg)
 
 	// User/global layers. Later loads override earlier loads.
 	loadFromDir(reg, filepath.Join(homeDir, ".claude", "skills"), SourceUserClaude)
@@ -290,6 +319,49 @@ func loadFromDir(reg *Registry, dir string, source Source) {
 
 func errorIsNoFrontmatter(err error) bool {
 	return errors.Is(err, ErrNoFrontmatter)
+}
+
+// loadBuiltins reads every *.md file from the embedded builtin/ directory
+// and registers each as a SourceBuiltin skill.  Parse errors are logged
+// and skipped; they should never occur in a well-formed binary but we
+// treat them gracefully anyway.
+func loadBuiltins(reg *Registry) {
+	entries, err := fs.ReadDir(builtinFS, "builtin")
+	if err != nil {
+		slog.Warn("skill: failed to read embedded builtin directory", "err", err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		embPath := "builtin/" + name
+		data, readErr := fs.ReadFile(builtinFS, embPath)
+		if readErr != nil {
+			slog.Warn("skill: failed to read embedded builtin skill", "path", embPath, "err", readErr)
+			continue
+		}
+		sk, parseErr := parse(data, embPath, parseModeFile)
+		if parseErr != nil {
+			if errorIsNoFrontmatter(parseErr) {
+				slog.Warn("skill: builtin skipped (no frontmatter)", "path", embPath)
+				continue
+			}
+			slog.Warn("skill: builtin skipped (parse error)", "path", embPath, "err", parseErr)
+			continue
+		}
+		// Built-ins are embedded, so embPath is only an fs.FS lookup key,
+		// not a real path callers can open on disk.
+		sk.Path = ""
+		sk.Dir = "builtin"
+		sk.Source = SourceBuiltin
+		sk.LoadedAt = time.Now()
+		reg.byName[sk.Name] = sk
+	}
 }
 
 // findProjectDir walks parents of start looking for a directory
