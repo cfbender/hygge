@@ -16,9 +16,10 @@
 //     vendor-prefixed model names).
 //
 // This package provides one shared adapter parameterised by those knobs.
-// Per-provider SHIM packages (internal/provider/openai,
-// internal/provider/openrouter, ...) configure the adapter and register
-// themselves with the provider registry.  Adding a new shim is intended to
+// Per-provider shim packages (internal/provider/openrouter, ...) configure
+// the adapter and register themselves with the provider registry.  The
+// internal/provider/openai shim was removed; OpenAI streaming is now
+// handled by Fantasy (charm.land/fantasy).  Adding a new shim is intended to
 // be ~30 lines.
 //
 // # Layering
