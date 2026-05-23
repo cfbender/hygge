@@ -144,6 +144,16 @@ type UIMessage struct {
 	// still pending its first token. The first real assistant delta clears
 	// the placeholder content before appending.
 	IsPlaceholder bool
+
+	// MessageID is the store-assigned identifier for this message.
+	// Populated when the message is finalized from a bus.MessageAppended
+	// event or hydrated from the store.  Used to detect and suppress
+	// duplicate insertions when the same MessageAppended event is processed
+	// more than once (e.g. around tool calls or subagent boundaries where
+	// the event may be replayed or arrive after the bubble was already
+	// flushed).  Empty for messages that were never persisted (placeholders,
+	// system error rows).
+	MessageID string
 }
 
 // MessageList renders the conversation history.

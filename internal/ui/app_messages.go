@@ -219,12 +219,28 @@ func (a *App) flushAssistantStream(role, messageID string) {
 	if role != "assistant" {
 		return
 	}
+	// Guard: if a non-streaming assistant with this exact messageID is already
+	// in the buffer (from a prior flush or hydration), updating it in-place is
+	// safe. Inserting a second copy would produce a duplicate bubble — the most
+	// common scenario is a MessageAppended event arriving after the streaming
+	// bubble was already finalized (e.g. around tool calls where the bus event
+	// delivery order can have the flush happen before the tool row appears).
+	if messageID != "" {
+		for i := range a.messages {
+			if a.messages[i].MessageID == messageID && a.messages[i].Role == components.RoleAssistant {
+				// Message already present — nothing to do.  The persisted content
+				// is canonical; a second flush would not change it meaningfully.
+				return
+			}
+		}
+	}
 	persisted, hasPersisted := a.persistedAssistantUIMessage(messageID)
 	if hasPersisted {
 		persisted.AgentType = a.ActiveModeName()
 		persisted.ModelName = a.opts.ModelName
 		persisted.ModeColor = a.activeModeColor()
 		persisted.FinalMarkdown = renderMarkdown(a.ensureRenderer(), persisted.Raw)
+		persisted.MessageID = messageID
 	}
 	idx := a.currentAssistantMessageIndex()
 	if idx < 0 {
@@ -252,6 +268,7 @@ func (a *App) flushAssistantStream(role, messageID string) {
 	last.IsPlaceholder = false
 	last.IsStreaming = false
 	last.Timestamp = a.opts.Now()
+	last.MessageID = messageID
 	if hasPersisted {
 		last.Raw = persisted.Raw
 		last.Thinking = persisted.Thinking
