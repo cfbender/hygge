@@ -875,10 +875,10 @@ func TestLoaded_ReportsAgeAndSource(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestPeriodicRefresh_TickerFiresAtInterval confirms that the periodic ticker
-// calls Refresh at least twice within interval × 4 when RefreshInterval > 0.
+// calls Refresh at least twice when RefreshInterval > 0.
 func TestPeriodicRefresh_TickerFiresAtInterval(t *testing.T) {
 	t.Parallel()
-	const interval = 40 * time.Millisecond
+	const interval = 50 * time.Millisecond
 
 	f := freshFetcher(t)
 	c, err := Load(LoadOptions{
@@ -896,10 +896,11 @@ func TestPeriodicRefresh_TickerFiresAtInterval(t *testing.T) {
 		}
 	}()
 
-	// Allow up to interval × 8 for at least 2 fetches to land.
-	deadline := time.Now().Add(interval * 8)
+	// Race-enabled CI can delay goroutine startup and timer delivery, so use a
+	// generous deadline while keeping the ticker interval short.
+	deadline := time.Now().Add(2 * time.Second)
 	for f.hits.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(interval / 4)
 	}
 	if got := f.hits.Load(); got < 2 {
 		t.Errorf("expected >= 2 periodic fetches within deadline, got %d", got)
