@@ -45,10 +45,11 @@ func TestResolveProviderModel_CompatProvider_WithBaseURL(t *testing.T) {
 
 func TestResolveProviderModel_CoreProviders_NoNetwork(t *testing.T) {
 	tests := []struct {
-		name       string
-		providerID string
-		modelID    string
-		opts       map[string]any
+		name         string
+		providerID   string
+		modelID      string
+		opts         map[string]any
+		wantProvider string
 	}{
 		{
 			name:       "anthropic",
@@ -69,6 +70,15 @@ func TestResolveProviderModel_CoreProviders_NoNetwork(t *testing.T) {
 				"x_title":      "",
 			},
 		},
+		{
+			name:       "gemini",
+			providerID: "gemini",
+			modelID:    "gemini-2.5-pro",
+			opts: map[string]any{
+				"api_key":  "sk-google-test",
+				"base_url": "http://127.0.0.1:1",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,8 +92,12 @@ func TestResolveProviderModel_CoreProviders_NoNetwork(t *testing.T) {
 			if r.Model == nil {
 				t.Fatal("language model is nil")
 			}
-			if got := r.Model.Provider(); got != tt.providerID {
-				t.Fatalf("model provider = %q, want %q", got, tt.providerID)
+			wantProvider := tt.wantProvider
+			if wantProvider == "" {
+				wantProvider = tt.providerID
+			}
+			if got := r.Model.Provider(); got != wantProvider {
+				t.Fatalf("model provider = %q, want %q", got, wantProvider)
 			}
 			if got := r.Model.Model(); got != tt.modelID {
 				t.Fatalf("model id = %q, want %q", got, tt.modelID)
@@ -96,6 +110,19 @@ func TestResolveProviderModel_UsesProviderEnvFallback(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-env")
 	r, err := llm.ResolveProviderModel(t.Context(), "openai", "gpt-4o-mini", map[string]any{
 		"base_url": "http://127.0.0.1:1/v1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ResolveProviderModel: %v", err)
+	}
+	if r.Model == nil {
+		t.Fatal("language model is nil")
+	}
+}
+
+func TestResolveProviderModel_GeminiUsesGoogleAPIKeyEnvFallback(t *testing.T) {
+	t.Setenv("GOOGLE_API_KEY", "sk-google-env")
+	r, err := llm.ResolveProviderModel(t.Context(), "gemini", "gemini-2.5-pro", map[string]any{
+		"base_url": "http://127.0.0.1:1",
 	}, nil)
 	if err != nil {
 		t.Fatalf("ResolveProviderModel: %v", err)

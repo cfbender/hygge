@@ -504,8 +504,8 @@ func displayProviderName(name string) string {
 		return "Anthropic"
 	case "deepseek":
 		return "DeepSeek"
-	case "google", "gemini":
-		return "Google"
+	case "gemini":
+		return "Gemini"
 	case "xai":
 		return "xAI"
 	case "groq":
