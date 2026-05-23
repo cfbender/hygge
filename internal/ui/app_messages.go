@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
 	"github.com/cfbender/hygge/internal/bus"
@@ -215,9 +216,12 @@ func (a *App) appendAssistantDelta(text string) {
 // flushAssistantStream marks the current assistant message as final and renders
 // it through glamour.  The messageID parameter is used to reconcile the live
 // stream with the authoritative persisted message when available.
-func (a *App) flushAssistantStream(role, messageID string) {
+//
+// Returns a non-nil tea.Cmd when a queued draft flush was deferred by
+// TurnCompleted (pendingQueueFlush==true) and should now be dispatched.
+func (a *App) flushAssistantStream(role, messageID string) tea.Cmd {
 	if role != "assistant" {
-		return
+		return nil
 	}
 	// Guard: if a non-streaming assistant with this exact messageID is already
 	// in the buffer (from a prior flush or hydration), updating it in-place is
@@ -230,7 +234,7 @@ func (a *App) flushAssistantStream(role, messageID string) {
 			if a.messages[i].MessageID == messageID && a.messages[i].Role == components.RoleAssistant {
 				// Message already present — nothing to do.  The persisted content
 				// is canonical; a second flush would not change it meaningfully.
-				return
+				return nil
 			}
 		}
 	}
@@ -248,7 +252,7 @@ func (a *App) flushAssistantStream(role, messageID string) {
 			a.insertPersistedAssistantMessage(persisted)
 			a.lastAssistantFlushIdx = a.indexOfFinalAssistant()
 		}
-		return
+		return a.dequeuePendingFlush()
 	}
 	last := &a.messages[idx]
 	// A "continuing…" placeholder that's now being flushed against a persisted
@@ -263,7 +267,7 @@ func (a *App) flushAssistantStream(role, messageID string) {
 		} else {
 			a.lastAssistantFlushIdx = -1
 		}
-		return
+		return a.dequeuePendingFlush()
 	}
 	last.IsPlaceholder = false
 	last.IsStreaming = false
@@ -294,6 +298,27 @@ func (a *App) flushAssistantStream(role, messageID string) {
 	// Remember which bubble was just finalised so a stray post-flush delta
 	// can extend it in place rather than spawn a phantom bubble.
 	a.lastAssistantFlushIdx = idx
+	return a.dequeuePendingFlush()
+}
+
+// dequeuePendingFlush fires the deferred queue flush that was held back by
+// TurnCompleted arriving before the final MessageAppended(assistant).  It
+// resets pendingQueueFlush, sets the UI to idle, and returns
+// flushQueuedDraftsCmd so the next queued draft starts cleanly after the
+// assistant turn is fully rendered.  Returns nil when no flush is pending or
+// the queue is empty.
+func (a *App) dequeuePendingFlush() tea.Cmd {
+	if !a.pendingQueueFlush {
+		return nil
+	}
+	a.pendingQueueFlush = false
+	a.busy = false
+	a.workingVerb = ""
+	a.input.SetBusy(false, "")
+	if len(a.queuedDrafts) == 0 {
+		return nil
+	}
+	return a.flushQueuedDraftsCmd()
 }
 
 // indexOfFinalAssistant returns the index of the trailing assistant message

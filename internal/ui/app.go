@@ -619,6 +619,15 @@ type App struct {
 	// instrumentation logging "appendAssistant dropped buffered content"). The
 	// underlying agent-side cause is still under investigation.
 	lastAssistantFlushIdx int
+
+	// pendingQueueFlush is set true when bus.TurnCompleted fires while there
+	// is still a streaming assistant bubble in the message list.  This happens
+	// because TurnCompleted and the final bus.MessageAppended(assistant) travel
+	// through separate goroutines into busCh and can arrive out of order.
+	// flushAssistantStream checks this flag after finalising the bubble and, if
+	// set, clears it and calls flushQueuedDraftsCmd so the next queued draft
+	// only fires after the UI has fully rendered the completed assistant turn.
+	pendingQueueFlush bool
 }
 
 // Init is the bubbletea Model entry point.  Starts the input focus, the
@@ -1358,6 +1367,20 @@ func (a *App) handleBusyReconcileTick() tea.Cmd {
 		// Start the working-verb animation now that we've gone busy.
 		if !wasBusy {
 			extraCmds = append(extraCmds, a.workingVerbTick())
+		}
+
+	case !agentBusy && a.busy && a.pendingQueueFlush:
+		// Recovery case: TurnCompleted arrived while the assistant bubble was
+		// still streaming, but the final MessageAppended(assistant) never made it
+		// through to release the deferred queue flush. Let the next queued draft
+		// start rather than leaving the input permanently busy.
+		a.pendingQueueFlush = false
+		a.busy = false
+		a.activeTurns = 0
+		a.workingVerb = ""
+		a.input.SetBusy(false, "")
+		if len(a.queuedDrafts) > 0 {
+			extraCmds = append(extraCmds, a.flushQueuedDraftsCmd())
 		}
 
 	case !agentBusy && a.busy && a.activeTurns > 0 && len(a.queuedDrafts) == 0 && a.queueCount == 0:
