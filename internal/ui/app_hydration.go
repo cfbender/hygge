@@ -247,7 +247,7 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 			return nil
 		}
 		ts := m.CreatedAt
-		return []uiMessage{{Role: components.RoleUser, Raw: text, Timestamp: ts}}
+		return []uiMessage{{Role: components.RoleUser, Raw: text, Timestamp: ts, MessageID: m.ID}}
 
 	case session.RoleAssistant:
 		// Collect all PartThinking texts (joined with "\n\n").
@@ -311,6 +311,8 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 		}
 
 		// Emit one assistant uiMessage with thinking + text, then tool entries.
+		// MessageID is stamped so duplicate-guard checks in flushAssistantStream
+		// can detect this message has already been hydrated.
 		assistantMsg := uiMessage{
 			Role:         components.RoleAssistant,
 			Raw:          rawText,
@@ -319,6 +321,7 @@ func uiEntriesFromStoreMessage(m *session.Message, toolResults map[string]sessio
 			OutputTokens: m.OutputTokens,
 			CostUSD:      m.CostUSD,
 			DurationMs:   m.DurationMs,
+			MessageID:    m.ID,
 		}
 		return append([]uiMessage{assistantMsg}, toolEntries...)
 
