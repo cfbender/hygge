@@ -76,7 +76,7 @@ func TestSubagentsShow_BuiltinGeneral(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "name:        general") {
+	if !strings.Contains(got, "name: general") {
 		t.Errorf("missing name line:\n%s", got)
 	}
 	if !strings.Contains(got, "system prompt") {

@@ -82,7 +82,7 @@ func TestSkillsShow_Found(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "name:        refactor") {
+	if !strings.Contains(got, "name: refactor") {
 		t.Errorf("missing name line:\n%s", got)
 	}
 	if !strings.Contains(got, "step 1") {
@@ -166,8 +166,8 @@ func TestSkillsShowHyggeBuiltin(t *testing.T) {
 	}
 	got := buf.String()
 	for _, want := range []string{
-		"name:        hygge",
-		"source:      builtin",
+		"name: hygge",
+		"source: builtin",
 		"config.toml",
 		"permissions",
 		"MCP",
