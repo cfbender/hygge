@@ -213,6 +213,13 @@ type Agent struct {
 	//   - Agent.Compact completes successfully for that session.
 	// Guarded by mu.
 	thresholdFired map[string]bool
+	// latestUsage stores the most recent context usage recorded by
+	// recordUsage for each session.  Used to annotate the latest user
+	// envelope with latest-known usage so the model
+	// does not have to calculate it.  Reset on successful Compact so
+	// stale pre-compaction numbers are never shown in the post-compaction
+	// turn.  Guarded by mu.
+	latestUsage map[string]sessionUsage
 	// pluginInjects counts per-plugin per-session message injections for
 	// the current turn.  Reset by ResetPluginInjectCounters at turn start.
 	// Guarded by mu.
@@ -264,6 +271,7 @@ func New(opts Options) (*Agent, error) {
 		pendingSystemAdditions: make(map[string][]string),
 		pendingSteering:        make(map[string][]string),
 		thresholdFired:         make(map[string]bool),
+		latestUsage:            make(map[string]sessionUsage),
 		activeRuns:             make(map[string]struct{}),
 		queues:                 make(map[string][]QueuedSend),
 	}
@@ -531,6 +539,16 @@ func (a *Agent) activeModel() session.ModelRef {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.model
+}
+
+// latestUsageFor returns the most recently recorded context usage for
+// sessionID as (usedTokens, pctUsed).  Returns (0, 0) when no usage has
+// been recorded yet.  Guarded by a.mu.
+func (a *Agent) latestUsageFor(sessionID string) (int64, float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	u := a.latestUsage[sessionID]
+	return u.usedTokens, u.pctUsed
 }
 
 func (a *Agent) systemPrompt() string {
@@ -1123,6 +1141,13 @@ func (a *Agent) ResetPluginInjectCounters(sessionID string) {
 type pluginInjectKey struct {
 	plugin  string
 	session string
+}
+
+// sessionUsage holds the last-seen context usage for a session, as
+// reported by recordUsage.  Zero value means "no data yet".
+type sessionUsage struct {
+	usedTokens int64
+	pctUsed    float64
 }
 
 // ErrInjectCap is returned by InjectMessage when a plugin has injected the

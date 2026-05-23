@@ -101,7 +101,11 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 		}
 	}
 
-	used := u.InputTokens + u.OutputTokens
+	// Context-window pressure includes prompt tokens served from provider
+	// cache: cached tokens may be cheaper, but they still occupy the model's
+	// input context. Cache-write tokens are already represented by InputTokens
+	// for the turn and are not added again.
+	used := u.InputTokens + u.CacheReadTokens + u.OutputTokens
 	maxTok := a.opts.ContextWindow
 	var pct float64
 	if maxTok > 0 {
@@ -115,6 +119,13 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 		ReasoningTokens: u.ReasoningTokens,
 		At:              a.opts.Now(),
 	})
+
+	// Store the latest known usage for this session so the next turn's
+	// user envelope can include latest-known usage without the model having
+	// to calculate it.
+	a.mu.Lock()
+	a.latestUsage[sessionID] = sessionUsage{usedTokens: used, pctUsed: pct}
+	a.mu.Unlock()
 
 	// T2.3 threshold suggestion: fire once per crossing.
 	// pct is in [0.0, 1.0]; threshold is in [0, 99] as a percentage.
@@ -234,9 +245,12 @@ func (a *Agent) Compact(ctx context.Context, sessionID string) (*session.Marker,
 	})
 
 	// Reset the threshold-fired flag so the suggestion re-appears if usage
-	// climbs back above threshold after compaction.
+	// climbs back above threshold after compaction.  Also clear the latest
+	// known context usage: the stale pre-compaction numbers would be
+	// misleading in the first post-compaction turn envelope.
 	a.mu.Lock()
 	delete(a.thresholdFired, sessionID)
+	delete(a.latestUsage, sessionID)
 	a.mu.Unlock()
 
 	return marker, nil
@@ -257,7 +271,7 @@ func (a *Agent) generateCompactionSummary(
 	ctx context.Context, _ string, msgs []*session.Message,
 ) (string, provider.Usage, error) {
 	if a.runtime != nil && a.runtime.hasFantasyModel() {
-		fmsgs := append([]fantasy.Message{fantasy.NewSystemMessage(compactionSystemPrompt)}, toFantasyMessages(msgs, nil, "", nil, nil, nil)...)
+		fmsgs := append([]fantasy.Message{fantasy.NewSystemMessage(compactionSystemPrompt)}, toFantasyMessages(msgs, nil, "", nil, nil, nil, 0, 0, 0)...)
 		fmsgs = append(fmsgs, fantasy.NewUserMessage("Summarize the conversation above."))
 		return a.runtime.Summarize(ctx, fmsgs, a.opts.CompactionMaxTokens)
 	}

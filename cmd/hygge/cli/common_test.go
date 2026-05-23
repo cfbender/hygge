@@ -685,6 +685,23 @@ func TestDefaultSystemPromptGuidesToolNarration(t *testing.T) {
 	}
 }
 
+// TestDefaultSystemPromptContainsCompactInstruction verifies that the
+// default system prompt instructs the model to use the compact tool at
+// ~90% context usage and when switching topics.
+func TestDefaultSystemPromptContainsCompactInstruction(t *testing.T) {
+	for _, want := range []string{
+		"<context_management>",
+		"compact",
+		"90%",
+		"context window",
+		"subject",
+	} {
+		if !strings.Contains(defaultSystemPrompt, want) {
+			t.Fatalf("defaultSystemPrompt missing compact instruction %q:\n%s", want, defaultSystemPrompt)
+		}
+	}
+}
+
 // TestBootstrap_AgentsMDAppearsInSystemPrompt verifies that an
 // AGENTS.md sitting next to .git in the project root is loaded and
 // appended to the system prompt under "## Project context".

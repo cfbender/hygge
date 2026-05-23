@@ -173,7 +173,8 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		return nil, fmt.Errorf("agent: load session memories: %w", err)
 	}
 	memories = append(memories, sessionMemories...)
-	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), nil, nil, memories)
+	usedTokens, pctUsed := a.latestUsageFor(sessionID)
+	fmsgs := toFantasyMessages(msgs, marker, a.systemPrompt(), nil, nil, memories, a.opts.ContextWindow, usedTokens, pctUsed)
 	pwd := a.opts.Pwd
 	if pwd == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -452,6 +453,9 @@ func toFantasyMessages(
 	lazy []agentsmd.Block,
 	systemPromptAdditions []string,
 	memories []*session.Memory,
+	contextWindow int64,
+	usedTokens int64,
+	pctUsed float64,
 ) []fantasy.Message {
 	out := []fantasy.Message{}
 	if sys := composeSystemPrompt(system, marker, lazy, systemPromptAdditions); strings.TrimSpace(sys) != "" {
@@ -488,7 +492,7 @@ func toFantasyMessages(
 		}
 		fm := fantasy.Message{Role: toFantasyRole(m.Role)}
 		if i == latestUserIdx && m.Role == session.RoleUser {
-			fm.Content = append(fm.Content, latestUserFantasyParts(m, memories)...)
+			fm.Content = append(fm.Content, latestUserFantasyParts(m, memories, contextWindow, usedTokens, pctUsed)...)
 			out = append(out, fm)
 			continue
 		}
@@ -533,8 +537,8 @@ func toFantasyMessages(
 	return out
 }
 
-func latestUserFantasyParts(m *session.Message, memories []*session.Memory) []fantasy.MessagePart {
-	parts := []fantasy.MessagePart{fantasy.TextPart{Text: buildLatestUserEnvelope(modelFacingUserText(m), memories)}}
+func latestUserFantasyParts(m *session.Message, memories []*session.Memory, contextWindow int64, usedTokens int64, pctUsed float64) []fantasy.MessagePart {
+	parts := []fantasy.MessagePart{fantasy.TextPart{Text: buildLatestUserEnvelope(modelFacingUserText(m), memories, contextWindow, usedTokens, pctUsed)}}
 	if m == nil {
 		return parts
 	}
