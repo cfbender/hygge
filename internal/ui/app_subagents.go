@@ -317,16 +317,34 @@ func (a *App) followIntoLatestSubagent() tea.Cmd {
 	return nil
 }
 
-// isForeground reports whether sessionID is the App's active foreground
-// session.  An empty foreground id matches anything: this preserves the
+// isForeground reports whether sessionID belongs to the App's active
+// foreground chain — either the visible session (top of the foreground
+// stack) or the root session at the bottom of the stack.
+//
+// An empty foreground id matches anything: this preserves the
 // pre-Stage-C behaviour where the App accepted all events because the
 // session was lazily created on first user input.
+//
+// Root-session acceptance is intentional: while the user is viewing a
+// subagent, the foreground id is the subagent's session, but root-session
+// events (assistant deltas, tool calls, message appends, turn lifecycle)
+// must still update a.messages and the chrome so the main thread keeps
+// progressing in the background and the parent transcript is intact when
+// the user pops back. See HYGGE-15.
 func (a *App) isForeground(sessionID string) bool {
 	fg := a.foregroundID()
 	if fg == "" {
 		return true
 	}
-	return sessionID == fg
+	if sessionID == fg {
+		return true
+	}
+	// Accept root-session events even while viewing a subagent so the
+	// parent transcript keeps building.
+	if root := a.rootSessionID(); root != "" && sessionID == root {
+		return true
+	}
+	return false
 }
 
 // routeToSubagent reports whether sessionID matches a tracked sub-agent

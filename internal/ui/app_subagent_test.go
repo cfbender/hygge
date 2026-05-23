@@ -285,6 +285,100 @@ func TestForegroundSubagentEventsStayInSubagentTranscript(t *testing.T) {
 	}
 }
 
+// TestParentEventsAccumulateWhileViewingSubagent is the HYGGE-15 regression
+// guard: when the user has followed into a subagent, events emitted by the
+// parent (root) session must still update a.messages so the parent's history
+// is intact when the user pops back out. Before the fix, isForeground() only
+// accepted the top of the foreground stack, which silently dropped every
+// parent-thread bus event while a subagent was being viewed.
+func TestParentEventsAccumulateWhileViewingSubagent(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Open a subagent and follow into it.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "parent-tu",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "parent-tu",
+		Type:            "general",
+		Description:     "background work",
+		Model:           "anthropic/claude-haiku-4-5",
+		At:              time.Now(),
+	})
+	app.pushForeground("sub-1")
+	if !app.viewingSubagent() {
+		t.Fatal("precondition: expected to be viewing subagent")
+	}
+	parentLenBefore := len(app.messages)
+
+	// While viewing the subagent, the parent (root) session continues to
+	// produce events: tool calls + assistant text. These must land in
+	// a.messages so they are visible when the user pops back.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "bash",
+		ToolUseID: "parent-bash-tu",
+		Args:      []byte(`{"command":"ls"}`),
+	})
+	app.Handle(bus.ToolCallCompleted{
+		SessionID:  "fg-session",
+		ToolName:   "bash",
+		ToolUseID:  "parent-bash-tu",
+		Result:     []byte("file.txt"),
+		DurationMs: 1,
+	})
+	app.Handle(bus.AssistantTextDelta{
+		SessionID: "fg-session",
+		Text:      "parent response",
+	})
+
+	if len(app.messages) <= parentLenBefore {
+		t.Fatalf("parent transcript len = %d, want > %d; parent events were dropped while viewing subagent",
+			len(app.messages), parentLenBefore)
+	}
+
+	// Find the parent bash tool row and assistant text in the parent buffer.
+	var sawBash, sawText bool
+	for i := range app.messages {
+		msg := app.messages[i]
+		if msg.Role == components.RoleTool && msg.ToolUseID == "parent-bash-tu" {
+			sawBash = true
+			if msg.IsStreaming {
+				t.Errorf("expected parent bash row to be finalised, still streaming: %+v", msg)
+			}
+		}
+		if msg.Role == components.RoleAssistant && strings.Contains(msg.Raw, "parent response") {
+			sawText = true
+		}
+	}
+	if !sawBash {
+		t.Error("parent bash tool row missing from a.messages while viewing subagent")
+	}
+	if !sawText {
+		t.Error("parent assistant delta missing from a.messages while viewing subagent")
+	}
+
+	// The subagent transcript must NOT contain the parent events.
+	st := app.subagents["sub-1"]
+	if st == nil {
+		t.Fatal("subagent state missing")
+	}
+	for _, msg := range st.Messages {
+		if msg.ToolUseID == "parent-bash-tu" {
+			t.Errorf("parent tool row leaked into subagent transcript: %+v", msg)
+		}
+		if msg.Role == components.RoleAssistant && strings.Contains(msg.Raw, "parent response") {
+			t.Errorf("parent assistant delta leaked into subagent transcript: %+v", msg)
+		}
+	}
+}
+
 func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
