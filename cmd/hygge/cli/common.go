@@ -41,8 +41,6 @@ import (
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/plugin"
 	"github.com/cfbender/hygge/internal/provider"
-	anthropicShim "github.com/cfbender/hygge/internal/provider/anthropic"
-	openaiShim "github.com/cfbender/hygge/internal/provider/openai"
 	openrouterShim "github.com/cfbender/hygge/internal/provider/openrouter"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/skill"
@@ -553,8 +551,6 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// Models() lists come from the live snapshot rather than the
 	// hardcoded fallbacks.  Passing nil is fine (tests sometimes
 	// deliberately do this); the provider shims tolerate it.
-	anthropicShim.SetCatalog(catSrc)
-	openaiShim.SetCatalog(catSrc)
 	openrouterShim.SetCatalog(catSrc)
 	var fantasyResolved llm.ProviderResolution
 	if opts.FantasyModel != nil {
