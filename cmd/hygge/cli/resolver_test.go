@@ -88,7 +88,7 @@ func TestBuildProviderResolver_UnknownProviderErrors(t *testing.T) {
 
 // testFactoryProvider registers itself under a unique name so we can
 // exercise buildProviderResolver's cache path without colliding with
-// the global anthropic/openai/openrouter registrations.
+// other registered providers.
 var testFactoryCalls atomic.Int32
 
 const testFactoryName = "hyggetest_resolver_provider"

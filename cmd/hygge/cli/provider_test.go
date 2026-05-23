@@ -438,8 +438,9 @@ func TestKnownProviders(t *testing.T) {
 func TestFantasyNativeProvider_ErrAuthWhenNoCredential(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 
-	for _, name := range []string{"anthropic", "openai"} {
+	for _, name := range []string{"anthropic", "openai", "openrouter"} {
 		_, err := buildFantasyNativeProvider(name, map[string]any{})
 		if !errors.Is(err, provider.ErrAuth) {
 			t.Errorf("%s with no credential: want ErrAuth, got %v", name, err)
@@ -454,6 +455,7 @@ func TestFantasyNativeProvider_ErrAuthWhenNoCredential(t *testing.T) {
 func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 
 	for _, tc := range []struct {
 		name   string
@@ -461,6 +463,7 @@ func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
 	}{
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"openai", "OPENAI_API_KEY"},
+		{"openrouter", "OPENROUTER_API_KEY"},
 	} {
 		// Via opts["api_key"].
 		p, err := buildFantasyNativeProvider(tc.name, map[string]any{"api_key": "sk-test-key"})
@@ -490,9 +493,9 @@ func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
 // that buildFantasyNativeProvider rejects provider names not in the
 // Fantasy-native set.
 func TestFantasyNativeProvider_UnknownReturnsErrUnknownProvider(t *testing.T) {
-	_, err := buildFantasyNativeProvider("openrouter", map[string]any{})
+	_, err := buildFantasyNativeProvider("no_such_provider_xyz", map[string]any{})
 	if !errors.Is(err, provider.ErrUnknownProvider) {
-		t.Errorf("openrouter: want ErrUnknownProvider, got %v", err)
+		t.Errorf("no_such_provider_xyz: want ErrUnknownProvider, got %v", err)
 	}
 }
 
@@ -527,21 +530,6 @@ func TestRequireAnyKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-from-env")
 	if err := requireAnyKey(nil, "OPENAI_API_KEY"); err != nil {
 		t.Errorf("env var set: want nil, got %v", err)
-	}
-}
-// TestOpenRouterRegistered confirms the openrouter shim is wired into the
-// CLI via the import in common.go.  Without this guard, removing the
-// import would silently break `hygge config set model.provider = openrouter`.
-func TestOpenRouterRegistered(t *testing.T) {
-	f, err := provider.Get("openrouter")
-	if err != nil {
-		t.Fatalf("provider.Get(openrouter): %v", err)
-	}
-	if f == nil {
-		t.Fatal("factory is nil")
-	}
-	if providerEnvVar("openrouter") != "OPENROUTER_API_KEY" {
-		t.Errorf("openrouter env var mapping missing")
 	}
 }
 

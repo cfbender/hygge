@@ -1216,8 +1216,9 @@ func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, 
 // lightweight namedStub that satisfies provider.Provider for Name()
 // metadata and auth-error semantics.
 var fantasyNativeProviders = map[string]string{
-	"anthropic": "ANTHROPIC_API_KEY",
-	"openai":    "OPENAI_API_KEY",
+	"anthropic":  "ANTHROPIC_API_KEY",
+	"openai":     "OPENAI_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
 }
 
 // buildFantasyNativeProvider returns a namedStub for providers that

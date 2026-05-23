@@ -56,10 +56,6 @@ const (
 	defaultXTitle = "hygge"
 )
 
-func init() {
-	provider.Register("openrouter", New)
-}
-
 // New constructs an OpenRouter provider from the given options map.
 // Supported keys:
 //

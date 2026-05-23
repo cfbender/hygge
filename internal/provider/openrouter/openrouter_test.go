@@ -139,15 +139,6 @@ func TestStringOptAllowEmpty(t *testing.T) {
 	}
 }
 
-func TestRegistered(t *testing.T) {
-	f, err := provider.Get("openrouter")
-	if err != nil {
-		t.Fatalf("Get(openrouter): %v", err)
-	}
-	if f == nil {
-		t.Fatal("factory is nil")
-	}
-}
 
 func TestListModels(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "sk-or-x")
