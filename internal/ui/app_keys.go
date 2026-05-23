@@ -136,6 +136,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.invalidateMsgCache()
 		return a, a.showToast("Reasoning", label)
 	case "ctrl+g":
+		// If already viewing a subagent, Ctrl+G pops back to the parent.
+		if a.viewingSubagent() {
+			a.popForeground()
+			return a, nil
+		}
 		return a, a.followIntoLatestSubagent()
 	case "ctrl+e":
 		if a.viewingSubagent() {
@@ -217,11 +222,6 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 	case "esc":
-		// Subagent view: Esc pops the foreground stack.
-		if len(a.foregroundStack) > 1 {
-			a.popForeground()
-			return a, nil
-		}
 		// Dismiss command palette first.
 		if a.opts.Commands != nil && strings.HasPrefix(a.input.Value(), "/") && !a.slashPaletteDismissed {
 			a.paletteHighlight = -1
