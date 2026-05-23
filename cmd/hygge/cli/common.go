@@ -532,11 +532,12 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		}
 	}
 	permEngine, err := permission.New(permission.EngineOptions{
-		Bus:    b,
-		Config: cfg,
-		State:  stateOpts,
-		Clock:  opts.Now,
-		Yolo:   opts.Yolo,
+		Bus:        b,
+		Config:     cfg,
+		State:      stateOpts,
+		ProjectDir: opts.Pwd,
+		Clock:      opts.Now,
+		Yolo:       opts.Yolo,
 	})
 	if err != nil {
 		_ = stOpen.Close()

@@ -3,6 +3,8 @@ package permission
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -342,6 +344,16 @@ func TestAsk_SessionScopeCache(t *testing.T) {
 func TestAsk_AlwaysScopePersistsAndCachesImmediately(t *testing.T) {
 	e, b, stateOpts := newEngine(t, defaultCfg())
 
+	// Use a real temp directory so os.Stat inside promoteTarget can confirm
+	// the target is a regular file (needed by the type-aware promotion logic).
+	srcDir := t.TempDir()
+	mainFile := filepath.Join(srcDir, "main.go")
+	if err := os.WriteFile(mainFile, []byte("package main"), 0o644); err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	// A sibling file inside the same dir — should be covered by the promoted glob.
+	siblingFile := filepath.Join(srcDir, "other.go")
+
 	var asks atomic.Int32
 	stop := fakeResponder(t, b, func(_ bus.PermissionAsked) bus.PermissionReplied {
 		asks.Add(1)
@@ -351,8 +363,8 @@ func TestAsk_AlwaysScopePersistsAndCachesImmediately(t *testing.T) {
 
 	d, err := e.Ask(context.Background(), Request{
 		Category: CategoryFileWrite,
-		Target:   "/repo/src/main.go",
-		Pwd:      "/repo",
+		Target:   mainFile,
+		Pwd:      srcDir,
 	})
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
@@ -363,8 +375,8 @@ func TestAsk_AlwaysScopePersistsAndCachesImmediately(t *testing.T) {
 
 	sibling, err := e.Ask(context.Background(), Request{
 		Category: CategoryFileWrite,
-		Target:   "/repo/src/other.go",
-		Pwd:      "/repo",
+		Target:   siblingFile,
+		Pwd:      srcDir,
 	})
 	if err != nil {
 		t.Fatalf("sibling Ask: %v", err)
@@ -384,9 +396,10 @@ func TestAsk_AlwaysScopePersistsAndCachesImmediately(t *testing.T) {
 		t.Fatalf("AllowedRules: got %d, want 1", len(s.AllowedRules))
 	}
 	r := s.AllowedRules[0]
-	// Pattern is promoted to a directory glob.
-	if r.Category != "file.write" || r.Pattern != "/repo/src/**" {
-		t.Errorf("rule: got %+v, want file.write @ /repo/src/**", r)
+	// Pattern is promoted to the containing directory glob.
+	wantPattern := filepath.Join(srcDir, "**")
+	if r.Category != "file.write" || r.Pattern != wantPattern {
+		t.Errorf("rule: got %+v, want file.write @ %s", r, wantPattern)
 	}
 	if r.CreatedAt == 0 {
 		t.Error("CreatedAt should be populated from engine clock")
