@@ -162,6 +162,30 @@ func TestStream_WithToolUse(t *testing.T) {
 	}
 }
 
+func TestToWireToolsOmitsNilRequired(t *testing.T) {
+	tools := toWireTools([]provider.Tool{{
+		Name: "linear_list_comments",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+			"required":   nil,
+		},
+	}})
+	if len(tools) != 1 {
+		t.Fatalf("tools len = %d, want 1", len(tools))
+	}
+	body, err := json.Marshal(tools[0].Function.Parameters)
+	if err != nil {
+		t.Fatalf("marshal parameters: %v", err)
+	}
+	if strings.Contains(string(body), `"required":null`) {
+		t.Fatalf("parameters contain required:null: %s", body)
+	}
+	if _, ok := tools[0].Function.Parameters["required"]; ok {
+		t.Fatalf("required key present for nil required: %+v", tools[0].Function.Parameters)
+	}
+}
+
 func TestStream_MultiToolCalls(t *testing.T) {
 	srv, _ := newSSEServer(t, "stream_multi_tool_calls.sse")
 	p := newCompat(t, Config{BaseURL: srv.URL})

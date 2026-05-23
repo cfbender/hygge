@@ -79,11 +79,14 @@ type sseTransport struct {
 	opts   SSEOptions
 	client *http.Client
 
-	// mu guards endpoint, lastEventID, and cancel.
-	mu          sync.Mutex
-	endpoint    string             // POST URL once handshake completes
-	lastEventID string             // Last-Event-ID for reconnection
-	cancel      context.CancelFunc // cancels the GET stream goroutine
+	// mu guards endpoint, lastEventID, and cancel funcs.
+	mu              sync.Mutex
+	endpoint        string             // POST URL once handshake completes
+	lastEventID     string             // Last-Event-ID for reconnection
+	cancel          context.CancelFunc // cancels the GET stream goroutine
+	postDrainCtx    context.Context
+	postDrainCancel context.CancelFunc // cancels POST response drain goroutines
+	postDrainWG     sync.WaitGroup
 
 	// inbound receives raw JSON payloads from both the GET stream
 	// (server-initiated notifications) and POST response streams.
@@ -121,10 +124,13 @@ func NewSSE(opts SSEOptions) Transport {
 	if opts.MaxReconnects == 0 {
 		opts.MaxReconnects = sseDefaultMaxReconnects
 	}
+	postDrainCtx, postDrainCancel := context.WithCancel(context.Background())
 	return &sseTransport{
-		opts:    opts,
-		client:  httpClient,
-		inbound: make(chan []byte, 64),
+		opts:            opts,
+		client:          httpClient,
+		postDrainCtx:    postDrainCtx,
+		postDrainCancel: postDrainCancel,
+		inbound:         make(chan []byte, 64),
 	}
 }
 
@@ -461,28 +467,52 @@ func (t *sseTransport) Send(ctx context.Context, msg []byte) error {
 	if err != nil {
 		return fmt.Errorf("mcp: sse: POST %s: %w", endpoint, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusAccepted {
 		// 202 Accepted: the server may respond asynchronously on the
 		// GET stream.  Nothing to drain here.
+		_ = resp.Body.Close()
 		return nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer func() { _ = resp.Body.Close() }()
 		return fmt.Errorf("mcp: sse: POST %s: status %d", endpoint, resp.StatusCode)
 	}
+
+	// Successful POST responses may either contain SSE events directly or
+	// remain open while responses arrive asynchronously on the GET stream.
+	// Treat the POST as accepted once headers arrive and drain its body in
+	// the background so Send does not block forever on open response bodies.
+	t.postDrainWG.Add(1)
+	go t.drainPOSTResponse(t.postDrainCtx, resp.Body)
+	return nil
+}
+
+func (t *sseTransport) drainPOSTResponse(ctx context.Context, body io.ReadCloser) {
+	defer t.postDrainWG.Done()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = body.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
+	defer func() { _ = body.Close() }()
 
 	// Drain the POST response body as SSE.  Some servers send a single
 	// response message; others stream progress notifications followed
 	// by the response.  All are forwarded to inbound.
-	scanner := newSSEScanner(resp.Body)
+	scanner := newSSEScanner(body)
 	for {
 		ev, err := scanner.Next()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			if errors.Is(err, io.EOF) || ctx.Err() != nil {
 				break
 			}
-			return fmt.Errorf("mcp: sse: read POST response: %w", err)
+			slog.Debug("mcp: sse: read POST response failed", "err", err, "server", t.ServerLabel())
+			break
 		}
 		name := ev.name
 		if name == "" {
@@ -498,13 +528,15 @@ func (t *sseTransport) Send(ctx context.Context, msg []byte) error {
 		if data == "" {
 			continue
 		}
+		if t.closed.Load() {
+			return
+		}
 		select {
 		case t.inbound <- []byte(data):
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		}
 	}
-	return nil
 }
 
 // Recv blocks until the next message arrives from the server (either
@@ -526,14 +558,18 @@ func (t *sseTransport) Close() error {
 	}
 	t.mu.Lock()
 	cancel := t.cancel
+	postDrainCancel := t.postDrainCancel
 	t.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	// Close inbound after a brief pause to let the drain goroutine
-	// observe the closed flag and exit naturally first.
+	if postDrainCancel != nil {
+		postDrainCancel()
+	}
+	// Close inbound after the POST drain goroutines have stopped so none
+	// can race with a send on the shared inbound channel.
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		t.postDrainWG.Wait()
 		t.closeInbound()
 	}()
 	return nil

@@ -31,10 +31,7 @@ func toWireTools(tools []provider.Tool) []chatTool {
 	}
 	out := make([]chatTool, 0, len(tools))
 	for _, t := range tools {
-		schema := t.InputSchema
-		if schema == nil {
-			schema = map[string]any{"type": "object"}
-		}
+		schema := sanitizeToolSchema(t.InputSchema)
 		out = append(out, chatTool{
 			Type: "function",
 			Function: chatToolFunctionSchema{
@@ -43,6 +40,20 @@ func toWireTools(tools []provider.Tool) []chatTool {
 				Parameters:  schema,
 			},
 		})
+	}
+	return out
+}
+
+func sanitizeToolSchema(schema map[string]any) map[string]any {
+	if schema == nil {
+		return map[string]any{"type": "object"}
+	}
+	out := make(map[string]any, len(schema))
+	for k, v := range schema {
+		if k == "required" && v == nil {
+			continue
+		}
+		out[k] = v
 	}
 	return out
 }
