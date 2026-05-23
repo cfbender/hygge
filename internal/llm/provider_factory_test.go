@@ -156,6 +156,10 @@ func TestResolveProviderModel_RejectsMissingAPIKey(t *testing.T) {
 // opencode-go regression tests (success criteria 7)
 // ---------------------------------------------------------------------------
 
+// fixedTime is a deterministic timestamp used in test fixtures to avoid
+// non-determinism from time.Now().
+var fixedTime = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
 // catalogFetcher is a test-only catalog.Fetcher that returns a pre-built snapshot.
 type catalogFetcher struct {
 	snap *catalog.Snapshot
@@ -170,7 +174,7 @@ func (f *catalogFetcher) Fetch(_ context.Context) (*catalog.Snapshot, error) {
 func opencodeGoCatalog(t *testing.T) *catalog.Catalog {
 	t.Helper()
 	snap := &catalog.Snapshot{
-		FetchedAt: time.Now(),
+		FetchedAt: fixedTime,
 		Providers: map[string]map[string]catalog.Entry{
 			"opencode-go": {
 				"minimax-m2.7": {
@@ -317,7 +321,7 @@ func TestResolveProviderModel_OpencodeGo_NilCatalog_EnvAPIKey(t *testing.T) {
 func staleCatalogWithoutMeta(t *testing.T) *catalog.Catalog {
 	t.Helper()
 	snap := &catalog.Snapshot{
-		FetchedAt: time.Now(),
+		FetchedAt: fixedTime,
 		Providers: map[string]map[string]catalog.Entry{
 			"opencode-go": {
 				"minimax-m2.7": {
