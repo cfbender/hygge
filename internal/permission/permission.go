@@ -34,15 +34,20 @@
 // The Engine is safe for concurrent Asks from many goroutines.  Each Ask
 // gets its own bus subscription so replies cannot cross-pollinate.  The
 // session cache uses a sync.RWMutex.  Closing the engine cancels all
-// pending Asks via the engine's internal context.
+// pending Asks via the engine's internal context.  Persisted "always" rules
+// use the state package's read/modify/write helpers, which are atomic but not
+// locked across concurrent process instances.
 package permission
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -51,6 +56,7 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/config"
+	"github.com/cfbender/hygge/internal/gitexec"
 	"github.com/cfbender/hygge/internal/state"
 )
 
@@ -162,7 +168,21 @@ type EngineOptions struct {
 
 	// State controls where persisted "always" approvals are loaded from
 	// and saved to.  Pass-through to [state.Load] and [state.Save].
+	//
+	// Deprecated for allow-always writes: prefer ProjectDir.  State is
+	// still used to load pre-existing user-global rules on startup.
 	State state.LoadOptions
+
+	// ProjectDir is the working directory of the current project.  When
+	// non-empty, "allow always" decisions are persisted to
+	// <ProjectDir>/.hygge/permissions.json rather than the user-global
+	// state file, and those project-scoped rules are loaded at engine
+	// construction time.
+	ProjectDir string
+
+	// Git executes git commands for project-local safety checks.  When nil,
+	// [gitexec.DefaultRunner] is used. Tests may inject a fake.
+	Git gitexec.Runner
 
 	// Clock is an injectable time source used for the At fields of
 	// published bus events and for AllowRule timestamps.  Defaults to
@@ -199,9 +219,11 @@ var SecretsDenylist = []string{
 // Engine evaluates Requests.  Construct with [New]; the zero value is not
 // usable.
 type Engine struct {
-	bus       *bus.Bus
-	stateOpts state.LoadOptions
-	clock     func() time.Time
+	bus        *bus.Bus
+	stateOpts  state.LoadOptions
+	projectDir string // may be empty; if set, "always" rules persist here
+	git        gitexec.Runner
+	clock      func() time.Time
 
 	matcher *Matcher
 
@@ -229,8 +251,12 @@ func New(opts EngineOptions) (*Engine, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	git := opts.Git
+	if git == nil {
+		git = gitexec.DefaultRunner{}
+	}
 
-	rules, err := buildRules(opts.Config, opts.State)
+	rules, err := buildRules(opts.Config, opts.State, opts.ProjectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +268,8 @@ func New(opts EngineOptions) (*Engine, error) {
 	return &Engine{
 		bus:          opts.Bus,
 		stateOpts:    opts.State,
+		projectDir:   opts.ProjectDir,
+		git:          git,
 		clock:        clock,
 		matcher:      matcher,
 		yolo:         opts.Yolo,
@@ -269,10 +297,11 @@ func (e *Engine) Yolo() bool {
 }
 
 // buildRules assembles the full ordered rule set for the engine.  The order
-// is: secrets denylist → persisted state allowances → default policy.  User
-// TOML-declared "[[permission.rules]]" entries would go between state and
-// defaults; this slot is reserved for a future config extension.
-func buildRules(cfg *config.Config, stateOpts state.LoadOptions) ([]Rule, error) {
+// is: secrets denylist → project-scoped allowances → persisted state
+// allowances → default policy.  User TOML-declared "[[permission.rules]]"
+// entries would go between state and defaults; this slot is reserved for a
+// future config extension.
+func buildRules(cfg *config.Config, stateOpts state.LoadOptions, projectDir string) ([]Rule, error) {
 	var rules []Rule
 
 	// 1. Secrets denylist (file.read + file.write).
@@ -283,14 +312,39 @@ func buildRules(cfg *config.Config, stateOpts state.LoadOptions) ([]Rule, error)
 		)
 	}
 
-	// 2. Persisted state allowances.
+	// 2a. Project-scoped allowances (from <projectDir>/.hygge/permissions.json).
+	if projectDir != "" {
+		projectRules, err := state.LoadProjectAllowRules(projectDir)
+		if err != nil {
+			return nil, fmt.Errorf("permission: load project allow rules: %w", err)
+		}
+		for _, r := range projectRules {
+			rules = append(rules, Rule{
+				Category: Category(r.Category),
+				Pattern:  r.Pattern,
+				Action:   ActionAllow,
+				Source:   "project-state",
+			})
+		}
+	}
+
+	// 2b. Persisted user-global state allowances.
+	// When a ProjectDir is set the session is hermetic: global file.read and
+	// file.write rules are intentionally excluded so that a poisoned global
+	// pattern (e.g. /Users/me/code/github/**) cannot bypass prompts for paths
+	// outside the current project.  Non-file categories (shell, network, agent,
+	// …) are still loaded so that pre-existing global tool approvals work.
 	st, err := state.Load(stateOpts)
 	if err != nil {
 		return nil, fmt.Errorf("permission: load state: %w", err)
 	}
 	for _, r := range st.AllowedRules {
+		cat := Category(r.Category)
+		if projectDir != "" && (cat == CategoryFileRead || cat == CategoryFileWrite) {
+			continue // file rules are project-local; ignore global ones in project sessions
+		}
 		rules = append(rules, Rule{
-			Category: Category(r.Category),
+			Category: cat,
 			Pattern:  r.Pattern,
 			Action:   ActionAllow,
 			Source:   "state",
@@ -447,7 +501,7 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 		Reason: "user reply",
 	}
 
-	// Promote file targets to a directory glob for broader coverage.
+	// Promote file and directory targets to the narrowest reusable pattern.
 	pattern := promoteTarget(req.Category, req.Target)
 
 	if decision.Action == ActionAllow && decision.Scope == ScopeAlways {
@@ -456,13 +510,30 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 			Pattern:   pattern,
 			CreatedAt: e.clock().UnixMilli(),
 		}
-		if err := state.AddAllowRule(rule, e.stateOpts); err != nil {
-			slog.Warn("permission: persist always-allow rule failed",
-				"category", req.Category,
-				"target", req.Target,
-				"pattern", pattern,
-				"err", err,
-			)
+		if e.projectDir != "" {
+			// Persist to the project-scoped .hygge/permissions.json so the
+			// rule is hermetic to this project and does not leak into the
+			// user's global state.
+			e.warnIfProjectHyggeTracked(req, pattern)
+			if err := state.AddProjectAllowRule(rule, e.projectDir); err != nil {
+				slog.Warn("permission: persist always-allow project rule failed",
+					"category", req.Category,
+					"target", req.Target,
+					"pattern", pattern,
+					"project_dir", e.projectDir,
+					"err", err,
+				)
+			}
+		} else {
+			// Fallback: no project dir configured, write to user-global state.
+			if err := state.AddAllowRule(rule, e.stateOpts); err != nil {
+				slog.Warn("permission: persist always-allow rule failed",
+					"category", req.Category,
+					"target", req.Target,
+					"pattern", pattern,
+					"err", err,
+				)
+			}
 		}
 	}
 
@@ -477,15 +548,53 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 	return decision
 }
 
+func (e *Engine) warnIfProjectHyggeTracked(req Request, pattern string) {
+	if e.projectDir == "" || e.git == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := e.git.Run(ctx, e.projectDir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return
+	}
+	_, err := e.git.Run(ctx, e.projectDir, "check-ignore", "-q", ".hygge/")
+	if err == nil {
+		return
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		slog.Warn("permission: .hygge/ is not ignored; add .hygge/ to .gitignore to keep project permissions local",
+			"category", req.Category,
+			"target", req.Target,
+			"pattern", pattern,
+			"project_dir", e.projectDir,
+		)
+		return
+	}
+	slog.Warn("permission: check .hygge gitignore failed",
+		"project_dir", e.projectDir,
+		"err", err,
+	)
+}
+
 // promoteTarget widens a specific file path to a directory glob so that
 // approving one file covers all files under the same project/directory.
 // For non-file categories, returns the target unchanged.
 //
+// For absolute paths the promotion is type-aware:
+//   - regular file  → parent directory glob: /a/b/c.txt → /a/b/**
+//   - directory     → self glob:             /a/b/c     → /a/b/c/**
+//   - unknown/error → exact target (no broadening)
+//
+// This prevents approving a sibling repo directory (e.g. /code/crush) from
+// silently widening to the parent (/code/**) and covering unrelated repos.
+//
 // Examples:
 //
-//	../crush/internal/cli/foo.go → ../crush/**
-//	/Users/me/other/proj/bar.go  → /Users/me/other/proj/**
-//	./src/main.go                → ./src/**  (but inside-PWD files auto-allow anyway)
+//	/Users/me/other/proj/bar.go  → /Users/me/other/proj/**   (regular file)
+//	/Users/me/code/crush         → /Users/me/code/crush/**   (directory)
+//	../crush/internal/cli/foo.go → ../crush/**               (relative, dotdot)
+//	./src/main.go                → ./src/**
 func promoteTarget(cat Category, target string) string {
 	if cat != CategoryFileRead && cat != CategoryFileWrite {
 		return target
@@ -494,14 +603,29 @@ func promoteTarget(cat Category, target string) string {
 		return target
 	}
 
+	if filepath.IsAbs(target) {
+		clean := filepath.Clean(target)
+		// Determine the entry type via stat so we know how far to widen.
+		fi, err := os.Stat(clean)
+		if err != nil {
+			// Target doesn't exist or is inaccessible: do not broaden to
+			// the parent directory. Return the exact target so the persisted
+			// rule is as narrow as possible.
+			return clean
+		}
+		if fi.IsDir() {
+			// Directory target: cover the directory itself, not its parent.
+			// /a/b/crush → /a/b/crush/**
+			return filepath.Join(clean, "**")
+		}
+		// Regular file (or symlink to one): cover the containing directory.
+		// /a/b/crush/main.go → /a/b/crush/**
+		return filepath.Join(filepath.Dir(clean), "**")
+	}
+
 	// For relative paths starting with "..", promote to the first
 	// directory component after the ".." prefix.
 	// ../crush/internal/cli/foo.go → ../crush/**
-	if filepath.IsAbs(target) {
-		// Absolute path: use the parent directory.
-		return filepath.Dir(target) + "/**"
-	}
-
 	// Relative path: find a sensible project root.
 	parts := splitPath(target)
 	// Count leading ".." segments.

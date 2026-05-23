@@ -3,6 +3,8 @@ package permission
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +104,7 @@ func TestSecretDenyRuleOnlyAppliesToFileCategories(t *testing.T) {
 }
 
 func TestPromoteTarget(t *testing.T) {
+	// Relative and non-file cases do not hit os.Stat so they are table-driven.
 	for _, tc := range []struct {
 		name   string
 		cat    Category
@@ -110,7 +113,6 @@ func TestPromoteTarget(t *testing.T) {
 	}{
 		{name: "shell unchanged", cat: CategoryShell, target: "go test ./...", want: "go test ./..."},
 		{name: "empty file target", cat: CategoryFileRead, target: "", want: ""},
-		{name: "absolute file", cat: CategoryFileWrite, target: "/repo/src/main.go", want: "/repo/src/**"},
 		{name: "relative dotdot project", cat: CategoryFileRead, target: "../crush/internal/cli/foo.go", want: "../crush/**"},
 		{name: "relative same project", cat: CategoryFileRead, target: "src/main.go", want: "src/**"},
 		{name: "relative current dir file", cat: CategoryFileWrite, target: "main.go", want: "./**"},
@@ -121,6 +123,60 @@ func TestPromoteTarget(t *testing.T) {
 			}
 		})
 	}
+
+	// Absolute-path cases require real filesystem entries so os.Stat works.
+	t.Run("absolute regular file", func(t *testing.T) {
+		dir := t.TempDir()
+		f, err := os.CreateTemp(dir, "main*.go")
+		if err != nil {
+			t.Fatalf("create temp file: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close temp file: %v", err)
+		}
+		want := filepath.Join(dir, "**")
+		if got := promoteTarget(CategoryFileWrite, f.Name()); got != want {
+			t.Fatalf("promoteTarget(file) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("absolute directory", func(t *testing.T) {
+		dir := t.TempDir()
+		want := filepath.Join(dir, "**")
+		if got := promoteTarget(CategoryFileRead, dir); got != want {
+			t.Fatalf("promoteTarget(dir) = %q, want %q", got, want)
+		}
+	})
+
+	// Regression for unclean absolute directory targets: avoid producing /path//**.
+	t.Run("absolute directory with trailing separator", func(t *testing.T) {
+		dir := t.TempDir()
+		want := filepath.Join(dir, "**")
+		if got := promoteTarget(CategoryFileRead, dir+string(os.PathSeparator)); got != want {
+			t.Fatalf("promoteTarget(dir/) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("root-level absolute file", func(t *testing.T) {
+		d := t.TempDir()
+		file := filepath.Join(d, "hygge-promote-root-file-test")
+		if err := os.WriteFile(file, []byte("test"), 0o600); err != nil {
+			t.Fatalf("create test file %s: %v", file, err)
+		}
+
+		want := filepath.Join(filepath.Dir(file), "**")
+		if got := promoteTarget(CategoryFileRead, file); got != want {
+			t.Fatalf("promoteTarget(root file) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("absolute unknown (non-existent)", func(t *testing.T) {
+		d := t.TempDir()
+		target := filepath.Join(d, "no", "such", "path", "crush")
+		if got := promoteTarget(CategoryFileRead, target); got != target {
+			t.Fatalf("promoteTarget(unknown) = %q, want exact target %q", got, target)
+		}
+	})
 }
 
 func TestSplitPath(t *testing.T) {
@@ -198,5 +254,75 @@ func TestStoreSessionClosedEngineNoops(t *testing.T) {
 	e.storeSession(Request{Category: CategoryShell, Target: "echo hi"}, Decision{Action: ActionAllow, Scope: ScopeSession})
 	if _, ok := e.lookupSession(Request{Category: CategoryShell, Target: "echo hi"}); ok {
 		t.Fatal("lookupSession found entry after storeSession on closed engine")
+	}
+}
+
+// TestOutsidePWD_DirAllowDoesNotMatchSiblingRepo is a regression test for the
+// over-broad file permission promotion bug.  Approving an outside-PWD directory
+// target like filepath.Join(base, "github", "repo-a") should persist as
+// filepath.Join(base, "github", "repo-a", "**"), NOT as the parent github
+// glob, so it cannot accidentally allow reads from a sibling repo.
+func TestOutsidePWD_DirAllowDoesNotMatchSiblingRepo(t *testing.T) {
+	dir := t.TempDir()
+	stateOpts := state.LoadOptions{HomeDir: dir}
+
+	base := t.TempDir()
+	approvedRepo := filepath.Join(base, "github", "repo-a")
+	siblingRepo := filepath.Join(base, "github", "repo-b")
+	otherProject := filepath.Join(base, "other", "project")
+
+	// Simulate what handleReply now persists for a directory target:
+	// promoteTarget(CategoryFileRead, approvedRepo) → filepath.Join(approvedRepo, "**")
+	// (The test uses a literal pattern to be independent of real os.Stat calls.)
+	if err := state.AddAllowRule(state.AllowRule{
+		Category: string(CategoryFileRead),
+		Pattern:  filepath.Join(approvedRepo, "**"),
+	}, stateOpts); err != nil {
+		t.Fatalf("seed allow rule: %v", err)
+	}
+
+	b := bus.New()
+	t.Cleanup(b.Close)
+	e, err := New(EngineOptions{
+		Bus:    b,
+		Config: defaultCfg(),
+		State:  stateOpts,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(e.Close)
+
+	// The approved directory pattern must allow files inside crush itself.
+	dAllowed, err := e.Ask(context.Background(), Request{
+		Category: CategoryFileRead,
+		Target:   filepath.Join(approvedRepo, "internal", "cli", "main.go"),
+		Pwd:      otherProject,
+	})
+	if err != nil {
+		t.Fatalf("Ask approved repo file: %v", err)
+	}
+	if dAllowed.Action != ActionAllow {
+		t.Errorf("approved repo file: got %v, want allow (covered by %s)", dAllowed.Action, filepath.Join(approvedRepo, "**"))
+	}
+
+	// A sibling repo must NOT be covered by the approved repo rule — it should be
+	// denied or asked, but never silently allowed via a parent glob.
+	// Default policy for outside-PWD file.read is "ask", so we expect ActionAsk
+	// to be resolved by bus.  We don't have a responder, so close the bus to get
+	// ErrBusClosed — that confirms the engine reached the ask stage, not allow.
+	b.Close()
+	_, err = e.Ask(context.Background(), Request{
+		Category: CategoryFileRead,
+		Target:   filepath.Join(siblingRepo, "AGENTS.md"),
+		Pwd:      otherProject,
+	})
+	if err == nil {
+		t.Fatal("sibling repo file: Ask succeeded (returned allow), want ask/deny — sibling must not be covered by crush rule")
+	}
+	// ErrBusClosed confirms the engine tried to ask the user (correct) rather
+	// than returning an allow from the persisted crush rule.
+	if !errors.Is(err, ErrBusClosed) {
+		t.Errorf("sibling repo file: err = %v, want ErrBusClosed (indicating ask, not pre-allowed)", err)
 	}
 }
