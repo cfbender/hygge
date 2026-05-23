@@ -364,7 +364,6 @@ type App struct {
 	pendingPerms          []components.PermissionRequest // FIFO queue
 	pendingQuestions      []components.QuestionRequest   // FIFO queue
 	questionSelectedIndex int                            // selected answer in the active question modal
-	modalToast            string                         // transient message inside the modal
 	overlays              overlayStack                   // typed topmost-first dialog routing foundation
 
 	// status state
@@ -897,10 +896,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if st, ok := a.subagents[m.SubSessionID]; ok && st.IsRunning() {
 			return a, a.subagentTick(m.SubSessionID)
 		}
-		return a, nil
-
-	case clearToastMsg:
-		a.modalToast = ""
 		return a, nil
 
 	case clearToastByID:

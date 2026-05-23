@@ -24,7 +24,6 @@ type PermissionModal struct {
 	Height  int
 	Theme   *styles.Styles
 	Request PermissionRequest
-	Toast   string // optional transient line (e.g. "edit not yet implemented")
 }
 
 // View renders the modal centered in a Width×Height box.  Caller is
@@ -85,7 +84,7 @@ func (m PermissionModal) renderBox() string {
 	b.WriteString(m.sectionLabel("Actions"))
 	b.WriteString("\n")
 	b.WriteString(m.actionRow(
-		[][2]string{{"[y]", "allow once"}, {"[Y]", "allow session"}, {"[A]", "allow always"}, {"[e]", "edit (v0.2)"}},
+		[][2]string{{"[y]", "allow once"}, {"[Y]", "allow session"}, {"[A]", "allow always"}},
 		false, contentW,
 	))
 	b.WriteString("\n")
@@ -93,11 +92,6 @@ func (m PermissionModal) renderBox() string {
 		[][2]string{{"[n]", "deny"}, {"[esc]", "deny"}},
 		true, contentW,
 	))
-
-	if m.Toast != "" {
-		b.WriteString("\n\n")
-		b.WriteString(m.warnStyle().Render(m.Toast))
-	}
 
 	return border.Render(b.String())
 }
@@ -145,11 +139,6 @@ func (m PermissionModal) bold() lipgloss.Style {
 		return lipgloss.NewStyle().Bold(true)
 	}
 	return m.Theme.Style(styles.AtomPrimary).Bold(true)
-}
-
-// warnStyle returns the warn atom style.
-func (m PermissionModal) warnStyle() lipgloss.Style {
-	return m.style(styles.AtomWarn)
 }
 
 func (m PermissionModal) style(a styles.Atom) lipgloss.Style {
