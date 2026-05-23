@@ -430,29 +430,30 @@ func TestKnownProviders(t *testing.T) {
 	}
 }
 
-// TestFantasyNativeProvider_ErrAuthWhenNoCredential confirms that
-// buildFantasyNativeProvider returns provider.ErrAuth when called with
-// empty opts and no env var set.  This preserves the bootstrap
-// auth-fallback path (errors.Is(err, provider.ErrAuth) → stubProvider)
-// that was previously guaranteed by the registry factory implementations.
-func TestFantasyNativeProvider_ErrAuthWhenNoCredential(t *testing.T) {
+// TestBuildNamedStubProvider_ErrAuthWhenNoCredential confirms that
+// buildNamedStubProvider returns provider.ErrAuth for providers with a
+// known canonical env var when neither opts["api_key"] nor the env var
+// is set.  This preserves the bootstrap auth-fallback path
+// (errors.Is(err, provider.ErrAuth) → stubProvider) for providers
+// whose env var the CLI knows about.
+func TestBuildNamedStubProvider_ErrAuthWhenNoCredential(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
 
 	for _, name := range []string{"anthropic", "openai", "openrouter"} {
-		_, err := buildFantasyNativeProvider(name, map[string]any{})
+		_, err := buildNamedStubProvider(name, map[string]any{})
 		if !errors.Is(err, provider.ErrAuth) {
 			t.Errorf("%s with no credential: want ErrAuth, got %v", name, err)
 		}
 	}
 }
 
-// TestFantasyNativeProvider_SucceedWithCredential confirms that
-// buildFantasyNativeProvider succeeds when opts["api_key"] or the env
-// var is populated (as bootstrap does after resolveProviderOptionsFor
+// TestBuildNamedStubProvider_SucceedWithCredential confirms that
+// buildNamedStubProvider succeeds when opts["api_key"] or the env var
+// is populated (as bootstrap does after resolveProviderOptionsFor
 // injects the auth-store credential).
-func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
+func TestBuildNamedStubProvider_SucceedWithCredential(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -466,7 +467,7 @@ func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
 		{"openrouter", "OPENROUTER_API_KEY"},
 	} {
 		// Via opts["api_key"].
-		p, err := buildFantasyNativeProvider(tc.name, map[string]any{"api_key": "sk-test-key"})
+		p, err := buildNamedStubProvider(tc.name, map[string]any{"api_key": "sk-test-key"})
 		if err != nil {
 			t.Errorf("%s with opts api_key: unexpected error: %v", tc.name, err)
 		}
@@ -478,7 +479,7 @@ func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
 
 		// Via env var.
 		t.Setenv(tc.envVar, "sk-env-key")
-		p2, err := buildFantasyNativeProvider(tc.name, map[string]any{})
+		p2, err := buildNamedStubProvider(tc.name, map[string]any{})
 		if err != nil {
 			t.Errorf("%s with env var: unexpected error: %v", tc.name, err)
 		}
@@ -489,20 +490,26 @@ func TestFantasyNativeProvider_SucceedWithCredential(t *testing.T) {
 	}
 }
 
-// TestFantasyNativeProvider_UnknownReturnsErrUnknownProvider confirms
-// that buildFantasyNativeProvider rejects provider names not in the
-// Fantasy-native set.
-func TestFantasyNativeProvider_UnknownReturnsErrUnknownProvider(t *testing.T) {
-	_, err := buildFantasyNativeProvider("no_such_provider_xyz", map[string]any{})
-	if !errors.Is(err, provider.ErrUnknownProvider) {
-		t.Errorf("no_such_provider_xyz: want ErrUnknownProvider, got %v", err)
+// TestBuildNamedStubProvider_UnknownReturnsStub confirms that
+// buildNamedStubProvider accepts any provider name, returning a stub
+// without error for names that have no known canonical env var.
+// Fantasy/Catwalk performs auth and capability validation at runtime.
+func TestBuildNamedStubProvider_UnknownReturnsStub(t *testing.T) {
+	p, err := buildNamedStubProvider("some_future_provider_xyz", map[string]any{})
+	if err != nil {
+		t.Fatalf("unknown provider with no env var: want nil error, got %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil provider stub")
+	}
+	if p.Name() != "some_future_provider_xyz" {
+		t.Errorf("Name() = %q, want %q", p.Name(), "some_future_provider_xyz")
 	}
 }
 
 // TestRequireAnyKey exercises the credential-check helper used by
-// buildFantasyNativeProvider.
+// buildNamedStubProvider.
 func TestRequireAnyKey(t *testing.T) {
-	// Ensure env vars are absent for the isolated cases below.
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 
