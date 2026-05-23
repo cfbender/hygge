@@ -125,7 +125,7 @@ type MCPServerStatus struct {
 // mcpBootstrapTimeout caps best-effort MCP discovery during startup. MCP tools
 // should never be able to hold the first UI frame hostage; a slow or wedged
 // server can still be diagnosed via `hygge mcp list` and fixed independently.
-const mcpBootstrapTimeout = 2 * time.Second
+const mcpBootstrapTimeout = 10 * time.Second
 
 type mcpInitResult struct {
 	client *mcp.Client
