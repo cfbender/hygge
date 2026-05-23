@@ -429,9 +429,9 @@ func TestKnownProviders(t *testing.T) {
 	}
 }
 
-// TestOpenAIRegistered confirms the openai shim is wired into the CLI via
-// the blank import in common.go.  Without this guard, removing the import
-// would silently break `hygge config set model.provider = openai`.
+// TestOpenAIRegistered confirms the openai stub is registered in the CLI
+// package via provider_init.go.  Without this guard, accidentally removing
+// the init-registration would silently break `hygge config set model.provider = openai`.
 func TestOpenAIRegistered(t *testing.T) {
 	f, err := provider.Get("openai")
 	if err != nil {
@@ -446,9 +446,8 @@ func TestOpenAIRegistered(t *testing.T) {
 }
 
 // TestOpenRouterRegistered confirms the openrouter shim is wired into the
-// CLI via the blank import in common.go.  Without this guard, removing
-// the import would silently break `hygge config set model.provider =
-// openrouter`.
+// CLI via the import in common.go.  Without this guard, removing the
+// import would silently break `hygge config set model.provider = openrouter`.
 func TestOpenRouterRegistered(t *testing.T) {
 	f, err := provider.Get("openrouter")
 	if err != nil {
