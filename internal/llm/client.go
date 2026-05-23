@@ -1,6 +1,6 @@
 // Package llm is the catwalk client wrapper and model-resolution layer.
 //
-// # Phase 1 scope
+// # Scope
 //
 // This package provides two things:
 //
@@ -10,27 +10,20 @@
 //     ETag-gated refresh from the live catwalk service.  Internally it
 //     delegates to [catalog.Catalog].
 //
-//  2. A [Resolve] helper that looks up a provider/model pair in the
-//     catalog and returns the corresponding [catalog.Entry].  Existing
-//     callers that already hold a [*catalog.Catalog] can keep using it
-//     directly; this wrapper is for new code that wants a narrower
-//     surface.
-//
-// Phase 2 adds ResolveProviderModel in provider_factory.go, which constructs
-// fantasy.LanguageModel values while the existing provider stream adapters stay
-// in place for the Phase 3 turn-loop migration.
+//  2. A [ResolveProviderModel] helper in provider_factory.go that constructs
+//     fantasy.LanguageModel values from a provider/model pair.
 //
 // # Boundaries
 //
-// This package imports [github.com/cfbender/hygge/internal/catalog] and
-// the standard library only.  It must not import internal/agent,
-// internal/store, internal/provider, or internal/cost.
+// This package may import the catalog layer, Fantasy provider adapters, and
+// narrow internal support packages needed for provider/model resolution (for
+// example auth and provider metadata).  It must not import internal/agent,
+// internal/store, or internal/cost.
 package llm
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -41,8 +34,7 @@ import (
 // catwalk embedded snapshot on construction and optionally performs a
 // live ETag-gated refresh in the background.
 //
-// Use [New] or [NewWithOptions] to construct one; the zero value is
-// not usable.
+// Use [NewWithOptions] to construct one; the zero value is not usable.
 type Client struct {
 	cat *catalog.Catalog
 }
@@ -77,16 +69,6 @@ type Options struct {
 	Now func() time.Time
 }
 
-// New constructs a production [Client] using default options.
-// It always returns a usable Client: the embedded snapshot is loaded
-// immediately so offline operation is always possible.
-//
-// Returns an error only if the embedded catwalk provider data is
-// missing or corrupt, which would be a build-time bug.
-func New() (*Client, error) {
-	return NewWithOptions(Options{})
-}
-
 // NewWithOptions constructs a [Client] with the given options.
 func NewWithOptions(opts Options) (*Client, error) {
 	loadOpts := catalog.LoadOptions{
@@ -109,13 +91,6 @@ func NewWithOptions(opts Options) (*Client, error) {
 // case-insensitive (delegated to catalog.Catalog.Lookup).
 func (c *Client) Resolve(providerID, modelID string) (catalog.Entry, bool) {
 	return c.cat.Lookup(providerID, modelID)
-}
-
-// Catalog returns the underlying [*catalog.Catalog] handle.  Useful for
-// callers that need the full catalog API (e.g. listing all models for a
-// provider).
-func (c *Client) Catalog() *catalog.Catalog {
-	return c.cat
 }
 
 // Refresh forces a live fetch and updates the in-memory and on-disk
@@ -145,18 +120,4 @@ func (c *Client) EmbeddedProviders() []string {
 		return nil
 	}
 	return c.cat.Providers()
-}
-
-// WarmLog logs the embedded-snapshot load result at Debug level.
-// Called from the CLI bootstrap to surface catalog readiness.
-func (c *Client) WarmLog() {
-	if c.cat == nil {
-		slog.Debug("llm: catalog not loaded")
-		return
-	}
-	l := c.cat.Loaded()
-	slog.Debug("llm: catalog loaded",
-		"source", l.Source,
-		"providers", l.Providers,
-		"models", l.Models)
 }
