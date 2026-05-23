@@ -46,6 +46,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -328,13 +329,22 @@ func buildRules(cfg *config.Config, stateOpts state.LoadOptions, projectDir stri
 	}
 
 	// 2b. Persisted user-global state allowances.
+	// When a ProjectDir is set the session is hermetic: global file.read and
+	// file.write rules are intentionally excluded so that a poisoned global
+	// pattern (e.g. /Users/me/code/github/**) cannot bypass prompts for paths
+	// outside the current project.  Non-file categories (shell, network, agent,
+	// …) are still loaded so that pre-existing global tool approvals work.
 	st, err := state.Load(stateOpts)
 	if err != nil {
 		return nil, fmt.Errorf("permission: load state: %w", err)
 	}
 	for _, r := range st.AllowedRules {
+		cat := Category(r.Category)
+		if projectDir != "" && (cat == CategoryFileRead || cat == CategoryFileWrite) {
+			continue // file rules are project-local; ignore global ones in project sessions
+		}
 		rules = append(rules, Rule{
-			Category: Category(r.Category),
+			Category: cat,
 			Pattern:  r.Pattern,
 			Action:   ActionAllow,
 			Source:   "state",
@@ -491,7 +501,7 @@ func (e *Engine) handleReply(req Request, reply bus.PermissionReplied) Decision 
 		Reason: "user reply",
 	}
 
-	// Promote file targets to a directory glob for broader coverage.
+	// Promote file and directory targets to the narrowest reusable pattern.
 	pattern := promoteTarget(req.Category, req.Target)
 
 	if decision.Action == ActionAllow && decision.Scope == ScopeAlways {
@@ -542,7 +552,8 @@ func (e *Engine) warnIfProjectHyggeTracked(req Request, pattern string) {
 	if e.projectDir == "" || e.git == nil {
 		return
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if _, err := e.git.Run(ctx, e.projectDir, "rev-parse", "--is-inside-work-tree"); err != nil {
 		return
 	}
@@ -570,11 +581,20 @@ func (e *Engine) warnIfProjectHyggeTracked(req Request, pattern string) {
 // approving one file covers all files under the same project/directory.
 // For non-file categories, returns the target unchanged.
 //
+// For absolute paths the promotion is type-aware:
+//   - regular file  → parent directory glob: /a/b/c.txt → /a/b/**
+//   - directory     → self glob:             /a/b/c     → /a/b/c/**
+//   - unknown/error → exact target (no broadening)
+//
+// This prevents approving a sibling repo directory (e.g. /code/crush) from
+// silently widening to the parent (/code/**) and covering unrelated repos.
+//
 // Examples:
 //
-//	../crush/internal/cli/foo.go → ../crush/**
-//	/Users/me/other/proj/bar.go  → /Users/me/other/proj/**
-//	./src/main.go                → ./src/**  (but inside-PWD files auto-allow anyway)
+//	/Users/me/other/proj/bar.go  → /Users/me/other/proj/**   (regular file)
+//	/Users/me/code/crush         → /Users/me/code/crush/**   (directory)
+//	../crush/internal/cli/foo.go → ../crush/**               (relative, dotdot)
+//	./src/main.go                → ./src/**
 func promoteTarget(cat Category, target string) string {
 	if cat != CategoryFileRead && cat != CategoryFileWrite {
 		return target
@@ -583,14 +603,29 @@ func promoteTarget(cat Category, target string) string {
 		return target
 	}
 
+	if filepath.IsAbs(target) {
+		clean := filepath.Clean(target)
+		// Determine the entry type via stat so we know how far to widen.
+		fi, err := os.Stat(clean)
+		if err != nil {
+			// Target doesn't exist or is inaccessible: do not broaden to
+			// the parent directory. Return the exact target so the persisted
+			// rule is as narrow as possible.
+			return clean
+		}
+		if fi.IsDir() {
+			// Directory target: cover the directory itself, not its parent.
+			// /a/b/crush → /a/b/crush/**
+			return filepath.Join(clean, "**")
+		}
+		// Regular file (or symlink to one): cover the containing directory.
+		// /a/b/crush/main.go → /a/b/crush/**
+		return filepath.Join(filepath.Dir(clean), "**")
+	}
+
 	// For relative paths starting with "..", promote to the first
 	// directory component after the ".." prefix.
 	// ../crush/internal/cli/foo.go → ../crush/**
-	if filepath.IsAbs(target) {
-		// Absolute path: use the parent directory.
-		return filepath.Dir(target) + "/**"
-	}
-
 	// Relative path: find a sensible project root.
 	parts := splitPath(target)
 	// Count leading ".." segments.

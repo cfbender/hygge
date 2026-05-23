@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,15 @@ func TestAlwaysAllow_WithProjectDir_WritesToProjectFile(t *testing.T) {
 	homeDir := t.TempDir()
 	projectDir := t.TempDir()
 	stateOpts := state.LoadOptions{HomeDir: homeDir}
+
+	// Create a real source file so os.Stat in promoteTarget can confirm it is a
+	// regular file and promote to the parent directory glob.
+	srcDir := t.TempDir()
+	mainFile := filepath.Join(srcDir, "main.go")
+	if err := os.WriteFile(mainFile, []byte("package main"), 0o644); err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	wantPattern := filepath.Join(srcDir, "**")
 
 	e, err := New(EngineOptions{
 		Bus:        b,
@@ -44,8 +54,8 @@ func TestAlwaysAllow_WithProjectDir_WritesToProjectFile(t *testing.T) {
 
 	d, err := e.Ask(context.Background(), Request{
 		Category: CategoryFileWrite,
-		Target:   "/repo/src/main.go",
-		Pwd:      "/repo",
+		Target:   mainFile,
+		Pwd:      srcDir,
 	})
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
@@ -63,8 +73,8 @@ func TestAlwaysAllow_WithProjectDir_WritesToProjectFile(t *testing.T) {
 		t.Fatalf("project rules: got %d, want 1", len(projectRules))
 	}
 	r := projectRules[0]
-	if r.Category != "file.write" || r.Pattern != "/repo/src/**" {
-		t.Errorf("project rule: got %+v, want file.write @ /repo/src/**", r)
+	if r.Category != "file.write" || r.Pattern != wantPattern {
+		t.Errorf("project rule: got %+v, want file.write @ %s", r, wantPattern)
 	}
 	if r.CreatedAt == 0 {
 		t.Error("project rule CreatedAt should be populated")
@@ -86,6 +96,13 @@ func TestAlwaysAllow_NoProjectDir_WritesToGlobalState(t *testing.T) {
 	homeDir := t.TempDir()
 	stateOpts := state.LoadOptions{HomeDir: homeDir}
 
+	srcDir := t.TempDir()
+	mainFile := filepath.Join(srcDir, "main.go")
+	if err := os.WriteFile(mainFile, []byte("package main"), 0o644); err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	wantPattern := filepath.Join(srcDir, "**")
+
 	e, err := New(EngineOptions{
 		Bus:    b,
 		Config: defaultCfg(),
@@ -105,8 +122,8 @@ func TestAlwaysAllow_NoProjectDir_WritesToGlobalState(t *testing.T) {
 
 	_, err = e.Ask(context.Background(), Request{
 		Category: CategoryFileWrite,
-		Target:   "/repo/src/main.go",
-		Pwd:      "/repo",
+		Target:   mainFile,
+		Pwd:      srcDir,
 	})
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
@@ -118,6 +135,9 @@ func TestAlwaysAllow_NoProjectDir_WritesToGlobalState(t *testing.T) {
 	}
 	if len(s.AllowedRules) != 1 {
 		t.Fatalf("global state AllowedRules: got %d, want 1", len(s.AllowedRules))
+	}
+	if got := s.AllowedRules[0].Pattern; got != wantPattern {
+		t.Fatalf("global state pattern = %q, want %q", got, wantPattern)
 	}
 }
 
@@ -241,6 +261,16 @@ func TestAlwaysAllow_WithProjectDir_NoBusPromptOnRepeat(t *testing.T) {
 	projectDir := t.TempDir()
 	stateOpts := state.LoadOptions{HomeDir: homeDir}
 
+	// Create a real source file so os.Stat in promoteTarget can promote to the
+	// parent directory glob and cover the sibling via the session cache.
+	srcDir := t.TempDir()
+	mainFile := filepath.Join(srcDir, "main.go")
+	if err := os.WriteFile(mainFile, []byte("package main"), 0o644); err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	// siblingFile does not need to exist on disk; it just needs to be in the same dir.
+	siblingFile := filepath.Join(srcDir, "other.go")
+
 	e, err := New(EngineOptions{
 		Bus:        b,
 		Config:     defaultCfg(),
@@ -260,21 +290,21 @@ func TestAlwaysAllow_WithProjectDir_NoBusPromptOnRepeat(t *testing.T) {
 	})
 	defer stop()
 
-	req := Request{
-		Category: CategoryFileWrite,
-		Target:   "/repo/src/main.go",
-		Pwd:      "/repo",
-	}
-
 	// First call: prompts the user.
-	if _, err := e.Ask(context.Background(), req); err != nil {
+	if _, err := e.Ask(context.Background(), Request{
+		Category: CategoryFileWrite,
+		Target:   mainFile,
+		Pwd:      srcDir,
+	}); err != nil {
 		t.Fatalf("first Ask: %v", err)
 	}
 
-	// Second call: session cache should serve it.
-	sibling := req
-	sibling.Target = "/repo/src/other.go"
-	d, err := e.Ask(context.Background(), sibling)
+	// Second call: session cache should serve it (sibling is covered by dir glob).
+	d, err := e.Ask(context.Background(), Request{
+		Category: CategoryFileWrite,
+		Target:   siblingFile,
+		Pwd:      srcDir,
+	})
 	if err != nil {
 		t.Fatalf("second Ask: %v", err)
 	}
@@ -283,5 +313,225 @@ func TestAlwaysAllow_WithProjectDir_NoBusPromptOnRepeat(t *testing.T) {
 	}
 	if got := asks.Load(); got != 1 {
 		t.Errorf("bus asks: got %d, want 1 (session cache should serve sibling)", got)
+	}
+}
+
+// --- Project session ignores global file.* allow rules ----------------------
+
+// TestProjectSession_GlobalFileRuleIgnored verifies that when ProjectDir is
+// set, a user-global file.read allow rule for a parent directory does NOT
+// silently auto-allow reads of files outside the project's PWD.
+//
+// Success criterion 1 from the spec.
+func TestProjectSession_GlobalFileRuleIgnored(t *testing.T) {
+	homeDir := t.TempDir()
+	projectDir := t.TempDir()
+	stateOpts := state.LoadOptions{HomeDir: homeDir}
+	base := t.TempDir()
+	githubDir := filepath.Join(base, "github")
+	outsideRepoFile := filepath.Join(githubDir, "repo-a", "AGENTS.md")
+	projectPwdDir := filepath.Join(githubDir, "repo-b")
+
+	// Seed a broad global file.read rule that would otherwise auto-allow the target.
+	if err := state.AddAllowRule(state.AllowRule{
+		Category: string(CategoryFileRead),
+		Pattern:  filepath.Join(githubDir, "**"),
+	}, stateOpts); err != nil {
+		t.Fatalf("seed global allow rule: %v", err)
+	}
+
+	b := bus.New()
+
+	e, err := New(EngineOptions{
+		Bus:        b,
+		Config:     defaultCfg(),
+		State:      stateOpts,
+		ProjectDir: projectDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(e.Close)
+
+	// Close the bus so that any "ask" resolves immediately as ErrBusClosed —
+	// that confirms the engine did NOT auto-allow via the global rule.
+	b.Close()
+
+	_, err = e.Ask(context.Background(), Request{
+		Category: CategoryFileRead,
+		Target:   outsideRepoFile,
+		Pwd:      projectPwdDir,
+	})
+	// We expect ErrBusClosed (engine tried to ask the user) — NOT nil (allow).
+	if err == nil {
+		t.Fatal("Ask returned allow; global file.* rule must not apply in project sessions")
+	}
+	if !errors.Is(err, ErrBusClosed) {
+		t.Errorf("err = %v, want ErrBusClosed (indicates ask stage was reached)", err)
+	}
+}
+
+// TestProjectSession_GlobalNonFileRuleHonored verifies that non-file global
+// rules (e.g. shell) still apply in project sessions.
+//
+// Success criterion 4 from the spec.
+func TestProjectSession_GlobalNonFileRuleHonored(t *testing.T) {
+	homeDir := t.TempDir()
+	projectDir := t.TempDir()
+	stateOpts := state.LoadOptions{HomeDir: homeDir}
+
+	// Seed a global shell allow rule.
+	if err := state.AddAllowRule(state.AllowRule{
+		Category: string(CategoryShell),
+		Pattern:  "go test ./...",
+	}, stateOpts); err != nil {
+		t.Fatalf("seed global shell rule: %v", err)
+	}
+
+	b := bus.New()
+	t.Cleanup(b.Close)
+
+	e, err := New(EngineOptions{
+		Bus:        b,
+		Config:     defaultCfg(),
+		State:      stateOpts,
+		ProjectDir: projectDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(e.Close)
+
+	d, err := e.Ask(context.Background(), Request{
+		Category: CategoryShell,
+		Target:   "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if d.Action != ActionAllow {
+		t.Errorf("shell action = %v, want allow (global shell rule should still apply)", d.Action)
+	}
+	if d.Reason != "rule: state" {
+		t.Errorf("Reason = %q, want rule: state (global shell rule source)", d.Reason)
+	}
+}
+
+// TestNonProjectSession_GlobalFileRuleHonored verifies that when ProjectDir is
+// empty, global file.read rules still apply as before.
+//
+// Success criterion 3 from the spec.
+func TestNonProjectSession_GlobalFileRuleHonored(t *testing.T) {
+	homeDir := t.TempDir()
+	stateOpts := state.LoadOptions{HomeDir: homeDir}
+	base := t.TempDir()
+	githubDir := filepath.Join(base, "github")
+	outsideRepoFile := filepath.Join(githubDir, "repo-a", "AGENTS.md")
+	projectPwdDir := filepath.Join(githubDir, "repo-b")
+
+	if err := state.AddAllowRule(state.AllowRule{
+		Category: string(CategoryFileRead),
+		Pattern:  filepath.Join(githubDir, "**"),
+	}, stateOpts); err != nil {
+		t.Fatalf("seed global file rule: %v", err)
+	}
+
+	b := bus.New()
+	t.Cleanup(b.Close)
+
+	e, err := New(EngineOptions{
+		Bus:    b,
+		Config: defaultCfg(),
+		State:  stateOpts,
+		// ProjectDir intentionally empty.
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(e.Close)
+
+	d, err := e.Ask(context.Background(), Request{
+		Category: CategoryFileRead,
+		Target:   outsideRepoFile,
+		Pwd:      projectPwdDir,
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if d.Action != ActionAllow {
+		t.Errorf("action = %v, want allow (global file rule must work when ProjectDir is empty)", d.Action)
+	}
+}
+
+// TestProjectSession_ProjectFileRuleHonored verifies that project-scoped file
+// rules (in .hygge/permissions.json) still apply even when global file rules
+// are ignored.
+//
+// Success criterion 2 from the spec.
+func TestProjectSession_ProjectFileRuleHonored(t *testing.T) {
+	homeDir := t.TempDir()
+	projectDir := t.TempDir()
+	stateOpts := state.LoadOptions{HomeDir: homeDir}
+	base := t.TempDir()
+	globalDir := filepath.Join(base, "global")
+	projectSrcDir := filepath.Join(base, "project-src")
+
+	// Seed a broad global file.read rule — it should be ignored.
+	if err := state.AddAllowRule(state.AllowRule{
+		Category: string(CategoryFileRead),
+		Pattern:  filepath.Join(globalDir, "**"),
+	}, stateOpts); err != nil {
+		t.Fatalf("seed global rule: %v", err)
+	}
+	// Seed a project-scoped rule for a different pattern.
+	if err := state.AddProjectAllowRule(state.AllowRule{
+		Category: string(CategoryFileRead),
+		Pattern:  filepath.Join(projectSrcDir, "**"),
+	}, projectDir); err != nil {
+		t.Fatalf("seed project rule: %v", err)
+	}
+
+	b := bus.New()
+	t.Cleanup(b.Close)
+
+	e, err := New(EngineOptions{
+		Bus:        b,
+		Config:     defaultCfg(),
+		State:      stateOpts,
+		ProjectDir: projectDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(e.Close)
+
+	// Project rule must allow its target.
+	d, err := e.Ask(context.Background(), Request{
+		Category: CategoryFileRead,
+		Target:   filepath.Join(projectSrcDir, "main.go"),
+		Pwd:      projectDir,
+	})
+	if err != nil {
+		t.Fatalf("Ask project target: %v", err)
+	}
+	if d.Action != ActionAllow {
+		t.Errorf("project target action = %v, want allow", d.Action)
+	}
+	if !strings.Contains(d.Reason, "project-state") {
+		t.Errorf("Reason = %q, want mention of project-state", d.Reason)
+	}
+
+	// Global file rule must NOT apply.
+	b.Close()
+	_, err = e.Ask(context.Background(), Request{
+		Category: CategoryFileRead,
+		Target:   filepath.Join(globalDir, "secret.go"),
+		Pwd:      projectDir,
+	})
+	if err == nil {
+		t.Fatal("global file rule was honoured in project session; expected ask/deny")
+	}
+	if !errors.Is(err, ErrBusClosed) {
+		t.Errorf("err = %v, want ErrBusClosed", err)
 	}
 }
