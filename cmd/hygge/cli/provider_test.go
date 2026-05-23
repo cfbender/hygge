@@ -532,5 +532,3 @@ func TestRequireAnyKey(t *testing.T) {
 		t.Errorf("env var set: want nil, got %v", err)
 	}
 }
-
-
