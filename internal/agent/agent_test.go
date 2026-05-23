@@ -2495,3 +2495,113 @@ func TestSteerDuringToolExecutionReachesNextFantasyStep(t *testing.T) {
 		t.Fatalf("steering prompt role = %s, want user", got)
 	}
 }
+
+// --- Runtime small-model wiring tests ----------------------------------------
+
+// TestRuntimeUsesExplicitTitleModelForGenerateTitle verifies that when
+// TitleModel is set explicitly in RuntimeOptions, GenerateTitle uses it and
+// NOT the main model.  This is the core HYGGE-6 contract: small_model /
+// small_provider reaches the title generation path.
+func TestRuntimeUsesExplicitTitleModelForGenerateTitle(t *testing.T) {
+	mainModel := &fakeFantasyModel{provider: "test", model: "large", text: "SHOULD NOT APPEAR"}
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Small model title"}
+
+	rt := NewRuntime(RuntimeOptions{
+		Model:      mainModel,
+		TitleModel: titleModel,
+	})
+
+	got, _, err := rt.GenerateTitle(t.Context(), "what should the title be?", 32)
+	if err != nil {
+		t.Fatalf("GenerateTitle: %v", err)
+	}
+	if got != "Small model title" {
+		t.Fatalf("GenerateTitle = %q, want %q", got, "Small model title")
+	}
+	if mainModel.calls.Load() != 0 {
+		t.Fatalf("main model was called %d times; want 0 (title model should be used instead)", mainModel.calls.Load())
+	}
+	if titleModel.calls.Load() != 1 {
+		t.Fatalf("title model calls = %d, want 1", titleModel.calls.Load())
+	}
+}
+
+// TestRuntimeFallsBackToMainModelWhenNoTitleModel verifies that when
+// TitleModel is absent (nil), GenerateTitle falls back to the main model.
+// This preserves the existing behaviour when small_model is not configured.
+func TestRuntimeFallsBackToMainModelWhenNoTitleModel(t *testing.T) {
+	mainModel := &fakeFantasyModel{provider: "test", model: "large", text: "Main model title"}
+
+	rt := NewRuntime(RuntimeOptions{
+		Model:      mainModel,
+		TitleModel: nil, // no small model configured
+	})
+
+	got, _, err := rt.GenerateTitle(t.Context(), "what should the title be?", 32)
+	if err != nil {
+		t.Fatalf("GenerateTitle: %v", err)
+	}
+	if got != "Main model title" {
+		t.Fatalf("GenerateTitle = %q, want %q", got, "Main model title")
+	}
+	if mainModel.calls.Load() != 1 {
+		t.Fatalf("main model calls = %d, want 1 (should fall back when no title model)", mainModel.calls.Load())
+	}
+}
+
+// TestRuntimeSetModelDoesNotOverrideExplicitTitleModel verifies that when a
+// TitleModel was supplied at construction (titleModelExplicit=true), calling
+// SetModel on the runtime does not replace it.  This prevents a model hot-swap
+// from silently reverting the small_model configuration.
+func TestRuntimeSetModelDoesNotOverrideExplicitTitleModel(t *testing.T) {
+	mainModel := &fakeFantasyModel{provider: "test", model: "large", text: "unused"}
+	titleModel := &fakeFantasyModel{provider: "test", model: "small", text: "Small model title"}
+	newMainModel := &fakeFantasyModel{provider: "test", model: "large-v2", text: "Large v2"}
+
+	rt := NewRuntime(RuntimeOptions{
+		Model:      mainModel,
+		TitleModel: titleModel,
+	})
+
+	// Hot-swap the main model (simulates a mode switch).
+	rt.SetModel(newMainModel)
+
+	// GenerateTitle must still use the explicit title model.
+	got, _, err := rt.GenerateTitle(t.Context(), "prompt", 32)
+	if err != nil {
+		t.Fatalf("GenerateTitle after SetModel: %v", err)
+	}
+	if got != "Small model title" {
+		t.Fatalf("GenerateTitle = %q, want %q (explicit title model should be preserved)", got, "Small model title")
+	}
+	if newMainModel.calls.Load() != 0 {
+		t.Fatalf("new main model called %d times after SetModel; title model should still be in use", newMainModel.calls.Load())
+	}
+}
+
+// TestRuntimeSetModelUpdatesImplicitTitleModel verifies that when no explicit
+// TitleModel was configured (titleModelExplicit=false), SetModel replaces
+// both the main model AND the title model.  This is the correct behaviour
+// when small_model is absent: the title model tracks the main model.
+func TestRuntimeSetModelUpdatesImplicitTitleModel(t *testing.T) {
+	mainModel := &fakeFantasyModel{provider: "test", model: "large", text: "old"}
+	newMainModel := &fakeFantasyModel{provider: "test", model: "large-v2", text: "New main model title"}
+
+	rt := NewRuntime(RuntimeOptions{
+		Model:      mainModel,
+		TitleModel: nil, // implicit: tracks main model
+	})
+
+	rt.SetModel(newMainModel)
+
+	got, _, err := rt.GenerateTitle(t.Context(), "prompt", 32)
+	if err != nil {
+		t.Fatalf("GenerateTitle after SetModel: %v", err)
+	}
+	if got != "New main model title" {
+		t.Fatalf("GenerateTitle = %q, want %q (implicit title model should follow SetModel)", got, "New main model title")
+	}
+	if mainModel.calls.Load() != 0 {
+		t.Fatalf("old main model called %d times; should have been replaced by SetModel", mainModel.calls.Load())
+	}
+}
