@@ -1535,7 +1535,6 @@ func maskKey(s string) string {
 	return s[:3] + "***" + s[len(s)-4:]
 }
 
-
 // envLookupWithXDG returns an env-lookup function that overrides the XDG
 // vars to the values we resolved (so config.Load sees our hermetic paths
 // in tests) and falls back to the real os environment for everything
