@@ -49,19 +49,31 @@ func TestRuntimeBuildsFantasyToolsFromRegistry(t *testing.T) {
 }
 
 func TestFantasyToolSchemaRequiredIsNeverNil(t *testing.T) {
-	params, required := fantasyToolSchema(map[string]any{
-		"type":       "object",
-		"properties": map[string]any{},
-		"required":   nil,
-	})
-	if params == nil {
-		t.Fatal("params nil")
+	cases := []struct {
+		name string
+		raw  any
+	}{
+		{name: "nil", raw: nil},
+		{name: "typed_nil_string_slice", raw: []string(nil)},
 	}
-	if required == nil {
-		t.Fatal("required nil; provider schemas must serialize an array, not null")
-	}
-	if len(required) != 0 {
-		t.Fatalf("required = %+v, want empty", required)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			params, required := fantasyToolSchema(map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+				"required":   tc.raw,
+			})
+			if params == nil {
+				t.Fatal("params nil")
+			}
+			if required == nil {
+				t.Fatal("required nil; provider schemas must serialize an array, not null")
+			}
+			if len(required) != 0 {
+				t.Fatalf("required = %+v, want empty", required)
+			}
+		})
 	}
 }
 

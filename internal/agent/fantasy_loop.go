@@ -63,7 +63,7 @@ func fantasyToolSchema(schema map[string]any) (map[string]any, []string) {
 func requiredStrings(raw any) []string {
 	switch v := raw.(type) {
 	case []string:
-		return append([]string(nil), v...)
+		return append([]string{}, v...)
 	case []any:
 		out := make([]string, 0, len(v))
 		for _, item := range v {
