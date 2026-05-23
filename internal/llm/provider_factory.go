@@ -61,7 +61,7 @@ func ResolveProviderModelWith(ctx context.Context, providerID, modelID string, o
 		return ProviderResolution{}, fmt.Errorf("llm: model id is required")
 	}
 
-	apiKey, err := resolveAPIKey(providerID, opts)
+	apiKey, err := resolveAPIKey(providerID, opts, cat)
 	if err != nil {
 		return ProviderResolution{}, err
 	}
@@ -69,7 +69,7 @@ func ResolveProviderModelWith(ctx context.Context, providerID, modelID string, o
 		return ProviderResolution{}, fmt.Errorf("%w: missing api_key for provider %q", provider.ErrAuth, providerID)
 	}
 
-	fp, err := newFantasyProvider(providerID, apiKey, opts, buildOpts)
+	fp, err := newFantasyProvider(providerID, apiKey, opts, buildOpts, cat)
 	if err != nil {
 		return ProviderResolution{}, err
 	}
@@ -85,7 +85,7 @@ func ResolveProviderModelWith(ctx context.Context, providerID, modelID string, o
 	}, nil
 }
 
-func newFantasyProvider(providerID, apiKey string, opts map[string]any, buildOpts ProviderBuildOptions) (fantasy.Provider, error) {
+func newFantasyProvider(providerID, apiKey string, opts map[string]any, buildOpts ProviderBuildOptions, cat *catalog.Catalog) (fantasy.Provider, error) {
 	baseURL := stringOpt(opts, "base_url")
 	headers := headersOpt(opts)
 	providerID = strings.ToLower(strings.TrimSpace(providerID))
@@ -179,6 +179,33 @@ func newFantasyProvider(providerID, apiKey string, opts map[string]any, buildOpt
 		return fopenrouter.New(fopts...)
 	default:
 		if baseURL == "" {
+			// Try to find the provider's API endpoint from the catalog.
+			// This enables openai-compat Catwalk providers (e.g. opencode-go)
+			// to work without the user supplying a base_url explicitly.
+			//
+			// Resolution order:
+			//   1. Runtime catalog (may be nil or may lack ProvidersMeta for
+			//      old disk snapshots).
+			//   2. Embedded Catwalk data — always present, no network required.
+			pm, pmOK := catalog.ProviderMeta{}, false
+			if cat != nil {
+				pm, pmOK = cat.LookupProvider(providerID)
+			}
+			if !pmOK {
+				pm, pmOK = catalog.LookupProviderEmbedded(providerID)
+			}
+			if pmOK && pm.APIEndpoint != "" {
+				baseURL = pm.APIEndpoint
+				// Merge provider-level default_headers into the request headers,
+				// not overwriting user-supplied values.
+				for k, v := range pm.DefaultHeaders {
+					if _, exists := headers[k]; !exists {
+						headers[k] = v
+					}
+				}
+			}
+		}
+		if baseURL == "" {
 			return nil, fmt.Errorf("llm: unsupported provider %q (base_url required for compat provider)", providerID)
 		}
 		return fopenaicompat.New(
@@ -206,7 +233,7 @@ func modelMetadata(providerID, modelID string, cat *catalog.Catalog) provider.Mo
 	return provider.Model{Name: modelID}
 }
 
-func resolveAPIKey(providerID string, opts map[string]any) (string, error) {
+func resolveAPIKey(providerID string, opts map[string]any, cat *catalog.Catalog) (string, error) {
 	if v, ok := opts["api_key"]; ok {
 		s, _ := v.(string)
 		s = strings.TrimSpace(s)
@@ -231,6 +258,32 @@ func resolveAPIKey(providerID string, opts map[string]any) (string, error) {
 	if envName := defaultAPIKeyEnv(providerID); envName != "" {
 		if ev := os.Getenv(envName); ev != "" {
 			return ev, nil
+		}
+	}
+	// Fall back to the catalog's APIKeyRef for this provider.
+	// Only used when there is no hardcoded env mapping for the provider.
+	//
+	// Resolution order:
+	//   1. Runtime catalog (may be nil or lack ProvidersMeta for old snapshots).
+	//   2. Embedded Catwalk data — always present, no network required.
+	apiKeyRef := ""
+	if cat != nil {
+		if pm, ok := cat.LookupProvider(providerID); ok && pm.APIKeyRef != "" {
+			apiKeyRef = pm.APIKeyRef
+		}
+	}
+	if apiKeyRef == "" {
+		if pm, ok := catalog.LookupProviderEmbedded(providerID); ok && pm.APIKeyRef != "" {
+			apiKeyRef = pm.APIKeyRef
+		}
+	}
+	if apiKeyRef != "" {
+		if after, ok0 := strings.CutPrefix(apiKeyRef, "$"); ok0 {
+			if after != "" {
+				if ev := os.Getenv(after); ev != "" {
+					return ev, nil
+				}
+			}
 		}
 	}
 	return "", nil

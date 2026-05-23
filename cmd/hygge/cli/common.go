@@ -41,8 +41,6 @@ import (
 	"github.com/cfbender/hygge/internal/permission"
 	"github.com/cfbender/hygge/internal/plugin"
 	"github.com/cfbender/hygge/internal/provider"
-	anthropicShim "github.com/cfbender/hygge/internal/provider/anthropic"
-	openaiShim "github.com/cfbender/hygge/internal/provider/openai"
 	openrouterShim "github.com/cfbender/hygge/internal/provider/openrouter"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/skill"
@@ -553,8 +551,6 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// Models() lists come from the live snapshot rather than the
 	// hardcoded fallbacks.  Passing nil is fine (tests sometimes
 	// deliberately do this); the provider shims tolerate it.
-	anthropicShim.SetCatalog(catSrc)
-	openaiShim.SetCatalog(catSrc)
 	openrouterShim.SetCatalog(catSrc)
 	var fantasyResolved llm.ProviderResolution
 	if opts.FantasyModel != nil {
@@ -611,7 +607,11 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		thm = styles.DefaultTheme()
 	}
 
-	contextWindow := lookupContextWindow(ctx, prv, cfg.Model.Name)
+	// Context window is sourced from the Catwalk catalog via the fantasy
+	// resolution metadata.  For non-fantasy paths (DryRun, stubProvider,
+	// test injections) the value is 0 — the agent treats 0 as "unknown"
+	// and skips PctUsed math.
+	contextWindow := fantasyResolved.Metadata.ContextWindow
 	memoryStore := memory.NewFileStore(memory.FileStoreOptions{ProjectDir: opts.Pwd, HomeDir: opts.HomeDir, XDGConfigHome: xdgConfig, Now: opts.Now})
 
 	// Phase: skills load
@@ -1210,10 +1210,56 @@ func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, 
 	}
 }
 
+// buildNamedStubProvider returns a namedStub for any provider name.
+// Fantasy/Catwalk handles all actual LLM calls; the CLI only needs to
+// carry provider identity (Name()) and enforce auth semantics for
+// providers with a known canonical env var.
+//
+// Auth rules:
+//   - If providerEnvVar returns a non-empty env var, requireAnyKey is
+//     called: ErrAuth is returned when neither opts["api_key"] nor the
+//     env var is set.  This preserves the bootstrap auth-fallback path
+//     (errors.Is(err, provider.ErrAuth) → stubProvider) for providers
+//     whose canonical env var the CLI already knows.
+//   - For providers with no known env var, no auth check is performed —
+//     Fantasy/Catwalk performs validation at runtime during model
+//     resolution.
+func buildNamedStubProvider(name string, opts map[string]any) (provider.Provider, error) {
+	if envVar := providerEnvVar(name); envVar != "" {
+		if err := requireAnyKey(opts, envVar); err != nil {
+			return nil, err
+		}
+	}
+	return namedStub{name: name}, nil
+}
+
+// lookupOrStubProvider consults the global provider registry for name.
+// When the provider is registered its factory is called with opts and
+// the result is returned.  When the provider is unknown it falls back
+// to buildNamedStubProvider so Fantasy/Catwalk can resolve it at
+// runtime.  Any error other than ErrUnknownProvider is returned as-is.
+func lookupOrStubProvider(name string, opts map[string]any) (provider.Provider, error) {
+	f, err := provider.Get(name)
+	if err == nil {
+		prv, err := f(opts)
+		if err != nil {
+			return nil, fmt.Errorf("cli: build provider %q: %w", name, err)
+		}
+		return prv, nil
+	}
+	if !errors.Is(err, provider.ErrUnknownProvider) {
+		return nil, fmt.Errorf("cli: lookup provider %q: %w", name, err)
+	}
+	return buildNamedStubProvider(name, opts)
+}
+
 // buildProvider returns the resolved Provider, preferring a caller-supplied
 // factory over the global provider registry.  modelOpts is the
 // caller-merged options map (config + injected credentials); the
 // adapter is opaque to its origin.
+//
+// When no factory is injected, lookupOrStubProvider handles the registry
+// lookup and namedStub fallback.
 func buildProvider(factory func(opts map[string]any) (provider.Provider, error), cfg *config.Config, modelOpts map[string]any) (provider.Provider, error) {
 	if factory != nil {
 		prv, err := factory(modelOpts)
@@ -1222,11 +1268,7 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 		}
 		return prv, nil
 	}
-	f, err := provider.Get(cfg.Model.Provider)
-	if err != nil {
-		return nil, fmt.Errorf("cli: lookup provider %q: %w", cfg.Model.Provider, err)
-	}
-	prv, err := f(modelOpts)
+	prv, err := lookupOrStubProvider(cfg.Model.Provider, modelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
 	}
@@ -1241,11 +1283,7 @@ func buildProviderForName(providerName string, factory func(opts map[string]any)
 		}
 		return prv, nil
 	}
-	f, err := provider.Get(providerName)
-	if err != nil {
-		return nil, fmt.Errorf("cli: lookup provider %q: %w", providerName, err)
-	}
-	prv, err := f(modelOpts)
+	prv, err := lookupOrStubProvider(providerName, modelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
@@ -1373,8 +1411,8 @@ func resolveProviderOptionsForWithAuth(providerName string, cfg *config.Config, 
 // re-used for credential resolution so override providers inherit
 // the same auth-store + env-var precedence as the parent.
 //
-// Returns provider.ErrUnknownProvider (wrapped) when no factory has
-// been registered under name, or the factory's own error otherwise.
+// lookupOrStubProvider handles the registry lookup and namedStub
+// fallback for any provider not found in the global registry.
 func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.LoadOptions) (provider.Provider, error) {
 	if providerName == "" {
 		return nil, fmt.Errorf("cli: buildProviderFor: empty provider name")
@@ -1383,11 +1421,7 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 	if err != nil {
 		return nil, err
 	}
-	factory, err := provider.Get(providerName)
-	if err != nil {
-		return nil, fmt.Errorf("cli: lookup provider %q: %w", providerName, err)
-	}
-	prv, err := factory(opts)
+	prv, err := lookupOrStubProvider(providerName, opts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
@@ -1535,27 +1569,6 @@ func maskKey(s string) string {
 	return s[:3] + "***" + s[len(s)-4:]
 }
 
-// lookupContextWindow asks the provider for its model list and finds the
-// configured model's window size.  Returns 0 when the provider cannot
-// answer (offline, transient error) — the agent treats 0 as "unknown" and
-// skips PctUsed math.
-func lookupContextWindow(ctx context.Context, prv provider.Provider, modelName string) int64 {
-	if prv == nil {
-		return 0
-	}
-	models, err := prv.ListModels(ctx)
-	if err != nil {
-		slog.Warn("cli: ListModels failed; context window will be 0", "err", err)
-		return 0
-	}
-	for _, m := range models {
-		if m.Name == modelName {
-			return m.ContextWindow
-		}
-	}
-	return 0
-}
-
 // envLookupWithXDG returns an env-lookup function that overrides the XDG
 // vars to the values we resolved (so config.Load sees our hermetic paths
 // in tests) and falls back to the real os environment for everything
@@ -1646,6 +1659,40 @@ func (stubProvider) Stream(_ context.Context, _ provider.Request) (<-chan provid
 func (stubProvider) CountTokens(_ context.Context, _ provider.Request) (int64, error) { return 0, nil }
 func (stubProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 	return nil, nil
+}
+
+// namedStub is a no-network provider.Provider that carries a provider
+// name and satisfies the interface.  Fantasy/Catwalk uses the name for
+// model resolution and performs all actual LLM calls; the stub is never
+// expected to handle streaming itself at runtime.
+type namedStub struct{ name string }
+
+func (n namedStub) Name() string { return n.name }
+func (n namedStub) Stream(_ context.Context, _ provider.Request) (<-chan provider.Event, error) {
+	return nil, fmt.Errorf("provider %q: direct Stream call on stub provider (Fantasy/Catwalk should handle this)", n.name)
+}
+func (n namedStub) CountTokens(_ context.Context, _ provider.Request) (int64, error) {
+	return 0, fmt.Errorf("provider %q: direct CountTokens call on stub provider (Fantasy/Catwalk should handle this)", n.name)
+}
+func (n namedStub) ListModels(_ context.Context) ([]provider.Model, error) {
+	return nil, fmt.Errorf("provider %q: direct ListModels call on stub provider (Fantasy/Catwalk should handle this)", n.name)
+}
+
+// requireAnyKey returns provider.ErrAuth (wrapped) when neither
+// opts["api_key"] nor the canonical environment variable envVar contains
+// a non-empty credential.  It is intentionally lenient: any non-empty
+// value satisfies the check because the caller (Fantasy) validates the
+// key's correctness when it actually makes the request.
+func requireAnyKey(opts map[string]any, envVar string) error {
+	if v, ok := opts["api_key"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return nil
+		}
+	}
+	if os.Getenv(envVar) != "" {
+		return nil
+	}
+	return fmt.Errorf("%w: no credential found; set %s or run `hygge provider auth`", provider.ErrAuth, envVar)
 }
 
 // shortID returns the leading 8 chars of id, or id itself if shorter.

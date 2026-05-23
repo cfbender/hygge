@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -429,35 +430,112 @@ func TestKnownProviders(t *testing.T) {
 	}
 }
 
-// TestOpenAIRegistered confirms the openai shim is wired into the CLI via
-// the blank import in common.go.  Without this guard, removing the import
-// would silently break `hygge config set model.provider = openai`.
-func TestOpenAIRegistered(t *testing.T) {
-	f, err := provider.Get("openai")
-	if err != nil {
-		t.Fatalf("provider.Get(openai): %v", err)
-	}
-	if f == nil {
-		t.Fatal("factory is nil")
-	}
-	if providerEnvVar("openai") != "OPENAI_API_KEY" {
-		t.Errorf("openai env var mapping missing")
+// TestBuildNamedStubProvider_ErrAuthWhenNoCredential confirms that
+// buildNamedStubProvider returns provider.ErrAuth for providers with a
+// known canonical env var when neither opts["api_key"] nor the env var
+// is set.  This preserves the bootstrap auth-fallback path
+// (errors.Is(err, provider.ErrAuth) → stubProvider) for providers
+// whose env var the CLI knows about.
+func TestBuildNamedStubProvider_ErrAuthWhenNoCredential(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	for _, name := range []string{"anthropic", "openai", "openrouter"} {
+		_, err := buildNamedStubProvider(name, map[string]any{})
+		if !errors.Is(err, provider.ErrAuth) {
+			t.Errorf("%s with no credential: want ErrAuth, got %v", name, err)
+		}
 	}
 }
 
-// TestOpenRouterRegistered confirms the openrouter shim is wired into the
-// CLI via the blank import in common.go.  Without this guard, removing
-// the import would silently break `hygge config set model.provider =
-// openrouter`.
-func TestOpenRouterRegistered(t *testing.T) {
-	f, err := provider.Get("openrouter")
+// TestBuildNamedStubProvider_SucceedWithCredential confirms that
+// buildNamedStubProvider succeeds when opts["api_key"] or the env var
+// is populated (as bootstrap does after resolveProviderOptionsFor
+// injects the auth-store credential).
+func TestBuildNamedStubProvider_SucceedWithCredential(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	for _, tc := range []struct {
+		name   string
+		envVar string
+	}{
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"openai", "OPENAI_API_KEY"},
+		{"openrouter", "OPENROUTER_API_KEY"},
+	} {
+		// Via opts["api_key"].
+		p, err := buildNamedStubProvider(tc.name, map[string]any{"api_key": "sk-test-key"})
+		if err != nil {
+			t.Errorf("%s with opts api_key: unexpected error: %v", tc.name, err)
+		}
+		if p == nil {
+			t.Errorf("%s with opts api_key: got nil provider", tc.name)
+		} else if p.Name() != tc.name {
+			t.Errorf("%s: Name() = %q, want %q", tc.name, p.Name(), tc.name)
+		}
+
+		// Via env var.
+		t.Setenv(tc.envVar, "sk-env-key")
+		p2, err := buildNamedStubProvider(tc.name, map[string]any{})
+		if err != nil {
+			t.Errorf("%s with env var: unexpected error: %v", tc.name, err)
+		}
+		if p2 == nil {
+			t.Errorf("%s with env var: got nil provider", tc.name)
+		}
+		t.Setenv(tc.envVar, "")
+	}
+}
+
+// TestBuildNamedStubProvider_UnknownReturnsStub confirms that
+// buildNamedStubProvider accepts any provider name, returning a stub
+// without error for names that have no known canonical env var.
+// Fantasy/Catwalk performs auth and capability validation at runtime.
+func TestBuildNamedStubProvider_UnknownReturnsStub(t *testing.T) {
+	p, err := buildNamedStubProvider("some_future_provider_xyz", map[string]any{})
 	if err != nil {
-		t.Fatalf("provider.Get(openrouter): %v", err)
+		t.Fatalf("unknown provider with no env var: want nil error, got %v", err)
 	}
-	if f == nil {
-		t.Fatal("factory is nil")
+	if p == nil {
+		t.Fatal("expected non-nil provider stub")
 	}
-	if providerEnvVar("openrouter") != "OPENROUTER_API_KEY" {
-		t.Errorf("openrouter env var mapping missing")
+	if p.Name() != "some_future_provider_xyz" {
+		t.Errorf("Name() = %q, want %q", p.Name(), "some_future_provider_xyz")
+	}
+}
+
+// TestRequireAnyKey exercises the credential-check helper used by
+// buildNamedStubProvider.
+func TestRequireAnyKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// No opts, no env var → ErrAuth.
+	if err := requireAnyKey(nil, "ANTHROPIC_API_KEY"); !errors.Is(err, provider.ErrAuth) {
+		t.Errorf("no credential: want ErrAuth, got %v", err)
+	}
+
+	// Empty string in opts["api_key"] → ErrAuth.
+	if err := requireAnyKey(map[string]any{"api_key": ""}, "ANTHROPIC_API_KEY"); !errors.Is(err, provider.ErrAuth) {
+		t.Errorf("empty opts api_key: want ErrAuth, got %v", err)
+	}
+
+	// Non-string value in opts["api_key"] → ErrAuth.
+	if err := requireAnyKey(map[string]any{"api_key": 42}, "ANTHROPIC_API_KEY"); !errors.Is(err, provider.ErrAuth) {
+		t.Errorf("non-string opts api_key: want ErrAuth, got %v", err)
+	}
+
+	// Valid string in opts["api_key"] → nil.
+	if err := requireAnyKey(map[string]any{"api_key": "sk-test"}, "ANTHROPIC_API_KEY"); err != nil {
+		t.Errorf("valid opts api_key: want nil, got %v", err)
+	}
+
+	// Env var set → nil even with no opts.
+	t.Setenv("OPENAI_API_KEY", "sk-from-env")
+	if err := requireAnyKey(nil, "OPENAI_API_KEY"); err != nil {
+		t.Errorf("env var set: want nil, got %v", err)
 	}
 }

@@ -562,6 +562,31 @@ func EmbeddedProviders() []string {
 	return providerIDsFromSnapshot(snap)
 }
 
+// LookupProviderEmbedded returns the [ProviderMeta] for the given provider id
+// from the Catwalk module's built-in provider configs.  It is network-free
+// and does not require a [Catalog] instance, making it safe to call when no
+// catalog is available (cat == nil) or when the runtime catalog's snapshot
+// predates provider-metadata support (ProvidersMeta == nil).
+//
+// Returns ok=false when the provider is not in the embedded data.
+func LookupProviderEmbedded(providerID string) (ProviderMeta, bool) {
+	if providerID == "" {
+		return ProviderMeta{}, false
+	}
+	snap, err := loadEmbeddedSnapshot()
+	if err != nil || snap == nil || snap.ProvidersMeta == nil {
+		return ProviderMeta{}, false
+	}
+	pkey := strings.ToLower(providerID)
+	if m, ok := snap.ProvidersMeta[pkey]; ok {
+		return cloneProviderMeta(m), true
+	}
+	if m, ok := snap.ProvidersMeta[providerID]; ok {
+		return cloneProviderMeta(m), true
+	}
+	return ProviderMeta{}, false
+}
+
 func providerIDsFromSnapshot(snap *Snapshot) []string {
 	if snap == nil {
 		return nil
@@ -695,6 +720,29 @@ func (c *Catalog) Loaded() Loaded {
 		StateDir:    stateDir,
 		SnapshotURL: c.baseURL,
 	}
+}
+
+// LookupProvider returns the ProviderMeta for the given provider id.
+// Returns ok=false when the provider is not in the catalog or when
+// the snapshot predates provider-level metadata.
+func (c *Catalog) LookupProvider(providerID string) (ProviderMeta, bool) {
+	if providerID == "" {
+		return ProviderMeta{}, false
+	}
+	c.mu.RLock()
+	snap := c.snapshot
+	c.mu.RUnlock()
+	if snap == nil || snap.ProvidersMeta == nil {
+		return ProviderMeta{}, false
+	}
+	pkey := strings.ToLower(providerID)
+	if m, ok := snap.ProvidersMeta[pkey]; ok {
+		return cloneProviderMeta(m), true
+	}
+	if m, ok := snap.ProvidersMeta[providerID]; ok {
+		return cloneProviderMeta(m), true
+	}
+	return ProviderMeta{}, false
 }
 
 // StatePath returns the absolute path of the on-disk snapshot file, or

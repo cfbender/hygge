@@ -343,14 +343,3 @@ func (b *ringBuffer) String() string {
 	defer b.mu.Unlock()
 	return string(b.buf)
 }
-
-// errIsBrokenPipe reports whether err is a broken-pipe / closed-pipe
-// error reported by Write on a child whose stdin was already closed.
-// Reserved for future use by the Client when reporting transport
-// errors.
-func errIsBrokenPipe(err error) bool { //nolint:unused // reserved for v0.3 SSE error mapping
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, syscall.EPIPE) || errors.Is(err, os.ErrClosed) || errors.Is(err, io.ErrClosedPipe)
-}
