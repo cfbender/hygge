@@ -1497,7 +1497,7 @@ func providerEnvVar(name string) string {
 		return "GROQ_API_KEY"
 	case "deepseek":
 		return "DEEPSEEK_API_KEY"
-	case "google", "gemini":
+	case "gemini":
 		return "GOOGLE_API_KEY"
 	case "xai":
 		return "XAI_API_KEY"
@@ -1520,7 +1520,7 @@ func knownProviders() []string {
 		"mistral",
 		"groq",
 		"deepseek",
-		"google",
+		"gemini",
 		"xai",
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	fanthropic "charm.land/fantasy/providers/anthropic"
+	fgoogle "charm.land/fantasy/providers/google"
 	fopenai "charm.land/fantasy/providers/openai"
 	fopenaicompat "charm.land/fantasy/providers/openaicompat"
 	fopenrouter "charm.land/fantasy/providers/openrouter"
@@ -122,6 +123,15 @@ func newFantasyProvider(providerID, apiKey string, opts map[string]any, buildOpt
 			fopts = append(fopts, fopenai.WithHeaders(headers))
 		}
 		return fopenai.New(fopts...)
+	case "gemini":
+		fopts := []fgoogle.Option{fgoogle.WithName("gemini"), fgoogle.WithGeminiAPIKey(apiKey)}
+		if baseURL != "" {
+			fopts = append(fopts, fgoogle.WithBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			fopts = append(fopts, fgoogle.WithHeaders(headers))
+		}
+		return fgoogle.New(fopts...)
 	case "openrouter":
 		if v := stringOptAllowEmpty(opts, "http_referer", "https://github.com/cfbender/hygge"); v != "" {
 			headers["HTTP-Referer"] = v
@@ -234,6 +244,8 @@ func defaultAPIKeyEnv(providerID string) string {
 		return "OPENAI_API_KEY"
 	case "openrouter":
 		return "OPENROUTER_API_KEY"
+	case "gemini":
+		return "GOOGLE_API_KEY"
 	default:
 		return ""
 	}
