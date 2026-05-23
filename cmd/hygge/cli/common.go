@@ -1233,15 +1233,33 @@ func buildNamedStubProvider(name string, opts map[string]any) (provider.Provider
 	return namedStub{name: name}, nil
 }
 
+// lookupOrStubProvider consults the global provider registry for name.
+// When the provider is registered its factory is called with opts and
+// the result is returned.  When the provider is unknown it falls back
+// to buildNamedStubProvider so Fantasy/Catwalk can resolve it at
+// runtime.  Any error other than ErrUnknownProvider is returned as-is.
+func lookupOrStubProvider(name string, opts map[string]any) (provider.Provider, error) {
+	f, err := provider.Get(name)
+	if err == nil {
+		prv, err := f(opts)
+		if err != nil {
+			return nil, fmt.Errorf("cli: build provider %q: %w", name, err)
+		}
+		return prv, nil
+	}
+	if !errors.Is(err, provider.ErrUnknownProvider) {
+		return nil, fmt.Errorf("cli: lookup provider %q: %w", name, err)
+	}
+	return buildNamedStubProvider(name, opts)
+}
+
 // buildProvider returns the resolved Provider, preferring a caller-supplied
 // factory over the global provider registry.  modelOpts is the
 // caller-merged options map (config + injected credentials); the
 // adapter is opaque to its origin.
 //
-// When no factory is injected, the legacy registry (provider.Get) is
-// consulted first.  If the provider is not registered there, a
-// lightweight namedStub is returned via buildNamedStubProvider and
-// Fantasy/Catwalk determines actual capability at runtime.
+// When no factory is injected, lookupOrStubProvider handles the registry
+// lookup and namedStub fallback.
 func buildProvider(factory func(opts map[string]any) (provider.Provider, error), cfg *config.Config, modelOpts map[string]any) (provider.Provider, error) {
 	if factory != nil {
 		prv, err := factory(modelOpts)
@@ -1250,18 +1268,7 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 		}
 		return prv, nil
 	}
-	f, err := provider.Get(cfg.Model.Provider)
-	if err == nil {
-		prv, err := f(modelOpts)
-		if err != nil {
-			return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
-		}
-		return prv, nil
-	}
-	if !errors.Is(err, provider.ErrUnknownProvider) {
-		return nil, fmt.Errorf("cli: lookup provider %q: %w", cfg.Model.Provider, err)
-	}
-	prv, err := buildNamedStubProvider(cfg.Model.Provider, modelOpts)
+	prv, err := lookupOrStubProvider(cfg.Model.Provider, modelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
 	}
@@ -1276,18 +1283,7 @@ func buildProviderForName(providerName string, factory func(opts map[string]any)
 		}
 		return prv, nil
 	}
-	f, err := provider.Get(providerName)
-	if err == nil {
-		prv, err := f(modelOpts)
-		if err != nil {
-			return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
-		}
-		return prv, nil
-	}
-	if !errors.Is(err, provider.ErrUnknownProvider) {
-		return nil, fmt.Errorf("cli: lookup provider %q: %w", providerName, err)
-	}
-	prv, err := buildNamedStubProvider(providerName, modelOpts)
+	prv, err := lookupOrStubProvider(providerName, modelOpts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
@@ -1415,9 +1411,8 @@ func resolveProviderOptionsForWithAuth(providerName string, cfg *config.Config, 
 // re-used for credential resolution so override providers inherit
 // the same auth-store + env-var precedence as the parent.
 //
-// The legacy registry (provider.Get) is consulted first; for any
-// provider not found there, a lightweight namedStub is returned and
-// Fantasy/Catwalk determines actual capability at runtime.
+// lookupOrStubProvider handles the registry lookup and namedStub
+// fallback for any provider not found in the global registry.
 func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.LoadOptions) (provider.Provider, error) {
 	if providerName == "" {
 		return nil, fmt.Errorf("cli: buildProviderFor: empty provider name")
@@ -1426,18 +1421,7 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 	if err != nil {
 		return nil, err
 	}
-	factory, err := provider.Get(providerName)
-	if err == nil {
-		prv, err := factory(opts)
-		if err != nil {
-			return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
-		}
-		return prv, nil
-	}
-	if !errors.Is(err, provider.ErrUnknownProvider) {
-		return nil, fmt.Errorf("cli: lookup provider %q: %w", providerName, err)
-	}
-	prv, err := buildNamedStubProvider(providerName, opts)
+	prv, err := lookupOrStubProvider(providerName, opts)
 	if err != nil {
 		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
@@ -1685,15 +1669,13 @@ type namedStub struct{ name string }
 
 func (n namedStub) Name() string { return n.name }
 func (n namedStub) Stream(_ context.Context, _ provider.Request) (<-chan provider.Event, error) {
-	ch := make(chan provider.Event)
-	close(ch)
-	return ch, nil
+	return nil, fmt.Errorf("provider %q: direct Stream call on stub provider (Fantasy/Catwalk should handle this)", n.name)
 }
 func (n namedStub) CountTokens(_ context.Context, _ provider.Request) (int64, error) {
-	return 0, nil
+	return 0, fmt.Errorf("provider %q: direct CountTokens call on stub provider (Fantasy/Catwalk should handle this)", n.name)
 }
 func (n namedStub) ListModels(_ context.Context) ([]provider.Model, error) {
-	return nil, nil
+	return nil, fmt.Errorf("provider %q: direct ListModels call on stub provider (Fantasy/Catwalk should handle this)", n.name)
 }
 
 // requireAnyKey returns provider.ErrAuth (wrapped) when neither
