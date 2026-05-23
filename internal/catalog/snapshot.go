@@ -54,6 +54,20 @@ type Snapshot struct {
 	ProvidersMeta map[string]ProviderMeta     `json:"providers_meta,omitempty"`
 }
 
+// cloneProviderMeta returns a shallow copy of pm with DefaultHeaders
+// cloned into a fresh map, so callers cannot mutate the snapshot's
+// in-memory state through the returned value.  Handles nil map cleanly.
+func cloneProviderMeta(pm ProviderMeta) ProviderMeta {
+	clone := pm
+	if pm.DefaultHeaders != nil {
+		clone.DefaultHeaders = make(map[string]string, len(pm.DefaultHeaders))
+		for k, v := range pm.DefaultHeaders {
+			clone.DefaultHeaders[k] = v
+		}
+	}
+	return clone
+}
+
 // snapshotFileFormat is the JSON shape persisted to
 // $XDG_STATE_HOME/hygge/catalog.json.  We use this separate type rather
 // than serialising Snapshot directly so the on-disk format stays

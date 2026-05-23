@@ -1084,3 +1084,131 @@ func TestSnapshotProviderMeta_OldSnapshotMissingMetaOK(t *testing.T) {
 		t.Error("LookupProvider should return ok=false for snapshot without ProvidersMeta")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DefaultHeaders mutation-isolation tests
+// ---------------------------------------------------------------------------
+
+// TestLookupProvider_DefaultHeadersMutationIsolated proves that mutating the
+// DefaultHeaders map returned by LookupProvider does not affect the snapshot's
+// in-memory storage (lowercase-key path).
+func TestLookupProvider_DefaultHeadersMutationIsolated(t *testing.T) {
+	t.Parallel()
+	const providerKey = "fancy"
+	snap := &Snapshot{
+		FetchedAt: time.Now(),
+		Providers: map[string]map[string]Entry{},
+		ProvidersMeta: map[string]ProviderMeta{
+			providerKey: {
+				Type:        "openai-compat",
+				APIEndpoint: "https://example.com/v1",
+				DefaultHeaders: map[string]string{
+					"X-Orig": "original",
+				},
+			},
+		},
+	}
+	c := &Catalog{snapshot: snap, src: SourceDisk, now: time.Now}
+
+	// Lowercase path.
+	pm, ok := c.LookupProvider(providerKey)
+	if !ok {
+		t.Fatalf("LookupProvider(%q): not found", providerKey)
+	}
+	pm.DefaultHeaders["X-Orig"] = "mutated"
+	pm.DefaultHeaders["X-New"] = "injected"
+
+	// Snapshot must be unchanged.
+	orig := snap.ProvidersMeta[providerKey].DefaultHeaders
+	if orig["X-Orig"] != "original" {
+		t.Errorf("snapshot DefaultHeaders[X-Orig] was mutated: got %q", orig["X-Orig"])
+	}
+	if _, exists := orig["X-New"]; exists {
+		t.Error("snapshot DefaultHeaders gained X-New from caller mutation")
+	}
+}
+
+// TestLookupProvider_OriginalKeyPathMutationIsolated covers the
+// original-providerID (non-lowercase) fallback branch of LookupProvider.
+func TestLookupProvider_OriginalKeyPathMutationIsolated(t *testing.T) {
+	t.Parallel()
+	// Store under a mixed-case key so the lowercase path misses and the
+	// original-providerID path hits.
+	const mixedKey = "FancyProvider"
+	snap := &Snapshot{
+		FetchedAt: time.Now(),
+		Providers: map[string]map[string]Entry{},
+		ProvidersMeta: map[string]ProviderMeta{
+			mixedKey: {
+				DefaultHeaders: map[string]string{"X-Token": "secret"},
+			},
+		},
+	}
+	c := &Catalog{snapshot: snap, src: SourceDisk, now: time.Now}
+
+	pm, ok := c.LookupProvider(mixedKey) // lowercase("FancyProvider") != mixedKey → fallback branch
+	if !ok {
+		t.Fatalf("LookupProvider(%q): not found via original-key path", mixedKey)
+	}
+	pm.DefaultHeaders["X-Token"] = "overwritten"
+
+	if snap.ProvidersMeta[mixedKey].DefaultHeaders["X-Token"] != "secret" {
+		t.Error("snapshot DefaultHeaders[X-Token] was mutated via original-key fallback path")
+	}
+}
+
+// TestLookupProviderEmbedded_DefaultHeadersMutationIsolated proves the same
+// isolation guarantee for the standalone LookupProviderEmbedded function.
+// It uses the live embedded snapshot, so it only runs when opencode-go (or
+// another provider with DefaultHeaders) is present; otherwise it skips.
+func TestLookupProviderEmbedded_DefaultHeadersMutationIsolated(t *testing.T) {
+	t.Parallel()
+	snap, err := loadEmbeddedSnapshot()
+	if err != nil {
+		t.Fatalf("loadEmbeddedSnapshot: %v", err)
+	}
+
+	// Find any provider that has a non-nil DefaultHeaders map.
+	var targetID string
+	for id, pm := range snap.ProvidersMeta {
+		if len(pm.DefaultHeaders) > 0 {
+			targetID = id
+			break
+		}
+	}
+	if targetID == "" {
+		t.Skip("no embedded provider has DefaultHeaders; skipping mutation-isolation test")
+	}
+
+	// Capture the original header values from the snapshot directly.
+	origHeaders := make(map[string]string, len(snap.ProvidersMeta[targetID].DefaultHeaders))
+	for k, v := range snap.ProvidersMeta[targetID].DefaultHeaders {
+		origHeaders[k] = v
+	}
+
+	pm, ok := LookupProviderEmbedded(targetID)
+	if !ok {
+		t.Fatalf("LookupProviderEmbedded(%q): not found", targetID)
+	}
+	// Mutate every key and add a new one.
+	for k := range pm.DefaultHeaders {
+		pm.DefaultHeaders[k] = "mutated"
+	}
+	pm.DefaultHeaders["X-Injected"] = "yes"
+
+	// loadEmbeddedSnapshot is called fresh each time, so re-load to confirm
+	// the underlying embedded data is clean.
+	snap2, err := loadEmbeddedSnapshot()
+	if err != nil {
+		t.Fatalf("loadEmbeddedSnapshot (second call): %v", err)
+	}
+	fresh := snap2.ProvidersMeta[targetID].DefaultHeaders
+	for k, want := range origHeaders {
+		if got := fresh[k]; got != want {
+			t.Errorf("embedded snapshot DefaultHeaders[%q] = %q after mutation, want %q", k, got, want)
+		}
+	}
+	if _, exists := fresh["X-Injected"]; exists {
+		t.Error("embedded snapshot gained X-Injected key from caller mutation")
+	}
+}

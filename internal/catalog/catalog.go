@@ -579,10 +579,10 @@ func LookupProviderEmbedded(providerID string) (ProviderMeta, bool) {
 	}
 	pkey := strings.ToLower(providerID)
 	if m, ok := snap.ProvidersMeta[pkey]; ok {
-		return m, true
+		return cloneProviderMeta(m), true
 	}
 	if m, ok := snap.ProvidersMeta[providerID]; ok {
-		return m, true
+		return cloneProviderMeta(m), true
 	}
 	return ProviderMeta{}, false
 }
@@ -737,10 +737,10 @@ func (c *Catalog) LookupProvider(providerID string) (ProviderMeta, bool) {
 	}
 	pkey := strings.ToLower(providerID)
 	if m, ok := snap.ProvidersMeta[pkey]; ok {
-		return m, true
+		return cloneProviderMeta(m), true
 	}
 	if m, ok := snap.ProvidersMeta[providerID]; ok {
-		return m, true
+		return cloneProviderMeta(m), true
 	}
 	return ProviderMeta{}, false
 }
