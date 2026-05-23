@@ -283,6 +283,27 @@ func TestAppendServer_WrittenFileIsReadableByLoadConfigs(t *testing.T) {
 	}
 }
 
+// TestAppendServer_CorruptTOMLReturnsError verifies that a corrupt
+// (unparseable) existing mcp.toml causes AppendServer to return an
+// error rather than silently skipping the duplicate check.
+func TestAppendServer_CorruptTOMLReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mcp.toml")
+	if err := os.WriteFile(p, []byte("this is not valid toml ][[["), 0o644); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+	err := AppendServer(AppendServerOptions{
+		Path:   p,
+		Server: AppendServerSpec{Name: "srv", Transport: "stdio", Command: "echo"},
+	})
+	if err == nil {
+		t.Fatal("expected error for corrupt mcp.toml, got nil")
+	}
+	if !strings.Contains(err.Error(), p) {
+		t.Errorf("error should mention path %q: %v", p, err)
+	}
+}
+
 func TestSortedStringKeys_Stable(t *testing.T) {
 	m := map[string]string{"z": "1", "a": "2", "m": "3"}
 	got := sortedStringKeys(m)

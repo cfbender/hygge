@@ -82,14 +82,16 @@ func AppendServer(opts AppendServerOptions) error {
 	// --- duplicate check ---
 	if _, err := os.Stat(opts.Path); err == nil {
 		data, readErr := os.ReadFile(opts.Path) //nolint:gosec
-		if readErr == nil {
-			var raw tomlSchema
-			if unmarshalErr := unmarshalTOML(data, &raw); unmarshalErr == nil {
-				for _, s := range raw.Servers {
-					if strings.TrimSpace(s.Name) == strings.TrimSpace(spec.Name) {
-						return fmt.Errorf("mcp writer: server %q already exists in %s; remove it first", spec.Name, opts.Path)
-					}
-				}
+		if readErr != nil {
+			return fmt.Errorf("mcp writer: read %s: %w", opts.Path, readErr)
+		}
+		var raw tomlSchema
+		if unmarshalErr := unmarshalTOML(data, &raw); unmarshalErr != nil {
+			return fmt.Errorf("mcp writer: parse %s: %w", opts.Path, unmarshalErr)
+		}
+		for _, s := range raw.Servers {
+			if strings.TrimSpace(s.Name) == strings.TrimSpace(spec.Name) {
+				return fmt.Errorf("mcp writer: server %q already exists in %s; remove it first", spec.Name, opts.Path)
 			}
 		}
 	}

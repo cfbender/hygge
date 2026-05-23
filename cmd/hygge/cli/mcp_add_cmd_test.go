@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/cfbender/hygge/internal/mcp"
 )
 
@@ -51,7 +54,7 @@ func TestMCPAdd_StdioWithPositionalName(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "my-server"})
+	root.SetArgs([]string{"mcp", "add", "my-server", "--scope", "global"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
 	}
@@ -77,6 +80,42 @@ func TestMCPAdd_StdioWithPositionalName(t *testing.T) {
 // Stdio server — name prompted (no positional arg)
 // ---------------------------------------------------------------------------
 
+func TestMCPAdd_ProjectScopeWritesProjectConfig(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"stdio", // transport
+		"echo",  // command
+		"",      // args blank
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "project-server", "--scope", "project"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	projectMCP := filepath.Join(home, ".hygge", "mcp.toml")
+	data, err := os.ReadFile(projectMCP) //nolint:gosec // test-controlled temp path
+	if err != nil {
+		t.Fatalf("project mcp.toml not written: %v", err)
+	}
+	if !strings.Contains(string(data), `name = "project-server"`) {
+		t.Errorf("missing server name in project mcp.toml:\n%s", data)
+	}
+	globalMCP := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	if _, err := os.Stat(globalMCP); err == nil {
+		t.Fatalf("global mcp.toml should not be written for project scope")
+	}
+	if !strings.Contains(buf.String(), "project config") {
+		t.Errorf("success output should mention project scope:\n%s", buf.String())
+	}
+}
+
 func TestMCPAdd_StdioWithPromptedName(t *testing.T) {
 	home := hermeticHome(t)
 
@@ -92,7 +131,7 @@ func TestMCPAdd_StdioWithPromptedName(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add"})
+	root.SetArgs([]string{"mcp", "add", "--scope", "global"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
 	}
@@ -126,7 +165,7 @@ func TestMCPAdd_HTTPWithAuth(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "remote-srv"})
+	root.SetArgs([]string{"mcp", "add", "remote-srv", "--scope", "global"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
 	}
@@ -247,7 +286,7 @@ func TestMCPAdd_SSENoAuth(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "sse-server"})
+	root.SetArgs([]string{"mcp", "add", "sse-server", "--scope", "global"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
 	}
@@ -278,7 +317,7 @@ func TestMCPAdd_DefaultTransportIsStdio(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "default-transport"})
+	root.SetArgs([]string{"mcp", "add", "default-transport", "--scope", "global"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
 	}
@@ -291,6 +330,56 @@ func TestMCPAdd_DefaultTransportIsStdio(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "default-transport") {
 		t.Errorf("server name missing:\n%s", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error: missing scope in noninteractive mode
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_ErrorMissingScopeNonInteractive(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"stdio",
+		"echo",
+		"",
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "needs-scope"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected missing scope error")
+	}
+	if !strings.Contains(buf.String(), "--scope is required") {
+		t.Fatalf("missing scope guidance:\n%s", buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "hygge", "mcp.toml")); err == nil {
+		t.Fatal("global mcp.toml should not be written when scope is missing")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".hygge", "mcp.toml")); err == nil {
+		t.Fatal("project mcp.toml should not be written when scope is missing")
+	}
+}
+
+func TestMCPAdd_ErrorInvalidScope(t *testing.T) {
+	hermeticHome(t)
+
+	root := NewRootCmd()
+	root.SetIn(mcpAddInput("stdio", "echo", ""))
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "bad-scope", "--scope", "team"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected invalid scope error")
+	}
+	if !strings.Contains(buf.String(), "invalid --scope") {
+		t.Fatalf("missing invalid scope message:\n%s", buf.String())
 	}
 }
 
@@ -309,7 +398,7 @@ func TestMCPAdd_ErrorMissingName(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add"})
+	root.SetArgs([]string{"mcp", "add", "--scope", "global"})
 	if err := root.Execute(); err == nil {
 		t.Error("expected error for missing server name")
 	}
@@ -332,7 +421,7 @@ func TestMCPAdd_ErrorUnknownTransport(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "srv"})
+	root.SetArgs([]string{"mcp", "add", "srv", "--scope", "global"})
 	if err := root.Execute(); err == nil {
 		t.Error("expected error for unknown transport")
 	}
@@ -359,7 +448,7 @@ func TestMCPAdd_StdioWithArgs(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "with-args"})
+	root.SetArgs([]string{"mcp", "add", "with-args", "--scope", "global"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
 	}
@@ -388,7 +477,7 @@ func TestMCPAdd_DuplicateServerRejected(t *testing.T) {
 		var buf bytes.Buffer
 		root.SetOut(&buf)
 		root.SetErr(&buf)
-		root.SetArgs([]string{"mcp", "add", "dup-srv"})
+		root.SetArgs([]string{"mcp", "add", "dup-srv", "--scope", "global"})
 		return root.Execute()
 	}
 
@@ -423,7 +512,7 @@ func TestMCPAdd_RejectsAuthPlaceholderCollision(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp", "add", "foo_bar"})
+	root.SetArgs([]string{"mcp", "add", "foo_bar", "--scope", "global"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
@@ -445,5 +534,163 @@ func TestMCPAuthEnvVar(t *testing.T) {
 		if got != c.want {
 			t.Errorf("mcpAuthEnvVar(%q, %q) = %q, want %q", c.server, c.header, got, c.want)
 		}
+	}
+}
+
+func TestMCPAddWizard_StdioProjectFlow(t *testing.T) {
+	hermeticHome(t)
+
+	m := newMCPAddWizardModel("", "")
+	updated, _ := m.advance()
+	m = updated.(mcpAddWizardModel)
+	if m.step != mcpAddWizardStepName || m.scope != mcpAddScopeProject {
+		t.Fatalf("after scope: step=%v scope=%q", m.step, m.scope)
+	}
+
+	m.input.SetValue("wizard-srv")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	if m.transport != "stdio" || m.step != mcpAddWizardStepCommand {
+		t.Fatalf("after transport: step=%v transport=%q", m.step, m.transport)
+	}
+
+	m.input.SetValue("echo")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	m.input.SetValue("hello world")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	if !m.done {
+		t.Fatal("wizard should be done after stdio args")
+	}
+	req, err := m.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if req.scope != mcpAddScopeProject {
+		t.Fatalf("scope = %q, want project", req.scope)
+	}
+	if req.spec.Name != "wizard-srv" || req.spec.Command != "echo" {
+		t.Fatalf("bad spec: %+v", req.spec)
+	}
+	if got := strings.Join(req.spec.Args, " "); got != "hello world" {
+		t.Fatalf("args = %q", got)
+	}
+}
+
+func TestMCPAddWizard_HTTPAuthFlow(t *testing.T) {
+	hermeticHome(t)
+
+	m := newMCPAddWizardModel("remote", mcpAddScopeGlobal)
+	if m.step != mcpAddWizardStepTransport {
+		t.Fatalf("initial step = %v, want transport", m.step)
+	}
+	m.moveChoice(1) // http
+	updated, _ := m.advance()
+	m = updated.(mcpAddWizardModel)
+	m.input.SetValue("https://api.example.com/mcp")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	m.input.SetValue("Authorization")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	if m.step != mcpAddWizardStepAuthValue || m.input.EchoMode != textinput.EchoPassword {
+		t.Fatalf("auth value step/echo not set: step=%v echo=%v", m.step, m.input.EchoMode)
+	}
+	m.input.SetValue("Bearer token")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+
+	req, err := m.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if req.spec.Headers["Authorization"] != "$HYGGE_MCP_REMOTE_AUTHORIZATION" {
+		t.Fatalf("headers = %#v", req.spec.Headers)
+	}
+	if req.authHeaders["Authorization"] != "Bearer token" {
+		t.Fatalf("auth headers = %#v", req.authHeaders)
+	}
+}
+
+func TestMCPAddWizard_ChoiceStepsUseSelection(t *testing.T) {
+	hermeticHome(t)
+
+	m := newMCPAddWizardModel("", "")
+	if !m.isChoiceStep() || m.selectedChoiceValue() != "project" {
+		t.Fatalf("initial choice = %q, choice step=%v", m.selectedChoiceValue(), m.isChoiceStep())
+	}
+	if view := m.View().Content; !strings.Contains(view, "›") || !strings.Contains(view, "Project") || strings.Contains(view, "Type project") {
+		t.Fatalf("scope choice view not rendered as selectable options:\n%s", view)
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(mcpAddWizardModel)
+	if got := m.selectedChoiceValue(); got != "global" {
+		t.Fatalf("after down selected %q, want global", got)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(mcpAddWizardModel)
+	m.input.SetValue("choice-srv")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	if !m.isChoiceStep() || m.step != mcpAddWizardStepTransport {
+		t.Fatalf("transport step should be selectable, step=%v choice=%v", m.step, m.isChoiceStep())
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(mcpAddWizardModel)
+	if got := m.selectedChoiceValue(); got != "http" {
+		t.Fatalf("after down selected transport %q, want http", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Partial-state guard: auth write failure must not create mcp.toml
+// ---------------------------------------------------------------------------
+
+// TestMCPAdd_AuthFailureDoesNotWriteMCPTOML verifies that when auth
+// persistence fails (e.g. unwritable state dir), the mcp.toml file is
+// NOT created — preserving atomicity between the two writes.
+func TestMCPAdd_AuthFailureDoesNotWriteMCPTOML(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("chmod 000 has no effect when running as root")
+	}
+	home := hermeticHome(t)
+
+	// Make the XDG state directory unwritable so SetAuth fails.
+	stateDir := filepath.Join(home, ".local", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.Chmod(stateDir, 0o444); err != nil { //nolint:gosec // test intentionally makes directory unwritable
+		t.Fatalf("chmod state: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o755) }) //nolint:gosec // restore temp directory permissions for cleanup
+
+	input := mcpAddInput(
+		"http",
+		"https://api.example.com/mcp",
+		"Authorization",
+		"Bearer secret",
+	)
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "partial-srv", "--scope", "global"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when auth write fails")
+	}
+
+	// mcp.toml must NOT have been written.
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	if _, statErr := os.Stat(mcpTOML); statErr == nil {
+		t.Error("mcp.toml was written despite auth failure; partial state created")
 	}
 }
