@@ -409,6 +409,85 @@ func TestSSETransport_HandshakeFailNonSSEResponse(t *testing.T) {
 	}
 }
 
+func TestSSETransport_SendReturnsWhenPostBodyStaysOpen(t *testing.T) {
+	t.Parallel()
+
+	postReceived := make(chan struct{})
+	postClosed := make(chan struct{})
+
+	var srvURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		f, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: endpoint\ndata: %s/rpc\n\n", srvURL)
+		f.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		close(postReceived)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done()
+		close(postClosed)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	srvURL = srv.URL
+
+	tr := NewSSE(SSEOptions{
+		ServerURL:      srv.URL + "/sse",
+		ConnectTimeout: 3 * time.Second,
+		MaxReconnects:  1,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := tr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = tr.Close() }()
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- tr.Send(ctx, []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	}()
+
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Send blocked on an open POST response body")
+	}
+
+	select {
+	case <-postReceived:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("server did not receive POST")
+	}
+
+	if err := tr.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-postClosed:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Close did not release open POST response")
+	}
+}
+
 func TestSSETransport_Notification(t *testing.T) {
 	// Server sends an unsolicited notification on the GET stream.
 	t.Parallel()

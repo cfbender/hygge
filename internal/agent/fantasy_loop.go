@@ -48,7 +48,7 @@ func (f *fantasyTool) SetProviderOptions(opts fantasy.ProviderOptions) { f.prov 
 
 func fantasyToolSchema(schema map[string]any) (map[string]any, []string) {
 	if schema == nil {
-		return map[string]any{}, nil
+		return map[string]any{}, []string{}
 	}
 	required := requiredStrings(schema["required"])
 	if props, ok := schema["properties"].(map[string]any); ok {
@@ -73,7 +73,7 @@ func requiredStrings(raw any) []string {
 		}
 		return out
 	default:
-		return nil
+		return []string{}
 	}
 }
 

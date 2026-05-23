@@ -48,6 +48,23 @@ func TestRuntimeBuildsFantasyToolsFromRegistry(t *testing.T) {
 	}
 }
 
+func TestFantasyToolSchemaRequiredIsNeverNil(t *testing.T) {
+	params, required := fantasyToolSchema(map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+		"required":   nil,
+	})
+	if params == nil {
+		t.Fatal("params nil")
+	}
+	if required == nil {
+		t.Fatal("required nil; provider schemas must serialize an array, not null")
+	}
+	if len(required) != 0 {
+		t.Fatalf("required = %+v, want empty", required)
+	}
+}
+
 func TestRuntimeConvertsFullJSONSchemaForFantasyTools(t *testing.T) {
 	reg := tool.Default()
 	rt := NewRuntime(RuntimeOptions{Tools: reg})
