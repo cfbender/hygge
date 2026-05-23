@@ -10,6 +10,30 @@ import (
 	"charm.land/catwalk/pkg/embedded"
 )
 
+// ProviderMeta carries provider-level metadata extracted from the Catwalk
+// configuration.  It is stored per provider id alongside the model map so
+// the LLM layer can construct openai-compat providers without a user-
+// supplied base_url.
+type ProviderMeta struct {
+	// Type is the Catwalk provider type string, e.g. "openai-compat",
+	// "anthropic", "openai".
+	Type string `json:"type,omitempty"`
+
+	// APIEndpoint is the provider's base URL for API requests,
+	// e.g. "https://opencode.ai/zen/go/v1".  Used as base_url when
+	// constructing an openai-compat fantasy provider.
+	APIEndpoint string `json:"api_endpoint,omitempty"`
+
+	// APIKeyRef is the raw api_key field from the Catwalk config.  When
+	// it starts with "$" it is treated as an environment variable name,
+	// e.g. "$OPENCODE_API_KEY" means os.Getenv("OPENCODE_API_KEY").
+	APIKeyRef string `json:"api_key_ref,omitempty"`
+
+	// DefaultHeaders are provider-level HTTP headers injected on every
+	// request, as specified in the Catwalk provider config.
+	DefaultHeaders map[string]string `json:"default_headers,omitempty"`
+}
+
 // Snapshot is the parsed, normalised in-memory and on-disk representation
 // of the catalog.  Providers maps provider id to model id to [Entry].
 //
@@ -19,10 +43,15 @@ import (
 // ETag is the HTTP ETag received from the catwalk server, forwarded as
 // If-None-Match on the next conditional refresh.  Empty for the embedded
 // snapshot and for disk snapshots written before ETag support was added.
+//
+// ProvidersMeta carries provider-level metadata (type, api_endpoint, etc.)
+// keyed by provider id.  Absent when loaded from an old snapshot that
+// predates provider metadata support; callers must tolerate a nil map.
 type Snapshot struct {
-	FetchedAt time.Time                   `json:"fetched_at"`
-	ETag      string                      `json:"etag,omitempty"`
-	Providers map[string]map[string]Entry `json:"providers"`
+	FetchedAt     time.Time                   `json:"fetched_at"`
+	ETag          string                      `json:"etag,omitempty"`
+	Providers     map[string]map[string]Entry `json:"providers"`
+	ProvidersMeta map[string]ProviderMeta     `json:"providers_meta,omitempty"`
 }
 
 // snapshotFileFormat is the JSON shape persisted to
@@ -30,10 +59,11 @@ type Snapshot struct {
 // than serialising Snapshot directly so the on-disk format stays
 // versionable without churning Snapshot's in-memory shape.
 type snapshotFileFormat struct {
-	Version   int                         `json:"version"`
-	FetchedAt time.Time                   `json:"fetched_at"`
-	ETag      string                      `json:"etag,omitempty"`
-	Providers map[string]map[string]Entry `json:"providers"`
+	Version       int                         `json:"version"`
+	FetchedAt     time.Time                   `json:"fetched_at"`
+	ETag          string                      `json:"etag,omitempty"`
+	Providers     map[string]map[string]Entry `json:"providers"`
+	ProvidersMeta map[string]ProviderMeta     `json:"providers_meta,omitempty"`
 }
 
 // snapshotFileVersion is the current on-disk format version.
@@ -99,7 +129,7 @@ func readSnapshotFile(path string) (*Snapshot, error) {
 	if f.Providers == nil {
 		f.Providers = map[string]map[string]Entry{}
 	}
-	return &Snapshot{FetchedAt: f.FetchedAt, ETag: f.ETag, Providers: f.Providers}, nil
+	return &Snapshot{FetchedAt: f.FetchedAt, ETag: f.ETag, Providers: f.Providers, ProvidersMeta: f.ProvidersMeta}, nil
 }
 
 // writeSnapshotFile atomically writes the snapshot to disk using a
@@ -117,10 +147,11 @@ func writeSnapshotFile(path string, snap *Snapshot) error {
 		return fmt.Errorf("create dir %s: %w", dir, err)
 	}
 	f := snapshotFileFormat{
-		Version:   snapshotFileVersion,
-		FetchedAt: snap.FetchedAt,
-		ETag:      snap.ETag,
-		Providers: snap.Providers,
+		Version:       snapshotFileVersion,
+		FetchedAt:     snap.FetchedAt,
+		ETag:          snap.ETag,
+		Providers:     snap.Providers,
+		ProvidersMeta: snap.ProvidersMeta,
 	}
 	data, err := encodeJSONIndent(f)
 	if err != nil {

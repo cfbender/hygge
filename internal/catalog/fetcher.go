@@ -110,6 +110,7 @@ func parseCatwalkJSON(body []byte, etag string) (*Snapshot, error) {
 // values into a Snapshot.
 func snapshotFromCatwalkProviders(providers []catwalk.Provider, etag string) *Snapshot {
 	out := make(map[string]map[string]Entry, len(providers))
+	meta := make(map[string]ProviderMeta, len(providers))
 	for _, p := range providers {
 		providerID := string(p.ID)
 		if providerID == "" {
@@ -126,8 +127,22 @@ func snapshotFromCatwalkProviders(providers []catwalk.Provider, etag string) *Sn
 		if len(mods) > 0 {
 			out[providerID] = mods
 		}
+		// Always capture provider-level metadata even when there are no models
+		// (unlikely, but defensive).
+		pm := ProviderMeta{
+			Type:        string(p.Type),
+			APIEndpoint: p.APIEndpoint,
+			APIKeyRef:   p.APIKey,
+		}
+		if len(p.DefaultHeaders) > 0 {
+			pm.DefaultHeaders = make(map[string]string, len(p.DefaultHeaders))
+			for k, v := range p.DefaultHeaders {
+				pm.DefaultHeaders[k] = v
+			}
+		}
+		meta[providerID] = pm
 	}
-	return &Snapshot{ETag: etag, Providers: out}
+	return &Snapshot{ETag: etag, Providers: out, ProvidersMeta: meta}
 }
 
 // entryFromCatwalkModel maps a single catwalk.Model to a catalog Entry.

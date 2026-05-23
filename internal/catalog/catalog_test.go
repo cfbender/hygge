@@ -975,3 +975,112 @@ func TestPeriodicRefresh_ZeroIntervalNoTicker(t *testing.T) {
 		t.Errorf("expected 0 fetches with no ticker, got %d", got)
 	}
 }
+
+// TestCatwalkMapping_OpencodeGoProviderMeta verifies that the opencode-go
+// provider from the embedded Catwalk data has its provider-level metadata
+// (type, api_endpoint, api_key_ref) correctly preserved in the snapshot.
+//
+// This is the catalog-layer regression test for the bug where provider-level
+// metadata was dropped when mapping Catwalk providers to catalog.Entry.
+func TestCatwalkMapping_OpencodeGoProviderMeta(t *testing.T) {
+	t.Parallel()
+	snap, err := loadEmbeddedSnapshot()
+	if err != nil {
+		t.Fatalf("loadEmbeddedSnapshot: %v", err)
+	}
+	pm, ok := snap.ProvidersMeta["opencode-go"]
+	if !ok {
+		t.Fatal("embedded snapshot missing ProvidersMeta[opencode-go]")
+	}
+	if pm.Type != "openai-compat" {
+		t.Errorf("ProvidersMeta[opencode-go].Type = %q, want openai-compat", pm.Type)
+	}
+	if pm.APIEndpoint == "" {
+		t.Error("ProvidersMeta[opencode-go].APIEndpoint is empty; expected a URL")
+	}
+	if pm.APIKeyRef != "$OPENCODE_API_KEY" {
+		t.Errorf("ProvidersMeta[opencode-go].APIKeyRef = %q, want $OPENCODE_API_KEY", pm.APIKeyRef)
+	}
+}
+
+// TestSnapshotProviderMeta_RoundTrips confirms that ProvidersMeta survives a
+// write-then-read cycle through the disk snapshot file, so refreshed catalogs
+// retain provider-level metadata.
+func TestSnapshotProviderMeta_RoundTrips(t *testing.T) {
+	t.Parallel()
+	dir := tempStateDir(t)
+	path := filepath.Join(dir, "catalog.json")
+	snap := &Snapshot{
+		FetchedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Providers: map[string]map[string]Entry{
+			"opencode-go": {
+				"minimax-m2.7": {Provider: "opencode-go", ID: "minimax-m2.7"},
+			},
+		},
+		ProvidersMeta: map[string]ProviderMeta{
+			"opencode-go": {
+				Type:        "openai-compat",
+				APIEndpoint: "https://opencode.ai/zen/go/v1",
+				APIKeyRef:   "$OPENCODE_API_KEY",
+			},
+		},
+	}
+	if err := writeSnapshotFile(path, snap); err != nil {
+		t.Fatalf("writeSnapshotFile: %v", err)
+	}
+	got, err := readSnapshotFile(path)
+	if err != nil {
+		t.Fatalf("readSnapshotFile: %v", err)
+	}
+	pm, ok := got.ProvidersMeta["opencode-go"]
+	if !ok {
+		t.Fatal("ProvidersMeta[opencode-go] missing after round-trip")
+	}
+	if pm.Type != "openai-compat" {
+		t.Errorf("Type = %q, want openai-compat", pm.Type)
+	}
+	if pm.APIEndpoint != "https://opencode.ai/zen/go/v1" {
+		t.Errorf("APIEndpoint = %q, want https://opencode.ai/zen/go/v1", pm.APIEndpoint)
+	}
+	if pm.APIKeyRef != "$OPENCODE_API_KEY" {
+		t.Errorf("APIKeyRef = %q, want $OPENCODE_API_KEY", pm.APIKeyRef)
+	}
+}
+
+// TestSnapshotProviderMeta_OldSnapshotMissingMetaOK confirms that a disk
+// snapshot that predates ProvidersMeta (the field is absent) loads cleanly
+// and returns ok=false from LookupProvider — no panic, no error.
+func TestSnapshotProviderMeta_OldSnapshotMissingMetaOK(t *testing.T) {
+	t.Parallel()
+	dir := tempStateDir(t)
+	path := filepath.Join(dir, "catalog.json")
+	// Write a v2 snapshot that intentionally omits providers_meta.
+	snap := &Snapshot{
+		FetchedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Providers: map[string]map[string]Entry{
+			"anthropic": {
+				"claude-sonnet-4-5": {Provider: "anthropic", ID: "claude-sonnet-4-5"},
+			},
+		},
+		// ProvidersMeta deliberately nil to simulate old snapshot.
+	}
+	if err := writeSnapshotFile(path, snap); err != nil {
+		t.Fatalf("writeSnapshotFile: %v", err)
+	}
+	c, err := Load(LoadOptions{
+		StateDir:          dir,
+		Source:            &fakeFetcher{err: errors.New("offline")},
+		BackgroundRefresh: new(false),
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Must load from disk.
+	if c.Loaded().Source != SourceDisk {
+		t.Errorf("source = %q, want %q", c.Loaded().Source, SourceDisk)
+	}
+	// LookupProvider on absent meta must return ok=false without panic.
+	if _, ok := c.LookupProvider("anthropic"); ok {
+		t.Error("LookupProvider should return ok=false for snapshot without ProvidersMeta")
+	}
+}

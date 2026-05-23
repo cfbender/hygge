@@ -697,6 +697,29 @@ func (c *Catalog) Loaded() Loaded {
 	}
 }
 
+// LookupProvider returns the ProviderMeta for the given provider id.
+// Returns ok=false when the provider is not in the catalog or when
+// the snapshot predates provider-level metadata.
+func (c *Catalog) LookupProvider(providerID string) (ProviderMeta, bool) {
+	if providerID == "" {
+		return ProviderMeta{}, false
+	}
+	c.mu.RLock()
+	snap := c.snapshot
+	c.mu.RUnlock()
+	if snap == nil || snap.ProvidersMeta == nil {
+		return ProviderMeta{}, false
+	}
+	pkey := strings.ToLower(providerID)
+	if m, ok := snap.ProvidersMeta[pkey]; ok {
+		return m, true
+	}
+	if m, ok := snap.ProvidersMeta[providerID]; ok {
+		return m, true
+	}
+	return ProviderMeta{}, false
+}
+
 // StatePath returns the absolute path of the on-disk snapshot file, or
 // the empty string when no state directory was resolved.
 func (c *Catalog) StatePath() string { return c.statePath }
