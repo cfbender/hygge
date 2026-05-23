@@ -1080,6 +1080,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.showToast("Steering sent", "Applies at the next agent step")
 
 	case sendStarted:
+		// Invalidate the branch cache so the sidebar picks up any branch
+		// change that occurred since the last message was sent.
+		a.invalidateBranch()
 		wasBusy := a.busy
 		a.busy = true
 		a.workingVerb = components.RandomWorkingVerb()
@@ -1259,6 +1262,9 @@ func (a *App) ensureSession(ctx context.Context) (string, error) {
 	// here (on the Cmd goroutine, NOT the render goroutine) so View()
 	// never needs to call Store.GetSession.
 	a.sessionTitle = a.loadSessionTitle(sess.ID)
+	// Invalidate the branch cache so the sidebar immediately reflects the
+	// current branch when a new session is started.
+	a.invalidateBranch()
 	bus.Publish(a.opts.Bus, bus.SessionStart{
 		SessionID: sess.ID,
 		Resumed:   false,

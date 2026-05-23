@@ -78,13 +78,11 @@ func TestReadGitBranch_EmptyHEAD(t *testing.T) {
 }
 
 func TestGitBranch_CachesResult(t *testing.T) {
-	// Clear the cache before the test to avoid cross-test pollution.
-	branchCacheMu.Lock()
-	delete(branchCache, "")
-	branchCacheMu.Unlock()
-
 	dir := t.TempDir()
 	writeGitHEAD(t, dir, "ref: refs/heads/cached\n")
+
+	// Pre-clear any residual cache for this path.
+	InvalidateBranchCache(dir)
 
 	first := GitBranch(dir)
 	if first != "cached" {
@@ -100,4 +98,47 @@ func TestGitBranch_CachesResult(t *testing.T) {
 	if second != "cached" {
 		t.Errorf("second call (should use cache): got %q, want %q", second, "cached")
 	}
+}
+
+func TestGitBranch_InvalidateCacheUpdates(t *testing.T) {
+	dir := t.TempDir()
+	writeGitHEAD(t, dir, "ref: refs/heads/before\n")
+
+	// Pre-clear any residual cache for this path.
+	InvalidateBranchCache(dir)
+
+	first := GitBranch(dir)
+	if first != "before" {
+		t.Fatalf("first call: got %q, want %q", first, "before")
+	}
+
+	// Simulate a git checkout: update HEAD on disk.
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/after\n"), 0o644); err != nil {
+		t.Fatalf("overwrite HEAD: %v", err)
+	}
+
+	// Without invalidation, the cache is returned.
+	cached := GitBranch(dir)
+	if cached != "before" {
+		t.Errorf("without invalidation: got %q, want cached %q", cached, "before")
+	}
+
+	// After invalidation, the fresh value is read.
+	InvalidateBranchCache(dir)
+	fresh := GitBranch(dir)
+	if fresh != "after" {
+		t.Errorf("after invalidation: got %q, want %q", fresh, "after")
+	}
+}
+
+func TestInvalidateBranchCache_NoGitDir(t *testing.T) {
+	// Invalidating a path with no .git should not panic.
+	dir := t.TempDir()
+	InvalidateBranchCache(dir) // no-op for unknown path
+	got := GitBranch(dir)      // should return ""
+	if got != "" {
+		t.Errorf("non-git dir: got %q, want empty", got)
+	}
+	// Second invalidate after a cache entry exists should also be safe.
+	InvalidateBranchCache(dir)
 }
