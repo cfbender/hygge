@@ -561,23 +561,26 @@ func TestPermissionModalRendersRequest(t *testing.T) {
 		},
 	}
 	out := m.View()
-	for _, want := range []string{"permission request", "Tool:", "read", "Category:", "file.read", "Target:", "/Users/cfb/.aws/credentials", "[y]", "[Y]", "[A]", "[n]", "[e]", "needs to inspect config"} {
+	for _, want := range []string{"permission request", "Tool:", "read", "Category:", "file.read", "Target:", "/Users/cfb/.aws/credentials", "[y]", "[Y]", "[A]", "[n]", "needs to inspect config"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("modal missing %q in:\n%s", want, out)
 		}
 	}
+	// edit option must not appear
+	if strings.Contains(out, "[e]") {
+		t.Errorf("modal must not contain [e] (edit removed), got:\n%s", out)
+	}
 }
 
-func TestPermissionModalRendersToast(t *testing.T) {
+func TestPermissionModalNoEditOption(t *testing.T) {
 	t.Parallel()
 	m := PermissionModal{
 		Width: 80, Height: 20, Theme: styles.DefaultTheme(),
 		Request: PermissionRequest{ToolName: "write", Category: "file.write", Target: "/tmp"},
-		Toast:   "edit not yet implemented",
 	}
 	out := m.View()
-	if !strings.Contains(out, "edit not yet implemented") {
-		t.Errorf("expected toast in modal, got:\n%s", out)
+	if strings.Contains(out, "[e]") || strings.Contains(out, "edit not yet implemented") || strings.Contains(out, "edit (v0.2)") {
+		t.Errorf("modal must not contain removed edit UI, got:\n%s", out)
 	}
 }
 
