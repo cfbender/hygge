@@ -1741,3 +1741,155 @@ func TestLiveTextOnlyThenFinalize(t *testing.T) {
 		t.Errorf("Thinking = %q, want empty for text-only", app.messages[0].Thinking)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests: duplicate-message guard (HYGGE-12)
+// ---------------------------------------------------------------------------
+
+// TestNoDuplicate_AssistantMessageAppendedTwice is a regression test for the
+// duplicate-bubble bug (HYGGE-12) where a duplicate bus.MessageAppended event
+// for the same assistant messageID caused a second bubble to appear.
+//
+// Sequence:
+//  1. AssistantTextDelta → streaming assistant bubble
+//  2. MessageAppended{role:"assistant", messageID:"m1"} → flushes bubble, stamps MessageID
+//  3. MessageAppended{role:"assistant", messageID:"m1"} → must be a no-op (guard fires)
+func TestNoDuplicate_AssistantMessageAppendedTwice(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "hello"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m1"})
+
+	// After first flush: 1 non-streaming assistant bubble.
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("after first MessageAppended: expected 1 message, got %d", got)
+	}
+	if app.messages[0].IsStreaming {
+		t.Errorf("expected IsStreaming=false after first MessageAppended")
+	}
+	if app.messages[0].MessageID != "m1" {
+		t.Errorf("MessageID = %q, want 'm1' after flush", app.messages[0].MessageID)
+	}
+
+	// Second duplicate MessageAppended with the same ID.
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m1"})
+
+	// Must still be exactly 1 message — no duplicate inserted.
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("after duplicate MessageAppended: expected 1 message, got %d (duplicate inserted)", got)
+	}
+}
+
+// TestNoDuplicate_AssistantMessageAppendedAfterToolCall is a regression test
+// for the scenario that most reliably triggered HYGGE-12: the assistant message
+// is flushed while a tool row already trails it, then a duplicate MessageAppended
+// arrives.  Without the fix, currentAssistantMessageIndex() returns -1 (no
+// streaming assistant visible) and insertPersistedAssistantMessage re-inserts.
+//
+// Sequence:
+//  1. AssistantTextDelta → streaming assistant bubble
+//  2. ToolCallRequested → tool row appended; lastAssistantFlushIdx reset
+//  3. MessageAppended{role:"assistant", messageID:"m1"} → flush (finds streaming assistant)
+//  4. MessageAppended{role:"assistant", messageID:"m1"} → must be a no-op
+func TestNoDuplicate_AssistantMessageAppendedAfterToolCall(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Step 1: streaming delta.
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "I'll run a tool."})
+
+	// Step 2: tool call appended.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "bash",
+		ToolUseID: "tu-1",
+		Args:      []byte(`{"command":"echo hi"}`),
+	})
+
+	// State: [assistant(streaming), tool(streaming)]
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages after delta+tool, got %d", got)
+	}
+
+	// Step 3: first MessageAppended.
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m1"})
+
+	// [assistant(flushed/m1), tool(streaming)]
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("after first MessageAppended: expected 2 messages, got %d", got)
+	}
+	if app.messages[0].Role != components.RoleAssistant {
+		t.Fatalf("messages[0].Role = %q, want assistant", app.messages[0].Role)
+	}
+	if app.messages[0].IsStreaming {
+		t.Errorf("expected assistant bubble flushed (IsStreaming=false)")
+	}
+	if app.messages[0].MessageID != "m1" {
+		t.Errorf("messages[0].MessageID = %q, want 'm1'", app.messages[0].MessageID)
+	}
+
+	// Step 4: duplicate MessageAppended — must be silently dropped.
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "m1"})
+
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("after duplicate MessageAppended: expected 2 messages, got %d (duplicate inserted)", got)
+	}
+	if app.messages[0].Role != components.RoleAssistant {
+		t.Errorf("messages[0] role changed unexpectedly: %q", app.messages[0].Role)
+	}
+	if app.messages[1].Role != components.RoleTool {
+		t.Errorf("messages[1] role changed unexpectedly: %q", app.messages[1].Role)
+	}
+}
+
+// TestNoDuplicate_UserMessageAppendedTwice is a regression test for the
+// duplicate-bubble bug (HYGGE-12) on the user message path: two consecutive
+// MessageAppended events with the same user messageID must not insert two user
+// bubbles.
+//
+// Sequence:
+//  1. MessageAppended{role:"user", messageID:"u1"} → appends user bubble
+//  2. MessageAppended{role:"user", messageID:"u1"} → must be a no-op
+func TestNoDuplicate_UserMessageAppendedTwice(t *testing.T) {
+	t.Parallel()
+	app, st, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "hello"}},
+		},
+	})
+	_ = app.Init()
+
+	// Retrieve the stored message ID.
+	ctx := t.Context()
+	msgs, err := st.MessagesDirectForSession(ctx, app.opts.SessionID)
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("MessagesDirectForSession: %v (msgs=%d)", err, len(msgs))
+	}
+	msgID := msgs[0].ID
+
+	// The session was hydrated by Init(); the user message is already in a.messages
+	// with MessageID stamped.
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("after Init: expected 1 message, got %d", got)
+	}
+	if app.messages[0].MessageID != msgID {
+		t.Errorf("hydrated message MessageID = %q, want %q", app.messages[0].MessageID, msgID)
+	}
+
+	// Fire a duplicate MessageAppended for the already-hydrated user message.
+	app.Handle(bus.MessageAppended{
+		SessionID: app.opts.SessionID,
+		Role:      "user",
+		MessageID: msgID,
+	})
+
+	// Must still be exactly 1 message — no duplicate.
+	if got := len(app.messages); got != 1 {
+		t.Fatalf("after duplicate user MessageAppended: expected 1 message, got %d (duplicate inserted)", got)
+	}
+	if app.messages[0].Raw != "hello" {
+		t.Errorf("user message Raw = %q, want 'hello'", app.messages[0].Raw)
+	}
+}

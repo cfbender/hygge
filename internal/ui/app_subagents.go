@@ -611,6 +611,13 @@ func (a *App) flushSubagentStream(subSessionID, role, messageID string) {
 	if !ok {
 		return
 	}
+	if messageID != "" {
+		for i := range st.Messages {
+			if st.Messages[i].MessageID == messageID && st.Messages[i].Role == components.RoleAssistant {
+				return
+			}
+		}
+	}
 	n := len(st.Messages)
 	if n == 0 {
 		return
@@ -620,6 +627,7 @@ func (a *App) flushSubagentStream(subSessionID, role, messageID string) {
 		return
 	}
 	last.IsStreaming = false
+	last.MessageID = messageID
 	last.ModelName = st.Model
 	if a.opts.Store != nil && messageID != "" {
 		if msg, err := a.opts.Store.GetMessage(a.ctx, messageID); err == nil && msg != nil {

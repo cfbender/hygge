@@ -1068,3 +1068,79 @@ func TestContinuingPlaceholder_DroppedOnTurnCompleted(t *testing.T) {
 		}
 	}
 }
+
+// TestNoDuplicate_SubagentAssistantMessageAppendedTwice is a regression test
+// for HYGGE-12: a duplicate bus.MessageAppended for a subagent assistant message
+// must not insert a second assistant bubble in the subagent's transcript.
+//
+// Sequence:
+//  1. SubagentStarted
+//  2. AssistantTextDelta in subagent
+//  3. MessageAppended{role:"assistant", MessageID:"sa-m1"} in subagent → flushes stream
+//  4. MessageAppended{role:"assistant", MessageID:"sa-m1"} again → must be a no-op
+func TestNoDuplicate_SubagentAssistantMessageAppendedTwice(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "tu-sa",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "tu-sa",
+		Type:            "general",
+		Description:     "test dedup",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	// Subagent assistant delta.
+	app.Handle(bus.AssistantTextDelta{SessionID: "sub-1", Text: "subagent answer"})
+
+	// First MessageAppended — should finalize the stream.
+	app.Handle(bus.MessageAppended{SessionID: "sub-1", Role: "assistant", MessageID: "sa-m1"})
+
+	st := app.subagents["sub-1"]
+	if st == nil {
+		t.Fatal("subagent state missing")
+	}
+	// After flush: exactly one assistant message in the subagent transcript.
+	assistantCount := 0
+	for _, m := range st.Messages {
+		if m.Role == components.RoleAssistant {
+			assistantCount++
+		}
+	}
+	if assistantCount != 1 {
+		t.Fatalf("after first MessageAppended: expected 1 assistant in subagent transcript, got %d", assistantCount)
+	}
+	if st.Messages[0].IsStreaming {
+		t.Errorf("expected subagent assistant finalized after MessageAppended")
+	}
+	if st.Messages[0].MessageID != "sa-m1" {
+		t.Fatalf("expected subagent assistant MessageID to be stamped, got %q", st.Messages[0].MessageID)
+	}
+
+	// Second duplicate MessageAppended for the subagent session — must be a no-op.
+	// The MessageID guard should fire before any metadata refresh or insertion.
+	before := st.Messages[0]
+	app.Handle(bus.MessageAppended{SessionID: "sub-1", Role: "assistant", MessageID: "sa-m1"})
+
+	assistantCount = 0
+	for _, m := range st.Messages {
+		if m.Role == components.RoleAssistant {
+			assistantCount++
+		}
+	}
+	if assistantCount != 1 {
+		t.Fatalf("after duplicate MessageAppended: expected 1 assistant in subagent transcript, got %d (duplicate inserted)", assistantCount)
+	}
+	after := st.Messages[0]
+	if after.Raw != before.Raw || after.MessageID != before.MessageID || after.IsStreaming != before.IsStreaming || after.OutputTokens != before.OutputTokens || after.CostUSD != before.CostUSD || after.DurationMs != before.DurationMs {
+		t.Fatalf("duplicate MessageAppended mutated subagent assistant: before=%+v after=%+v", before, after)
+	}
+}
