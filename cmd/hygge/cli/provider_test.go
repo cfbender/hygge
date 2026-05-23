@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -429,6 +430,21 @@ func TestKnownProviders(t *testing.T) {
 	}
 }
 
+// TestAnthropicRegistered confirms the anthropic stub is registered in the CLI
+// package via provider_init.go.  Symmetric guard to TestOpenAIRegistered.
+func TestAnthropicRegistered(t *testing.T) {
+	f, err := provider.Get("anthropic")
+	if err != nil {
+		t.Fatalf("provider.Get(anthropic): %v", err)
+	}
+	if f == nil {
+		t.Fatal("factory is nil")
+	}
+	if providerEnvVar("anthropic") != "ANTHROPIC_API_KEY" {
+		t.Errorf("anthropic env var mapping missing")
+	}
+}
+
 // TestOpenAIRegistered confirms the openai stub is registered in the CLI
 // package via provider_init.go.  Without this guard, accidentally removing
 // the init-registration would silently break `hygge config set model.provider = openai`.
@@ -458,5 +474,104 @@ func TestOpenRouterRegistered(t *testing.T) {
 	}
 	if providerEnvVar("openrouter") != "OPENROUTER_API_KEY" {
 		t.Errorf("openrouter env var mapping missing")
+	}
+}
+
+// TestRequireAnyKey exercises the credential-check helper used by the
+// namedStub factories in provider_init.go.
+func TestRequireAnyKey(t *testing.T) {
+	// Ensure env vars are absent for the isolated cases below.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// No opts, no env var → ErrAuth.
+	if err := requireAnyKey(nil, "ANTHROPIC_API_KEY"); !errors.Is(err, provider.ErrAuth) {
+		t.Errorf("no credential: want ErrAuth, got %v", err)
+	}
+
+	// Empty string in opts["api_key"] → ErrAuth.
+	if err := requireAnyKey(map[string]any{"api_key": ""}, "ANTHROPIC_API_KEY"); !errors.Is(err, provider.ErrAuth) {
+		t.Errorf("empty opts api_key: want ErrAuth, got %v", err)
+	}
+
+	// Non-string value in opts["api_key"] → ErrAuth.
+	if err := requireAnyKey(map[string]any{"api_key": 42}, "ANTHROPIC_API_KEY"); !errors.Is(err, provider.ErrAuth) {
+		t.Errorf("non-string opts api_key: want ErrAuth, got %v", err)
+	}
+
+	// Valid string in opts["api_key"] → nil.
+	if err := requireAnyKey(map[string]any{"api_key": "sk-test"}, "ANTHROPIC_API_KEY"); err != nil {
+		t.Errorf("valid opts api_key: want nil, got %v", err)
+	}
+
+	// Env var set → nil even with no opts.
+	t.Setenv("OPENAI_API_KEY", "sk-from-env")
+	if err := requireAnyKey(nil, "OPENAI_API_KEY"); err != nil {
+		t.Errorf("env var set: want nil, got %v", err)
+	}
+}
+
+// TestNamedStubFactories_ErrAuthWhenNoCredential confirms that the
+// anthropic and openai namedStub factories return provider.ErrAuth when
+// called with empty opts and no env var set.  This preserves the
+// bootstrap auth-fallback path (common.go errors.Is(err, provider.ErrAuth))
+// that was previously guaranteed by the legacy adapter implementations.
+func TestNamedStubFactories_ErrAuthWhenNoCredential(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	for _, name := range []string{"anthropic", "openai"} {
+		f, err := provider.Get(name)
+		if err != nil {
+			t.Fatalf("%s: provider.Get: %v", name, err)
+		}
+		_, err = f(map[string]any{})
+		if !errors.Is(err, provider.ErrAuth) {
+			t.Errorf("%s factory with no credential: want ErrAuth, got %v", name, err)
+		}
+	}
+}
+
+// TestNamedStubFactories_SucceedWithCredential confirms that the
+// namedStub factories succeed when opts["api_key"] is populated (as
+// bootstrap does after resolveProviderOptionsFor injects the auth-store
+// credential).
+func TestNamedStubFactories_SucceedWithCredential(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	for _, tc := range []struct {
+		name   string
+		envVar string
+	}{
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"openai", "OPENAI_API_KEY"},
+	} {
+		f, err := provider.Get(tc.name)
+		if err != nil {
+			t.Fatalf("%s: provider.Get: %v", tc.name, err)
+		}
+
+		// Via opts["api_key"].
+		p, err := f(map[string]any{"api_key": "sk-test-key"})
+		if err != nil {
+			t.Errorf("%s factory with opts api_key: unexpected error: %v", tc.name, err)
+		}
+		if p == nil {
+			t.Errorf("%s factory with opts api_key: got nil provider", tc.name)
+		} else if p.Name() != tc.name {
+			t.Errorf("%s factory: Name() = %q, want %q", tc.name, p.Name(), tc.name)
+		}
+
+		// Via env var.
+		t.Setenv(tc.envVar, "sk-env-key")
+		p2, err := f(map[string]any{})
+		if err != nil {
+			t.Errorf("%s factory with env var: unexpected error: %v", tc.name, err)
+		}
+		if p2 == nil {
+			t.Errorf("%s factory with env var: got nil provider", tc.name)
+		}
+		t.Setenv(tc.envVar, "")
 	}
 }
