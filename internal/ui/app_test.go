@@ -1513,21 +1513,24 @@ func TestPermissionModalEscDenies(t *testing.T) {
 	}
 }
 
-func TestPermissionModalEditShowsToast(t *testing.T) {
+func TestPermissionModalEditKeyIsNoop(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
 
 	app.Handle(bus.PermissionAsked{RequestID: "r5", ToolName: "x", Target: "y"})
-	_, _ = app.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-	if app.modalToast == "" {
-		t.Errorf("expected toast after 'e' key")
-	}
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	// 'e' must not dismiss the modal
 	if len(app.pendingPerms) != 1 {
-		t.Errorf("'e' should NOT dismiss the modal; pending=%d", len(app.pendingPerms))
+		t.Errorf("'e' should not dismiss the modal; pending=%d", len(app.pendingPerms))
 	}
+	// 'e' must not return a command (no toast tick, no reply)
+	if cmd != nil {
+		t.Errorf("'e' must produce no command, got %T", cmd)
+	}
+	// view must not contain the removed edit shortcut or stale toast
 	out := app.View().Content
-	if !strings.Contains(out, "edit not yet implemented") {
-		t.Errorf("expected toast in view, got:\n%s", out)
+	if strings.Contains(out, "[e]") || strings.Contains(out, "edit not yet implemented") || strings.Contains(out, "edit (v0.2)") {
+		t.Errorf("view must not contain removed edit UI after key press, got:\n%s", out)
 	}
 }
 

@@ -42,9 +42,6 @@ type queuedPromptDraft struct {
 // footer's working label without changing it on every spinner frame.
 type workingVerbTickMsg struct{}
 
-// clearToastMsg fires after the modal toast's display duration elapses.
-type clearToastMsg struct{}
-
 // clearNoticeMsg fires after the slash-command ephemeral notice
 // display duration elapses.  Carries the original notice text so a
 // later notice that landed in the meantime is not overwritten.

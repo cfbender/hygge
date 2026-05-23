@@ -411,7 +411,6 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
 		a.pendingPerms = a.pendingPerms[1:]
-		a.modalToast = ""
 		a.syncPermissionOverlay()
 		a.updateInputFocus()
 		return a, reply("deny", "once")
@@ -422,31 +421,24 @@ func (a *App) handleModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch rune(k.Text[0]) {
 		case 'y':
 			a.pendingPerms = a.pendingPerms[1:]
-			a.modalToast = ""
 			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("allow", "once")
 		case 'Y':
 			a.pendingPerms = a.pendingPerms[1:]
-			a.modalToast = ""
 			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("allow", "session")
 		case 'A':
 			a.pendingPerms = a.pendingPerms[1:]
-			a.modalToast = ""
 			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("allow", "always")
 		case 'n', 'N':
 			a.pendingPerms = a.pendingPerms[1:]
-			a.modalToast = ""
 			a.syncPermissionOverlay()
 			a.updateInputFocus()
 			return a, reply("deny", "once")
-		case 'e', 'E':
-			a.modalToast = "edit not yet implemented (v0.2)"
-			return a, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearToastMsg{} })
 		}
 	}
 	return a, nil

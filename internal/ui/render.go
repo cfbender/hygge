@@ -238,7 +238,6 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 			Height:  h,
 			Theme:   a.opts.Theme,
 			Request: a.pendingPerms[0],
-			Toast:   a.modalToast,
 		}.View()
 	case overlayQuestion:
 		return components.QuestionModal{
