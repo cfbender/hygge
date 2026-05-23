@@ -1,6 +1,7 @@
 [tools]
 go = "1.26"
 golangci-lint = "2"
+staticcheck = "2026.1"
 
 [tasks.build]
 description = "Compile the hygge binary to ./bin/hygge"
@@ -28,7 +29,7 @@ run = ["mise run build", "./bin/hygge $@"]
 
 [tasks.precommit]
 description = "All final checks before committing code"
-run = ["mise run fix", "mise run lint", "mise run test", "mise run build"]
+run = ["mise run fix", "mise run lint", "mise run test", "mise run build", "staticcheck ./..."]
 
 [tasks.fix]
 description = "Run linters with auto-fix enabled"

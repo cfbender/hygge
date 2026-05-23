@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -190,6 +192,15 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 	// authorization and proceed to model/mode setup.
 	needsOnboarding := rt.DryRun || !hasConfiguredModel(rt.Config, rt.Provenance) || !hasAnyProviderAuth(rt.StateOpts)
 
+	// In dry-run mode, buffer all [dry-run] preview messages so they don't
+	// interleave with the Bubble Tea alt-screen. dryRunLog is flushed to
+	// stdout after the TUI (or SkipTea early-return) exits.
+	var dryRunLog bytes.Buffer
+	dryRunOut := io.Writer(out(cmd))
+	if rt.DryRun {
+		dryRunOut = &dryRunLog
+	}
+
 	// Map CLI MCPServerStatus → UI SidebarMCPStatus so internal/ui has no
 	// dependency on cmd/.
 	mcpStatuses := make([]ui.SidebarMCPStatus, 0, len(rt.MCPStatuses))
@@ -246,7 +257,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 					continue
 				}
 				if rt.DryRun {
-					printf(errOut(cmd), "[dry-run] would save auth: provider=%s api_key=%s\n", providerName, maskKey(apiKey))
+					printf(dryRunOut, "[dry-run] would save auth: provider=%s api_key=%s\n", providerName, maskKey(apiKey))
 				} else {
 					if err := auth.Set(providerName, auth.Credential{Type: auth.CredAPIKey, APIKey: apiKey, AddedAt: time.Now()}, auth.LoadOptions{HomeDir: rt.StateOpts.HomeDir, XDGStateHome: rt.StateOpts.XDGStateHome}); err != nil {
 						return fmt.Errorf("onboarding: save api key for %s: %w", providerName, err)
@@ -262,7 +273,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			// 2. Persist mode (model selection + inline prompt) to user config.
 			if rt.DryRun {
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
-				printf(errOut(cmd), "[dry-run] would write onboarding mode to %s: provider=%s model=%s\n", target, result.Mode.Provider, result.Mode.Model)
+				printf(dryRunOut, "[dry-run] would write onboarding mode to %s: provider=%s model=%s\n", target, result.Mode.Provider, result.Mode.Model)
 			} else {
 				if _, err := config.WriteOnboardingMode(config.WriteOnboardingModeOptions{
 					HomeDir:       rt.StateOpts.HomeDir,
@@ -291,7 +302,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 				}
 				if rt.DryRun {
 					target := filepath.Join(rt.XDGConfigHome, "hygge", "subagents.toml")
-					printf(errOut(cmd), "[dry-run] would write %d subagent(s) to %s\n", len(agents), target)
+					printf(dryRunOut, "[dry-run] would write %d subagent(s) to %s\n", len(agents), target)
 				} else {
 					if err := config.WriteSubagentsToml(config.WriteSubagentsTomlOptions{
 						HomeDir:       rt.StateOpts.HomeDir,
@@ -303,6 +314,17 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			}
 
 			// 4. Refresh the runtime agent to use the new model+prompt.
+			// In dry-run mode skip the real provider/model build (no API key
+			// is persisted, so the lookups would fail) and keep the stub
+			// provider that was installed at bootstrap.
+			if rt.DryRun {
+				if result.Mode.Prompt != "" {
+					if err := rt.Agent.SetSystemPrompt(composeModeSystemPrompt(rt.BaseSystemPrompt, result.Mode.Prompt)); err != nil {
+						return fmt.Errorf("onboarding: set system prompt: %w", err)
+					}
+				}
+				return nil
+			}
 			modelOpts, err := resolveProviderOptionsFor(result.Mode.Provider, rt.Config, rt.StateOpts)
 			if err != nil {
 				return fmt.Errorf("onboarding: resolve provider opts: %w", err)
@@ -382,7 +404,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 		SaveModel: func(_ context.Context, providerName, modelName string) error {
 			if rt.DryRun {
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
-				printf(errOut(cmd), "[dry-run] would write model to %s: provider=%s model=%s\n", target, providerName, modelName)
+				printf(dryRunOut, "[dry-run] would write model to %s: provider=%s model=%s\n", target, providerName, modelName)
 				rt.Config.Model.Provider = providerName
 				rt.Config.Model.Name = modelName
 				return nil
@@ -402,7 +424,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 		SaveAPIKey: func(_ context.Context, providerName, apiKey string) error {
 			if rt.DryRun {
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
-				printf(errOut(cmd), "[dry-run] would write api_key to %s: provider=%s api_key=%s\n", target, providerName, maskKey(apiKey))
+				printf(dryRunOut, "[dry-run] would write api_key to %s: provider=%s api_key=%s\n", target, providerName, maskKey(apiKey))
 				if providerName == rt.Config.Model.Provider {
 					if rt.Config.Model.Options == nil {
 						rt.Config.Model.Options = map[string]any{}
@@ -436,11 +458,11 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 		SaveTheme: func(_ context.Context, name string) error {
 			if rt.DryRun {
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
-				printf(errOut(cmd), "[dry-run] would write theme to %s: name=%s\n", target, name)
+				printf(dryRunOut, "[dry-run] would write theme to %s: name=%s\n", target, name)
 				rt.Config.Theme.Name = name
 				newTheme, loadErr := styles.Load(name, styles.LoadOptions{ConfigHome: rt.XDGConfigHome, HomeDir: rt.StateOpts.HomeDir})
 				if loadErr != nil {
-					printf(errOut(cmd), "hygge: warning: dry-run theme load failed: %v\n", loadErr)
+					printf(dryRunOut, "hygge: warning: dry-run theme load failed: %v\n", loadErr)
 				} else {
 					rt.Theme = newTheme
 				}
@@ -481,6 +503,9 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 	// TTY.  testOverrides.SkipTea is consulted here so the same code
 	// path covers both modes.
 	if testOverrides != nil && testOverrides.SkipTea {
+		if dryRunLog.Len() > 0 {
+			printf(out(cmd), "%s", dryRunLog.String())
+		}
 		return nil
 	}
 
@@ -532,7 +557,13 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 	}()
 
 	if _, err := prog.Run(); err != nil {
+		if dryRunLog.Len() > 0 {
+			printf(out(cmd), "%s", dryRunLog.String())
+		}
 		return fmt.Errorf("cli: tea run: %w", err)
+	}
+	if dryRunLog.Len() > 0 {
+		printf(out(cmd), "%s", dryRunLog.String())
 	}
 	return nil
 }

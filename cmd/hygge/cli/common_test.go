@@ -896,3 +896,13 @@ func TestFindResumableSession_AllowAny(t *testing.T) {
 		t.Errorf("expected global latest %q, got %q", latest.ID, sid)
 	}
 }
+
+func TestKnownProvidersUsesCatwalkProviderIDs(t *testing.T) {
+	providers := knownProviders()
+	if !slices.Contains(providers, "gemini") {
+		t.Fatalf("knownProviders() missing Catwalk provider %q; got %v", "gemini", providers)
+	}
+	if slices.Contains(providers, "google") {
+		t.Fatalf("knownProviders() includes non-Catwalk provider %q; provider picker must use Catwalk provider IDs only: %v", "google", providers)
+	}
+}
