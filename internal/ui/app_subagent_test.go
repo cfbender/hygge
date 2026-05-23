@@ -379,6 +379,87 @@ func TestParentEventsAccumulateWhileViewingSubagent(t *testing.T) {
 	}
 }
 
+// TestParentSpawnsSubagentWhileViewingSubagent guards a second face of
+// HYGGE-15: while the user has followed into one subagent, the parent
+// (root) session may dispatch another subagent. That SubagentStarted event
+// must still register the new subagent and stamp the matching `subagent`
+// tool row in a.messages with its SubagentID — otherwise the row renders
+// as a bare tool entry instead of a styled subagent block when the user
+// pops back out.
+func TestParentSpawnsSubagentWhileViewingSubagent(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// First subagent: parent dispatches and we follow into it.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "first-tu",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-first",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "first-tu",
+		Type:            "general",
+		Description:     "first",
+		Model:           "x/y",
+		At:              time.Now().Add(-time.Second),
+	})
+	app.pushForeground("sub-first")
+	if !app.viewingSubagent() {
+		t.Fatal("precondition: expected to be viewing first subagent")
+	}
+
+	// While viewing sub-first, the parent dispatches a SECOND subagent.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "second-tu",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-second",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "second-tu",
+		Type:            "search",
+		Description:     "second",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	// The second subagent must be tracked even though the user is viewing
+	// the first one.
+	if _, ok := app.subagents["sub-second"]; !ok {
+		t.Fatalf("second subagent dispatched while viewing the first must still be tracked; subagents=%v", keysOf(app.subagents))
+	}
+
+	// The matching subagent tool row in the parent transcript must be
+	// stamped with SubagentID so the renderer binds the styled block to it.
+	var secondToolRow *uiMessage
+	for i := range app.messages {
+		msg := &app.messages[i]
+		if msg.Role == components.RoleTool && msg.ToolName == "subagent" && msg.ToolUseID == "second-tu" {
+			secondToolRow = msg
+			break
+		}
+	}
+	if secondToolRow == nil {
+		t.Fatal("second subagent tool row missing from a.messages")
+	}
+	if secondToolRow.SubagentID != "sub-second" {
+		t.Errorf("second subagent tool row not stamped: SubagentID=%q, want sub-second", secondToolRow.SubagentID)
+	}
+}
+
+func keysOf(m map[string]*components.SubagentState) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)

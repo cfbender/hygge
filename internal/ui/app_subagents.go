@@ -546,9 +546,15 @@ func (a *App) dropContinuingPlaceholder() {
 }
 
 // isInForegroundChain reports whether parentSessionID is the foreground
-// session or any descendant of it.  Used to filter incoming
-// SubagentStarted events so a sub-agent dispatched by a non-foreground
-// session does not leak into the current view.
+// session, the root session at the bottom of the stack, or any descendant
+// of either. Used to filter incoming SubagentStarted events so a sub-agent
+// dispatched by an unrelated session does not leak into the current view.
+//
+// Root-session acceptance is intentional: while the user is viewing a
+// subagent, the parent (root) session can still spawn additional subagents.
+// Those must be tracked so their tool rows in a.messages get stamped with
+// SubagentID and render as styled subagent blocks instead of bare tool
+// rows when the user pops back out. See HYGGE-15.
 func (a *App) isInForegroundChain(parentSessionID string) bool {
 	if parentSessionID == "" {
 		return false
@@ -564,6 +570,13 @@ func (a *App) isInForegroundChain(parentSessionID string) bool {
 	if parentSessionID == fg {
 		return true
 	}
+	// Accept the root session (and its descendants) even when the user has
+	// followed into a subagent: the parent keeps producing work and any
+	// subagent it spawns belongs in the parent transcript.
+	root := a.rootSessionID()
+	if root != "" && parentSessionID == root {
+		return true
+	}
 	// Walk known sub-agents.  Bounded by the size of the map; the
 	// runtime currently caps recursion at depth 1.
 	cur := parentSessionID
@@ -572,7 +585,7 @@ func (a *App) isInForegroundChain(parentSessionID string) bool {
 		if !ok {
 			return false
 		}
-		if st.ParentSessionID == fg {
+		if st.ParentSessionID == fg || (root != "" && st.ParentSessionID == root) {
 			return true
 		}
 		cur = st.ParentSessionID
