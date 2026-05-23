@@ -649,7 +649,39 @@ func TestEscAtDepth1_DoesNotPopStack(t *testing.T) {
 	_ = cmd
 }
 
-func TestEscAtDepth2_PopsStack(t *testing.T) {
+func TestEscAtDepth2_DoesNotPopStack(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.ToolCallRequested{SessionID: "fg-session", ToolName: "subagent", Args: []byte(`{}`)})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		Type:            "general",
+		Description:     "test",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	// Follow into sub-1.
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+
+	if len(app.foregroundStack) != 2 {
+		t.Fatalf("expected depth 2 after Ctrl+G, got %d: %v", len(app.foregroundStack), app.foregroundStack)
+	}
+
+	// Esc should NOT pop the subagent view.
+	_, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+
+	if len(app.foregroundStack) != 2 {
+		t.Errorf("Esc should not pop subagent view; expected stack depth 2, got %d: %v", len(app.foregroundStack), app.foregroundStack)
+	}
+	if app.foregroundID() != "sub-1" {
+		t.Errorf("foregroundID should remain sub-1 after Esc; got %q", app.foregroundID())
+	}
+}
+
+func TestCtrlGAtDepth2_PopsStack(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
 
@@ -671,11 +703,11 @@ func TestEscAtDepth2_PopsStack(t *testing.T) {
 		t.Fatalf("expected depth 2 after Ctrl+G, got %d: %v", len(app.foregroundStack), app.foregroundStack)
 	}
 
-	// Esc should pop back to root.
-	_, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	// Ctrl+G again should pop back to root.
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 
 	if len(app.foregroundStack) != 1 {
-		t.Errorf("expected stack depth 1 after Esc pop, got %d: %v", len(app.foregroundStack), app.foregroundStack)
+		t.Errorf("expected stack depth 1 after Ctrl+G pop, got %d: %v", len(app.foregroundStack), app.foregroundStack)
 	}
 	if app.foregroundID() != "fg-session" {
 		t.Errorf("foregroundID after pop = %q, want fg-session", app.foregroundID())
