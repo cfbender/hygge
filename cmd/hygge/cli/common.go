@@ -897,6 +897,44 @@ func composeModeSystemPrompt(basePrompt, modePrompt string) string {
 	return basePrompt + "\n\n" + modePrompt
 }
 
+func mcpAuthEnvLookup(opts bootstrapOptions) func(string) string {
+	store, err := mcp.LoadAuth(mcp.AuthLoadOptions{HomeDir: opts.HomeDir, XDGStateHome: opts.XDGStateHome})
+	if err != nil {
+		slog.Warn("cli: failed to load mcp-auth.json; falling back to process environment", "err", err)
+		return os.Getenv
+	}
+	byEnv := map[string]string{}
+	owners := map[string]string{}
+	servers := make([]string, 0, len(store.Servers))
+	for server := range store.Servers {
+		servers = append(servers, server)
+	}
+	sort.Strings(servers)
+	for _, server := range servers {
+		entry := store.Servers[server]
+		headers := make([]string, 0, len(entry.Headers))
+		for header := range entry.Headers {
+			headers = append(headers, header)
+		}
+		sort.Strings(headers)
+		for _, header := range headers {
+			envVar := mcpAuthEnvVar(server, header)
+			if owner := owners[envVar]; owner != "" && owner != server {
+				slog.Warn("cli: duplicate MCP auth placeholder; keeping first stored value", "env_var", envVar, "first_server", owner, "ignored_server", server)
+				continue
+			}
+			owners[envVar] = server
+			byEnv[envVar] = entry.Headers[header]
+		}
+	}
+	return func(key string) string {
+		if value, ok := byEnv[key]; ok {
+			return value
+		}
+		return os.Getenv(key)
+	}
+}
+
 // bootstrapMCP loads mcp.toml files, spawns each enabled server, and
 // registers its tools.  Returns the live clients, the discovered
 // configs (including disabled ones), and a status summary for the
@@ -910,6 +948,7 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 		HomeDir:       opts.HomeDir,
 		XDGConfigHome: xdgConfig,
 		Pwd:           opts.Pwd,
+		EnvLookup:     mcpAuthEnvLookup(opts),
 	})
 	if err != nil {
 		slog.Warn("cli: failed to load mcp.toml; MCP support disabled for this run", "err", err)
@@ -974,6 +1013,7 @@ func prepareAsyncMCP(opts bootstrapOptions, xdgConfig string) ([]mcp.ServerConfi
 		HomeDir:       opts.HomeDir,
 		XDGConfigHome: xdgConfig,
 		Pwd:           opts.Pwd,
+		EnvLookup:     mcpAuthEnvLookup(opts),
 	})
 	if err != nil {
 		slog.Warn("cli: failed to load mcp.toml; MCP support disabled for this run", "err", err)

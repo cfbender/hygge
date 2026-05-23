@@ -1,0 +1,449 @@
+package cli
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/cfbender/hygge/internal/mcp"
+)
+
+// mcpAddInput concatenates lines with "\n" to simulate piped stdin.
+func mcpAddInput(lines ...string) *bytes.Buffer {
+	return bytes.NewBufferString(strings.Join(lines, "\n") + "\n")
+}
+
+// ---------------------------------------------------------------------------
+// Appears in help
+// ---------------------------------------------------------------------------
+
+func TestMCPAddAppearsInHelp(t *testing.T) {
+	hermeticHome(t)
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "--help"})
+	_ = root.Execute()
+	if !strings.Contains(buf.String(), "add") {
+		t.Errorf("'add' not found in mcp help output:\n%s", buf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stdio server — name as positional arg
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_StdioWithPositionalName(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"stdio",   // transport
+		"mcp-bin", // command
+		"",        // args (blank)
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "my-server"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+	if !strings.Contains(buf.String(), "my-server") {
+		t.Errorf("server name not in output:\n%s", buf.String())
+	}
+
+	// Verify the file was written.
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	data, err := os.ReadFile(mcpTOML) //nolint:gosec // test-controlled temp path
+	if err != nil {
+		t.Fatalf("mcp.toml not written: %v", err)
+	}
+	if !strings.Contains(string(data), `name = "my-server"`) {
+		t.Errorf("missing server name in mcp.toml:\n%s", data)
+	}
+	if !strings.Contains(string(data), `command = "mcp-bin"`) {
+		t.Errorf("missing command in mcp.toml:\n%s", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stdio server — name prompted (no positional arg)
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_StdioWithPromptedName(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"prompted-server", // name prompt
+		"stdio",           // transport
+		"echo",            // command
+		"",                // args blank
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	data, err := os.ReadFile(mcpTOML) //nolint:gosec // test-controlled temp path
+	if err != nil {
+		t.Fatalf("mcp.toml not written: %v", err)
+	}
+	if !strings.Contains(string(data), "prompted-server") {
+		t.Errorf("missing server name:\n%s", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HTTP server with auth header
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_HTTPWithAuth(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"http",                     // transport
+		"https://api.example.com/", // url
+		"Authorization",            // auth header name
+		"Bearer super-secret-tok",  // auth header value (non-TTY path)
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "remote-srv"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	data, err := os.ReadFile(mcpTOML) //nolint:gosec // test-controlled temp path
+	if err != nil {
+		t.Fatalf("mcp.toml not written: %v", err)
+	}
+	// The mcp.toml should contain a $VAR reference, not the literal secret.
+	if strings.Contains(string(data), "super-secret-tok") {
+		t.Errorf("mcp.toml contains literal secret; should use $VAR reference:\n%s", data)
+	}
+	if !strings.Contains(string(data), "$HYGGE_MCP_REMOTE_SRV_AUTHORIZATION") {
+		t.Errorf("mcp.toml missing env-var placeholder:\n%s", data)
+	}
+
+	// The mcp-auth.json should contain the literal secret.
+	xdgState := filepath.Join(home, ".local", "state")
+	authOpts := mcp.AuthLoadOptions{
+		HomeDir:      home,
+		XDGStateHome: xdgState,
+	}
+	store, err := mcp.LoadAuth(authOpts)
+	if err != nil {
+		t.Fatalf("LoadAuth: %v", err)
+	}
+	entry, ok := store.GetAuth("remote-srv")
+	if !ok {
+		t.Fatal("remote-srv not found in mcp-auth.json")
+	}
+	if entry.Headers["Authorization"] != "Bearer super-secret-tok" {
+		t.Errorf("Authorization header: got %q", entry.Headers["Authorization"])
+	}
+	if strings.Contains(buf.String(), "export ") || strings.Contains(buf.String(), "<your-value>") {
+		t.Errorf("output should not tell user to re-export stored secret:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "source these values from mcp-auth.json") {
+		t.Errorf("output should explain auth store usage:\n%s", buf.String())
+	}
+}
+
+func TestMCPAuthEnvLookupSourcesStoredHeaders(t *testing.T) {
+	home := hermeticHome(t)
+	xdgConfig := filepath.Join(home, ".config")
+	xdgState := filepath.Join(home, ".local", "state")
+
+	writeStoredAuthServer(t, home, xdgConfig, xdgState)
+
+	cfgs, err := mcp.LoadConfigs(mcp.LoadOptions{
+		HomeDir:       home,
+		XDGConfigHome: xdgConfig,
+		EnvLookup:     mcpAuthEnvLookup(bootstrapOptions{HomeDir: home, XDGStateHome: xdgState}),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	if len(cfgs) != 1 {
+		t.Fatalf("got %d configs, want 1", len(cfgs))
+	}
+	if got := cfgs[0].Headers["Authorization"]; got != "Bearer stored-token" {
+		t.Fatalf("Authorization header = %q, want stored token", got)
+	}
+}
+
+func TestPrepareAsyncMCPUsesStoredAuthHeaders(t *testing.T) {
+	home := hermeticHome(t)
+	xdgConfig := filepath.Join(home, ".config")
+	xdgState := filepath.Join(home, ".local", "state")
+	writeStoredAuthServer(t, home, xdgConfig, xdgState)
+
+	cfgs, statuses := prepareAsyncMCP(bootstrapOptions{HomeDir: home, XDGStateHome: xdgState}, xdgConfig)
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	if len(cfgs) != 1 {
+		t.Fatalf("got %d configs, want 1", len(cfgs))
+	}
+	if got := cfgs[0].Headers["Authorization"]; got != "Bearer stored-token" {
+		t.Fatalf("async Authorization header = %q, want stored token", got)
+	}
+}
+
+func writeStoredAuthServer(t *testing.T, home, xdgConfig, xdgState string) {
+	t.Helper()
+	mcpTOML := filepath.Join(xdgConfig, "hygge", "mcp.toml")
+	if err := mcp.AppendServer(mcp.AppendServerOptions{
+		Path: mcpTOML,
+		Server: mcp.AppendServerSpec{
+			Name:      "remote-srv",
+			Transport: "http",
+			URL:       "https://api.example.com/mcp",
+			Headers:   map[string]string{"Authorization": "$HYGGE_MCP_REMOTE_SRV_AUTHORIZATION"},
+		},
+	}); err != nil {
+		t.Fatalf("AppendServer: %v", err)
+	}
+	if err := mcp.SetAuth("remote-srv", mcp.AuthEntry{Headers: map[string]string{"Authorization": "Bearer stored-token"}}, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SSE server without auth header
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_SSENoAuth(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"sse",                     // transport
+		"https://sse.example.com", // url
+		"",                        // auth header name blank → skip
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "sse-server"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	// mcp-auth.json should not be created (no secrets).
+	xdgState := filepath.Join(home, ".local", "state")
+	authPath := filepath.Join(xdgState, "hygge", "mcp-auth.json")
+	if _, err := os.Stat(authPath); err == nil {
+		t.Error("mcp-auth.json should not be created when no auth is provided")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Default transport (blank → stdio)
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_DefaultTransportIsStdio(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"", // transport blank → default stdio
+		"my-binary",
+		"",
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "default-transport"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	data, _ := os.ReadFile(mcpTOML) //nolint:gosec // test-controlled temp path
+	// transport = "stdio" is the default and should be omitted.
+	if strings.Contains(string(data), `transport =`) {
+		t.Errorf("transport field present for stdio default:\n%s", data)
+	}
+	if !strings.Contains(string(data), "default-transport") {
+		t.Errorf("server name missing:\n%s", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error: missing name
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_ErrorMissingName(t *testing.T) {
+	hermeticHome(t)
+
+	// Empty name input.
+	input := mcpAddInput("")
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add"})
+	if err := root.Execute(); err == nil {
+		t.Error("expected error for missing server name")
+	}
+	if !strings.Contains(buf.String(), "server name is required") {
+		t.Errorf("missing error message:\n%s", buf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error: unknown transport
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_ErrorUnknownTransport(t *testing.T) {
+	hermeticHome(t)
+
+	input := mcpAddInput("lasers") // bad transport
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "srv"})
+	if err := root.Execute(); err == nil {
+		t.Error("expected error for unknown transport")
+	}
+	if !strings.Contains(buf.String(), "unknown transport") {
+		t.Errorf("missing error message:\n%s", buf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stdio with args
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_StdioWithArgs(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"stdio",
+		"mcp-tool",
+		"--verbose --port 3000", // args
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "with-args"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	data, _ := os.ReadFile(mcpTOML) //nolint:gosec // test-controlled temp path
+	if !strings.Contains(string(data), "--verbose") {
+		t.Errorf("args missing from mcp.toml:\n%s", data)
+	}
+	if !strings.Contains(string(data), "3000") {
+		t.Errorf("port arg missing from mcp.toml:\n%s", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate server name rejected
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_DuplicateServerRejected(t *testing.T) {
+	home := hermeticHome(t)
+
+	addServer := func() error {
+		input := mcpAddInput("stdio", "echo", "")
+		root := NewRootCmd()
+		root.SetIn(input)
+		var buf bytes.Buffer
+		root.SetOut(&buf)
+		root.SetErr(&buf)
+		root.SetArgs([]string{"mcp", "add", "dup-srv"})
+		return root.Execute()
+	}
+
+	if err := addServer(); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	if err := addServer(); err == nil {
+		t.Error("expected error adding duplicate server")
+	}
+	_ = home
+}
+
+// ---------------------------------------------------------------------------
+// mcpAuthEnvVar helper
+// ---------------------------------------------------------------------------
+
+func TestMCPAdd_RejectsAuthPlaceholderCollision(t *testing.T) {
+	home := hermeticHome(t)
+	xdgState := filepath.Join(home, ".local", "state")
+	if err := mcp.SetAuth("foo-bar", mcp.AuthEntry{Headers: map[string]string{"Authorization": "Bearer first"}}, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+
+	input := mcpAddInput(
+		"http",
+		"https://api.example.com/mcp",
+		"Authorization",
+		"Bearer second",
+	)
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "foo_bar"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if !strings.Contains(buf.String(), "would collide with existing MCP server") {
+		t.Fatalf("collision message missing:\n%s", buf.String())
+	}
+}
+
+func TestMCPAuthEnvVar(t *testing.T) {
+	cases := []struct {
+		server, header, want string
+	}{
+		{"my-server", "Authorization", "HYGGE_MCP_MY_SERVER_AUTHORIZATION"},
+		{"foo", "X-API-Key", "HYGGE_MCP_FOO_X_API_KEY"},
+		{"a b", "Header Name", "HYGGE_MCP_A_B_HEADER_NAME"},
+	}
+	for _, c := range cases {
+		got := mcpAuthEnvVar(c.server, c.header)
+		if got != c.want {
+			t.Errorf("mcpAuthEnvVar(%q, %q) = %q, want %q", c.server, c.header, got, c.want)
+		}
+	}
+}
