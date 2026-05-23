@@ -1210,15 +1210,51 @@ func buildFantasyModelResolver(cfg *config.Config, stateOpts state.LoadOptions, 
 	}
 }
 
+// fantasyNativeProviders lists provider IDs that are handled entirely by
+// Fantasy/Catwalk for streaming.  They do not have a registry entry in
+// internal/provider; instead, buildFantasyNativeProvider constructs a
+// lightweight namedStub that satisfies provider.Provider for Name()
+// metadata and auth-error semantics.
+var fantasyNativeProviders = map[string]string{
+	"anthropic": "ANTHROPIC_API_KEY",
+	"openai":    "OPENAI_API_KEY",
+}
+
+// buildFantasyNativeProvider returns a namedStub for providers that
+// Fantasy handles natively (anthropic, openai).  It enforces the same
+// credential check that the old registry factories did: ErrAuth when
+// neither opts["api_key"] nor the canonical env var is set.
+func buildFantasyNativeProvider(name string, opts map[string]any) (provider.Provider, error) {
+	envVar, ok := fantasyNativeProviders[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", provider.ErrUnknownProvider, name)
+	}
+	if err := requireAnyKey(opts, envVar); err != nil {
+		return nil, err
+	}
+	return namedStub{name: name}, nil
+}
+
 // buildProvider returns the resolved Provider, preferring a caller-supplied
 // factory over the global provider registry.  modelOpts is the
 // caller-merged options map (config + injected credentials); the
 // adapter is opaque to its origin.
+//
+// For providers handled natively by Fantasy (anthropic, openai) the
+// global registry is bypassed entirely; a lightweight namedStub is
+// returned instead.
 func buildProvider(factory func(opts map[string]any) (provider.Provider, error), cfg *config.Config, modelOpts map[string]any) (provider.Provider, error) {
 	if factory != nil {
 		prv, err := factory(modelOpts)
 		if err != nil {
 			return nil, fmt.Errorf("cli: build provider (injected): %w", err)
+		}
+		return prv, nil
+	}
+	if _, ok := fantasyNativeProviders[cfg.Model.Provider]; ok {
+		prv, err := buildFantasyNativeProvider(cfg.Model.Provider, modelOpts)
+		if err != nil {
+			return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
 		}
 		return prv, nil
 	}
@@ -1238,6 +1274,13 @@ func buildProviderForName(providerName string, factory func(opts map[string]any)
 		prv, err := factory(modelOpts)
 		if err != nil {
 			return nil, fmt.Errorf("cli: build provider (injected): %w", err)
+		}
+		return prv, nil
+	}
+	if _, ok := fantasyNativeProviders[providerName]; ok {
+		prv, err := buildFantasyNativeProvider(providerName, modelOpts)
+		if err != nil {
+			return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 		}
 		return prv, nil
 	}
@@ -1373,6 +1416,9 @@ func resolveProviderOptionsForWithAuth(providerName string, cfg *config.Config, 
 // re-used for credential resolution so override providers inherit
 // the same auth-store + env-var precedence as the parent.
 //
+// For providers handled natively by Fantasy (anthropic, openai) the
+// global registry is bypassed; a namedStub is returned instead.
+//
 // Returns provider.ErrUnknownProvider (wrapped) when no factory has
 // been registered under name, or the factory's own error otherwise.
 func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.LoadOptions) (provider.Provider, error) {
@@ -1382,6 +1428,13 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 	opts, err := resolveProviderOptionsFor(providerName, cfg, stateOpts)
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := fantasyNativeProviders[providerName]; ok {
+		prv, err := buildFantasyNativeProvider(providerName, opts)
+		if err != nil {
+			return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
+		}
+		return prv, nil
 	}
 	factory, err := provider.Get(providerName)
 	if err != nil {
@@ -1625,6 +1678,42 @@ func (stubProvider) Stream(_ context.Context, _ provider.Request) (<-chan provid
 func (stubProvider) CountTokens(_ context.Context, _ provider.Request) (int64, error) { return 0, nil }
 func (stubProvider) ListModels(_ context.Context) ([]provider.Model, error) {
 	return nil, nil
+}
+
+// namedStub is a no-network provider.Provider that returns its name and
+// satisfies the interface.  It is used for Fantasy-native providers
+// (anthropic, openai) where Fantasy handles the actual LLM calls and
+// only the provider name is needed at runtime for metadata (Name()).
+type namedStub struct{ name string }
+
+func (n namedStub) Name() string { return n.name }
+func (n namedStub) Stream(_ context.Context, _ provider.Request) (<-chan provider.Event, error) {
+	ch := make(chan provider.Event)
+	close(ch)
+	return ch, nil
+}
+func (n namedStub) CountTokens(_ context.Context, _ provider.Request) (int64, error) {
+	return 0, nil
+}
+func (n namedStub) ListModels(_ context.Context) ([]provider.Model, error) {
+	return nil, nil
+}
+
+// requireAnyKey returns provider.ErrAuth (wrapped) when neither
+// opts["api_key"] nor the canonical environment variable envVar contains
+// a non-empty credential.  It is intentionally lenient: any non-empty
+// value satisfies the check because the caller (Fantasy) validates the
+// key's correctness when it actually makes the request.
+func requireAnyKey(opts map[string]any, envVar string) error {
+	if v, ok := opts["api_key"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return nil
+		}
+	}
+	if os.Getenv(envVar) != "" {
+		return nil
+	}
+	return fmt.Errorf("%w: no credential found; set %s or run `hygge provider auth`", provider.ErrAuth, envVar)
 }
 
 // shortID returns the leading 8 chars of id, or id itself if shorter.
