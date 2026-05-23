@@ -54,11 +54,14 @@ func TestLoad_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reg.Len() != 0 {
-		t.Errorf("Len = %d, want 0", reg.Len())
+	// Built-in skills (e.g. "hygge") are always present, so the registry
+	// is never completely empty.  Verify at least the hygge built-in loaded.
+	if _, ok := reg.Get("hygge"); !ok {
+		t.Error("built-in skill 'hygge' not present in empty registry")
 	}
-	if got := reg.All(); got != nil {
-		t.Errorf("All = %v, want nil", got)
+	// All() must return a non-nil slice because built-ins are loaded.
+	if got := reg.All(); len(got) == 0 {
+		t.Error("All() returned empty slice; expected at least the built-in hygge skill")
 	}
 }
 
@@ -70,9 +73,6 @@ func TestLoad_SingleUserAgentsSkill(t *testing.T) {
 	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-	if reg.Len() != 1 {
-		t.Fatalf("Len = %d, want 1", reg.Len())
 	}
 	sk, ok := reg.Get("foo")
 	if !ok {
@@ -230,9 +230,6 @@ func TestLoad_MalformedSkippedOthersLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reg.Len() != 1 {
-		t.Errorf("Len = %d, want 1", reg.Len())
-	}
 	if _, ok := reg.Get("good"); !ok {
 		t.Error("good skill was not loaded")
 	}
@@ -279,8 +276,13 @@ func TestLoad_NoFrontmatterSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reg.Len() != 1 {
-		t.Errorf("Len = %d, want 1", reg.Len())
+	// The README.md (no frontmatter) must be skipped; only "good" user
+	// skill + the built-in hygge skill should be present.
+	if _, ok := reg.Get("good"); !ok {
+		t.Error("good skill was not loaded")
+	}
+	if _, ok := reg.Get("README"); ok {
+		t.Error("README.md was loaded as a skill, expected skip")
 	}
 }
 
@@ -295,13 +297,26 @@ func TestRegistry_AllSorted(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	all := reg.All()
-	want := []string{"alpha", "bravo", "charlie"}
-	if len(all) != len(want) {
-		t.Fatalf("len(All) = %d, want %d", len(all), len(want))
+	// Built-ins (hygge) are always present; user skills alpha/bravo/charlie
+	// must also appear and All() must be sorted ascending.
+	wantContained := []string{"alpha", "bravo", "charlie", "hygge"}
+	if len(all) < len(wantContained) {
+		t.Fatalf("len(All) = %d, want >= %d", len(all), len(wantContained))
 	}
-	for i, sk := range all {
-		if sk.Name != want[i] {
-			t.Errorf("All[%d].Name = %q, want %q", i, sk.Name, want[i])
+	// Verify the four expected names are present and sorted relative to each other.
+	nameSet := make(map[string]bool, len(all))
+	for _, sk := range all {
+		nameSet[sk.Name] = true
+	}
+	for _, name := range wantContained {
+		if !nameSet[name] {
+			t.Errorf("All() missing expected skill %q", name)
+		}
+	}
+	// Verify the returned slice is globally sorted.
+	for i := 1; i < len(all); i++ {
+		if all[i].Name < all[i-1].Name {
+			t.Errorf("All() not sorted: %q < %q at index %d", all[i].Name, all[i-1].Name, i)
 		}
 	}
 }
@@ -341,6 +356,7 @@ func TestRegistry_SourceValuesPerLayer(t *testing.T) {
 
 func TestSourceString(t *testing.T) {
 	cases := map[Source]string{
+		SourceBuiltin:       "builtin",
 		SourceUserClaude:    "user/.claude",
 		SourceUserAgents:    "user/.agents",
 		SourceUserHygge:     "user/hygge",
@@ -403,8 +419,9 @@ func TestLoad_HomeDirFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reg.Len() != 0 {
-		t.Errorf("Len = %d", reg.Len())
+	// Built-in skills are always loaded regardless of the home dir.
+	if _, ok := reg.Get("hygge"); !ok {
+		t.Error("built-in hygge skill not present after home-dir fallback load")
 	}
 }
 
@@ -476,8 +493,12 @@ func TestLoad_BothLayoutsCoexist(t *testing.T) {
 	if _, ok := reg.Get("dir-one"); !ok {
 		t.Error("dir-one not loaded")
 	}
-	if got := reg.Len(); got != 2 {
-		t.Errorf("Len = %d, want 2", got)
+	if _, ok := reg.Get("hygge"); !ok {
+		t.Error("builtin hygge not loaded")
+	}
+	// flat-one + dir-one + the built-in hygge skill, plus any future builtins.
+	if got := reg.Len(); got < 3 {
+		t.Errorf("Len = %d, want >= 3 (flat-one + dir-one + builtin hygge)", got)
 	}
 }
 
@@ -500,7 +521,117 @@ func TestLoad_DirNameMismatchSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reg.Len() != 0 {
-		t.Errorf("Len = %d, want 0 (mismatched skill should be skipped)", reg.Len())
+	// The misnamed dir-style skill must be skipped; only the builtin hygge
+	// skill should be present (it is always loaded).
+	if _, ok := reg.Get("original"); ok {
+		t.Error("dir-name-mismatched skill 'original' was loaded; expected skip")
+	}
+	if _, ok := reg.Get("wrong-name"); ok {
+		t.Error("dir-name-mismatched skill 'wrong-name' was loaded; expected skip")
+	}
+	if _, ok := reg.Get("hygge"); !ok {
+		t.Error("built-in hygge skill not present")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Built-in skill tests (HYGGE-11)
+// ---------------------------------------------------------------------------
+
+// TestLoad_BuiltinHyggeAlwaysPresent verifies the hygge built-in skill is
+// discoverable in every fresh load, regardless of user / project paths.
+func TestLoad_BuiltinHyggeAlwaysPresent(t *testing.T) {
+	home, pwd := fakeHome(t)
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sk, ok := reg.Get("hygge")
+	if !ok {
+		t.Fatal("Get(hygge): not found; built-in skill must always be present")
+	}
+	if sk.Source != SourceBuiltin {
+		t.Errorf("Source = %v, want SourceBuiltin", sk.Source)
+	}
+	if sk.Description == "" {
+		t.Error("Description is empty")
+	}
+	if sk.WhenToUse == "" {
+		t.Error("WhenToUse is empty")
+	}
+	if sk.Body == "" {
+		t.Error("Body is empty")
+	}
+}
+
+// TestLoad_BuiltinBodyContainsKeyTopics verifies the hygge built-in skill
+// body covers the topics required by the spec.
+func TestLoad_BuiltinBodyContainsKeyTopics(t *testing.T) {
+	home, pwd := fakeHome(t)
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sk, ok := reg.Get("hygge")
+	if !ok {
+		t.Fatal("Get(hygge): not found")
+	}
+	requiredTopics := []string{
+		"config.toml",     // config files
+		"permissions",     // permissions
+		"MCP",             // MCP servers
+		"plugins",         // plugins
+		"skills",          // skills
+		"hooks",           // hooks
+		"Troubleshooting", // troubleshooting section
+	}
+	for _, topic := range requiredTopics {
+		if !strings.Contains(sk.Body, topic) {
+			t.Errorf("Body missing required topic %q", topic)
+		}
+	}
+}
+
+// TestLoad_UserSkillOverridesBuiltin verifies that a user skill with the
+// same name as a built-in skill replaces the built-in (higher priority).
+func TestLoad_UserSkillOverridesBuiltin(t *testing.T) {
+	home, pwd := fakeHome(t)
+	writeSkill(t, filepath.Join(home, ".agents", "skills"),
+		"hygge", "user-override description", "user-when", "user body")
+
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sk, ok := reg.Get("hygge")
+	if !ok {
+		t.Fatal("Get(hygge): not found")
+	}
+	if sk.Description != "user-override description" {
+		t.Errorf("Description = %q, want user-override description (user should override builtin)",
+			sk.Description)
+	}
+	if sk.Source != SourceUserAgents {
+		t.Errorf("Source = %v, want SourceUserAgents (user overrides builtin)", sk.Source)
+	}
+}
+
+// TestLoad_BuiltinPath verifies the builtin hygge skill has no filesystem
+// Path and uses only a virtual Dir token for diagnostics.
+func TestLoad_BuiltinPath(t *testing.T) {
+	home, pwd := fakeHome(t)
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sk, ok := reg.Get("hygge")
+	if !ok {
+		t.Fatal("Get(hygge): not found")
+	}
+	if sk.Path != "" {
+		t.Errorf("Path = %q, want empty for embedded builtin", sk.Path)
+	}
+	if sk.Dir != "builtin" {
+		t.Errorf("Dir = %q, want \"builtin\"", sk.Dir)
 	}
 }

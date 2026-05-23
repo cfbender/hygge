@@ -106,7 +106,7 @@ func TestInitAmpWritesModesAndConfigSubagents(t *testing.T) {
 	}
 }
 
-func TestInitOpenCodeWritesBuiltInInspiredDefaults(t *testing.T) {
+func TestInitWritesBuiltInInspiredDefaults(t *testing.T) {
 	home := hermeticHome(t)
 	seedInitAuth(t, home, "openai")
 

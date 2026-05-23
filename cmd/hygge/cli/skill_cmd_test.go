@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,8 +32,17 @@ func TestSkillsListEmpty(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if !strings.Contains(buf.String(), "no skills loaded") {
-		t.Errorf("expected empty-state marker, got:\n%s", buf.String())
+	// The hygge built-in skill is always present; "no skills loaded" must
+	// NOT appear.
+	got := buf.String()
+	if strings.Contains(got, "no skills loaded") {
+		t.Errorf("unexpected empty-state marker when builtin should be present:\n%s", got)
+	}
+	if !strings.Contains(got, "hygge") {
+		t.Errorf("built-in hygge skill not in listing:\n%s", got)
+	}
+	if !strings.Contains(got, "builtin") {
+		t.Errorf("source label 'builtin' not in listing:\n%s", got)
 	}
 }
 
@@ -138,5 +148,53 @@ func TestSkillsDoctor_ReportsBadFile(t *testing.T) {
 	}
 	if !strings.Contains(got, "issue(s) detected") {
 		t.Errorf("expected issue count:\n%s", got)
+	}
+}
+
+// TestSkillsShowHyggeBuiltin verifies that the built-in "hygge" skill is
+// shown by `hygge skills show hygge` and its body covers key topics.
+func TestSkillsShowHyggeBuiltin(t *testing.T) {
+	hermeticHome(t)
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"skills", "show", "hygge"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"name:        hygge",
+		"source:      builtin",
+		"config.toml",
+		"permissions",
+		"MCP",
+		"plugins",
+		"Troubleshooting",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("skills show hygge: output missing %q\n--- got ---\n%s", want, got)
+		}
+	}
+}
+
+// TestSkillsListBuiltinInSystemPrompt verifies that the hygge built-in skill
+// is reflected in the assembled system prompt at bootstrap time.
+func TestSkillsListBuiltinInSystemPrompt(t *testing.T) {
+	hermeticHome(t)
+
+	rt, err := bootstrap(context.Background(), bootstrapOptions{})
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if _, ok := rt.Skills.Get("hygge"); !ok {
+		t.Fatal("rt.Skills missing built-in hygge skill")
+	}
+	if !strings.Contains(rt.SystemPrompt, "<name>hygge</name>") {
+		t.Errorf("SystemPrompt missing <name>hygge</name>:\n%s", rt.SystemPrompt)
 	}
 }

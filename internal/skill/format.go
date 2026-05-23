@@ -20,8 +20,8 @@ func FormatAvailable(r *Registry) string {
 }
 
 // FormatAvailableVerbose renders the loaded skill index for the system prompt.
-// The XML-ish structure mirrors OpenCode and gives models clear fields to match
-// a task against before using the skill tool.
+// The XML-ish structure gives models clear fields to match a task against
+// before using the skill tool.
 func FormatAvailableVerbose(r *Registry) string {
 	if r == nil || r.Len() == 0 {
 		return "No skills are currently available."

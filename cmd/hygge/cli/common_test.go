@@ -594,8 +594,17 @@ func TestBootstrap_SkillsAppearInSystemPrompt(t *testing.T) {
 	}
 	defer func() { _ = rt.Close() }()
 
-	if rt.Skills == nil || rt.Skills.Len() != 1 {
-		t.Fatalf("Skills.Len() = %d, want 1", rt.Skills.Len())
+	// The user wrote "foo" under ~/.agents/skills; the hygge built-in is
+	// always also present, so we expect at least 2 skills (hygge + foo).
+	skillsLen := 0
+	if rt.Skills != nil {
+		skillsLen = rt.Skills.Len()
+	}
+	if skillsLen < 2 {
+		t.Fatalf("Skills.Len() = %d, want >= 2 (builtin hygge + user foo)", skillsLen)
+	}
+	if _, ok := rt.Skills.Get("foo"); !ok {
+		t.Fatal("Skills missing user-written 'foo' skill")
 	}
 	if !strings.Contains(rt.SystemPrompt, "## Available skills") {
 		t.Errorf("SystemPrompt missing skills header:\n%s", rt.SystemPrompt)
