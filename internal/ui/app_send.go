@@ -180,8 +180,20 @@ func (a *App) appendPersistedUserMessage(messageID string) {
 		return
 	}
 	entry := entries[0]
+	entry.MessageID = messageID
 	if entry.Raw != "" {
 		entry.FinalMarkdown = renderMarkdown(a.ensureRenderer(), entry.Raw)
+	}
+	// Guard: if this messageID is already present in the buffer (e.g. from a
+	// hydrated resume session or a duplicate MessageAppended event), replace
+	// the existing entry in-place rather than appending a duplicate.
+	for i := range a.messages {
+		if a.messages[i].MessageID == messageID && a.messages[i].Role == components.RoleUser {
+			a.messages[i] = entry
+			a.optimisticUserPending = false
+			a.invalidateMsgCache()
+			return
+		}
 	}
 	if a.optimisticUserPending && len(a.messages) > 0 && a.messages[len(a.messages)-1].Role == components.RoleUser {
 		a.messages[len(a.messages)-1] = entry
