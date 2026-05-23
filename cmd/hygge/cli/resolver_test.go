@@ -71,24 +71,33 @@ func TestBuildProviderResolver_InvalidRef(t *testing.T) {
 	}
 }
 
-func TestBuildProviderResolver_UnknownProviderErrors(t *testing.T) {
+func TestBuildProviderResolver_UnknownProviderReturnsStub(t *testing.T) {
+	// Unknown providers now resolve to a namedStub; ErrUnknownProvider
+	// is no longer returned at build time — Fantasy/Catwalk handles
+	// capability errors at runtime.
 	cfg := &config.Config{}
 	cfg.Model.Provider = "parentprov"
 	parent := countingProvider{name: "parentprov"}
 
-	r := buildProviderResolver(cfg, state.LoadOptions{}, parent)
-	_, _, err := r(context.Background(), "no_such_provider/model")
-	if err == nil {
-		t.Fatal("expected error for unknown provider")
+	r := buildProviderResolver(cfg, state.LoadOptions{HomeDir: t.TempDir()}, parent)
+	prv, modelID, err := r(context.Background(), "no_such_provider/model")
+	if err != nil {
+		t.Fatalf("expected nil error for unknown provider; got %v", err)
 	}
-	if !errors.Is(err, provider.ErrUnknownProvider) {
-		t.Errorf("error not wrapping provider.ErrUnknownProvider: %v", err)
+	if prv == nil {
+		t.Fatal("expected non-nil stub provider for unknown name")
+	}
+	if prv.Name() != "no_such_provider" {
+		t.Errorf("Name() = %q, want no_such_provider", prv.Name())
+	}
+	if modelID != "model" {
+		t.Errorf("modelID = %q, want model", modelID)
 	}
 }
 
 // testFactoryProvider registers itself under a unique name so we can
 // exercise buildProviderResolver's cache path without colliding with
-// the global anthropic/openai/openrouter registrations.
+// other registered providers.
 var testFactoryCalls atomic.Int32
 
 const testFactoryName = "hyggetest_resolver_provider"
@@ -141,12 +150,17 @@ func TestBuildProviderResolver_CachesByName(t *testing.T) {
 func TestBuildProviderFor_UnknownProvider(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Model.Provider = "parentprov"
-	_, err := buildProviderFor("no_such_provider_xyz", cfg, state.LoadOptions{HomeDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("expected error for unknown provider name")
+	// Unknown providers now return a namedStub so Fantasy/Catwalk can
+	// resolve them at runtime rather than failing at build time.
+	prv, err := buildProviderFor("no_such_provider_xyz", cfg, state.LoadOptions{HomeDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("expected nil error for unknown provider; got %v", err)
 	}
-	if !errors.Is(err, provider.ErrUnknownProvider) {
-		t.Errorf("error not wrapping ErrUnknownProvider: %v", err)
+	if prv == nil {
+		t.Fatal("expected non-nil stub provider for unknown name")
+	}
+	if prv.Name() != "no_such_provider_xyz" {
+		t.Errorf("Name() = %q, want %q", prv.Name(), "no_such_provider_xyz")
 	}
 }
 
