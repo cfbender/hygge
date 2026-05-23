@@ -17,7 +17,7 @@ import (
 // built-in set) and panic — there is no recovery path.  Tests pin
 // the full list so regressions are caught at the unit-test level.
 func RegisterBuiltins(reg *Registry) {
-	for _, c := range builtinCommands() {
+	for _, c := range builtinCommandsFor(reg) {
 		if err := reg.Register(c); err != nil {
 			panic(fmt.Sprintf("command: register builtin %q: %v", c.Name(), err))
 		}
@@ -28,8 +28,12 @@ func RegisterBuiltins(reg *Registry) {
 // Exposed as a function (not a package var) so tests can verify the
 // list independently of whatever Load may have layered on top.
 func builtinCommands() []Command {
+	return builtinCommandsFor(nil)
+}
+
+func builtinCommandsFor(reg *Registry) []Command {
 	return []Command{
-		&helpCmd{},
+		&helpCmd{registry: reg},
 		&newCmd{},
 		&clearCmd{},
 		&compactCmd{},
@@ -96,7 +100,9 @@ func (*memoryCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
 
 // --- /help ----------------------------------------------------------------
 
-type helpCmd struct{}
+type helpCmd struct {
+	registry *Registry
+}
 
 func (*helpCmd) Name() string        { return "help" }
 func (*helpCmd) Description() string { return "Show available commands or details for one" }
@@ -114,10 +120,10 @@ func (*helpCmd) Args() []ArgSpec {
 // by hand and skip [AttachHelpRegistry].
 var helpRegistry atomic.Pointer[Registry]
 
-func (*helpCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+func (h *helpCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
 	name := strings.TrimSpace(input)
 	if name != "" {
-		cmd, ok := lookupHelp(name)
+		cmd, ok := h.lookup(name)
 		if !ok {
 			return Outcome{Notice: fmt.Sprintf("/help: no command named %q", name)}, nil
 		}
@@ -127,14 +133,17 @@ func (*helpCmd) Execute(_ context.Context, _ App, input string) (Outcome, error)
 		}, nil
 	}
 	return Outcome{
-		Notice:    formatHelpList(allHelp()),
+		Notice:    formatHelpList(h.all()),
 		OpenModal: ModalHelp,
 	}, nil
 }
 
-// lookupHelp finds a command in the active registry, falling back to
-// the built-in set when no registry has been wired up.
-func lookupHelp(name string) (Command, bool) {
+// lookup finds a command in this help command's registry, falling back
+// to the global registry for legacy callers that construct help by hand.
+func (h *helpCmd) lookup(name string) (Command, bool) {
+	if h.registry != nil {
+		return h.registry.Get(name)
+	}
 	if reg := helpRegistry.Load(); reg != nil {
 		return reg.Get(name)
 	}
@@ -146,8 +155,11 @@ func lookupHelp(name string) (Command, bool) {
 	return nil, false
 }
 
-// allHelp returns every command visible to /help, sorted by name.
-func allHelp() []Command {
+// all returns every command visible to /help, sorted by name.
+func (h *helpCmd) all() []Command {
+	if h.registry != nil {
+		return h.registry.List()
+	}
 	if reg := helpRegistry.Load(); reg != nil {
 		return reg.List()
 	}
