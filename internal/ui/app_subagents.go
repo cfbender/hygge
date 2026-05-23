@@ -317,16 +317,34 @@ func (a *App) followIntoLatestSubagent() tea.Cmd {
 	return nil
 }
 
-// isForeground reports whether sessionID is the App's active foreground
-// session.  An empty foreground id matches anything: this preserves the
+// isForeground reports whether sessionID belongs to the App's active
+// foreground chain — either the visible session (top of the foreground
+// stack) or the root session at the bottom of the stack.
+//
+// An empty foreground id matches anything: this preserves the
 // pre-Stage-C behaviour where the App accepted all events because the
 // session was lazily created on first user input.
+//
+// Root-session acceptance is intentional: while the user is viewing a
+// subagent, the foreground id is the subagent's session, but root-session
+// events (assistant deltas, tool calls, message appends, turn lifecycle)
+// must still update a.messages and the chrome so the main thread keeps
+// progressing in the background and the parent transcript is intact when
+// the user pops back. See HYGGE-15.
 func (a *App) isForeground(sessionID string) bool {
 	fg := a.foregroundID()
 	if fg == "" {
 		return true
 	}
-	return sessionID == fg
+	if sessionID == fg {
+		return true
+	}
+	// Accept root-session events even while viewing a subagent so the
+	// parent transcript keeps building.
+	if root := a.rootSessionID(); root != "" && sessionID == root {
+		return true
+	}
+	return false
 }
 
 // routeToSubagent reports whether sessionID matches a tracked sub-agent
@@ -528,9 +546,15 @@ func (a *App) dropContinuingPlaceholder() {
 }
 
 // isInForegroundChain reports whether parentSessionID is the foreground
-// session or any descendant of it.  Used to filter incoming
-// SubagentStarted events so a sub-agent dispatched by a non-foreground
-// session does not leak into the current view.
+// session, the root session at the bottom of the stack, or any descendant
+// of either. Used to filter incoming SubagentStarted events so a sub-agent
+// dispatched by an unrelated session does not leak into the current view.
+//
+// Root-session acceptance is intentional: while the user is viewing a
+// subagent, the parent (root) session can still spawn additional subagents.
+// Those must be tracked so their tool rows in a.messages get stamped with
+// SubagentID and render as styled subagent blocks instead of bare tool
+// rows when the user pops back out. See HYGGE-15.
 func (a *App) isInForegroundChain(parentSessionID string) bool {
 	if parentSessionID == "" {
 		return false
@@ -546,6 +570,13 @@ func (a *App) isInForegroundChain(parentSessionID string) bool {
 	if parentSessionID == fg {
 		return true
 	}
+	// Accept the root session (and its descendants) even when the user has
+	// followed into a subagent: the parent keeps producing work and any
+	// subagent it spawns belongs in the parent transcript.
+	root := a.rootSessionID()
+	if root != "" && parentSessionID == root {
+		return true
+	}
 	// Walk known sub-agents.  Bounded by the size of the map; the
 	// runtime currently caps recursion at depth 1.
 	cur := parentSessionID
@@ -554,7 +585,7 @@ func (a *App) isInForegroundChain(parentSessionID string) bool {
 		if !ok {
 			return false
 		}
-		if st.ParentSessionID == fg {
+		if st.ParentSessionID == fg || (root != "" && st.ParentSessionID == root) {
 			return true
 		}
 		cur = st.ParentSessionID

@@ -285,6 +285,181 @@ func TestForegroundSubagentEventsStayInSubagentTranscript(t *testing.T) {
 	}
 }
 
+// TestParentEventsAccumulateWhileViewingSubagent is the HYGGE-15 regression
+// guard: when the user has followed into a subagent, events emitted by the
+// parent (root) session must still update a.messages so the parent's history
+// is intact when the user pops back out. Before the fix, isForeground() only
+// accepted the top of the foreground stack, which silently dropped every
+// parent-thread bus event while a subagent was being viewed.
+func TestParentEventsAccumulateWhileViewingSubagent(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Open a subagent and follow into it.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "parent-tu",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-1",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "parent-tu",
+		Type:            "general",
+		Description:     "background work",
+		Model:           "anthropic/claude-haiku-4-5",
+		At:              time.Now(),
+	})
+	app.pushForeground("sub-1")
+	if !app.viewingSubagent() {
+		t.Fatal("precondition: expected to be viewing subagent")
+	}
+	parentLenBefore := len(app.messages)
+
+	// While viewing the subagent, the parent (root) session continues to
+	// produce events: tool calls + assistant text. These must land in
+	// a.messages so they are visible when the user pops back.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "bash",
+		ToolUseID: "parent-bash-tu",
+		Args:      []byte(`{"command":"ls"}`),
+	})
+	app.Handle(bus.ToolCallCompleted{
+		SessionID:  "fg-session",
+		ToolName:   "bash",
+		ToolUseID:  "parent-bash-tu",
+		Result:     []byte("file.txt"),
+		DurationMs: 1,
+	})
+	app.Handle(bus.AssistantTextDelta{
+		SessionID: "fg-session",
+		Text:      "parent response",
+	})
+
+	if len(app.messages) <= parentLenBefore {
+		t.Fatalf("parent transcript len = %d, want > %d; parent events were dropped while viewing subagent",
+			len(app.messages), parentLenBefore)
+	}
+
+	// Find the parent bash tool row and assistant text in the parent buffer.
+	var sawBash, sawText bool
+	for i := range app.messages {
+		msg := app.messages[i]
+		if msg.Role == components.RoleTool && msg.ToolUseID == "parent-bash-tu" {
+			sawBash = true
+			if msg.IsStreaming {
+				t.Errorf("expected parent bash row to be finalised, still streaming: %+v", msg)
+			}
+		}
+		if msg.Role == components.RoleAssistant && strings.Contains(msg.Raw, "parent response") {
+			sawText = true
+		}
+	}
+	if !sawBash {
+		t.Error("parent bash tool row missing from a.messages while viewing subagent")
+	}
+	if !sawText {
+		t.Error("parent assistant delta missing from a.messages while viewing subagent")
+	}
+
+	// The subagent transcript must NOT contain the parent events.
+	st := app.subagents["sub-1"]
+	if st == nil {
+		t.Fatal("subagent state missing")
+	}
+	for _, msg := range st.Messages {
+		if msg.ToolUseID == "parent-bash-tu" {
+			t.Errorf("parent tool row leaked into subagent transcript: %+v", msg)
+		}
+		if msg.Role == components.RoleAssistant && strings.Contains(msg.Raw, "parent response") {
+			t.Errorf("parent assistant delta leaked into subagent transcript: %+v", msg)
+		}
+	}
+}
+
+// TestParentSpawnsSubagentWhileViewingSubagent guards a second face of
+// HYGGE-15: while the user has followed into one subagent, the parent
+// (root) session may dispatch another subagent. That SubagentStarted event
+// must still register the new subagent and stamp the matching `subagent`
+// tool row in a.messages with its SubagentID — otherwise the row renders
+// as a bare tool entry instead of a styled subagent block when the user
+// pops back out.
+func TestParentSpawnsSubagentWhileViewingSubagent(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// First subagent: parent dispatches and we follow into it.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "first-tu",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-first",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "first-tu",
+		Type:            "general",
+		Description:     "first",
+		Model:           "x/y",
+		At:              time.Now().Add(-time.Second),
+	})
+	app.pushForeground("sub-first")
+	if !app.viewingSubagent() {
+		t.Fatal("precondition: expected to be viewing first subagent")
+	}
+
+	// While viewing sub-first, the parent dispatches a SECOND subagent.
+	app.Handle(bus.ToolCallRequested{
+		SessionID: "fg-session",
+		ToolName:  "subagent",
+		ToolUseID: "second-tu",
+		Args:      []byte(`{}`),
+	})
+	app.Handle(bus.SubagentStarted{
+		SubSessionID:    "sub-second",
+		ParentSessionID: "fg-session",
+		ParentMessageID: "second-tu",
+		Type:            "search",
+		Description:     "second",
+		Model:           "x/y",
+		At:              time.Now(),
+	})
+
+	// The second subagent must be tracked even though the user is viewing
+	// the first one.
+	if _, ok := app.subagents["sub-second"]; !ok {
+		t.Fatalf("second subagent dispatched while viewing the first must still be tracked; subagents=%v", keysOf(app.subagents))
+	}
+
+	// The matching subagent tool row in the parent transcript must be
+	// stamped with SubagentID so the renderer binds the styled block to it.
+	var secondToolRow *uiMessage
+	for i := range app.messages {
+		msg := &app.messages[i]
+		if msg.Role == components.RoleTool && msg.ToolName == "subagent" && msg.ToolUseID == "second-tu" {
+			secondToolRow = msg
+			break
+		}
+	}
+	if secondToolRow == nil {
+		t.Fatal("second subagent tool row missing from a.messages")
+	}
+	if secondToolRow.SubagentID != "sub-second" {
+		t.Errorf("second subagent tool row not stamped: SubagentID=%q, want sub-second", secondToolRow.SubagentID)
+	}
+}
+
+func keysOf(m map[string]*components.SubagentState) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestMultipleSubagentsTrackedIndependently(t *testing.T) {
 	t.Parallel()
 	app, _ := makeForegroundApp(t)
