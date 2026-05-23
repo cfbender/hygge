@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -207,25 +206,5 @@ func mustWrite(t *testing.T, w io.Writer, p []byte) {
 	t.Helper()
 	if _, err := w.Write(p); err != nil {
 		t.Fatalf("Write: %v", err)
-	}
-}
-
-// io_test helpers --------------------------------------------------------
-
-// readAllFrames pulls every frame off r until io.EOF.  Used by client
-// tests that pipe both directions; declared here so stdio_test.go
-// remains the only file that needs bufio.Reader directly.
-func readAllFrames(t *testing.T, r *bufio.Reader) [][]byte { //nolint:unused // used by client_test.go
-	t.Helper()
-	var out [][]byte
-	for {
-		body, err := ReadFrame(r)
-		if errors.Is(err, io.EOF) {
-			return out
-		}
-		if err != nil {
-			t.Fatalf("ReadFrame: %v", err)
-		}
-		out = append(out, body)
 	}
 }
