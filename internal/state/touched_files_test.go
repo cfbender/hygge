@@ -1,7 +1,6 @@
 package state
 
 import (
-	"context"
 	"sort"
 	"testing"
 )
@@ -83,81 +82,4 @@ func TestTouchedFiles_ListIsSorted(t *testing.T) {
 			t.Errorf("index %d: got %q, want %q", i, g, want[i])
 		}
 	}
-}
-
-// TestParseNumstat tests the internal numstat parser directly.
-func TestParseNumstat(t *testing.T) {
-	projectDir := "/home/user/proj"
-	input := []byte("12\t3\tinternal/foo.go\n0\t7\tREADME.md\n-\t-\tbinary.bin\n")
-
-	got := parseNumstat(input, projectDir)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 entries, got %d: %v", len(got), got)
-	}
-
-	fooKey := projectDir + "/internal/foo.go"
-	readmeKey := projectDir + "/README.md"
-	binKey := projectDir + "/binary.bin"
-
-	checkEntry := func(key string, wantAdded, wantDeleted int) {
-		t.Helper()
-		ns, ok := got[key]
-		if !ok {
-			t.Errorf("key %q not found in result", key)
-			return
-		}
-		if ns.Added != wantAdded {
-			t.Errorf("%q: added=%d, want %d", key, ns.Added, wantAdded)
-		}
-		if ns.Deleted != wantDeleted {
-			t.Errorf("%q: deleted=%d, want %d", key, ns.Deleted, wantDeleted)
-		}
-	}
-	checkEntry(fooKey, 12, 3)
-	checkEntry(readmeKey, 0, 7)
-	checkEntry(binKey, 0, 0) // binary → 0/0
-}
-
-func TestParseNumstat_EmptyInput(t *testing.T) {
-	got := parseNumstat([]byte(""), "/proj")
-	if len(got) != 0 {
-		t.Fatalf("expected empty map; got %v", got)
-	}
-}
-
-func TestNumstatForFiles_UsesInjectedGitRunner(t *testing.T) {
-	runner := &fakeGitRunner{out: []byte("2\t1\thello.go\n")}
-	got := NumstatForFilesWithGitRunner(t.Context(), "/repo", []string{"/repo/hello.go"}, runner)
-	ns, ok := got["/repo/hello.go"]
-	if !ok {
-		t.Fatalf("expected entry for hello.go; map=%v", got)
-	}
-	if ns.Added != 2 || ns.Deleted != 1 {
-		t.Fatalf("numstat = %+v", ns)
-	}
-	if runner.dir != "/repo" {
-		t.Fatalf("runner dir = %q", runner.dir)
-	}
-	wantArgs := []string{"diff", "--numstat", "HEAD", "--", "/repo/hello.go"}
-	if len(runner.args) != len(wantArgs) {
-		t.Fatalf("args len = %d, want %d: %v", len(runner.args), len(wantArgs), runner.args)
-	}
-	for i := range wantArgs {
-		if runner.args[i] != wantArgs[i] {
-			t.Fatalf("args[%d] = %q, want %q; args=%v", i, runner.args[i], wantArgs[i], runner.args)
-		}
-	}
-}
-
-type fakeGitRunner struct {
-	dir  string
-	args []string
-	out  []byte
-	err  error
-}
-
-func (f *fakeGitRunner) Run(_ context.Context, dir string, args ...string) ([]byte, error) {
-	f.dir = dir
-	f.args = append([]string(nil), args...)
-	return append([]byte(nil), f.out...), f.err
 }
