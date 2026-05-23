@@ -1469,7 +1469,7 @@ func TestToFantasyMessagesSynthesizesMissingToolResults(t *testing.T) {
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "try again"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil, 0, 0, 0)
 	if len(fmsgs) != 4 {
 		t.Fatalf("fantasy messages len = %d, want 4: %+v", len(fmsgs), fmsgs)
 	}
@@ -1496,7 +1496,7 @@ func TestToFantasyMessagesWrapsOnlyLatestUserMessage(t *testing.T) {
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil, 0, 0, 0)
 	if len(fmsgs) != 3 {
 		t.Fatalf("fantasy messages len = %d, want 3: %+v", len(fmsgs), fmsgs)
 	}
@@ -1525,7 +1525,7 @@ func TestToFantasyMessagesDropsHistoricalAssistantThinking(t *testing.T) {
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil, 0, 0, 0)
 	if len(fmsgs) != 3 {
 		t.Fatalf("fantasy messages len = %d, want 3: %+v", len(fmsgs), fmsgs)
 	}
@@ -1543,12 +1543,12 @@ func TestToFantasyMessagesDropsHistoricalAssistantThinking(t *testing.T) {
 
 func TestToFantasyMessagesStripsHistoricalTurnContext(t *testing.T) {
 	msgs := []*session.Message{
-		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: buildLatestUserEnvelope("historical raw request", nil)}}},
+		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: buildLatestUserEnvelope("historical raw request", nil, 0, 0, 0)}}},
 		{Role: session.RoleAssistant, Parts: []session.Part{{Kind: session.PartText, Text: "older answer"}}},
 		{Role: session.RoleUser, Parts: []session.Part{{Kind: session.PartText, Text: "latest request"}}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil, 0, 0, 0)
 	older := fantasyMessageText(fmsgs[0])
 	if older != "historical raw request" {
 		t.Fatalf("older user message = %q, want raw request", older)
@@ -1567,7 +1567,7 @@ func TestToFantasyMessagesPreservesLatestUserImages(t *testing.T) {
 		}},
 	}
 
-	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil)
+	fmsgs := toFantasyMessages(msgs, nil, "", nil, nil, nil, 0, 0, 0)
 	if len(fmsgs) != 1 {
 		t.Fatalf("fantasy messages len = %d, want 1", len(fmsgs))
 	}

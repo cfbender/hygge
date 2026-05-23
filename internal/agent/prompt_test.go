@@ -94,7 +94,7 @@ func TestComposeSystemPrompt_LazyBlocksAfterMarker(t *testing.T) {
 }
 
 func TestBuildLatestUserEnvelope_OrderAndRawRequest(t *testing.T) {
-	envelope := buildLatestUserEnvelope("please inspect <file> and keep ]]> intact", nil)
+	envelope := buildLatestUserEnvelope("please inspect <file> and keep ]]> intact", nil, 0, 0, 0)
 	for _, want := range []string{
 		turnContextOpen,
 		"<workspace_state>",
@@ -122,7 +122,7 @@ func TestBuildLatestUserEnvelope_OrderAndRawRequest(t *testing.T) {
 }
 
 func TestStripHistoricalTurnContextExtractsUserRequest(t *testing.T) {
-	envelope := buildLatestUserEnvelope("raw historical request", nil)
+	envelope := buildLatestUserEnvelope("raw historical request", nil, 0, 0, 0)
 	if got := stripHistoricalTurnContext(envelope); got != "raw historical request" {
 		t.Fatalf("stripped request = %q", got)
 	}
@@ -137,7 +137,7 @@ func TestBuildLatestUserEnvelopeIncludesSessionMemories(t *testing.T) {
 		{ID: "01GLOBAL", Scope: session.MemoryScopeGlobal, Title: "Global", Body: "global preference"},
 		{ID: "01PROJECT", Scope: session.MemoryScopeProject, Title: "Project", Body: "project preference"},
 		{ID: "01MEMORY", Scope: session.MemoryScopeSession, Content: "prefers focused diffs with ]]> preserved"},
-	})
+	}, 0, 0, 0)
 	if !strings.Contains(envelope, `<memory scope="session" id="01MEMORY">`) {
 		t.Fatalf("session memory wrapper missing:\n%s", envelope)
 	}
@@ -147,6 +147,77 @@ func TestBuildLatestUserEnvelopeIncludesSessionMemories(t *testing.T) {
 	}
 	if strings.Contains(envelope, "No active memories") {
 		t.Fatalf("unexpected no-memory content in envelope:\n%s", envelope)
+	}
+}
+
+func TestBuildLatestUserEnvelopeContextWindowPresent(t *testing.T) {
+	envelope := buildLatestUserEnvelope("do work", nil, 200000, 0, 0)
+	if !strings.Contains(envelope, "<context_window>") {
+		t.Fatalf("envelope missing <context_window>:\n%s", envelope)
+	}
+	if !strings.Contains(envelope, "<max_tokens>200000</max_tokens>") {
+		t.Fatalf("envelope missing <max_tokens>200000</max_tokens>:\n%s", envelope)
+	}
+	// context_window must appear between memories and critical_turn_reminders.
+	assertPromptOrder(t, envelope, "<memories>", "<context_window>", "<critical_turn_reminders>", userRequestOpen)
+}
+
+func TestBuildLatestUserEnvelopeContextWindowZeroOmitted(t *testing.T) {
+	for _, cw := range []int64{0, -1} {
+		envelope := buildLatestUserEnvelope("do work", nil, cw, 0, 0)
+		if strings.Contains(envelope, "<context_window>") {
+			t.Fatalf("contextWindow=%d: envelope should omit <context_window>, got:\n%s", cw, envelope)
+		}
+	}
+}
+
+// TestBuildLatestUserEnvelopeUsagePresent verifies that latest-known usage
+// is rendered inside <context_window> when contextWindow > 0 and usedTokens > 0.
+func TestBuildLatestUserEnvelopeUsagePresent(t *testing.T) {
+	// 40000 used out of 200000 = 20.0%
+	envelope := buildLatestUserEnvelope("do work", nil, 200000, 40000, 0.2)
+	if !strings.Contains(envelope, "<context_window>") {
+		t.Fatalf("envelope missing <context_window>:\n%s", envelope)
+	}
+	if !strings.Contains(envelope, "<max_tokens>200000</max_tokens>") {
+		t.Fatalf("envelope missing <max_tokens>:\n%s", envelope)
+	}
+	if !strings.Contains(envelope, "<latest_known_used_tokens>40000</latest_known_used_tokens>") {
+		t.Fatalf("envelope missing <latest_known_used_tokens>:\n%s", envelope)
+	}
+	if !strings.Contains(envelope, "<latest_known_used_percent>20.0</latest_known_used_percent>") {
+		t.Fatalf("envelope missing <latest_known_used_percent>:\n%s", envelope)
+	}
+	// Order: max_tokens, then usage, all inside context_window.
+	assertPromptOrder(t, envelope, "<context_window>", "<max_tokens>", "<latest_known_used_tokens>", "<latest_known_used_percent>", "</context_window>")
+}
+
+// TestBuildLatestUserEnvelopeUsageOmittedWhenZeroTokens verifies that
+// latest-known usage is not rendered when usedTokens == 0, even if
+// contextWindow > 0 (i.e. no prior turn yet).
+func TestBuildLatestUserEnvelopeUsageOmittedWhenZeroTokens(t *testing.T) {
+	envelope := buildLatestUserEnvelope("do work", nil, 200000, 0, 0)
+	if !strings.Contains(envelope, "<context_window>") {
+		t.Fatalf("envelope missing <context_window>:\n%s", envelope)
+	}
+	if strings.Contains(envelope, "<latest_known_used_tokens>") {
+		t.Fatalf("latest_known_used_tokens should be omitted when usedTokens=0:\n%s", envelope)
+	}
+	if strings.Contains(envelope, "<latest_known_used_percent>") {
+		t.Fatalf("latest_known_used_percent should be omitted when usedTokens=0:\n%s", envelope)
+	}
+}
+
+// TestBuildLatestUserEnvelopeUsageOmittedWhenNoContextWindow verifies that
+// latest-known usage is not rendered when contextWindow == 0, regardless of
+// usedTokens.
+func TestBuildLatestUserEnvelopeUsageOmittedWhenNoContextWindow(t *testing.T) {
+	envelope := buildLatestUserEnvelope("do work", nil, 0, 50000, 0.25)
+	if strings.Contains(envelope, "<context_window>") {
+		t.Fatalf("context_window block should be omitted when contextWindow=0:\n%s", envelope)
+	}
+	if strings.Contains(envelope, "<latest_known_used_tokens>") {
+		t.Fatalf("latest_known_used_tokens should be omitted when contextWindow=0:\n%s", envelope)
 	}
 }
 
