@@ -270,7 +270,7 @@ func (a *App) breadcrumbSegments() []string {
 	}
 	st := a.foregroundSubagent()
 	if st == nil {
-		return []string{"subagent", "esc to go back"}
+		return []string{"subagent", "ctrl+g to go back"}
 	}
 
 	label := st.Type
@@ -279,9 +279,9 @@ func (a *App) breadcrumbSegments() []string {
 	}
 
 	ids := a.sortedSubagentIDs()
-	nav := "esc to go back"
+	nav := "ctrl+g to go back"
 	if len(ids) > 1 {
-		nav = "↑ ↓ navigate · esc to go back"
+		nav = "↑ ↓ navigate · ctrl+g to go back"
 	}
 	return []string{label, nav}
 }
