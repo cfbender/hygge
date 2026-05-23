@@ -76,6 +76,29 @@ bubble/sidebar UI.
 - IDs are ULIDs, timestamps are Unix milliseconds, costs are `float64` USD.
 - Tests must not depend on an existing local database or config file.
 
+## CLI command UX
+
+- Hygge CLI commands should feel like part of the terminal product, not plain
+  line prompts. Prefer Fang-wrapped Cobra commands with Bubble Tea/Bubbles/Lip
+  Gloss v2 components for interactive flows.
+- Use selectable choices for bounded decisions such as scope, transport,
+  provider, model, auth method, or yes/no confirmations. Do not ask users to
+  type option names when the set of valid answers is known.
+- Use text input only for genuinely free-form values: names, paths, commands,
+  URLs, tokens, headers, and similar user-provided strings. Hide secret input.
+- Keep automation safe: every interactive choice must also have an explicit
+  flag or noninteractive path. Non-TTY runs must never hang; fail with clear
+  remediation when required choices are missing.
+- Keep command logic UI-independent where practical. Parse flags and build
+  typed request structs separately from Bubble Tea models, then pass the result
+  to narrow persistence/service functions.
+- Make success and error output clear and pretty: include the affected resource,
+  scope, and path when useful, while preserving script-friendly behavior for
+  noninteractive output.
+- Test CLI commands hermetically with fake home/config/state directories and
+  direct Bubble Tea model updates for interactive flows; avoid real terminals,
+  real user config, and live network calls in tests.
+
 ## Provider/runtime notes
 
 - Active turns should use Fantasy when a `fantasy.LanguageModel` is available;

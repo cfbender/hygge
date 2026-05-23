@@ -19,6 +19,7 @@ func newMCPCmd() *cobra.Command {
 		Short: "Inspect and probe configured MCP servers",
 	}
 	root.AddCommand(
+		newMCPAddCmd(),
 		newMCPListCmd(),
 		newMCPPingCmd(),
 		newMCPToolsCmd(),
