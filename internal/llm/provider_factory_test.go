@@ -263,3 +263,124 @@ func TestResolveProviderModel_OpencodeGo_ExplicitBaseURLOverrides(t *testing.T) 
 		t.Fatal("language model is nil")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests: nil catalog and stale catalog without ProvidersMeta.
+//
+// These cover the original failure mode: real builds can have a nil catalog
+// (unit tests, bootstrap edge cases) or a disk snapshot that predates the
+// ProvidersMeta field.  In both cases the embedded Catwalk data must be
+// consulted as a fallback.
+// ---------------------------------------------------------------------------
+
+// TestResolveProviderModel_OpencodeGo_NilCatalog_WithAPIKey reproduces the
+// exact error "llm: unsupported provider "opencode-go" (base_url required for
+// compat provider)" that occurs when cat == nil.
+func TestResolveProviderModel_OpencodeGo_NilCatalog_WithAPIKey(t *testing.T) {
+	r, err := llm.ResolveProviderModel(t.Context(), "opencode-go", "minimax-m2.7", map[string]any{
+		"api_key": "sk-opencode-test",
+	}, nil /* nil catalog — must fall back to embedded */)
+	if err != nil {
+		t.Fatalf("ResolveProviderModel with nil catalog: %v", err)
+	}
+	if r.Provider == nil {
+		t.Fatal("provider is nil")
+	}
+	if r.Model == nil {
+		t.Fatal("language model is nil")
+	}
+	if got := r.Model.Provider(); got != "opencode-go" {
+		t.Fatalf("model.Provider() = %q, want %q", got, "opencode-go")
+	}
+}
+
+// TestResolveProviderModel_OpencodeGo_NilCatalog_EnvAPIKey reproduces the
+// failure when cat == nil and the api_key comes from $OPENCODE_API_KEY.
+func TestResolveProviderModel_OpencodeGo_NilCatalog_EnvAPIKey(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "sk-env-opencode-test")
+	r, err := llm.ResolveProviderModel(t.Context(), "opencode-go", "minimax-m2.7",
+		nil /* no opts */, nil /* nil catalog */)
+	if err != nil {
+		t.Fatalf("ResolveProviderModel with nil catalog + env key: %v", err)
+	}
+	if r.Model == nil {
+		t.Fatal("language model is nil")
+	}
+	if got := r.Model.Provider(); got != "opencode-go" {
+		t.Fatalf("model.Provider() = %q, want %q", got, "opencode-go")
+	}
+}
+
+// staleCatalogWithoutMeta builds a catalog whose in-memory snapshot has a
+// Providers map for opencode-go but no ProvidersMeta — simulating an old disk
+// snapshot written before provider-metadata support was added.
+func staleCatalogWithoutMeta(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	snap := &catalog.Snapshot{
+		FetchedAt: time.Now(),
+		Providers: map[string]map[string]catalog.Entry{
+			"opencode-go": {
+				"minimax-m2.7": {
+					Provider: "opencode-go",
+					ID:       "minimax-m2.7",
+					Name:     "MiniMax M2.7",
+				},
+			},
+		},
+		// ProvidersMeta intentionally absent — old snapshot.
+	}
+	off := new(bool)
+	cat, err := catalog.Load(catalog.LoadOptions{
+		StateDir:          t.TempDir(),
+		Source:            &catalogFetcher{snap: snap},
+		BackgroundRefresh: off,
+	})
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+	if _, err := cat.Refresh(context.Background()); err != nil {
+		t.Fatalf("catalog.Refresh: %v", err)
+	}
+	t.Cleanup(func() { _ = cat.Close() })
+	return cat
+}
+
+// TestResolveProviderModel_OpencodeGo_StaleSnapshotNoMeta exercises the case
+// where a Catalog instance exists but its snapshot has no ProvidersMeta.
+// The embedded fallback must provide the api_endpoint.
+func TestResolveProviderModel_OpencodeGo_StaleSnapshotNoMeta(t *testing.T) {
+	cat := staleCatalogWithoutMeta(t)
+	r, err := llm.ResolveProviderModel(t.Context(), "opencode-go", "minimax-m2.7", map[string]any{
+		"api_key": "sk-opencode-test",
+	}, cat)
+	if err != nil {
+		t.Fatalf("ResolveProviderModel with stale snapshot: %v", err)
+	}
+	if r.Provider == nil {
+		t.Fatal("provider is nil")
+	}
+	if r.Model == nil {
+		t.Fatal("language model is nil")
+	}
+	if got := r.Model.Provider(); got != "opencode-go" {
+		t.Fatalf("model.Provider() = %q, want %q", got, "opencode-go")
+	}
+}
+
+// TestResolveProviderModel_OpencodeGo_StaleSnapshot_EnvAPIKey exercises the
+// combined stale-snapshot + env-based API key path.
+func TestResolveProviderModel_OpencodeGo_StaleSnapshot_EnvAPIKey(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "sk-env-opencode-test")
+	cat := staleCatalogWithoutMeta(t)
+	r, err := llm.ResolveProviderModel(t.Context(), "opencode-go", "minimax-m2.7",
+		nil /* no opts */, cat)
+	if err != nil {
+		t.Fatalf("ResolveProviderModel with stale snapshot + env key: %v", err)
+	}
+	if r.Model == nil {
+		t.Fatal("language model is nil")
+	}
+	if got := r.Model.Provider(); got != "opencode-go" {
+		t.Fatalf("model.Provider() = %q, want %q", got, "opencode-go")
+	}
+}

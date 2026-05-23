@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -136,9 +137,7 @@ func snapshotFromCatwalkProviders(providers []catwalk.Provider, etag string) *Sn
 		}
 		if len(p.DefaultHeaders) > 0 {
 			pm.DefaultHeaders = make(map[string]string, len(p.DefaultHeaders))
-			for k, v := range p.DefaultHeaders {
-				pm.DefaultHeaders[k] = v
-			}
+			maps.Copy(pm.DefaultHeaders, p.DefaultHeaders)
 		}
 		meta[providerID] = pm
 	}

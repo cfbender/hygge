@@ -182,15 +182,25 @@ func newFantasyProvider(providerID, apiKey string, opts map[string]any, buildOpt
 			// Try to find the provider's API endpoint from the catalog.
 			// This enables openai-compat Catwalk providers (e.g. opencode-go)
 			// to work without the user supplying a base_url explicitly.
+			//
+			// Resolution order:
+			//   1. Runtime catalog (may be nil or may lack ProvidersMeta for
+			//      old disk snapshots).
+			//   2. Embedded Catwalk data — always present, no network required.
+			pm, pmOK := catalog.ProviderMeta{}, false
 			if cat != nil {
-				if pm, ok := cat.LookupProvider(providerID); ok && pm.APIEndpoint != "" {
-					baseURL = pm.APIEndpoint
-					// Merge provider-level default_headers from catalog into the
-					// request headers, not overwriting user-supplied values.
-					for k, v := range pm.DefaultHeaders {
-						if _, exists := headers[k]; !exists {
-							headers[k] = v
-						}
+				pm, pmOK = cat.LookupProvider(providerID)
+			}
+			if !pmOK {
+				pm, pmOK = catalog.LookupProviderEmbedded(providerID)
+			}
+			if pmOK && pm.APIEndpoint != "" {
+				baseURL = pm.APIEndpoint
+				// Merge provider-level default_headers into the request headers,
+				// not overwriting user-supplied values.
+				for k, v := range pm.DefaultHeaders {
+					if _, exists := headers[k]; !exists {
+						headers[k] = v
 					}
 				}
 			}
@@ -252,13 +262,26 @@ func resolveAPIKey(providerID string, opts map[string]any, cat *catalog.Catalog)
 	}
 	// Fall back to the catalog's APIKeyRef for this provider.
 	// Only used when there is no hardcoded env mapping for the provider.
+	//
+	// Resolution order:
+	//   1. Runtime catalog (may be nil or lack ProvidersMeta for old snapshots).
+	//   2. Embedded Catwalk data — always present, no network required.
+	apiKeyRef := ""
 	if cat != nil {
 		if pm, ok := cat.LookupProvider(providerID); ok && pm.APIKeyRef != "" {
-			if after, ok0 := strings.CutPrefix(pm.APIKeyRef, "$"); ok0 {
-				if after != "" {
-					if ev := os.Getenv(after); ev != "" {
-						return ev, nil
-					}
+			apiKeyRef = pm.APIKeyRef
+		}
+	}
+	if apiKeyRef == "" {
+		if pm, ok := catalog.LookupProviderEmbedded(providerID); ok && pm.APIKeyRef != "" {
+			apiKeyRef = pm.APIKeyRef
+		}
+	}
+	if apiKeyRef != "" {
+		if after, ok0 := strings.CutPrefix(apiKeyRef, "$"); ok0 {
+			if after != "" {
+				if ev := os.Getenv(after); ev != "" {
+					return ev, nil
 				}
 			}
 		}
