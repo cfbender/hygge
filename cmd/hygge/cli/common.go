@@ -611,7 +611,11 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		thm = styles.DefaultTheme()
 	}
 
-	contextWindow := lookupContextWindow(ctx, prv, cfg.Model.Name)
+	// Context window is sourced from the Catwalk catalog via the fantasy
+	// resolution metadata.  For non-fantasy paths (DryRun, stubProvider,
+	// test injections) the value is 0 — the agent treats 0 as "unknown"
+	// and skips PctUsed math.
+	contextWindow := fantasyResolved.Metadata.ContextWindow
 	memoryStore := memory.NewFileStore(memory.FileStoreOptions{ProjectDir: opts.Pwd, HomeDir: opts.HomeDir, XDGConfigHome: xdgConfig, Now: opts.Now})
 
 	// Phase: skills load
@@ -1535,26 +1539,6 @@ func maskKey(s string) string {
 	return s[:3] + "***" + s[len(s)-4:]
 }
 
-// lookupContextWindow asks the provider for its model list and finds the
-// configured model's window size.  Returns 0 when the provider cannot
-// answer (offline, transient error) — the agent treats 0 as "unknown" and
-// skips PctUsed math.
-func lookupContextWindow(ctx context.Context, prv provider.Provider, modelName string) int64 {
-	if prv == nil {
-		return 0
-	}
-	models, err := prv.ListModels(ctx)
-	if err != nil {
-		slog.Warn("cli: ListModels failed; context window will be 0", "err", err)
-		return 0
-	}
-	for _, m := range models {
-		if m.Name == modelName {
-			return m.ContextWindow
-		}
-	}
-	return 0
-}
 
 // envLookupWithXDG returns an env-lookup function that overrides the XDG
 // vars to the values we resolved (so config.Load sees our hermetic paths
