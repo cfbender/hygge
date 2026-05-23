@@ -1,6 +1,0 @@
-data: {"id":"chatcmpl-4","object":"chat.completion.chunk","created":1234567890,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-4","object":"chat.completion.chunk","created":1234567890,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-data: [DONE]
-
