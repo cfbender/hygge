@@ -5,7 +5,7 @@ Bubble Tea TUI, streaming model responses, persistent SQLite sessions, tools,
 plugins, MCP integrations, hooks, subagents, slash commands, and themeable chat
 UI chrome.
 
-<img width="1772" height="1046" alt="image" src="https://github.com/user-attachments/assets/3c63744c-f9a9-47ab-9e94-6a239bf3442c" />
+<img width="1758" height="1052" alt="image" src="https://github.com/user-attachments/assets/ca77b3e4-1e4c-47f3-91c6-7986032b6ef7" />
 
 ## Install
 
