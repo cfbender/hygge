@@ -801,6 +801,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Subagents:     subagentReg,
 		Permission:    permEngine,
 		PluginConfigs: cfg.RawPluginSettings(),
+		ProfileDir:    cfg.ProfileDir,
 		Pwd:           opts.Pwd,
 	})
 	if err != nil {

@@ -25,12 +25,15 @@ type configSource struct {
 //  1. User config
 //  2. Profile (chain via extends, base-first)
 //  3. Walk-up .hygge/config.toml files (root-first, so pwd-nearest wins last)
+//
+// The second return value is the resolved profile directory (see
+// resolveProfileChain for the definition).
 func enumerateSources(
 	_ context.Context,
 	opts LoadOptions,
 	xdgConfigHome string,
 	profileName string,
-) ([]configSource, error) {
+) ([]configSource, string, error) {
 	var sources []configSource
 
 	// 1. User config.
@@ -43,28 +46,38 @@ func enumerateSources(
 	}
 
 	// 2. Profile chain.
-	profileSources, err := resolveProfileChain(profileName, xdgConfigHome)
+	profileSources, profileDir, err := resolveProfileChain(profileName, xdgConfigHome)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	sources = append(sources, profileSources...)
 
 	// 3. Walk-up .hygge/config.toml files.
 	walkSources, err := collectWalkupSources(opts.Pwd, opts.HomeDir)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	sources = append(sources, walkSources...)
 
-	return sources, nil
+	return sources, profileDir, nil
 }
 
 // resolveProfileChain builds the ordered list of profile sources for
 // profileName, following extends chains (base profile first, so the named
 // profile's values win last).
-func resolveProfileChain(profileName, xdgConfigHome string) ([]configSource, error) {
+//
+// The second return value is the resolved profile directory for the *named*
+// profile (not its ancestors).  This is:
+//   - the directory containing a flat profile file
+//     ($profilesDir/<name>.toml → $profilesDir/<name>), or
+//   - the directory profile directory itself
+//     ($profilesDir/<name>/config.toml → $profilesDir/<name>).
+//
+// The directory may not exist on disk (flat profile case).  An empty string
+// is returned when no profile file was found (e.g. missing "default").
+func resolveProfileChain(profileName, xdgConfigHome string) ([]configSource, string, error) {
 	if profileName == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	profilesDir := filepath.Join(xdgConfigHome, "hygge", "profiles")
@@ -77,24 +90,44 @@ func resolveProfileChain(profileName, xdgConfigHome string) ([]configSource, err
 	}
 
 	var chain []entry
+	// profileDir records the directory for the named profile (the first entry
+	// in the walk; later entries are extended parents).
+	profileDir := ""
 	visited := make(map[string]bool)
 	current := profileName
 
 	for {
 		if visited[current] {
-			return nil, fmt.Errorf("%w: %s", ErrCyclicProfile, current)
+			return nil, "", fmt.Errorf("%w: %s", ErrCyclicProfile, current)
 		}
 		if len(chain) >= maxProfileDepth {
-			return nil, fmt.Errorf("%w: max %d", ErrProfileDepth, maxProfileDepth)
+			return nil, "", fmt.Errorf("%w: max %d", ErrProfileDepth, maxProfileDepth)
 		}
 
-		profilePath := filepath.Join(profilesDir, current+".toml")
-		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
+		// Prefer the flat file; fall back to the directory form.
+		// Requirement 3: flat file wins when both exist (backward compat).
+		flatPath := filepath.Join(profilesDir, current+".toml")
+		dirPath := filepath.Join(profilesDir, current, "config.toml")
+
+		var profilePath string
+		switch {
+		case fileExists(flatPath):
+			profilePath = flatPath
+		case fileExists(dirPath):
+			profilePath = dirPath
+		default:
 			if current == "default" {
 				// Missing "default" profile is not an error on first run.
-				break
+				// Break the for loop — profileDir stays "".
+				goto done
 			}
-			return nil, fmt.Errorf("%w: %s", ErrProfileNotFound, current)
+			return nil, "", fmt.Errorf("%w: %s", ErrProfileNotFound, current)
+		}
+
+		// Record the directory for the named (first) profile only.
+		// Both flat and directory forms resolve to profiles/<name>.
+		if len(chain) == 0 {
+			profileDir = filepath.Join(profilesDir, current)
 		}
 
 		visited[current] = true
@@ -103,7 +136,7 @@ func resolveProfileChain(profileName, xdgConfigHome string) ([]configSource, err
 		// Peek at the file to see if it has an extends key.
 		m, err := loadTOMLFile(profilePath)
 		if err != nil {
-			return nil, &ParseError{File: profilePath, Err: err}
+			return nil, "", &ParseError{File: profilePath, Err: err}
 		}
 		extendsVal, ok := m["extends"]
 		if !ok {
@@ -115,6 +148,7 @@ func resolveProfileChain(profileName, xdgConfigHome string) ([]configSource, err
 		}
 		current = extendsName
 	}
+done:
 
 	// Reverse so the base (earliest in the extends chain) is applied first,
 	// giving the named profile the highest precedence within the chain.
@@ -129,7 +163,13 @@ func resolveProfileChain(profileName, xdgConfigHome string) ([]configSource, err
 			source: Source{File: e.path},
 		})
 	}
-	return sources, nil
+	return sources, profileDir, nil
+}
+
+// fileExists reports whether a regular file exists at path.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // collectWalkupSources walks up from dir toward homeDir, collecting

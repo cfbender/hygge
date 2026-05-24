@@ -169,8 +169,11 @@ func TestPluginsTypesInstallWritesLuaLSFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read types: %v", err)
 	}
-	if got := string(typesData); !strings.Contains(got, "---@class Hygge") || !strings.Contains(got, "function hygge.register_tool") {
-		t.Fatalf("types file missing Hygge definitions:\n%s", got)
+	gotTypes := string(typesData)
+	for _, want := range []string{"---@class Hygge", "---@field profile HyggeProfile", "---@class HyggeProfile", "---@field dir string Absolute active profile directory", "function hygge.register_tool"} {
+		if !strings.Contains(gotTypes, want) {
+			t.Fatalf("types file missing %q:\n%s", want, gotTypes)
+		}
 	}
 
 	luarcPath := filepath.Join(dir, ".luarc.json")
@@ -244,8 +247,12 @@ func TestPluginsDevInitWritesScaffoldAndTypes(t *testing.T) {
 		t.Fatalf("plugin.lua missing starter tool:\n%s", string(pluginData))
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, ".hygge", "types", "hygge.lua")); err != nil {
+	typesData, err := os.ReadFile(filepath.Join(dir, ".hygge", "types", "hygge.lua")) // #nosec G304 -- hermetic test path under t.TempDir
+	if err != nil {
 		t.Fatalf("expected types file: %v", err)
+	}
+	if !strings.Contains(string(typesData), "---@field profile HyggeProfile") {
+		t.Fatalf("types file missing profile metadata:\n%s", string(typesData))
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".luarc.json")); err != nil {
 		t.Fatalf("expected .luarc.json: %v", err)
