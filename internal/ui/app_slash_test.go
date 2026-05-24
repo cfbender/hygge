@@ -437,13 +437,8 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
 	var switched []string
-	var saved []string
 	app.opts.SwitchModel = func(_ context.Context, providerName, modelName, _ string) error {
 		switched = append(switched, providerName+"/"+modelName)
-		return nil
-	}
-	app.opts.SaveModel = func(_ context.Context, providerName, modelName string) error {
-		saved = append(saved, providerName+"/"+modelName)
 		return nil
 	}
 	typeInto(app, "/model openrouter/gpt-5")
@@ -454,9 +449,6 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	runSlashTestCmd(app, cmd)
 	if len(switched) != 1 || switched[0] != "openrouter/gpt-5" {
 		t.Fatalf("SwitchModel calls = %v, want [openrouter/gpt-5]", switched)
-	}
-	if len(saved) != 1 || saved[0] != "openrouter/gpt-5" {
-		t.Fatalf("SaveModel calls = %v, want [openrouter/gpt-5]", saved)
 	}
 	if app.opts.ModelProvider != "openrouter" {
 		t.Errorf("ModelProvider = %q, want openrouter", app.opts.ModelProvider)
@@ -472,16 +464,14 @@ func TestSlashCommandModelUpdatesOpts(t *testing.T) {
 	}
 }
 
-func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testing.T) {
+func TestSlashCommandModelDoesNotCallSaveModel(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)
-	var switched []string
-	app.opts.SwitchModel = func(_ context.Context, providerName, modelName, _ string) error {
-		switched = append(switched, providerName+"/"+modelName)
-		return nil
-	}
+	app.opts.SwitchModel = func(_ context.Context, _, _, _ string) error { return nil }
+	var saveCalled bool
 	app.opts.SaveModel = func(_ context.Context, _, _ string) error {
-		return errors.New("permission denied")
+		saveCalled = true
+		return nil
 	}
 	typeInto(app, "/model openrouter/gpt-5")
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -489,14 +479,11 @@ func TestSlashCommandModelSaveFailureKeepsRuntimeSwitchAndReportsNotice(t *testi
 		t.Fatal("expected model switch cmd")
 	}
 	runSlashTestCmd(app, cmd)
-	if len(switched) != 1 || switched[0] != "openrouter/gpt-5" {
-		t.Fatalf("SwitchModel calls = %v, want [openrouter/gpt-5]", switched)
+	if saveCalled {
+		t.Error("SaveModel must not be called by the /model slash command")
 	}
 	if app.opts.ModelProvider != "openrouter" || app.opts.ModelName != "gpt-5" {
-		t.Fatalf("selected model = %s/%s, want openrouter/gpt-5", app.opts.ModelProvider, app.opts.ModelName)
-	}
-	if !strings.Contains(app.notice, "save failed") || !strings.Contains(app.notice, "permission denied") {
-		t.Fatalf("notice = %q, want save failure", app.notice)
+		t.Fatalf("session model = %s/%s, want openrouter/gpt-5", app.opts.ModelProvider, app.opts.ModelName)
 	}
 }
 
