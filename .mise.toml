@@ -39,3 +39,7 @@ run = "go fix ./..."
 [tasks.bump]
 description = "Bump major/minor/patch version, commit, tag, and push"
 run = "bash ./scripts/bump.sh $@"
+
+[tasks.changelog]
+description = "Generate CHANGELOG.md for the next major/minor/patch version"
+run = "bash ./scripts/changelog.sh $@"
