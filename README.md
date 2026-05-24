@@ -292,6 +292,10 @@ The bump task increments `cmd/hygge/cli/cli.go`, commits, creates an annotated
 tag, and pushes the commit and tag. Use it only when intentionally cutting a
 release.
 
+See [docs/releasing.md](docs/releasing.md) for the full release process,
+changelog generation with [git-cliff](https://git-cliff.org), and required
+GitHub repository settings (squash-only merges, PR title enforcement).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
