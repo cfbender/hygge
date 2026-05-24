@@ -161,6 +161,11 @@ type AppOptions struct {
 	// the hard-coded secrets denylist active.
 	Yolo    bool
 	SetYolo func(ctx context.Context, enabled bool) error
+
+	// OpenURL opens a URL with the OS default browser. When nil, OpenURLWithOS
+	// is used.  Tests inject a no-op stub to avoid spawning a real browser.
+	// Only http(s) URLs from URLHitZones are passed to this function.
+	OpenURL func(url string) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -341,6 +346,7 @@ type App struct {
 	subagentHitZones       []components.SubagentHitZone
 	toolHitZones           []components.ToolHitZone
 	thinkingHitZones       []components.ThinkingHitZone
+	urlHitZones            []components.URLHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
@@ -1162,6 +1168,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				etm := a.expandedThinkingFor(tid)
 				etm[idx] = !etm[idx]
 				a.invalidateMsgCache()
+				return a, nil
+			}
+			// Check for URL click: open with OS default browser.
+			// This fires on a plain left-click so it works in all terminals,
+			// including those where mouse reporting prevents native Command-click
+			// from reaching OSC 8 hyperlinks.
+			if url := a.urlAtScreen(m.X, m.Y); url != "" {
+				a.clearSelection()
+				opener := a.opts.OpenURL
+				if opener == nil {
+					opener = OpenURLWithOS
+				}
+				_ = opener(url) // best-effort; failure is silently dropped
 				return a, nil
 			}
 			a.handleMouseDown(m.X, m.Y)
