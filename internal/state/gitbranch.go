@@ -15,6 +15,17 @@ var (
 	branchCache   = map[string]string{}
 )
 
+// InvalidateBranchCache removes the cached branch name for projectPath so the
+// next call to GitBranch re-reads .git/HEAD from disk.  Call this when the
+// branch is expected to have changed (e.g. when a new user message is sent or a
+// new session starts) to ensure the sidebar reflects the current branch without
+// paying a filesystem read on every render tick.
+func InvalidateBranchCache(projectPath string) {
+	branchCacheMu.Lock()
+	delete(branchCache, projectPath)
+	branchCacheMu.Unlock()
+}
+
 // GitBranch returns the current branch (or detached-HEAD short SHA) for the
 // repository rooted at or above projectPath.  The result is cached per
 // projectPath for the lifetime of the process.
