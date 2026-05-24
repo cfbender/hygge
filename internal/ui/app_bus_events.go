@@ -85,7 +85,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			a.lastAssistantFlushIdx = -1
 			return titleCmd
 		}
-		a.flushAssistantStream(e.Role, e.MessageID)
+		return a.flushAssistantStream(e.Role, e.MessageID)
 
 	case bus.ToolCallRequested:
 		if a.routeToSubagent(e.SessionID) {
@@ -408,6 +408,16 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			a.activeTurns--
 		}
 		if a.activeTurns == 0 && len(a.queuedDrafts) > 0 {
+			// If there is still a streaming assistant bubble in the message
+			// list, bus.MessageAppended(assistant) has not yet been processed
+			// (TurnCompleted and MessageAppended travel through separate bridge
+			// goroutines and can arrive out of order).  Defer the flush until
+			// flushAssistantStream finalises the bubble so the next queued send
+			// never overlaps with the outgoing assistant turn's render.
+			if a.currentAssistantMessageIndex() >= 0 && a.messages[a.currentAssistantMessageIndex()].IsStreaming {
+				a.pendingQueueFlush = true
+				return nil
+			}
 			a.busy = false
 			a.workingVerb = ""
 			a.input.SetBusy(false, "")

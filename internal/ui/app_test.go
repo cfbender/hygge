@@ -2953,6 +2953,167 @@ func TestTurnCompletedFlushesQueuedDraftsInOrder(t *testing.T) {
 	}
 }
 
+// TestTurnCompleted_DeferFlushUntilAssistantFinalised verifies that when
+// bus.TurnCompleted arrives while the trailing assistant message is still
+// streaming (IsStreaming=true), flushQueuedDraftsCmd is NOT fired immediately.
+// Instead, pendingQueueFlush is set and the flush fires only once
+// bus.MessageAppended(assistant) triggers flushAssistantStream.
+//
+// This guards against the race where TurnCompleted and the final
+// MessageAppended(assistant) travel through separate bridge goroutines and
+// arrive out of order, causing the next queued draft to start before the
+// current assistant turn has finished rendering.
+func TestTurnCompleted_DeferFlushUntilAssistantFinalised(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.SessionID = "sess"
+	seen := make(chan string, 1)
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		seen <- firstTextPart(parts)
+		return nil, nil
+	}
+
+	// Simulate a turn that has a streaming assistant bubble still in the
+	// message list (MessageAppended has not yet been processed).
+	app.busy = true
+	app.activeTurns = 1
+	app.messages = append(app.messages, uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         "partial response",
+		VisibleRaw:  "partial response",
+		IsStreaming: true,
+	})
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "queued draft"})
+
+	// TurnCompleted while streaming: must defer the flush.
+	// pendingQueueFlush should be set; the queued draft should still be
+	// in the queue (not yet sent).
+	app.Handle(bus.TurnCompleted{SessionID: "sess"})
+	if !app.pendingQueueFlush {
+		t.Fatal("pendingQueueFlush should be set after TurnCompleted with a streaming assistant")
+	}
+	if len(app.queuedDrafts) != 1 {
+		t.Fatalf("queue should still have 1 draft after deferred TurnCompleted, got %d", len(app.queuedDrafts))
+	}
+	// Confirm the send has NOT been dispatched yet.
+	select {
+	case got := <-seen:
+		t.Fatalf("queued draft was sent prematurely before MessageAppended(assistant); got %q", got)
+	default:
+	}
+
+	// Now simulate MessageAppended(assistant) arriving (the deferred event).
+	// flushAssistantStream is called, which calls dequeuePendingFlush, which
+	// calls flushQueuedDraftsCmd — launching the send goroutine immediately.
+	app.Handle(bus.MessageAppended{SessionID: "sess", MessageID: "msg-1", Role: "assistant"})
+	if app.pendingQueueFlush {
+		t.Fatal("pendingQueueFlush should be cleared after MessageAppended(assistant)")
+	}
+	// The send goroutine was started by flushQueuedDraftsCmd — wait for it.
+	got := readSeenPrompt(t, seen)
+	if got != "queued draft" {
+		t.Fatalf("flushed send text = %q, want %q", got, "queued draft")
+	}
+	if app.busy {
+		t.Fatal("app should be idle before dispatching the queued draft")
+	}
+	// The assistant message should be finalised (IsStreaming=false).
+	for _, msg := range app.messages {
+		if msg.Role == components.RoleAssistant && msg.IsStreaming {
+			t.Error("assistant message should not be streaming after MessageAppended flush")
+		}
+	}
+}
+
+func TestPendingQueueFlushClearedAfterQueueEmptied(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.SessionID = "sess"
+	app.busy = true
+	app.activeTurns = 0
+	app.pendingQueueFlush = true
+	app.messages = append(app.messages, uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         "partial response",
+		VisibleRaw:  "partial response",
+		IsStreaming: true,
+	})
+
+	app.Handle(bus.MessageAppended{SessionID: "sess", MessageID: "msg-1", Role: "assistant"})
+	if app.pendingQueueFlush {
+		t.Fatal("pendingQueueFlush should be cleared after assistant finalises")
+	}
+	if app.busy {
+		t.Fatal("app should be idle after releasing pending queue flush with no queued drafts")
+	}
+}
+
+func TestBusyReconcileTick_ReleasesPendingQueueFlush(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.SessionID = "sess"
+	seen := make(chan string, 1)
+	app.testAgentIsSessionBusyFn = func(string) bool { return false }
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		seen <- firstTextPart(parts)
+		return nil, nil
+	}
+	app.busy = true
+	app.activeTurns = 0
+	app.pendingQueueFlush = true
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "reconciled draft"})
+
+	cmd := app.handleBusyReconcileTick()
+	if cmd == nil {
+		t.Fatal("expected reconcile tick to return queued send command")
+	}
+	if app.pendingQueueFlush {
+		t.Fatal("pendingQueueFlush should be cleared by reconcile fallback")
+	}
+	if app.busy {
+		t.Fatal("app should be idle before dispatching reconciled queued draft")
+	}
+	got := readSeenPrompt(t, seen)
+	if got != "reconciled draft" {
+		t.Fatalf("flushed send text = %q, want %q", got, "reconciled draft")
+	}
+}
+
+// TestTurnCompleted_NoStreamingAssistant_FlushesImmediately verifies the
+// fast path: when TurnCompleted arrives and there is no streaming assistant
+// bubble, the queue flush is not deferred.
+func TestTurnCompleted_NoStreamingAssistant_FlushesImmediately(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	app.opts.SessionID = "sess"
+	seen := make(chan string, 1)
+	app.testAgentSendFn = func(_ context.Context, _ string, parts []session.Part) (*session.Message, error) {
+		seen <- firstTextPart(parts)
+		return nil, nil
+	}
+	app.busy = true
+	app.activeTurns = 1
+	// A finalised (non-streaming) assistant message — no deferred flush needed.
+	app.messages = append(app.messages, uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         "complete response",
+		VisibleRaw:  "complete response",
+		IsStreaming: false,
+	})
+	app.enqueuePromptDraft(queuedPromptDraft{Text: "immediate draft"})
+
+	// flushQueuedDraftsCmd launches the send goroutine immediately when called
+	// inside the TurnCompleted handler — no MessageAppended needed.
+	app.Handle(bus.TurnCompleted{SessionID: "sess"})
+	if app.pendingQueueFlush {
+		t.Fatal("pendingQueueFlush should not be set when no streaming assistant")
+	}
+	got := readSeenPrompt(t, seen)
+	if got != "immediate draft" {
+		t.Fatalf("flushed send text = %q, want %q", got, "immediate draft")
+	}
+}
+
 func readSeenPrompt(t *testing.T, ch <-chan string) string {
 	t.Helper()
 	select {
