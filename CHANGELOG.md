@@ -16,13 +16,14 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 - Dedupe replayed appended messages ([`d292d84c`](../../commit/d292d84cbe1123edb829af81425605d0599b846a))
 - Keep parent transcript updating while viewing a subagent (#22) ([`dd06166f`](../../commit/dd06166fbe4f227b3a3c9c13c937d178cef8c8d9))
 - Defer queued sends until assistant finalizes (#23) ([`d1cfdfda`](../../commit/d1cfdfda0c30ccfa471d9a6efe39d2514a4a7414))
-- Refresh git branch display on send ([`fa46a9a9`](../../commit/fa46a9a96ffd2a58297244d0fee413fe928f1030))
+- Refresh git branch display on send (#25) ([`0a179c64`](../../commit/0a179c64bdaab60acbdb4abc68760bcda8fecf91))
 
 ### Chores
 
 - Todos ([`405a4746`](../../commit/405a4746ba0f6f34190e5d6db7fba18c2fe404b9))
 - Increase mcp bootstrap timeout ([`74eef552`](../../commit/74eef552270cc93fc8526ac47f18d4bbe554529d))
 - Update dependencies (#12) ([`8a25f555`](../../commit/8a25f55502bc9a2c8020bd7dc03faf0d4c4b7e2e))
+- Changelog ([`2fb047b3`](../../commit/2fb047b3a3644b28b9cd45bd5edeb401024364e4))
 
 ### Features
 
@@ -45,7 +46,7 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ### Style
 
-- Polish CLI inspection output ([`d1296e26`](../../commit/d1296e26375e20463dca4ddc39d8507e4d5b9c99))
+- Polish CLI inspection output (#24) ([`d2ce73f1`](../../commit/d2ce73f1c7e410123958bb66befe9b4e34529cd3))
 
 ### Tests
 
