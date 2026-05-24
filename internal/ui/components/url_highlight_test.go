@@ -105,6 +105,22 @@ func TestLinkifyURLs_InsideStyledText(t *testing.T) {
 	}
 }
 
+func TestLinkifyURLs_DoesNotConsumeANSISuffix(t *testing.T) {
+	t.Parallel()
+	url := "https://github.com/cfbender/hygge/pull/28"
+	ansiSuffix := "\x1b[38;5;252m"
+	out := LinkifyURLs(url + ansiSuffix)
+	if !strings.Contains(out, expectedOSC8(url)) {
+		t.Fatalf("URL not linkified before ANSI suffix; got:\n%q", out)
+	}
+	if strings.Contains(out, url+";5;252m") {
+		t.Fatalf("ANSI SGR suffix was consumed as URL text; got:\n%q", out)
+	}
+	if !strings.Contains(out, ansiSuffix) {
+		t.Fatalf("ANSI suffix lost; got:\n%q", out)
+	}
+}
+
 // ── Integration: user bubble in MessageList ─────────────────────────────────
 
 func TestURLsLinkedInUserBubble(t *testing.T) {

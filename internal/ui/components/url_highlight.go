@@ -8,9 +8,9 @@ import (
 )
 
 // urlPattern matches plain http:// and https:// URLs in text.
-// It captures the URL up to the first whitespace or common trailing
-// punctuation that is unlikely to be part of the URL itself.
-var urlPattern = regexp.MustCompile(`https?://[^\s<>"')\]},;]+`)
+// It captures the URL up to the first whitespace, ANSI/control byte, or common
+// trailing punctuation that is unlikely to be part of the URL itself.
+var urlPattern = regexp.MustCompile(`https?://[^\s\x00-\x1f\x7f<>"')\]},;]+`)
 
 // urlTrailingPunct is the set of characters to strip from the right end of a
 // matched URL. A period or comma at the very end almost always belongs to the
