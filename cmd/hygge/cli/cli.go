@@ -147,6 +147,7 @@ manage sessions, profiles, configuration, and themes.`,
 		newCatalogCmd(),
 		newHooksCmd(),
 		newPluginsCmd(),
+		newLogsCmd(),
 	)
 
 	return root
