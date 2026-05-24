@@ -120,6 +120,7 @@ func (a *App) renderChatContent() string {
 			AnimFor:            a.subagentAnims,
 			Now:                now,
 			HoverSubagentID:    a.hoverSubagentID,
+			HoverURL:           a.hoverURL,
 			ExpandedTools:      a.expandedTools,
 			ExpandedThinking:   a.expandedThinkingFor(a.foregroundTranscriptID()),
 			MessageIndexOffset: messageIndexOffset,

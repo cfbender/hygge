@@ -229,6 +229,26 @@ func TestViewWithHitZones_URLZonesInAssistantBubble(t *testing.T) {
 	}
 }
 
+func TestViewWithHitZones_URLZonesAbsentForAssistantPlaceholder(t *testing.T) {
+	t.Parallel()
+	url := "https://placeholder.example.com"
+	ml := MessageList{
+		Width: 100,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{{
+			Role:          RoleAssistant,
+			Raw:           "Thinking… " + url,
+			IsPlaceholder: true,
+		}},
+	}
+	_, _, _, _, urlZones := ml.ViewWithHitZones()
+	for _, z := range urlZones {
+		if z.URL == url {
+			t.Fatalf("assistant placeholder URL must not generate a hit zone; got zone %+v", z)
+		}
+	}
+}
+
 func TestViewWithHitZones_URLZonesAbsentForToolMessages(t *testing.T) {
 	t.Parallel()
 	// Tool messages contain file paths / output that may match URL patterns

@@ -185,6 +185,10 @@ type MessageList struct {
 	// When set, that subagent's bubble renders with highlight styling.
 	HoverSubagentID string
 
+	// HoverURL is the URL currently under the mouse cursor. When set, matching
+	// visible URL text in user/assistant bubbles renders with hover styling.
+	HoverURL string
+
 	// ExpandedTools is the set of ToolUseIDs whose output is fully expanded
 	// (not truncated). Nil means all tools are collapsed.
 	ExpandedTools map[string]bool
@@ -419,7 +423,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 			// Tool/system output is intentionally excluded: those rows are
 			// not linkified and may contain file paths / command output that
 			// superficially match URL patterns.
-			if text != "" && (chunk.single.Role == RoleUser || chunk.single.Role == RoleAssistant) {
+			if text != "" && (chunk.single.Role == RoleUser || (chunk.single.Role == RoleAssistant && !chunk.single.IsPlaceholder)) {
 				for _, pos := range ExtractURLPositions(text) {
 					urlPartPositions = append(urlPartPositions, urlPartPos{
 						partIndex: len(parts), // parts not yet appended; this will be the index after append
@@ -617,6 +621,17 @@ func (m MessageList) renderOne(msg UIMessage, msgIdx int, collapseLimit int) str
 	return rendered
 }
 
+func (m MessageList) highlightHoveredURL(body string) string {
+	if m.HoverURL == "" {
+		return body
+	}
+	style := lipgloss.NewStyle().Underline(true).Bold(true)
+	if m.Theme != nil {
+		style = m.Theme.Style(styles.AtomAccent).Underline(true).Bold(true)
+	}
+	return HighlightURL(body, m.HoverURL, style)
+}
+
 // renderUserBubble renders a RoleUser message as a right-aligned chat bubble.
 func (m MessageList) renderUserBubble(msg UIMessage) string {
 	width := m.Width
@@ -644,6 +659,7 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	if m.Theme != nil {
 		body = HighlightMentions(body, m.Theme.Style(styles.AtomAccent))
 	}
+	body = m.highlightHoveredURL(body)
 	body = LinkifyURLs(body)
 
 	// Header-right: relative timestamp.
@@ -744,6 +760,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 			}
 			rawBody = phStyle.Render(rawBody)
 		} else {
+			rawBody = m.highlightHoveredURL(rawBody)
 			// Wrap plain http(s):// URLs with OSC 8 terminal hyperlinks so
 			// supporting terminals render them as clickable links.
 			rawBody = LinkifyURLs(rawBody)

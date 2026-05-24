@@ -350,6 +350,8 @@ type App struct {
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
+	// hoverURL is the message URL under the mouse cursor, or "".
+	hoverURL string
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -1180,7 +1182,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if opener == nil {
 					opener = OpenURLWithOS
 				}
-				_ = opener(url) // best-effort; failure is silently dropped
+				if err := opener(url); err != nil {
+					return a, a.setNotice("Failed to open URL: " + err.Error())
+				}
 				return a, nil
 			}
 			a.handleMouseDown(m.X, m.Y)
@@ -1200,14 +1204,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.sel.active && m.Button != tea.MouseLeft {
 				a.sel.active = false
 			}
-			// Track hover over subagent bubbles.
-			prev := a.hoverSubagentID
+			// Track hover over clickable message regions.
+			prevSubagentID := a.hoverSubagentID
+			prevURL := a.hoverURL
 			a.hoverSubagentID = a.subagentAtScreen(m.X, m.Y)
-			if a.hoverSubagentID != prev {
+			a.hoverURL = ""
+			if a.hoverSubagentID == "" {
+				a.hoverURL = a.urlAtScreen(m.X, m.Y)
+			}
+			if a.hoverSubagentID != prevSubagentID || a.hoverURL != prevURL {
 				a.invalidateMsgCache()
 			}
-			// Skip text selection when hovering a subagent bubble.
-			if a.hoverSubagentID == "" {
+			// Skip text selection when hovering a clickable region.
+			if a.hoverSubagentID == "" && a.hoverURL == "" {
 				a.handleMouseMotion(m.X, m.Y)
 			}
 		}

@@ -79,6 +79,27 @@ const urlTrailingPunct = ".,:"
 // sequence because those sequences contain \x1b which cannot be part of a
 // valid URL match.
 func LinkifyURLs(s string) string {
+	return rewriteURLs(s, func(url string) string {
+		// Wrap with OSC 8 hyperlink; visible text is the URL itself.
+		return lipgloss.NewStyle().Hyperlink(url).Render(url)
+	})
+}
+
+// HighlightURL styles the visible text for the given URL in s. It is intended
+// for hover feedback after hit testing has identified the URL under the mouse.
+func HighlightURL(s, hoveredURL string, style lipgloss.Style) string {
+	if hoveredURL == "" {
+		return s
+	}
+	return rewriteURLs(s, func(url string) string {
+		if url != hoveredURL {
+			return url
+		}
+		return style.Render(url)
+	})
+}
+
+func rewriteURLs(s string, render func(url string) string) string {
 	if s == "" {
 		return s
 	}
@@ -97,8 +118,7 @@ func LinkifyURLs(s string) string {
 			last = end
 			continue
 		}
-		// Wrap with OSC 8 hyperlink; visible text is the URL itself.
-		b.WriteString(lipgloss.NewStyle().Hyperlink(url).Render(url))
+		b.WriteString(render(url))
 		// Emit any stripped trailing characters as plain text.
 		b.WriteString(s[start+len(url) : end])
 		last = end

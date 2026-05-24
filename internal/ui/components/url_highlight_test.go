@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
@@ -113,11 +115,25 @@ func TestLinkifyURLs_DoesNotConsumeANSISuffix(t *testing.T) {
 	if !strings.Contains(out, expectedOSC8(url)) {
 		t.Fatalf("URL not linkified before ANSI suffix; got:\n%q", out)
 	}
-	if strings.Contains(out, url+";5;252m") {
-		t.Fatalf("ANSI SGR suffix was consumed as URL text; got:\n%q", out)
+	if strings.Contains(out, url+ansiSuffix) {
+		t.Fatalf("ANSI SGR suffix was consumed as URL text for %q; got:\n%q", url, out)
 	}
 	if !strings.Contains(out, ansiSuffix) {
 		t.Fatalf("ANSI suffix lost; got:\n%q", out)
+	}
+}
+
+func TestHighlightURL_StylesOnlyHoveredURL(t *testing.T) {
+	t.Parallel()
+	hovered := "https://hover.example.com"
+	other := "https://other.example.com"
+	style := lipgloss.NewStyle().Underline(true)
+	out := HighlightURL("open "+hovered+" not "+other, hovered, style)
+	if !strings.Contains(out, style.Render(hovered)) {
+		t.Fatalf("hovered URL was not styled; got:\n%q", out)
+	}
+	if strings.Contains(out, style.Render(other)) {
+		t.Fatalf("non-hovered URL should not be styled; got:\n%q", out)
 	}
 }
 

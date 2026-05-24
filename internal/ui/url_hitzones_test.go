@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -96,6 +98,45 @@ func TestURLAtScreen_HitsURLZone(t *testing.T) {
 	}
 }
 
+func TestMouseMotionOverURL_SetsHoverURL(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newURLTestApp(t)
+	app.opts.SessionID = "url-hover-session"
+
+	const url = "https://hover.example.com"
+	app.messages = []uiMessage{{
+		Role: components.RoleUser,
+		Raw:  "hover " + url,
+	}}
+
+	_ = app.View()
+	if len(app.urlHitZones) == 0 {
+		t.Fatal("urlHitZones empty after View() — cannot test hover handler")
+	}
+
+	var zone *components.URLHitZone
+	for i := range app.urlHitZones {
+		if app.urlHitZones[i].URL == url {
+			zone = &app.urlHitZones[i]
+			break
+		}
+	}
+	if zone == nil {
+		t.Fatalf("URL %q not in urlHitZones: %+v", url, app.urlHitZones)
+	}
+
+	screenY := headerHeight + zone.Line + 1 - app.msgViewport.YOffset()
+	screenX := (zone.StartCol + zone.EndCol) / 2
+	app.Update(tea.MouseMotionMsg{X: screenX, Y: screenY})
+	if app.hoverURL != url {
+		t.Fatalf("hoverURL = %q; want %q", app.hoverURL, url)
+	}
+	app.Update(tea.MouseMotionMsg{X: 0, Y: screenY})
+	if app.hoverURL != "" {
+		t.Fatalf("hoverURL after moving away = %q; want empty", app.hoverURL)
+	}
+}
+
 // TestMouseClickOnURL_OpensURL verifies that a tea.MouseClickMsg whose
 // coordinates land on a URLHitZone invokes the OpenURL function with the
 // correct URL without falling through to text selection.
@@ -145,6 +186,41 @@ func TestMouseClickOnURL_OpensURL(t *testing.T) {
 
 // TestMouseClickOutsideURL_DoesNotOpenURL verifies that a click outside any
 // URLHitZone does not invoke OpenURL.
+func TestMouseClickOnURLFailureShowsNotice(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newURLTestApp(t)
+	app.opts.SessionID = "url-fail-session"
+	app.opts.OpenURL = func(string) error { return errors.New("browser unavailable") }
+
+	const url = "https://fail.example.com"
+	app.messages = []uiMessage{{
+		Role: components.RoleUser,
+		Raw:  "open " + url,
+	}}
+	_ = app.View()
+
+	var zone *components.URLHitZone
+	for i := range app.urlHitZones {
+		if app.urlHitZones[i].URL == url {
+			zone = &app.urlHitZones[i]
+			break
+		}
+	}
+	if zone == nil {
+		t.Fatalf("URL %q not in urlHitZones: %+v", url, app.urlHitZones)
+	}
+
+	screenY := headerHeight + zone.Line + 1 - app.msgViewport.YOffset()
+	screenX := (zone.StartCol + zone.EndCol) / 2
+	_, cmd := app.Update(tea.MouseClickMsg{X: screenX, Y: screenY, Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatal("expected notice clear command after URL opener failure")
+	}
+	if !strings.Contains(app.notice, "Failed to open URL: browser unavailable") {
+		t.Fatalf("notice = %q, want URL opener failure", app.notice)
+	}
+}
+
 func TestMouseClickOutsideURL_DoesNotOpenURL(t *testing.T) {
 	t.Parallel()
 	app, opened, _ := newURLTestApp(t)
