@@ -772,6 +772,17 @@ func (a *App) gitBranch() string {
 	return appstate.GitBranch(a.opts.ProjectDir)
 }
 
+// invalidateBranch drops the cached git branch for the project directory so
+// the next call to gitBranch re-reads .git/HEAD from disk.  Call this at
+// natural "break points" (new user message, new session) to keep the sidebar
+// branch display current without paying a filesystem read on every render tick.
+func (a *App) invalidateBranch() {
+	if a.opts.ProjectDir == "" {
+		return
+	}
+	appstate.InvalidateBranchCache(a.opts.ProjectDir)
+}
+
 // foregroundTranscriptID returns a stable key identifying which transcript is
 // currently being rendered. When viewing a subagent, this is the subagent's
 // SubSessionID; otherwise it is the root session ID (foreground stack bottom).
