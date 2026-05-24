@@ -1020,9 +1020,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.opts.ModelProvider = m.provider
 		a.opts.ModelName = m.model
-		if m.saveErr != nil {
-			return a, a.setNotice("model switched for this session but save failed: " + m.saveErr.Error())
-		}
 		return a, a.showToast("Model switched", "Using "+m.provider+"/"+m.model)
 
 	case apiKeySaveResult:
