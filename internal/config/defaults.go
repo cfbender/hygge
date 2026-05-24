@@ -17,10 +17,10 @@ const (
 // Keys not supplied by any source fall back to these values.
 //
 // Note: model.provider, model.name, and model.reasoning are intentionally
-// absent from defaults.  Provider/name/reasoning should come from [[modes]]
-// entries; when no modes are declared, validateConfig synthesises a "General"
-// mode using hard-coded fallback values.  model.small_model and
-// model.small_provider remain here because they live outside of modes.
+// absent from defaults. Provider/name/reasoning should come from [[modes]]
+// entries; when no modes are declared, Modes remains empty so startup can
+// route to onboarding. model.small_model and model.small_provider remain here
+// because they live outside of modes.
 func defaultConfig() map[string]any {
 	return map[string]any{
 		"model": map[string]any{

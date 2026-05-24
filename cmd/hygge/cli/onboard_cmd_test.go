@@ -26,13 +26,16 @@ func TestOnboardWritesGeneralModelToUserConfig(t *testing.T) {
 		t.Fatalf("read config: %v", err)
 	}
 	config := string(data)
-	if !strings.Contains(config, "[model]") {
-		t.Fatalf("config missing [model] section:\n%s", config)
+	if !strings.Contains(config, "[[modes]]") {
+		t.Fatalf("config missing [[modes]] section:\n%s", config)
+	}
+	if strings.Contains(config, "[model]\n") {
+		t.Fatalf("config should not write top-level [model] active fields:\n%s", config)
 	}
 	if !strings.Contains(config, `provider = 'openrouter'`) && !strings.Contains(config, `provider = "openrouter"`) {
 		t.Fatalf("config missing openrouter provider:\n%s", config)
 	}
-	if !strings.Contains(config, `name = 'openai/gpt-4o-mini'`) && !strings.Contains(config, `name = "openai/gpt-4o-mini"`) {
+	if !strings.Contains(config, `model = 'openai/gpt-4o-mini'`) && !strings.Contains(config, `model = "openai/gpt-4o-mini"`) {
 		t.Fatalf("config missing selected model:\n%s", config)
 	}
 	if !strings.Contains(out.String(), "Configured General agent") {

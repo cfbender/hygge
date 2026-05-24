@@ -51,7 +51,10 @@ func TestInitGeneralWritesPromptFileAndSingleMode(t *testing.T) {
 		t.Fatalf("read config: %v", err)
 	}
 	config := string(data)
-	for _, want := range []string{`provider = 'anthropic'`, `model = 'claude-test'`, `name = 'general'`, `prompt = 'file:prompts/general/general.md'`} {
+	if strings.Contains(config, "[model]\n") {
+		t.Fatalf("init should not write top-level [model] active fields:\n%s", config)
+	}
+	for _, want := range []string{`[[modes]]`, `provider = 'anthropic'`, `model = 'claude-test'`, `name = 'general'`, `prompt = 'file:prompts/general/general.md'`} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("config missing %q:\n%s", want, config)
 		}

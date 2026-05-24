@@ -140,9 +140,10 @@ func newProfileShowCmd() *cobra.Command {
 			defer func() { _ = rt.Close() }()
 
 			cfg := rt.Config
+			providerName, modelName := activeModel(cfg)
 			printf(out(cmd), "profile: %s\n", cfg.Profile)
-			printf(out(cmd), "model.provider = %q\n", cfg.Model.Provider)
-			printf(out(cmd), "model.name     = %q\n", cfg.Model.Name)
+			printf(out(cmd), "model.provider = %q\n", providerName)
+			printf(out(cmd), "model.name     = %q\n", modelName)
 			printf(out(cmd), "theme.name     = %q\n", cfg.Theme.Name)
 			printf(out(cmd), "permission:\n")
 			printf(out(cmd), "  file_read_outside_pwd = %q\n", cfg.Permission.FileReadOutsidePwd)

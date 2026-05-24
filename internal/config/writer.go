@@ -11,7 +11,7 @@ import (
 )
 
 // WriteModelOptions controls the narrow config writer used by runtime model
-// selection.  It only writes model.provider and model.name.
+// selection. It writes the active provider/model into the first [[modes]] entry.
 type WriteModelOptions struct {
 	HomeDir       string
 	XDGConfigHome string
@@ -37,7 +37,7 @@ type WritePluginSourcesOptions = WriteModelOptions
 type WriteDefaultProfileOptions = WriteModelOptions
 
 // WriteModelSelection persists provider/name to one deterministic writable
-// file. Target policy: if the winning model provenance already comes from a
+// file. Target policy: if the winning modes provenance already comes from a
 // real config file, update that file; otherwise create/update the user config
 // at $XDG_CONFIG_HOME/hygge/config.toml. Env/flag/default-only selections are
 // never rewritten in place. Existing TOML is decoded to a generic map before
@@ -59,13 +59,26 @@ func WriteModelSelection(opts WriteModelOptions, providerName, modelName string)
 		return target, fmt.Errorf("config: read model target: %w", err)
 	}
 
-	model, ok := m["model"].(map[string]any)
-	if !ok {
-		model = map[string]any{}
-		m["model"] = model
+	modes, _ := m["modes"].([]any)
+	entry := map[string]any{
+		"name":     "General",
+		"provider": providerName,
+		"model":    modelName,
 	}
-	model["provider"] = providerName
-	model["name"] = modelName
+	if len(modes) > 0 {
+		if first, ok := modes[0].(map[string]any); ok {
+			entry = first
+			if _, ok := entry["name"].(string); !ok || strings.TrimSpace(fmt.Sprint(entry["name"])) == "" {
+				entry["name"] = "General"
+			}
+		}
+		entry["provider"] = providerName
+		entry["model"] = modelName
+		modes[0] = entry
+	} else {
+		modes = []any{entry}
+	}
+	m["modes"] = modes
 
 	var buf bytes.Buffer
 	enc := toml.NewEncoder(&buf)
@@ -103,10 +116,6 @@ func WriteProviderAPIKey(opts WriteProviderAPIKeyOptions, providerName, apiKey s
 		model = map[string]any{}
 		m["model"] = model
 	}
-	if existing, ok := model["provider"].(string); ok && existing != "" && existing != providerName {
-		return target, fmt.Errorf("config: target model provider is %q, not %q", existing, providerName)
-	}
-	model["provider"] = providerName
 	options, ok := model["options"].(map[string]any)
 	if !ok {
 		options = map[string]any{}
@@ -240,7 +249,7 @@ func providerAPIKeyWriteTarget(opts WriteProviderAPIKeyOptions) string {
 }
 
 func modelWriteTarget(opts WriteModelOptions) string {
-	for _, key := range []string{"model.provider", "model.name"} {
+	for _, key := range []string{"modes", "modes.General.provider", "modes.General.model"} {
 		if path := lastRealSource(opts.Provenance[key]); path != "" {
 			return path
 		}
@@ -333,18 +342,6 @@ func WriteInitStyle(opts WriteInitStyleOptions, style InitStyleConfig) (string, 
 		m = parsed
 	} else if !os.IsNotExist(err) {
 		return target, fmt.Errorf("config: read init target: %w", err)
-	}
-
-	first := style.Modes[0]
-	modelMap, ok := m["model"].(map[string]any)
-	if !ok {
-		modelMap = map[string]any{}
-		m["model"] = modelMap
-	}
-	modelMap["provider"] = first.Provider
-	modelMap["name"] = first.Model
-	if first.Reasoning != "" {
-		modelMap["reasoning"] = first.Reasoning
 	}
 
 	modes := make([]any, 0, len(style.Modes))
@@ -448,15 +445,9 @@ func WriteOnboardingMode(opts WriteOnboardingModeOptions, mode ModeConfig) (stri
 		return target, fmt.Errorf("config: read onboarding target: %w", err)
 	}
 
-	// Write model.provider and model.name so bare `hygge` works without
-	// an explicit [[modes]] section in configs that rely on defaults.
-	modelMap, ok := m["model"].(map[string]any)
-	if !ok {
-		modelMap = map[string]any{}
-		m["model"] = modelMap
-	}
-	modelMap["provider"] = mode.Provider
-	modelMap["name"] = mode.Model
+	// Write provider/model into the [[modes]] entry only.
+	// Top-level [model].provider/name are no longer used for active model
+	// selection; [[modes]] is the canonical source.
 
 	// Encode the mode as a TOML table that can sit in an [[modes]] array.
 	// We find or replace by Name inside any existing "modes" slice.

@@ -509,7 +509,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	//
 	// The provider adapter's own resolveAPIKey chain is preserved
 	// unchanged; this code is purely about feeding it the right input.
-	modelOpts, err := resolveProviderOptionsForWithAuth(cfg.Model.Provider, cfg, stateOpts, !opts.DryRun)
+	activeProvider, activeModelName := activeModel(cfg)
+	modelOpts, err := resolveProviderOptionsForWithAuth(activeProvider, cfg, stateOpts, !opts.DryRun)
 	if err != nil {
 		_ = stOpen.Close()
 		b.Close()
@@ -519,14 +520,14 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	if opts.DryRun {
 		prv = stubProvider{}
 	} else {
-		prv, err = buildProvider(opts.ProviderFactory, cfg, modelOpts)
+		prv, err = buildProvider(opts.ProviderFactory, activeProvider, modelOpts)
 		if err != nil {
 			// Missing credentials must not block CLI inspection commands.
 			// The TUI entrypoint opens onboarding when no provider auth exists;
 			// every other CLI command tolerates a no-op stub. Non-auth failures
 			// still surface.
 			if errors.Is(err, provider.ErrAuth) {
-				slog.Debug("cli: configured provider has no credential; using stub", "provider", cfg.Model.Provider, "err", err)
+				slog.Debug("cli: configured provider has no credential; using stub", "provider", activeProvider, "err", err)
 				prv = stubProvider{}
 			} else {
 				_ = stOpen.Close()
@@ -560,17 +561,19 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	var fantasyResolved llm.ProviderResolution
 	if opts.FantasyModel != nil {
 		fantasyResolved.Model = opts.FantasyModel
-	} else if opts.DryRun {
+	} else if opts.DryRun || activeProvider == "" {
+		// No provider to resolve: DryRun ignores external config, or no
+		// [[modes]] have been configured yet (onboarding needed).
 		fantasyResolved = llm.ProviderResolution{}
 	} else {
-		fantasyResolved, err = llm.ResolveProviderModelWith(ctx, cfg.Model.Provider, cfg.Model.Name, modelOpts, catSrc, orBuildOpts)
+		fantasyResolved, err = llm.ResolveProviderModelWith(ctx, activeProvider, activeModelName, modelOpts, catSrc, orBuildOpts)
 		if err != nil {
 			// Missing credentials are non-fatal at bootstrap so CLI
 			// inspection commands work without an API key.  The TUI
 			// entrypoint enforces the auth requirement before
 			// reaching a state where the model is actually used.
 			if errors.Is(err, provider.ErrAuth) {
-				slog.Debug("cli: skipping fantasy model resolution; no credential", "provider", cfg.Model.Provider, "err", err)
+				slog.Debug("cli: skipping fantasy model resolution; no credential", "provider", activeProvider, "err", err)
 				fantasyResolved = llm.ProviderResolution{}
 			} else {
 				permEngine.Close()
@@ -584,7 +587,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	if opts.FantasyModel == nil && !opts.DryRun && cfg.Model.SmallModel != "" {
 		smallProvider := cfg.Model.SmallProvider
 		if smallProvider == "" {
-			smallProvider = cfg.Model.Provider
+			smallProvider = activeProvider
 		}
 		resolved, err := llm.ResolveProviderModelWith(ctx, smallProvider, cfg.Model.SmallModel, modelOpts, catSrc, orBuildOpts)
 		if err != nil {
@@ -1225,8 +1228,10 @@ func newMCPTransport(cfg mcp.ServerConfig) mcp.Transport {
 func buildProviderResolver(cfg *config.Config, stateOpts state.LoadOptions, parent provider.Provider) subagent.ProviderResolver {
 	var mu sync.Mutex
 	cache := map[string]provider.Provider{}
-	if parent != nil && cfg != nil && cfg.Model.Provider != "" {
-		cache[cfg.Model.Provider] = parent
+	if parent != nil && cfg != nil {
+		if ap, _ := activeModel(cfg); ap != "" {
+			cache[ap] = parent
+		}
 	}
 	return func(_ context.Context, ref string) (provider.Provider, string, error) {
 		providerName, modelID, err := subagent.ParseModelRef(ref)
@@ -1320,7 +1325,7 @@ func lookupOrStubProvider(name string, opts map[string]any) (provider.Provider, 
 //
 // When no factory is injected, lookupOrStubProvider handles the registry
 // lookup and namedStub fallback.
-func buildProvider(factory func(opts map[string]any) (provider.Provider, error), cfg *config.Config, modelOpts map[string]any) (provider.Provider, error) {
+func buildProvider(factory func(opts map[string]any) (provider.Provider, error), providerName string, modelOpts map[string]any) (provider.Provider, error) {
 	if factory != nil {
 		prv, err := factory(modelOpts)
 		if err != nil {
@@ -1328,9 +1333,9 @@ func buildProvider(factory func(opts map[string]any) (provider.Provider, error),
 		}
 		return prv, nil
 	}
-	prv, err := lookupOrStubProvider(cfg.Model.Provider, modelOpts)
+	prv, err := lookupOrStubProvider(providerName, modelOpts)
 	if err != nil {
-		return nil, fmt.Errorf("cli: build provider %q: %w", cfg.Model.Provider, err)
+		return nil, fmt.Errorf("cli: build provider %q: %w", providerName, err)
 	}
 	return prv, nil
 }
@@ -1373,7 +1378,7 @@ func resolveProviderOptionsForWithAuth(providerName string, cfg *config.Config, 
 	//    provider.  When a subagent override targets a different
 	//    provider, its options come solely from credentials + the
 	//    adapter's own defaults.
-	if providerName == cfg.Model.Provider {
+	if ap, _ := activeModel(cfg); providerName == ap {
 		maps.Copy(merged, cfg.Model.Options)
 		if v, ok := merged["api_key"]; ok {
 			if s, ok := v.(string); ok && s != "" {
@@ -1488,30 +1493,37 @@ func buildProviderFor(providerName string, cfg *config.Config, stateOpts state.L
 	return prv, nil
 }
 
-// hasAnyProviderAuth reports whether any known provider has at least
-// one credential source configured.  A credential source is either the
-// provider's canonical environment variable being set non-empty, or an
-// entry in the per-machine auth.json store.  Used by the TUI entrypoint
-// to refuse to start when there is no way to talk to a model — every
-// other CLI command tolerates a missing credential.
-func hasConfiguredModel(cfg *config.Config, prov config.Provenance) bool {
-	if hasRealConfigSource(prov["model.provider"]) && hasRealConfigSource(prov["model.name"]) {
-		return true
+// activeModel returns the provider and model name for the active (first)
+// mode. [[modes]] is the canonical source for active provider/model;
+// configs without modes have no active model and require onboarding.
+func activeModel(cfg *config.Config) (provider, name string) {
+	if cfg != nil && len(cfg.Modes) > 0 {
+		return cfg.Modes[0].Provider, cfg.Modes[0].Model
 	}
+	return "", ""
+}
+
+// hasConfiguredModel reports whether [[modes]] in the config contain at
+// least one entry that came from a real config source (not defaults).
+// [[modes]] is the canonical source for provider/model since the
+// compatibility layer that copied modes[0] into cfg.Model.Provider/Name
+// was removed.  A config with no modes needs onboarding.
+func hasConfiguredModel(cfg *config.Config, prov config.Provenance) bool {
 	if cfg == nil {
 		return false
 	}
-	providerName := strings.TrimSpace(cfg.Model.Provider)
-	modelName := strings.TrimSpace(cfg.Model.Name)
-	if providerName == "" || modelName == "" {
+	if len(cfg.Modes) == 0 {
 		return false
 	}
+	// The "modes" provenance key is set when [[modes]] comes from a real
+	// config file.  Individual mode keys (modes.<name>.provider etc.) are
+	// an alternative path used by some test helpers.
+	if hasRealConfigSource(prov["modes"]) {
+		return true
+	}
 	for _, mode := range cfg.Modes {
-		if strings.TrimSpace(mode.Provider) != providerName || strings.TrimSpace(mode.Model) != modelName {
-			continue
-		}
 		prefix := "modes." + mode.Name
-		if (hasRealConfigSource(prov[prefix+".provider"]) && hasRealConfigSource(prov[prefix+".model"])) || hasRealConfigSource(prov["modes"]) {
+		if hasRealConfigSource(prov[prefix+".provider"]) && hasRealConfigSource(prov[prefix+".model"]) {
 			return true
 		}
 	}

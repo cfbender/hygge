@@ -51,9 +51,17 @@ model = "gpt-4"
 	if m["theme"].(map[string]any)["name"] != "shell" {
 		t.Fatalf("theme dropped: %#v", m)
 	}
-	model := m["model"].(map[string]any)
-	if model["provider"] != "openai" || model["name"] != "gpt-5" {
-		t.Fatalf("model = %#v", model)
+	// model.provider/name are no longer written to top-level [model] by
+	// WriteOnboardingMode; [[modes]] is the canonical source.
+	if modelRaw, ok := m["model"]; ok {
+		if modelMap, ok := modelRaw.(map[string]any); ok {
+			if _, hasProvider := modelMap["provider"]; hasProvider {
+				t.Fatalf("top-level model.provider should not be written by onboarding, got: %#v", modelMap)
+			}
+			if _, hasName := modelMap["name"]; hasName {
+				t.Fatalf("top-level model.name should not be written by onboarding, got: %#v", modelMap)
+			}
+		}
 	}
 	modes := m["modes"].([]any)
 	if len(modes) != 2 {

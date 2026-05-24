@@ -233,8 +233,8 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 		AuthConfiguredProviders: configuredProvidersForRuntime(rt),
 		SessionID:               sessionID,
 		ProjectDir:              rt.Pwd,
-		ModelProvider:           rt.Config.Model.Provider,
-		ModelName:               rt.Config.Model.Name,
+		ModelProvider:           func() string { p, _ := activeModel(rt.Config); return p }(),
+		ModelName:               func() string { _, n := activeModel(rt.Config); return n }(),
 		ProfileName:             rt.Config.Profile,
 		Reasoning:               resolveReasoning(rt.Config, reasoningFlag),
 		Yolo:                    rt.Permission != nil && rt.Permission.Yolo(),
@@ -284,10 +284,10 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 					return fmt.Errorf("onboarding: save mode: %w", err)
 				}
 			}
-			rt.Config.Model.Provider = result.Mode.Provider
-			rt.Config.Model.Name = result.Mode.Model
 			// Synthesize a modes slice from the onboarding result so the
 			// rest of the session has the new mode immediately available.
+			// [[modes]] is now the canonical source; top-level Model.Provider/Name
+			// are no longer updated here.
 			rt.Config.Modes = []config.ModeConfig{result.Mode}
 
 			// 3. Persist subagents to user subagents.toml if any were created.
@@ -405,8 +405,12 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			if rt.DryRun {
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
 				printf(dryRunOut, "[dry-run] would write model to %s: provider=%s model=%s\n", target, providerName, modelName)
-				rt.Config.Model.Provider = providerName
-				rt.Config.Model.Name = modelName
+				// Update the active (first) mode in memory; [[modes]] is canonical.
+				if len(rt.Config.Modes) == 0 {
+					rt.Config.Modes = []config.ModeConfig{{Name: "General"}}
+				}
+				rt.Config.Modes[0].Provider = providerName
+				rt.Config.Modes[0].Model = modelName
 				return nil
 			}
 			_, err := config.WriteModelSelection(config.WriteModelOptions{
@@ -416,8 +420,12 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 				Provenance:    rt.Provenance,
 			}, providerName, modelName)
 			if err == nil {
-				rt.Config.Model.Provider = providerName
-				rt.Config.Model.Name = modelName
+				// Update the active (first) mode in memory; [[modes]] is canonical.
+				if len(rt.Config.Modes) == 0 {
+					rt.Config.Modes = []config.ModeConfig{{Name: "General"}}
+				}
+				rt.Config.Modes[0].Provider = providerName
+				rt.Config.Modes[0].Model = modelName
 			}
 			return err
 		},
@@ -425,7 +433,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			if rt.DryRun {
 				target := filepath.Join(rt.XDGConfigHome, "hygge", "config.toml")
 				printf(dryRunOut, "[dry-run] would write api_key to %s: provider=%s api_key=%s\n", target, providerName, maskKey(apiKey))
-				if providerName == rt.Config.Model.Provider {
+				if ap, _ := activeModel(rt.Config); providerName == ap {
 					if rt.Config.Model.Options == nil {
 						rt.Config.Model.Options = map[string]any{}
 					}
@@ -439,7 +447,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 				Pwd:           rt.Pwd,
 				Provenance:    rt.Provenance,
 			}, providerName, apiKey)
-			if err == nil && providerName == rt.Config.Model.Provider {
+			if ap, _ := activeModel(rt.Config); err == nil && providerName == ap {
 				if rt.Config.Model.Options == nil {
 					rt.Config.Model.Options = map[string]any{}
 				}
@@ -509,11 +517,14 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 		return nil
 	}
 
-	slog.Info("hygge: tui session started",
-		"pwd", rt.Pwd,
-		"provider", rt.Config.Model.Provider,
-		"model", rt.Config.Model.Name,
-		"profile", rt.Config.Profile)
+	{
+		ap, am := activeModel(rt.Config)
+		slog.Info("hygge: tui session started",
+			"pwd", rt.Pwd,
+			"provider", ap,
+			"model", am,
+			"profile", rt.Config.Profile)
+	}
 
 	prog := tea.NewProgram(app,
 		// Pass the exact environment so bubbletea uses our env for terminal
