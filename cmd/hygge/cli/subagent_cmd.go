@@ -38,16 +38,18 @@ func newSubagentsListCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
+			sty := newInspectStylesFor(out(cmd))
 			all := rt.Subagents.List()
 			if len(all) == 0 {
 				// Should never happen: the builtin `general` type is
 				// always present.  Defensive print so the user sees
 				// SOMETHING rather than an empty pipe.
-				writeln(out(cmd), "(no sub-agent types registered)")
+				writeln(out(cmd), sty.Muted.Render("(no sub-agent types registered)"))
 				return nil
 			}
+			// Tabwriter: always plain to preserve column alignment.
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "NAME\tSOURCE\tMODEL\tTOOLS\tDESCRIPTION")
+			printf(tw, "NAME\tSOURCE\tMODEL\tTOOLS\tDESCRIPTION\n")
 			for _, t := range all {
 				tools := "(defaults)"
 				if len(t.Tools) > 0 {
@@ -94,21 +96,22 @@ func newSubagentsShowCmd() *cobra.Command {
 				return die(cmd, "no sub-agent type named %q (use `hygge subagents list` to see what is loaded)", name)
 			}
 
-			printf(out(cmd), "name:        %s\n", t.Name)
-			printf(out(cmd), "source:      %s\n", t.Source)
+			sty := newInspectStylesFor(out(cmd))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("name:"), sty.Value.Render(t.Name))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("source:"), sty.Value.Render(t.Source))
 			if t.Model != "" {
-				printf(out(cmd), "model:       %s\n", t.Model)
+				printf(out(cmd), "%s %s\n", sty.Label.Render("model:"), sty.Value.Render(t.Model))
 			} else {
-				printf(out(cmd), "model:       (inherits parent's)\n")
+				printf(out(cmd), "%s %s\n", sty.Label.Render("model:"), sty.Muted.Render("(inherits parent's)"))
 			}
-			printf(out(cmd), "description: %s\n", t.Description)
+			printf(out(cmd), "%s %s\n", sty.Label.Render("description:"), t.Description)
 			if len(t.Tools) == 0 {
-				printf(out(cmd), "tools:       (defaults: %s)\n",
-					strings.Join(rt.Subagents.DefaultTools(), ", "))
+				printf(out(cmd), "%s %s\n", sty.Label.Render("tools:"),
+					sty.Muted.Render("(defaults: "+strings.Join(rt.Subagents.DefaultTools(), ", ")+")"))
 			} else {
-				printf(out(cmd), "tools:       %s\n", strings.Join(t.Tools, ", "))
+				printf(out(cmd), "%s %s\n", sty.Label.Render("tools:"), strings.Join(t.Tools, ", "))
 			}
-			printf(out(cmd), "\n--- system prompt ---\n%s\n", t.SystemPrompt)
+			printf(out(cmd), "\n%s\n%s\n", sty.Muted.Render("--- system prompt ---"), t.SystemPrompt)
 			return nil
 		},
 	}

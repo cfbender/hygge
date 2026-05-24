@@ -41,16 +41,18 @@ func newCommandsListCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
+			sty := newInspectStylesFor(out(cmd))
 			all := rt.Commands.List()
 			if len(all) == 0 {
 				// The built-in set is always present so this should
 				// never fire; print a defensive message just in
 				// case.
-				writeln(out(cmd), "(no slash commands registered)")
+				writeln(out(cmd), sty.Muted.Render("(no slash commands registered)"))
 				return nil
 			}
+			// Tabwriter: always plain to preserve column alignment.
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "NAME\tSOURCE\tARGS\tDESCRIPTION")
+			printf(tw, "NAME\tSOURCE\tARGS\tDESCRIPTION\n")
 			for _, c := range all {
 				if sourceFilter != "" && c.Source() != sourceFilter {
 					continue
@@ -92,14 +94,15 @@ func newCommandsShowCmd() *cobra.Command {
 			if !ok {
 				return die(cmd, "no command named /%s (use `hygge commands list` to see what is loaded)", name)
 			}
-			printf(out(cmd), "name:        /%s\n", c.Name())
-			printf(out(cmd), "source:      %s\n", c.Source())
-			printf(out(cmd), "description: %s\n", c.Description())
+			sty := newInspectStylesFor(out(cmd))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("name:"), sty.Value.Render("/"+c.Name()))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("source:"), sty.Value.Render(c.Source()))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("description:"), c.Description())
 			argSpecs := c.Args()
 			if len(argSpecs) == 0 {
-				printf(out(cmd), "args:        (none)\n")
+				printf(out(cmd), "%s %s\n", sty.Label.Render("args:"), sty.Muted.Render("(none)"))
 			} else {
-				printf(out(cmd), "args:\n")
+				printf(out(cmd), "%s\n", sty.Label.Render("args:"))
 				for _, a := range argSpecs {
 					req := ""
 					if a.Required {
@@ -109,7 +112,7 @@ func newCommandsShowCmd() *cobra.Command {
 					if desc == "" {
 						desc = "(no description)"
 					}
-					printf(out(cmd), "  %s%s — %s\n", a.Name, req, desc)
+					printf(out(cmd), "  %s%s — %s\n", sty.Value.Render(a.Name), sty.Muted.Render(req), desc)
 				}
 			}
 			return nil

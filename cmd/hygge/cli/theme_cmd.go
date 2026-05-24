@@ -38,9 +38,10 @@ func newThemeShowCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
+			sty := newInspectStylesFor(out(cmd))
 			printRaw(out(cmd), rt.Theme.FormatTheme())
 			writeln(out(cmd))
-			writeln(out(cmd), "preview:")
+			writeln(out(cmd), sty.Header.Render("preview:"))
 			for _, atom := range styles.AllAtoms() {
 				style := rt.Theme.Style(atom)
 				printf(out(cmd), "  %-16s %s\n",
