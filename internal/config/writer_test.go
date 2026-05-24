@@ -14,8 +14,7 @@ func TestWriteModelSelectionUpdatesExistingConfigPreservingUnrelatedFields(t *te
 		t.Fatal(err)
 	}
 	input := `[model]
-provider = "anthropic"
-name = "old"
+small_model = "haiku"
 
 [model.options]
 api_key = "env"
@@ -28,13 +27,19 @@ strict = true
 
 [mcp.server]
 command = "server"
+
+[[modes]]
+name = "smart"
+provider = "anthropic"
+model = "old"
+prompt = "Keep this prompt."
 `
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	wrote, err := WriteModelSelection(WriteModelOptions{Provenance: Provenance{
-		"model.provider": {{File: "<defaults>"}, {File: path}},
+		"modes": {{File: path}},
 	}}, "openrouter", "gpt-5")
 	if err != nil {
 		t.Fatalf("WriteModelSelection: %v", err)
@@ -47,11 +52,22 @@ command = "server"
 		t.Fatal(err)
 	}
 	model := m["model"].(map[string]any)
-	if model["provider"] != "openrouter" || model["name"] != "gpt-5" {
-		t.Fatalf("model = %#v", model)
+	if _, ok := model["provider"]; ok {
+		t.Fatalf("top-level model.provider written: %#v", model)
+	}
+	if _, ok := model["name"]; ok {
+		t.Fatalf("top-level model.name written: %#v", model)
+	}
+	if model["small_model"] != "haiku" {
+		t.Fatalf("model.small_model dropped: %#v", model)
 	}
 	if model["options"].(map[string]any)["api_key"] != "env" {
 		t.Fatalf("model.options dropped: %#v", model["options"])
+	}
+	modes := m["modes"].([]any)
+	firstMode := modes[0].(map[string]any)
+	if firstMode["name"] != "smart" || firstMode["provider"] != "openrouter" || firstMode["model"] != "gpt-5" || firstMode["prompt"] != "Keep this prompt." {
+		t.Fatalf("first mode = %#v", firstMode)
 	}
 	if m["theme"].(map[string]any)["name"] != "nord" || m["plugins"].(map[string]any)["policy"] == nil || m["mcp"].(map[string]any)["server"] == nil {
 		t.Fatalf("unrelated config dropped: %#v", m)
@@ -63,8 +79,7 @@ func TestWriteProviderAPIKeyPreservesModelOptions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	input := `[model]
-provider = "openai"
-name = "gpt-5"
+small_model = "gpt-4o-mini"
 
 [model.options]
 base_url = "https://example.invalid/v1"
@@ -73,7 +88,7 @@ headers = { X-Test = "yes" }
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	wrote, err := WriteProviderAPIKey(WriteProviderAPIKeyOptions{Provenance: Provenance{"model.provider": {{File: path}}}}, "openai", "sk-fake-dialog")
+	wrote, err := WriteProviderAPIKey(WriteProviderAPIKeyOptions{Provenance: Provenance{"model.options.api_key": {{File: path}}}}, "openai", "sk-fake-dialog")
 	if err != nil {
 		t.Fatalf("WriteProviderAPIKey: %v", err)
 	}
@@ -84,7 +99,17 @@ headers = { X-Test = "yes" }
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := m["model"].(map[string]any)["options"].(map[string]any)
+	model := m["model"].(map[string]any)
+	if _, ok := model["provider"]; ok {
+		t.Fatalf("top-level model.provider written: %#v", model)
+	}
+	if _, ok := model["name"]; ok {
+		t.Fatalf("top-level model.name written: %#v", model)
+	}
+	if model["small_model"] != "gpt-4o-mini" {
+		t.Fatalf("small_model dropped: %#v", model)
+	}
+	options := model["options"].(map[string]any)
 	if options["api_key"] != "sk-fake-dialog" {
 		t.Fatalf("api_key = %#v", options["api_key"])
 	}
@@ -104,7 +129,7 @@ func TestWriteModelSelectionCreatesUserConfigWhenNoRealModelProvenance(t *testin
 		HomeDir:       home,
 		XDGConfigHome: xdg,
 		Provenance: Provenance{
-			"model.provider": {{File: "<defaults>"}, {File: "<env>"}},
+			"modes": {{File: "<defaults>"}, {File: "<env>"}},
 		},
 	}, "openai", "gpt-5")
 	if err != nil {
@@ -118,9 +143,16 @@ func TestWriteModelSelectionCreatesUserConfigWhenNoRealModelProvenance(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	model := m["model"].(map[string]any)
-	if model["provider"] != "openai" || model["name"] != "gpt-5" {
-		t.Fatalf("model = %#v", model)
+	if _, ok := m["model"]; ok {
+		t.Fatalf("top-level model section created: %#v", m["model"])
+	}
+	modes := m["modes"].([]any)
+	if len(modes) != 1 {
+		t.Fatalf("modes len = %d, want 1", len(modes))
+	}
+	mode := modes[0].(map[string]any)
+	if mode["name"] != "General" || mode["provider"] != "openai" || mode["model"] != "gpt-5" {
+		t.Fatalf("mode = %#v", mode)
 	}
 }
 

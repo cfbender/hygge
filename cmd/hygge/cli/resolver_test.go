@@ -38,9 +38,7 @@ func TestBuildProviderResolver_ParentShortCircuits(t *testing.T) {
 	// any construction.  This is critical: the parent is always
 	// already authenticated, so reusing it avoids redundant auth-
 	// store reads (and tests that don't register any factory).
-	cfg := &config.Config{}
-	cfg.Model.Provider = "parentprov"
-	cfg.Model.Name = "parent-model"
+	cfg := &config.Config{Modes: []config.ModeConfig{{Name: "General", Provider: "parentprov", Model: "parent-model"}}}
 	parent := countingProvider{name: "parentprov"}
 
 	r := buildProviderResolver(cfg, state.LoadOptions{}, parent)
@@ -57,8 +55,7 @@ func TestBuildProviderResolver_ParentShortCircuits(t *testing.T) {
 }
 
 func TestBuildProviderResolver_InvalidRef(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Model.Provider = "parentprov"
+	cfg := &config.Config{Modes: []config.ModeConfig{{Name: "General", Provider: "parentprov", Model: "parent-model"}}}
 	parent := countingProvider{name: "parentprov"}
 
 	r := buildProviderResolver(cfg, state.LoadOptions{}, parent)
@@ -75,8 +72,7 @@ func TestBuildProviderResolver_UnknownProviderReturnsStub(t *testing.T) {
 	// Unknown providers now resolve to a namedStub; ErrUnknownProvider
 	// is no longer returned at build time — Fantasy/Catwalk handles
 	// capability errors at runtime.
-	cfg := &config.Config{}
-	cfg.Model.Provider = "parentprov"
+	cfg := &config.Config{Modes: []config.ModeConfig{{Name: "General", Provider: "parentprov", Model: "parent-model"}}}
 	parent := countingProvider{name: "parentprov"}
 
 	r := buildProviderResolver(cfg, state.LoadOptions{HomeDir: t.TempDir()}, parent)
@@ -117,9 +113,7 @@ func TestBuildProviderResolver_CachesByName(t *testing.T) {
 
 	startCalls := testFactoryCalls.Load()
 
-	cfg := &config.Config{}
-	cfg.Model.Provider = "parentprov"
-	cfg.Model.Name = "p-model"
+	cfg := &config.Config{Modes: []config.ModeConfig{{Name: "General", Provider: "parentprov", Model: "p-model"}}}
 	parent := countingProvider{name: "parentprov"}
 
 	r := buildProviderResolver(cfg, state.LoadOptions{HomeDir: t.TempDir()}, parent)
@@ -148,8 +142,7 @@ func TestBuildProviderResolver_CachesByName(t *testing.T) {
 }
 
 func TestBuildProviderFor_UnknownProvider(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Model.Provider = "parentprov"
+	cfg := &config.Config{Modes: []config.ModeConfig{{Name: "General", Provider: "parentprov", Model: "parent-model"}}}
 	// Unknown providers now return a namedStub so Fantasy/Catwalk can
 	// resolve them at runtime rather than failing at build time.
 	prv, err := buildProviderFor("no_such_provider_xyz", cfg, state.LoadOptions{HomeDir: t.TempDir()})

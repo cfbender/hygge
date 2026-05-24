@@ -768,8 +768,8 @@ func dryRunSaveOnboardingCallback(
 		printf(out, "[dry-run] would write onboarding mode to %s: provider=%s model=%s\n",
 			target, mode.Provider, mode.Model)
 	}
-	rt.Config.Model.Provider = mode.Provider
-	rt.Config.Model.Name = mode.Model
+	// Update active mode in memory; [[modes]] is canonical.
+	rt.Config.Modes = []config.ModeConfig{mode}
 
 	// Step 4 — dry-run must skip the real provider/model build.
 	if rt.DryRun {

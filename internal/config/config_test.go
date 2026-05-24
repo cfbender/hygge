@@ -59,11 +59,11 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if cfg.Model.Provider != "anthropic" {
-		t.Errorf("model.provider: got %q, want %q", cfg.Model.Provider, "anthropic")
-	}
-	if cfg.Model.Name != "claude-sonnet-4-5" {
-		t.Errorf("model.name: got %q, want %q", cfg.Model.Name, "claude-sonnet-4-5")
+	// Defaults-only load has no [[modes]] — empty modes signal that
+	// onboarding is required.  cfg.Model.Provider/Name are not populated
+	// from defaults; they reflect what was explicitly set in [model].
+	if len(cfg.Modes) != 0 {
+		t.Errorf("Modes: got %d entries, want 0 (no synthesis)", len(cfg.Modes))
 	}
 	if cfg.Permission.Shell != PermAsk {
 		t.Errorf("permission.shell: got %q, want %q", cfg.Permission.Shell, PermAsk)
@@ -80,7 +80,7 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 
 	// Provenance for permission and theme keys should point to <defaults>.
 	// model.provider and model.name are no longer in the defaults map —
-	// they come from synthesized modes or explicit [model] config.
+	// they come from explicit [model] config or [[modes]] entries.
 	for _, key := range []string{"permission.shell", "theme.name"} {
 		sources, ok := prov[key]
 		if !ok {
@@ -1222,8 +1222,8 @@ func TestCatalogConfig_RefreshIntervalDuration_DirectParsing(t *testing.T) {
 
 // TestLoad_ModesOnlyConfig_NoModelSection verifies that a config with
 // [[modes]] entries (each with explicit provider and model) is valid even when
-// there is no [model] section at all.  The first mode becomes the default and
-// cfg.Model.Provider/Name are derived from it.
+// there is no [model] section at all.  [[modes]] is the canonical source for
+// active provider/model; cfg.Model.Provider/Name are not derived from modes.
 func TestLoad_ModesOnlyConfig_NoModelSection(t *testing.T) {
 	tmp := t.TempDir()
 	cfgDir := filepath.Join(tmp, ".config", "hygge")
@@ -1245,18 +1245,17 @@ model = "anthropic/claude-haiku-4-5"
 		t.Fatalf("Load: %v", err)
 	}
 
-	// First mode is the default.
-	if cfg.Model.Provider != "openrouter" {
-		t.Errorf("Model.Provider: got %q, want openrouter", cfg.Model.Provider)
-	}
-	if cfg.Model.Name != "anthropic/claude-opus-4-5" {
-		t.Errorf("Model.Name: got %q, want anthropic/claude-opus-4-5", cfg.Model.Name)
-	}
 	if len(cfg.Modes) != 2 {
 		t.Fatalf("Modes len: got %d, want 2", len(cfg.Modes))
 	}
 	if cfg.Modes[0].Name != "smart" {
 		t.Errorf("Modes[0].Name: got %q, want smart", cfg.Modes[0].Name)
+	}
+	if cfg.Modes[0].Provider != "openrouter" {
+		t.Errorf("Modes[0].Provider: got %q, want openrouter", cfg.Modes[0].Provider)
+	}
+	if cfg.Modes[0].Model != "anthropic/claude-opus-4-5" {
+		t.Errorf("Modes[0].Model: got %q, want anthropic/claude-opus-4-5", cfg.Modes[0].Model)
 	}
 	if cfg.Modes[0].Description != "Deep reasoning mode" {
 		t.Errorf("Modes[0].Description: got %q, want 'Deep reasoning mode'", cfg.Modes[0].Description)
@@ -1266,10 +1265,10 @@ model = "anthropic/claude-haiku-4-5"
 	}
 }
 
-// TestLoad_NoModelNoModes_SynthesizesGeneralMode verifies that when neither a
-// [model] section nor [[modes]] are present, a built-in "General" mode is
-// synthesized from hard-coded defaults.
-func TestLoad_NoModelNoModes_SynthesizesGeneralMode(t *testing.T) {
+// TestLoad_NoModelNoModes_EmptyModes verifies that when neither a
+// [model] section nor [[modes]] are present, cfg.Modes is empty (no
+// synthesis).  Empty modes signal that onboarding is required.
+func TestLoad_NoModelNoModes_EmptyModes(t *testing.T) {
 	tmp := t.TempDir()
 	// Empty config dir -- no user config at all.
 	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
@@ -1277,24 +1276,23 @@ func TestLoad_NoModelNoModes_SynthesizesGeneralMode(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(cfg.Modes) != 1 {
-		t.Fatalf("Modes len: got %d, want 1", len(cfg.Modes))
+	if len(cfg.Modes) != 0 {
+		t.Fatalf("Modes len: got %d, want 0 (no synthesis)", len(cfg.Modes))
 	}
-	if cfg.Modes[0].Name != "General" {
-		t.Errorf("Modes[0].Name: got %q, want General", cfg.Modes[0].Name)
+	// cfg.Model fields remain at zero value when [model] section is absent.
+	if cfg.Model.Provider != "" {
+		t.Errorf("Model.Provider: got %q, want empty", cfg.Model.Provider)
 	}
-	if cfg.Model.Provider != "anthropic" {
-		t.Errorf("Model.Provider: got %q, want anthropic", cfg.Model.Provider)
-	}
-	if cfg.Model.Name != "claude-sonnet-4-5" {
-		t.Errorf("Model.Name: got %q, want claude-sonnet-4-5", cfg.Model.Name)
+	if cfg.Model.Name != "" {
+		t.Errorf("Model.Name: got %q, want empty", cfg.Model.Name)
 	}
 }
 
-// TestLoad_ModelSectionSynthesizesGeneralMode verifies that when a [model]
-// section is set but no [[modes]] are declared, a "General" mode is
-// synthesized from the [model] provider/name (backward compat).
-func TestLoad_ModelSectionSynthesizesGeneralMode(t *testing.T) {
+// TestLoad_ModelSectionOnly_NoModes verifies that when a [model] section is
+// set but no [[modes]] are declared, cfg.Modes is empty (no synthesis from
+// [model]).  The [model] provider/name fields are still parsed into the struct
+// for backward compat with tooling that reads them directly.
+func TestLoad_ModelSectionOnly_NoModes(t *testing.T) {
 	tmp := t.TempDir()
 	cfgDir := filepath.Join(tmp, ".config", "hygge")
 	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
@@ -1308,12 +1306,11 @@ name = "gpt-4o"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(cfg.Modes) != 1 {
-		t.Fatalf("Modes len: got %d, want 1", len(cfg.Modes))
+	// No modes synthesized from [model] section.
+	if len(cfg.Modes) != 0 {
+		t.Fatalf("Modes len: got %d, want 0 (no synthesis)", len(cfg.Modes))
 	}
-	if cfg.Modes[0].Name != "General" {
-		t.Errorf("Modes[0].Name: got %q, want General", cfg.Modes[0].Name)
-	}
+	// [model] fields are still parsed and accessible.
 	if cfg.Model.Provider != "openai" {
 		t.Errorf("Model.Provider: got %q, want openai", cfg.Model.Provider)
 	}
@@ -1351,18 +1348,22 @@ model = "anthropic/claude-opus-4-5"
 	if cfg.Model.SmallModel != "gpt-4o-mini" {
 		t.Errorf("Model.SmallModel: got %q, want gpt-4o-mini", cfg.Model.SmallModel)
 	}
-	// Main model comes from the mode, not [model].
-	if cfg.Model.Provider != "openrouter" {
-		t.Errorf("Model.Provider: got %q, want openrouter (from mode)", cfg.Model.Provider)
+	// Active provider/model come from the mode, not [model].
+	if len(cfg.Modes) != 1 {
+		t.Fatalf("Modes len: got %d, want 1", len(cfg.Modes))
 	}
-	if cfg.Model.Name != "anthropic/claude-opus-4-5" {
-		t.Errorf("Model.Name: got %q, want anthropic/claude-opus-4-5 (from mode)", cfg.Model.Name)
+	if cfg.Modes[0].Provider != "openrouter" {
+		t.Errorf("Modes[0].Provider: got %q, want openrouter", cfg.Modes[0].Provider)
+	}
+	if cfg.Modes[0].Model != "anthropic/claude-opus-4-5" {
+		t.Errorf("Modes[0].Model: got %q, want anthropic/claude-opus-4-5", cfg.Modes[0].Model)
 	}
 }
 
 // TestLoad_ModesOnlyConfig_DefaultModeIsFirst verifies that when [[modes]]
-// are declared without a [model] section, the first mode is the default and
-// cfg.Model.Provider/Name track it correctly.
+// are declared without a [model] section, the first mode is the default.
+// [[modes]] is the canonical source; cfg.Model.Provider/Name are not
+// derived from modes.
 func TestLoad_ModesOnlyConfig_DefaultModeIsFirst(t *testing.T) {
 	tmp := t.TempDir()
 	cfgDir := filepath.Join(tmp, ".config", "hygge")
@@ -1384,14 +1385,76 @@ model = "claude-haiku-4-5"
 		t.Fatalf("Load: %v", err)
 	}
 
+	if len(cfg.Modes) != 2 {
+		t.Fatalf("Modes len: got %d, want 2", len(cfg.Modes))
+	}
 	if cfg.Modes[0].Name != "builder" {
 		t.Errorf("Modes[0].Name: got %q, want builder", cfg.Modes[0].Name)
 	}
-	// cfg.Model reflects the first (default) mode.
-	if cfg.Model.Provider != "anthropic" {
-		t.Errorf("Model.Provider: got %q, want anthropic", cfg.Model.Provider)
+	if cfg.Modes[0].Provider != "anthropic" {
+		t.Errorf("Modes[0].Provider: got %q, want anthropic", cfg.Modes[0].Provider)
 	}
-	if cfg.Model.Name != "claude-opus-4-5" {
-		t.Errorf("Model.Name: got %q, want claude-opus-4-5", cfg.Model.Name)
+	if cfg.Modes[0].Model != "claude-opus-4-5" {
+		t.Errorf("Modes[0].Model: got %q, want claude-opus-4-5", cfg.Modes[0].Model)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Validation error tests: modes with missing provider/model
+// ---------------------------------------------------------------------------
+
+// TestLoad_ModesMissingProvider verifies that validateConfig returns a clear
+// error when a [[modes]] entry omits the required provider field.
+func TestLoad_ModesMissingProvider(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[[modes]]
+name = "broken"
+model = "some-model"
+`)
+	_, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err == nil {
+		t.Fatal("expected validation error for mode missing provider, got nil")
+	}
+	var ivErr *InvalidValueError
+	if !errors.As(err, &ivErr) {
+		t.Fatalf("expected *InvalidValueError, got %T: %v", err, err)
+	}
+}
+
+// TestLoad_ModesMissingModel verifies that validateConfig returns a clear
+// error when a [[modes]] entry omits the required model field.
+func TestLoad_ModesMissingModel(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[[modes]]
+name = "broken"
+provider = "anthropic"
+`)
+	_, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err == nil {
+		t.Fatal("expected validation error for mode missing model, got nil")
+	}
+	var ivErr *InvalidValueError
+	if !errors.As(err, &ivErr) {
+		t.Fatalf("expected *InvalidValueError, got %T: %v", err, err)
+	}
+}
+
+// TestLoad_EmptyModesAllowed verifies that zero [[modes]] entries is valid
+// (onboarding scenario).
+func TestLoad_EmptyModesAllowed(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load with no modes: %v", err)
+	}
+	if len(cfg.Modes) != 0 {
+		t.Errorf("Modes: got %d, want 0", len(cfg.Modes))
 	}
 }
