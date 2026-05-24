@@ -47,6 +47,11 @@ type RegistryOptions struct {
 	// PluginConfigs maps plugin names to their [plugins.<name>] TOML tables.
 	PluginConfigs map[string]map[string]any
 
+	// ProfileDir is the resolved active profile directory.  Plugins can use
+	// this to load files that live next to the profile config.  May be empty
+	// when no profile is active or the profile is the unnamed default.
+	ProfileDir string
+
 	// Pwd is the working directory for Exec calls.
 	Pwd string
 
@@ -583,6 +588,12 @@ func (h *registryHost) Config() map[string]any {
 	}
 	return h.reg.opts.PluginConfigs[h.pluginName]
 }
+
+func (h *registryHost) ProfileDir() string {
+	return h.reg.opts.ProfileDir
+}
+
+var _ Host = (*registryHost)(nil)
 
 // --- Adapter types ---
 
