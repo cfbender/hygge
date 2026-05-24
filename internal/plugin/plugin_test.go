@@ -810,3 +810,103 @@ func TestPluginToolAdapter_inputSchema(t *testing.T) {
 		t.Error("InputSchema() returned nil")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// HYGGE-20: hygge.profile.dir exposure
+// ---------------------------------------------------------------------------
+
+// TestPluginHost_profileDirExposed verifies that hygge.profile.dir is
+// accessible from Lua and equals the ProfileDir set in RegistryOptions.
+func TestPluginHost_profileDirExposed(t *testing.T) {
+	toolReg := tool.NewRegistry()
+	hookReg := hook.New()
+	cmdReg := command.New()
+	subReg, _ := subagent.Load(subagent.LoadOptions{})
+
+	wantProfileDir := t.TempDir() // arbitrary directory
+
+	reg, _ := plugin.NewRegistry(plugin.RegistryOptions{
+		CacheDir:   t.TempDir(),
+		Tools:      toolReg,
+		Hooks:      hookReg,
+		Commands:   cmdReg,
+		Subagents:  subReg,
+		ProfileDir: wantProfileDir,
+	})
+
+	luaScript := `
+hygge.register_tool {
+    name = "get_profile_dir",
+    description = "Returns hygge.profile.dir",
+    execute = function(ctx, input)
+        return { content = hygge.profile.dir }
+    end,
+}
+`
+	dir := t.TempDir()
+	writeFile(t, dir, "plugin.lua", luaScript)
+
+	if err := reg.Install(context.Background(), "local:"+dir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	toolFn, ok := toolReg.Get("get_profile_dir")
+	if !ok {
+		t.Fatal("get_profile_dir tool not registered")
+	}
+
+	result, err := toolFn.Execute(context.Background(), nil, tool.ExecContext{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Content != wantProfileDir {
+		t.Errorf("hygge.profile.dir = %q, want %q", result.Content, wantProfileDir)
+	}
+}
+
+// TestPluginHost_profileDirEmptyWhenUnset verifies that hygge.profile.dir is
+// an empty string when no ProfileDir is configured.
+func TestPluginHost_profileDirEmptyWhenUnset(t *testing.T) {
+	toolReg := tool.NewRegistry()
+	hookReg := hook.New()
+	cmdReg := command.New()
+	subReg, _ := subagent.Load(subagent.LoadOptions{})
+
+	reg, _ := plugin.NewRegistry(plugin.RegistryOptions{
+		CacheDir:  t.TempDir(),
+		Tools:     toolReg,
+		Hooks:     hookReg,
+		Commands:  cmdReg,
+		Subagents: subReg,
+		// ProfileDir intentionally omitted.
+	})
+
+	luaScript := `
+hygge.register_tool {
+    name = "get_profile_dir_empty",
+    description = "Returns hygge.profile.dir",
+    execute = function(ctx, input)
+        return { content = tostring(hygge.profile.dir) }
+    end,
+}
+`
+	dir := t.TempDir()
+	writeFile(t, dir, "plugin.lua", luaScript)
+
+	if err := reg.Install(context.Background(), "local:"+dir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	toolFn, ok := toolReg.Get("get_profile_dir_empty")
+	if !ok {
+		t.Fatal("get_profile_dir_empty tool not registered")
+	}
+
+	result, err := toolFn.Execute(context.Background(), nil, tool.ExecContext{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Content != "" {
+		t.Errorf("hygge.profile.dir = %q, want empty string", result.Content)
+	}
+}

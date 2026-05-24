@@ -137,6 +137,11 @@ type Host interface {
 	// Config returns the [plugins.<plugin-name>] TOML table as a generic
 	// map.  Empty when no overrides are set.
 	Config() map[string]any
+
+	// ProfileDir returns the resolved active profile directory, or "" when
+	// no named profile is active.  Plugins can use this to load files that
+	// live adjacent to the active profile config.
+	ProfileDir() string
 }
 
 // PluginTool describes a tool being registered by a plugin.

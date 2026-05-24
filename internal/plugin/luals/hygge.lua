@@ -8,12 +8,16 @@
 ---@class Hygge
 ---@field config table<string, any> Plugin-specific `[plugins.<name>]` config from `config.toml`.
 ---@field plugin HyggePlugin Current plugin metadata.
+---@field profile HyggeProfile Active profile metadata.
 ---@field session HyggeSession Current session metadata. Empty during plugin initialisation.
 hygge = {}
 
 ---@class HyggePlugin
 ---@field dir string Absolute directory containing this plugin's entrypoint.
 ---@field path string Absolute path to this plugin's entrypoint file.
+
+---@class HyggeProfile
+---@field dir string Absolute active profile directory. Empty when no profile directory is active.
 
 ---@class HyggeSession
 ---@field id string Current session ID when available.

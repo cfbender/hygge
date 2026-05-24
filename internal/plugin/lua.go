@@ -166,6 +166,11 @@ func (p *luaPlugin) registerHyggeModule(L *lua.LState) {
 	L.SetField(pluginTbl, "path", lua.LString(p.scriptPath))
 	L.SetField(hygge, "plugin", pluginTbl)
 
+	// --- Profile metadata (read-only) ---
+	profileTbl := L.NewTable()
+	L.SetField(profileTbl, "dir", lua.LString(p.host.ProfileDir()))
+	L.SetField(hygge, "profile", profileTbl)
+
 	// --- Session stub (populated per-handler; at module init it's empty) ---
 	sessionTbl := L.NewTable()
 	L.SetField(sessionTbl, "id", lua.LString(""))

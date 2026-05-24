@@ -72,6 +72,14 @@ type Config struct {
 	// set by Load after profile resolution.
 	Profile string `mapstructure:"-"`
 
+	// ProfileDir is the resolved directory for the active profile.
+	// For a flat profile ($XDG_CONFIG_HOME/hygge/profiles/<name>.toml) this
+	// is $XDG_CONFIG_HOME/hygge/profiles/<name> (which may not exist on disk).
+	// For a directory profile ($XDG_CONFIG_HOME/hygge/profiles/<name>/config.toml)
+	// this is that directory.  Empty when no profile is active (e.g. "default"
+	// with no profile file).  Not decoded from TOML; set by Load.
+	ProfileDir string `mapstructure:"-"`
+
 	Model         ModelConfig         `mapstructure:"model"`
 	Permission    PermissionConfig    `mapstructure:"permission"`
 	Theme         ThemeConfig         `mapstructure:"theme"`
@@ -384,8 +392,9 @@ func Load(ctx context.Context, opts LoadOptions) (*Config, Provenance, error) {
 
 	// Enumerate all sources.
 	var sources []configSource
+	var profileDir string
 	if !opts.IgnoreExternalSources {
-		sources, err = enumerateSources(ctx, opts, xdgConfigHome, profileName)
+		sources, profileDir, err = enumerateSources(ctx, opts, xdgConfigHome, profileName)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -439,6 +448,7 @@ func Load(ctx context.Context, opts LoadOptions) (*Config, Provenance, error) {
 		return nil, nil, err
 	}
 	cfg.Profile = profileName
+	cfg.ProfileDir = profileDir
 	cfg.raw = merged
 
 	// Validate known fields.

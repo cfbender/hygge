@@ -1458,3 +1458,189 @@ func TestLoad_EmptyModesAllowed(t *testing.T) {
 		t.Errorf("Modes: got %d, want 0", len(cfg.Modes))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// HYGGE-20: directory profile config + ProfileDir exposure
+// ---------------------------------------------------------------------------
+
+// TestLoad_DirectoryProfileLoads verifies that a profile stored as
+// $profilesDir/<name>/config.toml is discovered and loaded.
+func TestLoad_DirectoryProfileLoads(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "dirprof"
+
+	profileDir := filepath.Join(tmp, ".config", "hygge", "profiles", "dirprof")
+	writeTOML(t, filepath.Join(profileDir, "config.toml"), `
+[model]
+name = "from-dir-profile"
+`)
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Model.Name != "from-dir-profile" {
+		t.Errorf("model.name: got %q, want from-dir-profile", cfg.Model.Name)
+	}
+	if cfg.Profile != "dirprof" {
+		t.Errorf("Profile: got %q, want dirprof", cfg.Profile)
+	}
+}
+
+// TestLoad_FlatProfileWinsOverDirectoryProfile verifies that when both
+// $profilesDir/<name>.toml and $profilesDir/<name>/config.toml exist,
+// the flat file wins (backward compatibility).
+func TestLoad_FlatProfileWinsOverDirectoryProfile(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "ambiguous"
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+	// Write both forms.
+	writeTOML(t, filepath.Join(profilesDir, "ambiguous.toml"), `
+[model]
+name = "from-flat"
+`)
+	writeTOML(t, filepath.Join(profilesDir, "ambiguous", "config.toml"), `
+[model]
+name = "from-dir"
+`)
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Model.Name != "from-flat" {
+		t.Errorf("model.name: got %q, want from-flat (flat should win)", cfg.Model.Name)
+	}
+}
+
+// TestLoad_ProfileDir_FlatProfile verifies that ProfileDir is set to
+// $profilesDir/<name> for a flat profile file.
+func TestLoad_ProfileDir_FlatProfile(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "flat"
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+	writeTOML(t, filepath.Join(profilesDir, "flat.toml"), `
+[model]
+name = "flatmodel"
+`)
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantDir := filepath.Join(profilesDir, "flat")
+	if cfg.ProfileDir != wantDir {
+		t.Errorf("ProfileDir: got %q, want %q", cfg.ProfileDir, wantDir)
+	}
+}
+
+// TestLoad_ProfileDir_DirectoryProfile verifies that ProfileDir is set to
+// the profile directory itself for a directory-form profile.
+func TestLoad_ProfileDir_DirectoryProfile(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "dirform"
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+	profileDir := filepath.Join(profilesDir, "dirform")
+	writeTOML(t, filepath.Join(profileDir, "config.toml"), `
+[model]
+name = "dirmodel"
+`)
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ProfileDir != profileDir {
+		t.Errorf("ProfileDir: got %q, want %q", cfg.ProfileDir, profileDir)
+	}
+}
+
+// TestLoad_ProfileDir_DefaultMissing verifies that ProfileDir is empty when the
+// default profile file does not exist (first-run scenario).
+func TestLoad_ProfileDir_DefaultMissing(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	// No profile specified; defaults to "default" which doesn't exist.
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ProfileDir != "" {
+		t.Errorf("ProfileDir: got %q, want empty for missing default profile", cfg.ProfileDir)
+	}
+}
+
+func TestLoad_ProfileDir_IgnoreExternalSources(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "work"
+	opts.IgnoreExternalSources = true
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+	writeTOML(t, filepath.Join(profilesDir, "work.toml"), `
+[model]
+name = "ignored-profile"
+`)
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "default" {
+		t.Errorf("Profile: got %q, want default when external sources are ignored", cfg.Profile)
+	}
+	if cfg.ProfileDir != "" {
+		t.Errorf("ProfileDir: got %q, want empty when external sources are ignored", cfg.ProfileDir)
+	}
+	if cfg.Model.Name == "ignored-profile" {
+		t.Errorf("model.name was loaded from profile despite IgnoreExternalSources")
+	}
+}
+
+// TestLoad_DirectoryProfile_ExtendsChain verifies that a directory profile can
+// participate in an extends chain (extending a flat base profile).
+func TestLoad_DirectoryProfile_ExtendsChain(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "child"
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+
+	// Base is a flat profile.
+	writeTOML(t, filepath.Join(profilesDir, "base.toml"), `
+[permission]
+shell = "allow"
+`)
+
+	// Child is a directory profile extending base.
+	childDir := filepath.Join(profilesDir, "child")
+	writeTOML(t, filepath.Join(childDir, "config.toml"), `
+extends = "base"
+
+[model]
+name = "child-model"
+`)
+
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Model.Name != "child-model" {
+		t.Errorf("model.name: got %q, want child-model", cfg.Model.Name)
+	}
+	if cfg.Permission.Shell != PermAllow {
+		t.Errorf("permission.shell: got %q, want allow (from base)", cfg.Permission.Shell)
+	}
+	// ProfileDir should be the child directory.
+	if cfg.ProfileDir != childDir {
+		t.Errorf("ProfileDir: got %q, want %q", cfg.ProfileDir, childDir)
+	}
+}
