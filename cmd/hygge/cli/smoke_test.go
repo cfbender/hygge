@@ -177,7 +177,7 @@ func TestSmoke_EndToEnd(t *testing.T) {
 	sess, err := rt.Store.CreateSession(ctx, session.NewSession{
 		ProjectDir: pwd,
 		Model: session.ModelRef{
-			Provider: rt.Config.Model.Provider,
+			Provider: "anthropic", // smoke provider is always anthropic
 			Name:     fakeModel,
 		},
 	})

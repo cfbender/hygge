@@ -88,16 +88,11 @@ type Config struct {
 	// individual types.  The subagent registry loader consults this map in
 	// addition to the legacy subagents.toml files.
 	Subagents map[string]SubagentEntry `mapstructure:"subagents"`
-	// Modes defines the agent modes available to the user. The app is always
-	// in a mode; the first mode is the default. Each mode specifies a
-	// provider and model. The [[modes]] array-of-tables is the preferred
-	// way to configure provider/model; the [model] section (provider/name)
-	// is only used as a fallback for modes that omit those fields or when
-	// no [[modes]] are declared at all.
-	// When no [[modes]] are declared, a built-in "General" mode is
-	// synthesized: it uses [model].provider/name when set, otherwise falls
-	// back to hard-coded defaults ("anthropic" / "claude-sonnet-4-5").
-	// After Load(), Modes is guaranteed to have at least one entry.
+	// Modes defines the agent modes available to the user. The first mode is
+	// the default when modes exist. Each mode specifies its provider and model;
+	// [[modes]] is the canonical source for active provider/model selection.
+	// Empty modes are valid after Load() and signal that startup should route to
+	// onboarding instead of synthesizing a fallback mode.
 	Modes []ModeConfig `mapstructure:"modes"`
 
 	// Plugins holds plugin source and per-plugin configuration.
@@ -236,11 +231,11 @@ type ModelConfig struct {
 	ReasoningBudget int `mapstructure:"reasoning_budget"`
 }
 
-// ModeConfig defines a named agent mode. The app is always in a mode;
-// each mode specifies a provider, model, and optional reasoning level,
-// system prompt, and accent color. Modes are declared as [[modes]]
-// array-of-tables in TOML. When no modes are configured, a built-in
-// "General" mode is synthesized from defaults.
+// ModeConfig defines a named agent mode. The app runs in a mode when one is
+// configured; each mode specifies a provider, model, and optional reasoning
+// level, system prompt, and accent color. Modes are declared as [[modes]]
+// array-of-tables in TOML. When no modes are configured, startup routes to
+// onboarding instead of synthesizing a fallback mode.
 type ModeConfig struct {
 	// Name is the display name for the mode (e.g. "smart", "rush", "deep").
 	Name string `mapstructure:"name"`
@@ -589,52 +584,30 @@ func validateConfig(cfg *Config) error {
 		cfg.Model.ReasoningBudget = 0
 	}
 
-	// Ensure Modes is always populated.
+	// [[modes]] is now the canonical source for active provider/model.
 	//
-	// When no [[modes]] are declared, synthesize a built-in "General" mode.
-	// The provider/name/reasoning come from the [model] section when set;
-	// otherwise fall back to the canonical hard-coded defaults.
+	// Empty modes are allowed — the TUI detects the missing config and
+	// opens the onboarding wizard.
 	//
-	// When [[modes]] are declared they are self-sufficient: [model] provider/
-	// name are only used as a fallback for modes that omit those fields
-	// (backward compat for configs that use modes as overrides of a base
-	// model table).
-	const defaultProvider = "anthropic"
-	const defaultModelName = "claude-sonnet-4-5"
-	if len(cfg.Modes) == 0 {
-		provider := cfg.Model.Provider
-		if strings.TrimSpace(provider) == "" {
-			provider = defaultProvider
-		}
-		name := cfg.Model.Name
-		if strings.TrimSpace(name) == "" {
-			name = defaultModelName
-		}
-		cfg.Modes = []ModeConfig{{
-			Name:        "General",
-			Provider:    provider,
-			Model:       name,
-			Reasoning:   cfg.Model.Reasoning,
-			Description: "General-purpose mode",
-		}}
-	} else {
-		// Fill in any modes that omit Provider or Model from the
-		// [model] section (backward compat with configs that use
-		// modes as overrides of a base model).
-		for i := range cfg.Modes {
-			if cfg.Modes[i].Provider == "" {
-				cfg.Modes[i].Provider = cfg.Model.Provider
+	// When modes are present every mode must declare both provider and
+	// model; missing fields are a hard validation error so operators
+	// get a clear message instead of a silent fallback.
+	for i := range cfg.Modes {
+		if strings.TrimSpace(cfg.Modes[i].Provider) == "" {
+			return &InvalidValueError{
+				Key:   fmt.Sprintf("modes[%d].provider", i),
+				Value: "",
+				Msg:   fmt.Sprintf("mode %q must declare a provider", cfg.Modes[i].Name),
 			}
-			if cfg.Modes[i].Model == "" {
-				cfg.Modes[i].Model = cfg.Model.Name
+		}
+		if strings.TrimSpace(cfg.Modes[i].Model) == "" {
+			return &InvalidValueError{
+				Key:   fmt.Sprintf("modes[%d].model", i),
+				Value: "",
+				Msg:   fmt.Sprintf("mode %q must declare a model", cfg.Modes[i].Name),
 			}
 		}
 	}
-
-	// Derive Model.Provider/Name from the first (default) mode so the
-	// rest of the bootstrap can read them without knowing about modes.
-	cfg.Model.Provider = cfg.Modes[0].Provider
-	cfg.Model.Name = cfg.Modes[0].Model
 
 	// Compaction threshold: 0 is valid (disables suggestion); ≥ 100 warns and
 	// resets to the default 80.

@@ -11,9 +11,9 @@ import (
 	"github.com/cfbender/hygge/internal/config"
 )
 
-// ActiveMode returns the currently active mode config. Always returns
-// non-nil because Modes is guaranteed to have at least one entry after
-// config loading.
+// ActiveMode returns the currently active mode config. initModes ensures the
+// UI always has at least one in-memory mode, even when config loading left
+// modes empty so onboarding can run.
 func (a *App) ActiveMode() *config.ModeConfig {
 	return &a.opts.Modes[a.modeIndex]
 }

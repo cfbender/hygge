@@ -152,6 +152,22 @@ func seedHermeticModelConfig(t *testing.T, home string) {
 	}
 }
 
+// seedHermeticModeConfig writes a canonical [[modes]] entry into the hermetic
+// config dir.  Use this (instead of seedHermeticModelConfig) when the test
+// needs the bootstrap to have an active provider/model via the new
+// [[modes]]-canonical path.
+func seedHermeticModeConfig(t *testing.T, home string) {
+	t.Helper()
+	cfgDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	body := []byte("[[modes]]\nname = \"General\"\nprovider = \"anthropic\"\nmodel = \"claude-sonnet-4-5\"\n")
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), body, 0o600); err != nil {
+		t.Fatalf("write mode config: %v", err)
+	}
+}
+
 func hermeticHomeWithModel(t *testing.T) string {
 	t.Helper()
 	home := hermeticHome(t)
@@ -344,14 +360,13 @@ func TestBootstrapYoloEnablesPermissionBypass(t *testing.T) {
 }
 
 func TestFantasyModelResolverDoesNotReuseParentAfterConfigChange(t *testing.T) {
-	cfg := &config.Config{Model: config.ModelConfig{
-		Provider: "test-provider",
-		Name:     "model-a",
-		Options: map[string]any{
+	cfg := &config.Config{
+		Model: config.ModelConfig{Options: map[string]any{
 			"api_key":  "sk-test",
 			"base_url": "https://first.invalid/v1",
-		},
-	}}
+		}},
+		Modes: []config.ModeConfig{{Name: "General", Provider: "test-provider", Model: "model-a"}},
+	}
 	resolver := buildFantasyModelResolver(cfg, stateLoadOptionsForTest(), nil, fakeFantasyLanguageModel{}, llm.ProviderBuildOptions{})
 
 	cfg.Model.Options["base_url"] = "https://second.invalid/v1"
@@ -404,11 +419,13 @@ func TestBootstrapDryRunIgnoresConfigAndAuth(t *testing.T) {
 	if !rt.DryRun {
 		t.Fatal("rt.DryRun = false, want true")
 	}
-	if rt.Config.Model.Provider != "anthropic" || rt.Config.Model.Name != "claude-sonnet-4-5" {
-		t.Fatalf("model = %s/%s, want defaults", rt.Config.Model.Provider, rt.Config.Model.Name)
+	// DryRun ignores external sources, so no [model] section is loaded and
+	// no [[modes]] are present.  cfg.Model.Provider/Name are empty.
+	if rt.Config.Model.Provider != "" || rt.Config.Model.Name != "" {
+		t.Fatalf("dry-run model = %s/%s, want empty (external sources ignored)", rt.Config.Model.Provider, rt.Config.Model.Name)
 	}
 	if hasConfiguredModel(rt.Config, rt.Provenance) {
-		t.Fatalf("hasConfiguredModel = true; provenance = %v", rt.Provenance)
+		t.Fatalf("hasConfiguredModel = true; no modes with dry-run (external sources ignored)")
 	}
 	if got := captured.snapshot(); got != nil {
 		t.Fatalf("provider factory was called with opts %#v; want no provider/auth load", got)
@@ -426,6 +443,9 @@ func TestBootstrap_AuthStoreInjectsAPIKey(t *testing.T) {
 		auth.LoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
 		t.Fatalf("auth.Set: %v", err)
 	}
+
+	// Seed a [[modes]] entry so the bootstrap has an active provider.
+	seedHermeticModeConfig(t, home)
 
 	captured := &optsCapture{}
 	// Override the provider factory installed by hermeticHome so we

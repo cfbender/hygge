@@ -34,8 +34,14 @@ func TestLoadIgnoreExternalSourcesUsesDefaultsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Model.Provider != "anthropic" || cfg.Model.Name != "claude-sonnet-4-5" {
-		t.Fatalf("model = %s/%s, want defaults", cfg.Model.Provider, cfg.Model.Name)
+	// With IgnoreExternalSources no user/project config is loaded, so no
+	// [model] section is merged in and no [[modes]] are present.
+	// cfg.Model.Provider/Name remain empty; modes remain empty (no synthesis).
+	if cfg.Model.Provider != "" || cfg.Model.Name != "" {
+		t.Fatalf("model = %s/%s, want empty (external sources ignored)", cfg.Model.Provider, cfg.Model.Name)
+	}
+	if len(cfg.Modes) != 0 {
+		t.Fatalf("Modes: got %d, want 0 (external sources ignored)", len(cfg.Modes))
 	}
 	if hasRealConfigSourceForTest(prov["model.provider"]) || hasRealConfigSourceForTest(prov["model.name"]) {
 		t.Fatalf("provenance should only contain defaults, got provider=%v name=%v", prov["model.provider"], prov["model.name"])
