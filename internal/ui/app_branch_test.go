@@ -37,8 +37,8 @@ func newBranchTestApp(t *testing.T, projectDir string) (*App, *bus.Bus) {
 		Bus:           b,
 		Theme:         styles.DefaultTheme(),
 		ProjectDir:    projectDir,
-		ModelProvider: "anthropic",
-		ModelName:     "claude-sonnet-4-5",
+		ModelProvider: "provider-placeholder",
+		ModelName:     "model-placeholder",
 		Now:           now,
 	})
 	if err != nil {
