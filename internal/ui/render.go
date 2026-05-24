@@ -120,11 +120,12 @@ func (a *App) renderChatContent() string {
 			AnimFor:            a.subagentAnims,
 			Now:                now,
 			HoverSubagentID:    a.hoverSubagentID,
+			HoverURL:           a.hoverURL,
 			ExpandedTools:      a.expandedTools,
 			ExpandedThinking:   a.expandedThinkingFor(a.foregroundTranscriptID()),
 			MessageIndexOffset: messageIndexOffset,
 		}
-		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones = ml.ViewWithHitZones()
+		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones, a.urlHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
 		a.msgCacheStreamingDirty = false
 		a.msgCacheW = l.leftW

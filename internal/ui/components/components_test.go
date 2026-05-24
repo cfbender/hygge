@@ -677,7 +677,7 @@ func TestToolGroupBubble_StandaloneBashHitZonesDoNotShareCombinedBlock(t *testin
 		},
 	}
 
-	_, _, zones, _ := ml.ViewWithHitZones()
+	_, _, zones, _, _ := ml.ViewWithHitZones()
 	if len(zones) != 2 {
 		t.Fatalf("expected one hit zone per standalone bash block, got %d", len(zones))
 	}
@@ -888,26 +888,6 @@ func containsBackgroundSGR(s string) bool {
 		i = j
 	}
 	return false
-}
-
-// stripANSI is a naive ANSI escape stripper for test assertions.
-// Removes ESC[...m sequences so tests can check plain text.
-func stripANSI(s string) string {
-	var out strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			i += 2
-			for i < len(s) && s[i] != 'm' {
-				i++
-			}
-			i++ // consume 'm'
-			continue
-		}
-		out.WriteByte(s[i])
-		i++
-	}
-	return out.String()
 }
 
 // ── Sidebar tests ────────────────────────────────────────────────────────────
@@ -1745,7 +1725,7 @@ func TestToolGroup_LongBashGitDiffCanExpand(t *testing.T) {
 		},
 	}
 
-	collapsed, _, zones, _ := ml.ViewWithHitZones()
+	collapsed, _, zones, _, _ := ml.ViewWithHitZones()
 	plainCollapsed := stripANSI(collapsed)
 	if len(zones) != 1 || zones[0].ToolUseID != "bash-diff" {
 		t.Fatalf("expected bash diff hit zone, got %+v", zones)
@@ -1778,7 +1758,7 @@ func TestToolGroup_LongEditDiffCanExpand(t *testing.T) {
 		},
 	}
 
-	collapsed, _, zones, _ := ml.ViewWithHitZones()
+	collapsed, _, zones, _, _ := ml.ViewWithHitZones()
 	plainCollapsed := stripANSI(collapsed)
 	if len(zones) != 1 || zones[0].ToolUseID != "edit-diff" {
 		t.Fatalf("expected edit diff hit zone, got %+v", zones)
@@ -1860,7 +1840,7 @@ func TestToolGroup_SideBySidePairPreservationToEndNoExpandHint(t *testing.T) {
 		},
 	}
 
-	collapsed, _, zones, _ := ml.ViewWithHitZones()
+	collapsed, _, zones, _, _ := ml.ViewWithHitZones()
 	plainCollapsed := stripANSI(collapsed)
 
 	// A hit zone may exist for the tool block (the infrastructure always
@@ -1905,7 +1885,7 @@ func TestThinkingClickToExpand_AffordancePresent(t *testing.T) {
 		},
 	}
 
-	content, _, _, thinkingZones := ml.ViewWithHitZones()
+	content, _, _, thinkingZones, _ := ml.ViewWithHitZones()
 	plain := stripANSI(content)
 
 	// Affordance must appear.
@@ -1941,7 +1921,7 @@ func TestThinkingClickToExpand_NoZoneWhenShort(t *testing.T) {
 		},
 	}
 
-	_, _, _, thinkingZones := ml.ViewWithHitZones()
+	_, _, _, thinkingZones, _ := ml.ViewWithHitZones()
 	if len(thinkingZones) != 0 {
 		t.Fatalf("expected no ThinkingHitZone for short thinking, got %d", len(thinkingZones))
 	}
@@ -1971,7 +1951,7 @@ func TestThinkingClickToExpand_ToggleExpanded(t *testing.T) {
 		ExpandedThinking: map[int]bool{0: true},
 	}
 
-	content, _, _, thinkingZones := ml.ViewWithHitZones()
+	content, _, _, thinkingZones, _ := ml.ViewWithHitZones()
 	plain := stripANSI(content)
 
 	// All thinking lines should be visible.
@@ -2023,7 +2003,7 @@ func TestThinkingClickToExpand_MultipleMessages(t *testing.T) {
 		},
 	}
 
-	_, _, _, thinkingZones := ml.ViewWithHitZones()
+	_, _, _, thinkingZones, _ := ml.ViewWithHitZones()
 	if len(thinkingZones) != 2 {
 		t.Fatalf("expected 2 ThinkingHitZones for 2 long-thinking messages, got %d: %+v", len(thinkingZones), thinkingZones)
 	}
@@ -2064,7 +2044,7 @@ func TestThinkingClickToExpand_MessageIndexOffset(t *testing.T) {
 		ExpandedThinking: map[int]bool{50: true},
 	}
 
-	content, _, _, thinkingZones := ml.ViewWithHitZones()
+	content, _, _, thinkingZones, _ := ml.ViewWithHitZones()
 	plain := stripANSI(content)
 	if !strings.Contains(plain, "click to collapse thinking") {
 		t.Fatalf("expected expanded thinking looked up by offset message index; got:\n%s", plain)

@@ -161,6 +161,11 @@ type AppOptions struct {
 	// the hard-coded secrets denylist active.
 	Yolo    bool
 	SetYolo func(ctx context.Context, enabled bool) error
+
+	// OpenURL opens a URL with the OS default browser. When nil, OpenURLWithOS
+	// is used.  Tests inject a no-op stub to avoid spawning a real browser.
+	// Only http(s) URLs from URLHitZones are passed to this function.
+	OpenURL func(url string) error
 }
 
 // uiMessage is the App's internal alias for the components.UIMessage view
@@ -341,9 +346,12 @@ type App struct {
 	subagentHitZones       []components.SubagentHitZone
 	toolHitZones           []components.ToolHitZone
 	thinkingHitZones       []components.ThinkingHitZone
+	urlHitZones            []components.URLHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
+	// hoverURL is the message URL under the mouse cursor, or "".
+	hoverURL string
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -1164,6 +1172,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.invalidateMsgCache()
 				return a, nil
 			}
+			// Check for URL click: open with OS default browser.
+			// This fires on a plain left-click so it works in all terminals,
+			// including those where mouse reporting prevents native Command-click
+			// from reaching OSC 8 hyperlinks.
+			if url := a.urlAtScreen(m.X, m.Y); url != "" {
+				a.clearSelection()
+				opener := a.opts.OpenURL
+				if opener == nil {
+					opener = OpenURLWithOS
+				}
+				if err := opener(url); err != nil {
+					return a, a.setNotice("Failed to open URL: " + err.Error())
+				}
+				return a, nil
+			}
 			a.handleMouseDown(m.X, m.Y)
 		}
 		return a, nil
@@ -1181,14 +1204,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.sel.active && m.Button != tea.MouseLeft {
 				a.sel.active = false
 			}
-			// Track hover over subagent bubbles.
-			prev := a.hoverSubagentID
+			// Track hover over clickable message regions.
+			prevSubagentID := a.hoverSubagentID
+			prevURL := a.hoverURL
 			a.hoverSubagentID = a.subagentAtScreen(m.X, m.Y)
-			if a.hoverSubagentID != prev {
+			a.hoverURL = ""
+			if a.hoverSubagentID == "" {
+				a.hoverURL = a.urlAtScreen(m.X, m.Y)
+			}
+			if a.hoverSubagentID != prevSubagentID || a.hoverURL != prevURL {
 				a.invalidateMsgCache()
 			}
-			// Skip text selection when hovering a subagent bubble.
-			if a.hoverSubagentID == "" {
+			// Skip text selection when hovering a clickable region.
+			if a.hoverSubagentID == "" && a.hoverURL == "" {
 				a.handleMouseMotion(m.X, m.Y)
 			}
 		}

@@ -112,6 +112,40 @@ func (a *App) thinkingAtScreen(screenX, screenY int) int {
 	return -1
 }
 
+// urlAtScreen returns the URL for a URLHitZone at the given screen coordinates,
+// or "" if none.  Uses the same viewport coordinate translation as
+// subagentAtScreen.  The column check is performed against the visual screen
+// column (screenX) compared with the hit zone's StartCol/EndCol so only clicks
+// directly on URL text trigger the opener.
+func (a *App) urlAtScreen(screenX, screenY int) string {
+	if len(a.urlHitZones) == 0 {
+		return ""
+	}
+	// Only register clicks within the left column.
+	if screenX >= a.layout.leftW {
+		return ""
+	}
+	viewportTop := headerHeight
+	chatH := a.layout.chat.Dy()
+	viewportBottom := viewportTop + chatH
+	if screenY < viewportTop || screenY >= viewportBottom {
+		return ""
+	}
+	// The viewport content is rendered with a leading blank line before the
+	// message list. URL zones are recorded relative to the message list itself,
+	// so subtract that viewport-only spacer when translating screen coordinates.
+	contentLine := (screenY - viewportTop) + a.msgViewport.YOffset() - 1
+	if contentLine < 0 {
+		return ""
+	}
+	for _, zone := range a.urlHitZones {
+		if contentLine == zone.Line && screenX >= zone.StartCol && screenX < zone.EndCol {
+			return zone.URL
+		}
+	}
+	return ""
+}
+
 // viewingSubagent reports whether the user is viewing a subagent's
 // transcript (foreground stack depth > 1).
 func (a *App) viewingSubagent() bool {
