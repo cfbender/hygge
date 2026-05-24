@@ -594,6 +594,7 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	if m.Theme != nil {
 		body = HighlightMentions(body, m.Theme.Style(styles.AtomAccent))
 	}
+	body = LinkifyURLs(body)
 
 	// Header-right: relative timestamp.
 	headerRight := ""
@@ -692,6 +693,10 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 				phStyle = lipgloss.NewStyle().Faint(true).Italic(true)
 			}
 			rawBody = phStyle.Render(rawBody)
+		} else {
+			// Wrap plain http(s):// URLs with OSC 8 terminal hyperlinks so
+			// supporting terminals render them as clickable links.
+			rawBody = LinkifyURLs(rawBody)
 		}
 		bodyParts = append(bodyParts, rawBody)
 	}
