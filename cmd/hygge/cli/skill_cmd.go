@@ -2,16 +2,84 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"image/color"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/cfbender/hygge/internal/skill"
 )
+
+// inspectStyles holds Lip Gloss styles shared by the inspection/list
+// commands: skills, subagents, commands, and context.  Kept in a single
+// struct so the palette is consistent across all four command groups.
+type inspectStyles struct {
+	Header lipgloss.Style // bold column headers
+	Label  lipgloss.Style // left-hand "field:" labels in show commands
+	Value  lipgloss.Style // right-hand values in show commands
+	Muted  lipgloss.Style // empty-state notices and secondary info
+	Path   lipgloss.Style // file system paths
+	OK     lipgloss.Style // "ok" status badge
+	Warn   lipgloss.Style // "skipped"/"error" status badge
+}
+
+// newInspectStylesFor returns full ANSI styles when w is a TTY and
+// NO_COLOR is not set; otherwise returns plain no-op styles so that
+// piped / redirected output and scripts are never polluted with escape
+// sequences.
+//
+// Tabwriter tables must always use the plain variant (pass a non-*os.File
+// writer, e.g. the tabwriter itself) because ANSI bytes inside tab cells
+// break column alignment.  Only "show" commands that write one field per
+// line should pass the real command writer.
+func newInspectStylesFor(w io.Writer) inspectStyles {
+	if isColorWriter(w) {
+		return inspectStyles{
+			Header: lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()),
+			Label:  lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()).Width(13),
+			Value:  lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
+			Muted:  lipgloss.NewStyle().Foreground(inspectMutedColor()),
+			Path:   lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")),
+			OK:     lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
+			Warn:   lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
+		}
+	}
+	plain := lipgloss.NewStyle()
+	return inspectStyles{
+		Header: plain,
+		Label:  plain,
+		Value:  plain,
+		Muted:  plain,
+		Path:   plain,
+		OK:     plain,
+		Warn:   plain,
+	}
+}
+
+// isColorWriter reports whether w is a terminal that supports ANSI colour.
+// Returns false when w is not an *os.File, when the file descriptor is not
+// a terminal, or when NO_COLOR is set (https://no-color.org).
+func isColorWriter(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
+
+func inspectHeaderColor() color.Color { return lipgloss.Color("#38BDF8") }
+func inspectMutedColor() color.Color  { return lipgloss.Color("#6B7280") }
 
 // newSkillsCmd builds the `hygge skills` subcommand group.
 func newSkillsCmd() *cobra.Command {
@@ -41,13 +109,17 @@ func newSkillsListCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
+			// empty-state: styled when TTY, plain otherwise.
+			sty := newInspectStylesFor(out(cmd))
 			all := rt.Skills.All()
 			if len(all) == 0 {
-				writeln(out(cmd), "(no skills loaded)")
+				writeln(out(cmd), sty.Muted.Render("(no skills loaded)"))
 				return nil
 			}
+			// Tabwriter: always plain — ANSI bytes inside tab cells
+			// corrupt column alignment regardless of terminal type.
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "NAME\tSOURCE\tPATH\tDESCRIPTION")
+			printf(tw, "NAME\tSOURCE\tPATH\tDESCRIPTION\n")
 			home := homeDirFromRuntime(rt)
 			for _, sk := range all {
 				printf(tw, "%s\t%s\t%s\t%s\n",
@@ -85,23 +157,24 @@ func newSkillsShowCmd() *cobra.Command {
 			if !ok {
 				return die(cmd, "no skill named %q (use `hygge skills list` to see what is loaded)", name)
 			}
-			printf(out(cmd), "name:        %s\n", sk.Name)
-			printf(out(cmd), "source:      %s\n", sk.Source.String())
-			printf(out(cmd), "path:        %s\n", sk.Path)
-			printf(out(cmd), "description: %s\n", sk.Description)
-			printf(out(cmd), "when_to_use: %s\n", sk.WhenToUse)
+			sty := newInspectStylesFor(out(cmd))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("name:"), sty.Value.Render(sk.Name))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("source:"), sty.Value.Render(sk.Source.String()))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("path:"), sty.Path.Render(sk.Path))
+			printf(out(cmd), "%s %s\n", sty.Label.Render("description:"), sk.Description)
+			printf(out(cmd), "%s %s\n", sty.Label.Render("when_to_use:"), sk.WhenToUse)
 			if len(sk.Extras) > 0 {
-				printf(out(cmd), "extras:\n")
+				printf(out(cmd), "%s\n", sty.Label.Render("extras:"))
 				keys := make([]string, 0, len(sk.Extras))
 				for k := range sk.Extras {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
 				for _, k := range keys {
-					printf(out(cmd), "  %s = %q\n", k, sk.Extras[k])
+					printf(out(cmd), "  %s = %q\n", sty.Value.Render(k), sk.Extras[k])
 				}
 			}
-			printf(out(cmd), "\n---\n%s\n", sk.Body)
+			printf(out(cmd), "\n%s\n%s\n", sty.Muted.Render("---"), sk.Body)
 			return nil
 		},
 	}
@@ -150,9 +223,12 @@ func newSkillsDoctorCmd() *cobra.Command {
 				)
 			}
 
+			// Non-table styled output (empty-state / footer): TTY-aware.
+			sty := newInspectStylesFor(out(cmd))
 			problems := 0
+			// Tabwriter: always plain to preserve column alignment.
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "STATUS\tSOURCE\tPATH\tDETAIL")
+			printf(tw, "STATUS\tSOURCE\tPATH\tDETAIL\n")
 			for _, d := range dirs {
 				entries, err := os.ReadDir(d.path)
 				if err != nil {
@@ -188,9 +264,9 @@ func newSkillsDoctorCmd() *cobra.Command {
 				return err
 			}
 			if problems == 0 {
-				writeln(out(cmd), "\nno problems detected")
+				writeln(out(cmd), "\n"+sty.OK.Render("no problems detected"))
 			} else {
-				printf(out(cmd), "\n%d issue(s) detected\n", problems)
+				printf(out(cmd), "\n%s\n", sty.Warn.Render(fmt.Sprintf("%d issue(s) detected", problems)))
 			}
 			return nil
 		},

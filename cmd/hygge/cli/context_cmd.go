@@ -45,12 +45,14 @@ func newContextListCmd() *cobra.Command {
 			}
 			defer func() { _ = rt.Close() }()
 
+			sty := newInspectStylesFor(out(cmd))
 			if len(rt.AgentsBlocks) == 0 {
-				writeln(out(cmd), "(no context files loaded)")
+				writeln(out(cmd), sty.Muted.Render("(no context files loaded)"))
 				return nil
 			}
+			// Tabwriter: always plain to preserve column alignment.
 			tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-			writeln(tw, "SOURCE\tPATH\tBYTES\tLINES")
+			printf(tw, "SOURCE\tPATH\tBYTES\tLINES\n")
 			home := homeDirFromRuntime(rt)
 			for _, b := range rt.AgentsBlocks {
 				var display string
@@ -92,7 +94,7 @@ func newContextShowCmd() *cobra.Command {
 			defer func() { _ = rt.Close() }()
 
 			if len(rt.AgentsBlocks) == 0 {
-				writeln(out(cmd), "(no context files loaded)")
+				writeln(out(cmd), newInspectStylesFor(out(cmd)).Muted.Render("(no context files loaded)"))
 				return nil
 			}
 			rendered := agentsmd.BuildSystemPromptAdditions(rt.AgentsBlocks)
