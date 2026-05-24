@@ -14,6 +14,10 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 - Keep slash model changes session-only (#31) ([`f8b85b9e`](../../commit/f8b85b9e67960003fa10b595bceee950a8d65c76))
 
+### Chores
+
+- Update changelog ([`708d1ca4`](../../commit/708d1ca45e2dbf138c270af11a9784553f86d79d))
+
 ### Features
 
 - Clickable URLs (#28) ([`5def1d27`](../../commit/5def1d2746e93f6794926300a2901cded6fb0c8c))
