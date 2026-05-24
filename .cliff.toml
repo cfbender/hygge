@@ -1,0 +1,54 @@
+# git-cliff configuration
+# https://git-cliff.org/docs/configuration
+#
+# Usage (from repo root):
+#   git-cliff v0.11.0..HEAD --tag v0.12.0 --output CHANGELOG.md
+#   git-cliff vX.Y.Z..HEAD --tag vA.B.C --prepend CHANGELOG.md
+
+[changelog]
+header = "# Changelog\n\nAll notable changes to Hygge are documented here.\n\nVersions follow [Semantic Versioning](https://semver.org/).\nThis file is generated from `git log` using [git-cliff](https://git-cliff.org).\nSee [docs/releasing.md](docs/releasing.md) for maintainer instructions.\n\n---\n\n"
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }} ([`{{ commit.id | truncate(length=8, end="") }}`](../../commit/{{ commit.id }}))\
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+  { message = "^chore: release",          skip = true },
+  { message = "^docs: update changelog", skip = true },
+  { message = "^feat",          group = "Features"         },
+  { message = "^fix",           group = "Bug Fixes"        },
+  { message = "^refactor",      group = "Refactoring"      },
+  { message = "^style",         group = "Style"            },
+  { message = "^test",          group = "Tests"            },
+  { message = "^chore",         group = "Chores"           },
+  { message = "^docs",          group = "Documentation"    },
+  { message = "^perf",          group = "Performance"      },
+  { message = "^ci",            group = "CI"               },
+  { message = "^build",         group = "Build"            },
+  { message = "^revert",        group = "Reverts"          },
+  { message = ".*",             group = "Miscellaneous"    },
+]
+# Release commits from scripts/bump.sh are created after the changelog update and
+# tagged directly, so they should not appear in the vPREV..HEAD changelog range.
+commit_preprocessors = []
+filter_commits = false
+tag_pattern = "v[0-9].*"
+skip_tags = ""
+ignore_tags = ""
+topo_order = false
+sort_commits = "oldest"

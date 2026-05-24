@@ -1,4 +1,5 @@
 [tools]
+git-cliff = "latest"
 go = "1.26"
 golangci-lint = "2"
 staticcheck = "2026.1"

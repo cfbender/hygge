@@ -1,0 +1,41 @@
+name: PR Title Check
+
+# Validates that PR titles follow Conventional Commits so squash-merge commits
+# produce a parseable history for git-cliff.
+#
+# Safe for forks: only reads pull_request event metadata — no checkout, no
+# build, no secrets consumed.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  check-title:
+    name: conventional commit title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Conventional Commits pattern: type(optional-scope)!: description
+          # https://www.conventionalcommits.org/en/v1.0.0/
+          pattern='^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)(\([^)]+\))?(!)?: \S.*$'
+          if echo "$PR_TITLE" | grep -Eq "$pattern"; then
+            echo "✓ PR title follows Conventional Commits: $PR_TITLE"
+          else
+            echo "✗ PR title does not follow Conventional Commits." >&2
+            echo "  Title: $PR_TITLE" >&2
+            echo "" >&2
+            echo "  Expected format: <type>(<scope>): <description>" >&2
+            echo "  Examples:" >&2
+            echo "    feat: add session export command" >&2
+            echo "    fix(mcp): handle timeout on slow servers" >&2
+            echo "    chore: update dependencies" >&2
+            echo "" >&2
+            echo "  Valid types: feat fix docs style refactor perf test chore build ci revert" >&2
+            exit 1
+          fi
