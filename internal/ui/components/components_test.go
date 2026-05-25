@@ -584,6 +584,48 @@ func TestPermissionModalNoEditOption(t *testing.T) {
 	}
 }
 
+// TestPermissionModal_LongTargetStaysWithinViewport verifies that a very long
+// single-line Target value does not push the modal wider than the declared
+// viewport width, and that the action buttons remain visible in the output.
+func TestPermissionModal_LongTargetStaysWithinViewport(t *testing.T) {
+	t.Parallel()
+	const viewportWidth = 80
+	longTarget := strings.Repeat("x", 300) // far wider than any viewport
+	m := PermissionModal{
+		Width:  viewportWidth,
+		Height: 24,
+		Theme:  styles.DefaultTheme(),
+		Request: PermissionRequest{
+			RequestID: "req-long",
+			ToolName:  "bash",
+			Category:  "shell",
+			Target:    longTarget,
+			Why:       strings.Repeat("y", 300),
+		},
+	}
+	out := m.View()
+
+	// No rendered line may exceed the declared viewport width.
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > viewportWidth {
+			t.Errorf("line %d width=%d exceeds viewport %d; line=%q", i, got, viewportWidth, line)
+		}
+	}
+
+	// Action buttons must still appear.
+	plain := stripANSI(out)
+	for _, want := range []string{"[y]", "[Y]", "[A]", "[n]"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("action button %q missing from modal with long target; got:\n%s", want, plain)
+		}
+	}
+
+	// Truncation ellipsis must be present (value was definitely longer than avail).
+	if !strings.Contains(plain, "…") {
+		t.Errorf("long target should be truncated with '…'; got:\n%s", plain)
+	}
+}
+
 func TestInputBuildsAndReports(t *testing.T) {
 	t.Parallel()
 	in := NewInput(styles.DefaultTheme())

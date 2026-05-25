@@ -102,8 +102,29 @@ func (m PermissionModal) sectionLabel(label string) string {
 }
 
 // field renders a "Label: value" pair with the label muted.
+// The value is truncated with "…" so it never pushes the modal wider than
+// the content width, keeping the action buttons visible at all viewport sizes.
 func (m PermissionModal) field(label, value string) string {
-	return m.style(styles.AtomMuted).Render(label+": ") + value
+	prefix := label + ": "
+	avail := max(m.contentWidth()-len(prefix), 1)
+	value = truncateFieldValue(value, avail)
+	return m.style(styles.AtomMuted).Render(prefix) + value
+}
+
+// truncateFieldValue truncates s to at most avail visible rune widths,
+// appending "…" when the string is longer.
+func truncateFieldValue(s string, avail int) string {
+	if avail <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= avail {
+		return s
+	}
+	if avail == 1 {
+		return string(runes[0])
+	}
+	return string(runes[:avail-1]) + "…"
 }
 
 // actionRow renders a horizontal group of key-description pairs inside a
