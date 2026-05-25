@@ -241,6 +241,45 @@ name = "claude-sonnet-4-5"
 	}
 }
 
+func TestWriteDefaultProfileUpdatesHyggeTomlProvenance(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, ".config", "hygge", "hygge.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`default_profile = "old"
+
+[model]
+provider = "anthropic"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	wrote, err := WriteDefaultProfile(WriteDefaultProfileOptions{
+		HomeDir: home,
+		Provenance: Provenance{
+			"default_profile": {{File: path}},
+		},
+	}, "work")
+	if err != nil {
+		t.Fatalf("WriteDefaultProfile: %v", err)
+	}
+	if wrote != path {
+		t.Fatalf("target = %q, want %q", wrote, path)
+	}
+	m, err := loadTOMLFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["default_profile"] != "work" {
+		t.Fatalf("default_profile = %#v", m["default_profile"])
+	}
+	if m["model"].(map[string]any)["provider"] != "anthropic" {
+		t.Fatalf("model dropped: %#v", m)
+	}
+}
+
 func TestWritePluginSourcesPreservesPerPluginTables(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -4,11 +4,14 @@
 // # Merge order (lowest → highest precedence)
 //
 //  1. Builtin defaults (defaults.go)
-//  2. User config: $XDG_CONFIG_HOME/hygge/config.toml
+//  2. User config: $XDG_CONFIG_HOME/hygge/config.toml, then hygge.toml
+//     (hygge.toml values win over config.toml values within the user scope)
 //  3. Profile: $XDG_CONFIG_HOME/hygge/profiles/<name>.toml
 //     Resolved recursively via the "extends" key (max depth 8, cycle-detected).
-//  4. Walk-up .hygge/config.toml starting from opts.Pwd going up to $HOME.
-//     Files closer to Pwd have higher precedence.
+//  4. Walk-up starting from opts.Pwd going up to $HOME.
+//     Each directory is checked for .hygge/config.toml then .hygge/hygge.toml;
+//     hygge.toml values win within the same directory.
+//     Directories closer to Pwd have higher precedence overall.
 //  5. Environment variables: HYGGE_model__provider → model.provider.
 //     Uses "__" (double underscore) as path-segment separator; single
 //     underscores within a segment are preserved as part of the key name.
@@ -510,20 +513,28 @@ func resolveProfileName(opts LoadOptions, xdgConfigHome, xdgStateHome string) (s
 }
 
 func defaultProfileFromUserConfig(xdgConfigHome string) (string, error) {
-	path := filepath.Join(xdgConfigHome, "hygge", "config.toml")
-	data, err := os.ReadFile(path) //nolint:gosec // intentional config path
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
+	hyggeDir := filepath.Join(xdgConfigHome, "hygge")
+	// Check config.toml first, then hygge.toml; the latter wins when both exist
+	// because it is checked last and its non-empty result takes precedence.
+	result := ""
+	for _, name := range []string{"config.toml", "hygge.toml"} {
+		path := filepath.Join(hyggeDir, name)
+		data, err := os.ReadFile(path) //nolint:gosec // intentional config path
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("config: read user config for default profile: %w", err)
 		}
-		return "", fmt.Errorf("config: read user config for default profile: %w", err)
+		m, err := parseTOMLBytes(data)
+		if err != nil {
+			return "", &ParseError{File: path, Err: err}
+		}
+		if profileName, _ := m["default_profile"].(string); strings.TrimSpace(profileName) != "" {
+			result = strings.TrimSpace(profileName)
+		}
 	}
-	m, err := parseTOMLBytes(data)
-	if err != nil {
-		return "", &ParseError{File: path, Err: err}
-	}
-	profileName, _ := m["default_profile"].(string)
-	return strings.TrimSpace(profileName), nil
+	return result, nil
 }
 
 // decodeToStruct converts the merged map to a typed Config using mapstructure.

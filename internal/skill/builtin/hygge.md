@@ -16,8 +16,15 @@ customise, and debug their Hygge installation.
 
 ### 1.1 Global (user) config
 
-Location: `$XDG_CONFIG_HOME/hygge/config.toml`
-Default path when XDG is unset: `~/.config/hygge/config.toml`
+Hygge accepts either filename; `hygge.toml` takes precedence over `config.toml`
+when both are present in the same directory.  Use `hygge.toml` for projects
+where `config.toml` is already owned by another tool.
+
+Location (either filename):
+- `$XDG_CONFIG_HOME/hygge/hygge.toml` (wins over config.toml when both exist)
+- `$XDG_CONFIG_HOME/hygge/config.toml` (existing name, still supported)
+
+Default path when XDG is unset: `~/.config/hygge/hygge.toml` or `~/.config/hygge/config.toml`
 
 ```toml
 [model]
@@ -54,13 +61,15 @@ sources = []   # list of "local:/path/to/dir" or registry references
 ### 1.2 Project config
 
 Project config is discovered by a walk-up from the current directory to the
-first `.git` boundary.  Merge order (later overrides earlier):
+first `.git` boundary.  Both `config.toml` and `hygge.toml` are checked in
+each `.hygge/` directory; `hygge.toml` values win over `config.toml` values
+within the same directory.  Merge order (later overrides earlier):
 
-1. Global config (`~/.config/hygge/config.toml`)
-2. Project config (`.hygge/config.toml` at the project root)
+1. Global config (`~/.config/hygge/config.toml`, then `hygge.toml` if present)
+2. Project config (`.hygge/config.toml`, then `.hygge/hygge.toml` if present)
 
-There is no separate `.agents/config.toml` support — only `.hygge/config.toml`
-is read for project-level settings.
+Use `.hygge/hygge.toml` when `.hygge/config.toml` is already owned by another
+tool in the project.
 
 ### 1.3 Environment variable overrides
 
