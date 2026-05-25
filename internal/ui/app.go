@@ -705,6 +705,18 @@ func (a *App) SetProgram(p *tea.Program) {
 	a.program = p
 }
 
+// CurrentSessionID returns the session ID that was active when the App last
+// settled into a foreground session.  It returns the value stored in
+// opts.SessionID, which is updated by both the initial resume path and the
+// lazy-create path (ensureSession/applySwitchSession).
+//
+// Safe to call from any goroutine after prog.Run() returns; by that point the
+// bubbletea event loop has exited and no further writes to opts.SessionID can
+// occur through the normal Update/send paths.
+func (a *App) CurrentSessionID() string {
+	return a.opts.SessionID
+}
+
 // sendOutOfBand injects msg into the bubbletea event loop from a goroutine
 // running outside the normal Update path.  Safe to call from any goroutine.
 // Uses testSendFn when set (unit tests); falls back to program.Send in
