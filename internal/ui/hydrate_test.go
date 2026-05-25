@@ -110,6 +110,45 @@ func TestHydrate_ResumePopulatesMessages(t *testing.T) {
 	}
 }
 
+func TestLazyContextLoadedAnnotation_PersistsAndHydrates(t *testing.T) {
+	t.Parallel()
+	app, st, _ := newTestAppWithStore(t, nil)
+	text := "context loaded: pkg/AGENTS.md"
+
+	app.handleBusEvent(bus.LazyContextLoaded{
+		SessionID: app.opts.SessionID,
+		Files:     []string{"pkg/AGENTS.md"},
+		At:        app.opts.Now(),
+	})
+
+	if len(app.messages) != 1 {
+		t.Fatalf("live messages = %d, want 1", len(app.messages))
+	}
+	if app.messages[0].Role != components.RoleSystem || app.messages[0].Raw != text {
+		t.Fatalf("live message = (%q, %q), want (%q, %q)", app.messages[0].Role, app.messages[0].Raw, components.RoleSystem, text)
+	}
+
+	msgs, err := st.MessagesForSession(t.Context(), app.opts.SessionID)
+	if err != nil {
+		t.Fatalf("MessagesForSession: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(msgs))
+	}
+	if msgs[0].Role != session.RoleSystem || firstTextPart(msgs[0].Parts) != text {
+		t.Fatalf("persisted message = (%q, %q), want (%q, %q)", msgs[0].Role, firstTextPart(msgs[0].Parts), session.RoleSystem, text)
+	}
+
+	app.messages = nil
+	app.hydrateMessagesFromStore(app.opts.SessionID)
+	if len(app.messages) != 1 {
+		t.Fatalf("hydrated messages = %d, want 1", len(app.messages))
+	}
+	if app.messages[0].Role != components.RoleSystem || app.messages[0].Raw != text {
+		t.Fatalf("hydrated message = (%q, %q), want (%q, %q)", app.messages[0].Role, app.messages[0].Raw, components.RoleSystem, text)
+	}
+}
+
 func TestHydrate_ResumePopulatesTodoSummary(t *testing.T) {
 	t.Parallel()
 	app, st, _ := newTestAppWithStore(t, nil)

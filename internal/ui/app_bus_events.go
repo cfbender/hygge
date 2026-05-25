@@ -454,10 +454,19 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		label := strings.Join(e.Files, ", ")
+		text := "context loaded: " + label
 		a.messages = append(a.messages, uiMessage{
 			Role: components.RoleSystem,
-			Raw:  "context loaded: " + label,
+			Raw:  text,
 		})
+		if a.opts.Store != nil {
+			if _, err := a.opts.Store.AppendMessage(a.ctx, e.SessionID, session.NewMessage{
+				Role:  session.RoleSystem,
+				Parts: []session.Part{{Kind: session.PartText, Text: text}},
+			}); err != nil {
+				a.notice = "context annotation: " + err.Error()
+			}
+		}
 	}
 	return nil
 }
