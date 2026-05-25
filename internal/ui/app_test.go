@@ -2088,6 +2088,79 @@ func TestEnsureSessionLazilyCreates(t *testing.T) {
 	}
 }
 
+// TestCurrentSessionID_FreshSession verifies that CurrentSessionID returns
+// the lazily-created session ID after ensureSession runs, covering the
+// exit-summary path for bare `hygge` (fresh session, no --resume flag).
+func TestCurrentSessionID_FreshSession(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+
+	b := bus.New()
+	app, err := New(AppOptions{
+		Bus:           b,
+		Store:         st,
+		Theme:         styles.DefaultTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "claude-sonnet-4-5",
+		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	// Before any session is created, CurrentSessionID must return "".
+	if got := app.CurrentSessionID(); got != "" {
+		t.Errorf("CurrentSessionID before ensureSession = %q, want empty", got)
+	}
+
+	// Simulate the lazy-create path (triggered when the user sends their
+	// first message in a fresh session).
+	id, err := app.ensureSession(ctx)
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
+	}
+	if id == "" {
+		t.Fatal("ensureSession returned empty id")
+	}
+
+	// CurrentSessionID must now return the newly created session id,
+	// which is the value the exit-summary logic in cmd/hygge/cli/run.go
+	// reads after prog.Run() returns.
+	if got := app.CurrentSessionID(); got != id {
+		t.Errorf("CurrentSessionID after ensureSession = %q, want %q", got, id)
+	}
+}
+
+// TestCurrentSessionID_ResumedSession verifies that CurrentSessionID returns
+// the session ID supplied at construction time when the App is resumed from
+// an existing session (the pre-populated opts.SessionID path).
+func TestCurrentSessionID_ResumedSession(t *testing.T) {
+	t.Parallel()
+	app, err := New(AppOptions{
+		Bus:           bus.New(),
+		Theme:         styles.DefaultTheme(),
+		ProjectDir:    "/tmp/proj",
+		ModelProvider: "anthropic",
+		ModelName:     "claude-sonnet-4-5",
+		SessionID:     "existing-session-id",
+		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	if got := app.CurrentSessionID(); got != "existing-session-id" {
+		t.Errorf("CurrentSessionID = %q, want %q", got, "existing-session-id")
+	}
+}
+
 func TestListenBusReadsAndReissues(t *testing.T) {
 	t.Parallel()
 	app, b := newTestApp(t)
