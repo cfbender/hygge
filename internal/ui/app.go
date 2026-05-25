@@ -347,6 +347,7 @@ type App struct {
 	toolHitZones           []components.ToolHitZone
 	thinkingHitZones       []components.ThinkingHitZone
 	urlHitZones            []components.URLHitZone
+	userMsgHitZones        []components.UserMsgHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
@@ -444,6 +445,7 @@ type App struct {
 	apiKeyModal        components.APIKeyModal
 	themeModal         components.ThemeModal
 	onboardingWizard   components.OnboardingWizard
+	messageActionModal components.MessageActionModal
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -1194,6 +1196,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := opener(url); err != nil {
 					return a, a.setNotice("Failed to open URL: " + err.Error())
 				}
+				return a, nil
+			}
+			// Check for user message click: open message-action modal.
+			if zone := a.userMsgAtScreen(m.X, m.Y); zone != nil {
+				a.clearSelection()
+				a.messageActionModal = components.MessageActionModal{
+					Theme:       a.opts.Theme,
+					SessionID:   a.foregroundID(),
+					MessageID:   zone.MessageID,
+					MessageText: zone.MessageText,
+					Cursor:      0,
+				}
+				a.openOverlay(overlayMessageAction)
+				a.updateInputFocus()
 				return a, nil
 			}
 			a.handleMouseDown(m.X, m.Y)

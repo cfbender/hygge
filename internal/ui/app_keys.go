@@ -63,6 +63,8 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleThemeModalKey(k)
 		case overlayOnboarding:
 			return a.handleOnboardingKey(k)
+		case overlayMessageAction:
+			return a.handleMessageActionModalKey(k)
 		case overlayQuit:
 			switch k.String() {
 			case "y", "Y", "ctrl+c":

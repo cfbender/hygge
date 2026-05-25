@@ -340,6 +340,16 @@ type SubagentHitZone struct {
 	partIndex    int // internal: index into parts array during construction
 }
 
+// UserMsgHitZone maps a range of content lines to a user message.
+// Clicking anywhere on those lines opens the message-action modal.
+type UserMsgHitZone struct {
+	StartLine   int // inclusive, relative to message-list content
+	EndLine     int // exclusive
+	MessageID   string
+	MessageText string // raw message text (for copy action)
+	partIndex   int    // internal: index into rendered parts array
+}
+
 // URLHitZone maps a single screen line + column range to a clickable URL found
 // in user or assistant message output.  Clicking within [StartCol, EndCol) on
 // the content line should open the URL with the OS default browser.
@@ -358,15 +368,15 @@ type URLHitZone struct {
 // tool-calls bubble. Bash, edit, and write tools render as standalone tool
 // blocks so expandable output and large file diffs have their own hit zone.
 func (m MessageList) View() string {
-	content, _, _, _, _ := m.ViewWithHitZones()
+	content, _, _, _, _, _ := m.ViewWithHitZones()
 	return content
 }
 
 // ViewWithHitZones renders all messages and returns both the rendered content
 // and the line ranges of clickable subagent bubbles.
-func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZone, []ThinkingHitZone, []URLHitZone) {
+func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZone, []ThinkingHitZone, []URLHitZone, []UserMsgHitZone) {
 	if len(m.Messages) == 0 {
-		return m.renderEmptyState(), nil, nil, nil, nil
+		return m.renderEmptyState(), nil, nil, nil, nil, nil
 	}
 	collapseLimit := m.CollapseLines
 	if collapseLimit <= 0 {
@@ -379,6 +389,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 	var zones []SubagentHitZone
 	var toolZones []ToolHitZone
 	var thinkingZones []ThinkingHitZone
+	var userMsgZones []UserMsgHitZone
 
 	// urlPartPositions accumulates per-part URL positions discovered after
 	// rendering; converted to absolute line numbers in the walk below.
@@ -419,6 +430,16 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 					})
 				}
 			}
+			// Track user message bubbles for click-to-action modal.
+			// Only finalized (non-streaming) user messages with a MessageID
+			// are registered, as streaming messages have no stable ID.
+			if chunk.single.Role == RoleUser && !chunk.single.IsStreaming && chunk.single.MessageID != "" && chunk.single.Raw != "" && text != "" {
+				userMsgZones = append(userMsgZones, UserMsgHitZone{
+					MessageID:   chunk.single.MessageID,
+					MessageText: chunk.single.Raw,
+					partIndex:   len(parts),
+				})
+			}
 			// Collect URL hit zones for user and assistant bubbles only.
 			// Tool/system output is intentionally excluded: those rows are
 			// not linkified and may contain file paths / command output that
@@ -438,6 +459,11 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 			for len(urlPartPositions) > 0 && urlPartPositions[len(urlPartPositions)-1].partIndex == len(parts) {
 				urlPartPositions = urlPartPositions[:len(urlPartPositions)-1]
 			}
+			// If we added a user-msg zone for a part that turned out to be empty,
+			// remove it too.
+			for len(userMsgZones) > 0 && userMsgZones[len(userMsgZones)-1].partIndex == len(parts) {
+				userMsgZones = userMsgZones[:len(userMsgZones)-1]
+			}
 			continue
 		}
 		parts = append(parts, text)
@@ -453,7 +479,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 
 	// Walk the joined string to compute actual line offsets for each zone.
 	var urlZones []URLHitZone
-	if len(zones) > 0 || len(toolZones) > 0 || len(thinkingZones) > 0 || len(urlPartPositions) > 0 {
+	if len(zones) > 0 || len(toolZones) > 0 || len(thinkingZones) > 0 || len(urlPartPositions) > 0 || len(userMsgZones) > 0 {
 		line := 0
 		for i, part := range parts {
 			partLines := strings.Count(part, "\n") + 1
@@ -475,6 +501,12 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 					thinkingZones[zi].EndLine = line + partLines
 				}
 			}
+			for zi := range userMsgZones {
+				if userMsgZones[zi].partIndex == i {
+					userMsgZones[zi].StartLine = line
+					userMsgZones[zi].EndLine = line + partLines
+				}
+			}
 			for _, up := range urlPartPositions {
 				if up.partIndex == i {
 					absLine := line + up.pos.Line
@@ -493,7 +525,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 		}
 	}
 
-	return joined, zones, toolZones, thinkingZones, urlZones
+	return joined, zones, toolZones, thinkingZones, urlZones, userMsgZones
 }
 
 // buildChunks walks m.Messages and produces a slice of renderChunks.

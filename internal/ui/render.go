@@ -125,7 +125,7 @@ func (a *App) renderChatContent() string {
 			ExpandedThinking:   a.expandedThinkingFor(a.foregroundTranscriptID()),
 			MessageIndexOffset: messageIndexOffset,
 		}
-		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones, a.urlHitZones = ml.ViewWithHitZones()
+		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones, a.urlHitZones, a.userMsgHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
 		a.msgCacheStreamingDirty = false
 		a.msgCacheW = l.leftW
@@ -283,6 +283,10 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 		a.onboardingWizard.Width = w
 		a.onboardingWizard.Height = h
 		return a.onboardingWizard.View()
+	case overlayMessageAction:
+		a.messageActionModal.Width = w
+		a.messageActionModal.Height = h
+		return a.messageActionModal.View()
 	case overlayQuit:
 		return a.renderQuitOverlay(w, h)
 	}
