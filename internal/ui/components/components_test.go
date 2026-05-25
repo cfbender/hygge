@@ -620,9 +620,23 @@ func TestPermissionModal_LongTargetStaysWithinViewport(t *testing.T) {
 		}
 	}
 
-	// Truncation ellipsis must be present (value was definitely longer than avail).
-	if !strings.Contains(plain, "…") {
-		t.Errorf("long target should be truncated with '…'; got:\n%s", plain)
+	// Long values should get multiple rendered value lines before truncating.
+	lines := strings.Split(plain, "\n")
+	var targetValueLines []string
+	inTarget := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.Contains(line, "Target:"):
+			inTarget = true
+		case inTarget && strings.Contains(line, "Why:"):
+			inTarget = false
+		case inTarget && strings.Contains(trimmed, "x"):
+			targetValueLines = append(targetValueLines, line)
+		}
+	}
+	if len(targetValueLines) < 2 || !strings.Contains(targetValueLines[len(targetValueLines)-1], "…") {
+		t.Errorf("long target should use multiple value lines before truncating; got:\n%s", plain)
 	}
 }
 
