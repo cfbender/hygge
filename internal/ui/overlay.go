@@ -22,6 +22,7 @@ const (
 	overlayPermission     overlayKind = "permission"
 	overlayQuestion       overlayKind = "question"
 	overlayQuit           overlayKind = "quit"
+	overlayMessageAction  overlayKind = "message_action"
 )
 
 type overlayStack struct {

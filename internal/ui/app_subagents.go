@@ -112,6 +112,38 @@ func (a *App) thinkingAtScreen(screenX, screenY int) int {
 	return -1
 }
 
+// userMsgAtScreen returns the UserMsgHitZone for a user message bubble at the
+// given screen coordinates, or nil if none.  User bubbles are right-aligned at
+// 80% of leftW; clicks anywhere on those lines qualify.
+func (a *App) userMsgAtScreen(screenX, screenY int) *components.UserMsgHitZone {
+	if len(a.userMsgHitZones) == 0 {
+		return nil
+	}
+	// User bubbles occupy the right 80% of the left column; accept any click
+	// within the full left column width (the column is exclusively chat content).
+	if screenX >= a.layout.leftW {
+		return nil
+	}
+	viewportTop := headerHeight
+	chatH := a.layout.chat.Dy()
+	viewportBottom := viewportTop + chatH
+	if screenY < viewportTop || screenY >= viewportBottom {
+		return nil
+	}
+	// Same leading-blank-line offset as urlAtScreen.
+	contentLine := (screenY - viewportTop) + a.msgViewport.YOffset() - 1
+	if contentLine < 0 {
+		return nil
+	}
+	for i := range a.userMsgHitZones {
+		z := &a.userMsgHitZones[i]
+		if contentLine >= z.StartLine && contentLine < z.EndLine {
+			return z
+		}
+	}
+	return nil
+}
+
 // urlAtScreen returns the URL for a URLHitZone at the given screen coordinates,
 // or "" if none.  Uses the same viewport coordinate translation as
 // subagentAtScreen.  The column check is performed against the visual screen

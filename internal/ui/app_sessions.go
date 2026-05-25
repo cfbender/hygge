@@ -210,6 +210,10 @@ func (a *App) applyMemoryModalMsg(msg components.MemoryModalMsg) tea.Cmd {
 // stack to [id] via resetForeground so the breadcrumb is cleared.  Use
 // Ctrl+G to follow into a sub-session without losing the current root.
 func (a *App) applySwitchSession(id string) tea.Cmd {
+	return a.applySwitchSessionWithToast(id, "", "")
+}
+
+func (a *App) applySwitchSessionWithToast(id, toastTitle, toastSubtitle string) tea.Cmd {
 	// Cancel any in-flight send so the old session's stream does not
 	// deliver messages into the newly-cleared or switched session.
 	if a.inflightCancel != nil {
@@ -252,7 +256,9 @@ func (a *App) applySwitchSession(id string) tea.Cmd {
 	if len(id) > 8 {
 		noticeID = id[:8]
 	}
-	if id == "" {
+	if toastTitle != "" || toastSubtitle != "" {
+		cmds = append(cmds, a.showToast(toastTitle, toastSubtitle))
+	} else if id == "" {
 		cmds = append(cmds, a.showToast("Session cleared", "Next input creates a new session"))
 	} else {
 		cmds = append(cmds, a.showToast("Session switched", "Using "+noticeID))
@@ -298,7 +304,7 @@ func (a *App) applyForkSession(fromID, messageID string) tea.Cmd {
 		if err != nil {
 			return clearNoticeMsg{notice: "fork: " + err.Error()}
 		}
-		return switchSessionMsg{ID: forked.ID}
+		return switchSessionMsg{ID: forked.ID, ToastTitle: "Session forked", ToastSubtitle: "New session"}
 	}
 }
 

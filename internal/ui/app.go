@@ -347,11 +347,14 @@ type App struct {
 	toolHitZones           []components.ToolHitZone
 	thinkingHitZones       []components.ThinkingHitZone
 	urlHitZones            []components.URLHitZone
+	userMsgHitZones        []components.UserMsgHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
 	// hoverURL is the message URL under the mouse cursor, or "".
 	hoverURL string
+	// hoverUserMsgID is the user message under the mouse cursor, or "".
+	hoverUserMsgID string
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -444,6 +447,7 @@ type App struct {
 	apiKeyModal        components.APIKeyModal
 	themeModal         components.ThemeModal
 	onboardingWizard   components.OnboardingWizard
+	messageActionModal components.MessageActionModal
 
 	// forkPendingID and forkPendingMsgID are set by applyUpdate when a
 	// /fork outcome is received.  applyOutcome drains them after all
@@ -1024,7 +1028,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case switchSessionMsg:
-		return a, a.applySwitchSession(m.ID)
+		return a, a.applySwitchSessionWithToast(m.ID, m.ToastTitle, m.ToastSubtitle)
 
 	case modelSwitchResult:
 		if m.err != nil {
@@ -1196,6 +1200,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return a, nil
 			}
+			// Check for user message click: open message-action modal.
+			if zone := a.userMsgAtScreen(m.X, m.Y); zone != nil {
+				a.clearSelection()
+				a.messageActionModal = components.MessageActionModal{
+					Theme:       a.opts.Theme,
+					SessionID:   a.foregroundID(),
+					MessageID:   zone.MessageID,
+					MessageText: zone.MessageText,
+					Cursor:      0,
+				}
+				a.openOverlay(overlayMessageAction)
+				a.updateInputFocus()
+				return a, nil
+			}
 			a.handleMouseDown(m.X, m.Y)
 		}
 		return a, nil
@@ -1216,16 +1234,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Track hover over clickable message regions.
 			prevSubagentID := a.hoverSubagentID
 			prevURL := a.hoverURL
+			prevUserMsgID := a.hoverUserMsgID
 			a.hoverSubagentID = a.subagentAtScreen(m.X, m.Y)
 			a.hoverURL = ""
+			a.hoverUserMsgID = ""
 			if a.hoverSubagentID == "" {
 				a.hoverURL = a.urlAtScreen(m.X, m.Y)
 			}
-			if a.hoverSubagentID != prevSubagentID || a.hoverURL != prevURL {
+			if a.hoverSubagentID == "" && a.hoverURL == "" {
+				if zone := a.userMsgAtScreen(m.X, m.Y); zone != nil {
+					a.hoverUserMsgID = zone.MessageID
+				}
+			}
+			if a.hoverSubagentID != prevSubagentID || a.hoverURL != prevURL || a.hoverUserMsgID != prevUserMsgID {
 				a.invalidateMsgCache()
 			}
 			// Skip text selection when hovering a clickable region.
-			if a.hoverSubagentID == "" && a.hoverURL == "" {
+			if a.hoverSubagentID == "" && a.hoverURL == "" && a.hoverUserMsgID == "" {
 				a.handleMouseMotion(m.X, m.Y)
 			}
 		}
