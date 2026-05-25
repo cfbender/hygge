@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.13.2] — 2026-05-25
+
+### Features
+
+- Avoid auth method pagination (#39) ([`4cf52a70`](../../commit/4cf52a70694f13351bdc212fdfa62f9adac0e365))
 ## [0.13.1] — 2026-05-25
 
 ### Chores
