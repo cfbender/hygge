@@ -8,6 +8,13 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.13.0] — 2026-05-25
+
+### Features
+
+- Annotate lazy project context loading (#34) ([`99cf40ff`](../../commit/99cf40ffc9495cb5d2bf051dbe577d1eadea968a))
+- Show session resume help on exit (#35) ([`46980d92`](../../commit/46980d92a63b8b58e08d51036752e968f4c36bc7))
+- Support hygge.toml config files (#36) ([`9d2b52bf`](../../commit/9d2b52bfa4022c0dc6afc0014a664a4192f746ae))
 ## [0.12.4] — 2026-05-25
 
 ### Chores
