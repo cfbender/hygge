@@ -75,6 +75,25 @@ func TestDeepMerge_ArraysReplacedWholesale(t *testing.T) {
 
 // TestDeepMerge_ArraysOfTablesByID verifies that arrays of tables with "id"
 // fields are merged by id.
+func TestDeepMerge_EmptyArrayRecordsProvenance(t *testing.T) {
+	dst := map[string]any{}
+	src := map[string]any{"modes": []any{}}
+	prov := make(Provenance)
+
+	if err := deepMergeInto(dst, src, prov, Source{File: "high.toml"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	modes, ok := dst["modes"].([]any)
+	if !ok || len(modes) != 0 {
+		t.Fatalf("expected empty modes array, got %#v", dst["modes"])
+	}
+	sources := prov["modes"]
+	if len(sources) != 1 || sources[0].File != "high.toml" {
+		t.Fatalf("expected modes provenance from high.toml, got %#v", sources)
+	}
+}
+
 func TestDeepMerge_ArraysOfTablesByID(t *testing.T) {
 	dst := map[string]any{
 		"servers": []any{

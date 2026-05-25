@@ -252,6 +252,24 @@ func recordLeafProvenance(prov Provenance, v any, source Source, prefix string) 
 			}
 			recordLeafProvenance(prov, child, source, subKey)
 		}
+	case []any:
+		if len(val) == 0 {
+			prov[prefix] = append(prov[prefix], source)
+			return
+		}
+		mergeKey := arrayMergeKey(prefix)
+		if allHaveMergeKey(val, mergeKey) {
+			for i, child := range val {
+				childMap := child.(map[string]any)
+				subKey := fmt.Sprintf("%s.%d", prefix, i)
+				if mergeValue, ok := childMap[mergeKey]; ok {
+					subKey = prefix + "." + fmt.Sprint(mergeValue)
+				}
+				recordLeafProvenance(prov, childMap, source, subKey)
+			}
+			return
+		}
+		prov[prefix] = append(prov[prefix], source)
 	default:
 		prov[prefix] = append(prov[prefix], source)
 	}

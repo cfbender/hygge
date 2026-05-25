@@ -271,7 +271,18 @@ func TestResolveValue_UnknownKey(t *testing.T) {
 }
 
 func TestResolveValue_IncompleteKey(t *testing.T) {
-	cases := []string{"model", "permission", "model.options.nonexistent"}
+	cases := []string{
+		"model",
+		"permission",
+		"model.options.nonexistent",
+		"ui.nerd_fonts.extra",
+		"compaction.threshold_pct.extra",
+		"session.resume_default.extra",
+		"catalog.refresh_interval.extra",
+		"notifications.enabled.extra",
+		"notifications.permission_ask.extra",
+		"notifications.turn_complete.extra",
+	}
 	for _, key := range cases {
 		_, err := resolveValue(&Config{Model: ModelConfig{Options: map[string]any{}}}, key)
 		if err == nil {
@@ -291,7 +302,7 @@ func TestFormatValue(t *testing.T) {
 		{true, "true"},
 		{int64(42), "42"},
 		{float64(3.14), "3.14"},
-		{map[string]any{"k": "v"}, "{...}"},
+		{map[string]any{"k": "v"}, `{ k = "v" }`},
 		{Source{File: "x.toml"}, "(set here)"},
 		{nil, "<nil>"},
 	}
