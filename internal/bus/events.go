@@ -418,6 +418,22 @@ type TurnCompleted struct {
 	At time.Time
 }
 
+// LazyContextLoaded fires when the agent's lazy AGENTS.md / CLAUDE.md loader
+// discovers and queues one or more subdir context files during a tool call.
+// It is NOT published for the root AGENTS.md files loaded at startup — only
+// for subdirectory files surfaced by [agentsmd.LazyTracker.Touch].
+// Subscribers (e.g. the UI) render a user-visible annotation so the user
+// can see which extra project context was loaded for the next provider turn.
+type LazyContextLoaded struct {
+	// SessionID is the session for which context was loaded.
+	SessionID string
+	// Files is the list of relative (or absolute, when outside the project
+	// root) paths of the newly-discovered context files.  Always non-empty.
+	Files []string
+	// At is the wall-clock time the context was loaded.
+	At time.Time
+}
+
 // SubagentCompleted fires when a sub-agent finishes. Pairs 1:1 with
 // [SubagentStarted].
 type SubagentCompleted struct {

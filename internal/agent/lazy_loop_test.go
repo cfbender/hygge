@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cfbender/hygge/internal/agentsmd"
+	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/provider"
 )
 
@@ -155,4 +157,142 @@ func TestSend_LazyContextNotReinjected(t *testing.T) {
 	if strings.Contains(systems[2], "## Additional project context (loaded for this turn)") {
 		t.Fatalf("turn-3 prompt should not re-inject lazy header, got %q", systems[2])
 	}
+}
+
+// TestSend_LazyContextLoadedEventEmitted verifies that a LazyContextLoaded bus
+// event is published when a tool call touches a subdirectory that contains an
+// AGENTS.md the tracker has not yet seen.  The event must carry the session ID
+// and at least the relative path of the discovered file.
+func TestSend_LazyContextLoadedEventEmitted(t *testing.T) {
+	env := newTestEnv(t)
+
+	subdir := filepath.Join(env.pwd, "lib")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	agentsFile := filepath.Join(subdir, "AGENTS.md")
+	if err := os.WriteFile(agentsFile, []byte("lib rules"), 0o600); err != nil {
+		t.Fatalf("write agents: %v", err)
+	}
+	target := filepath.Join(subdir, "main.go")
+	if err := os.WriteFile(target, []byte("package lib"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(env.pwd, ".git"), nil, 0o600); err != nil {
+		t.Fatalf("write .git marker: %v", err)
+	}
+
+	tracker := agentsmd.NewLazyTracker("", env.pwd, nil)
+
+	prov := newFakeProvider("fake",
+		scriptToolUse("", toolUseEvent(t, "tu1", "read", map[string]any{"path": target})),
+		scriptText("done", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+	)
+
+	a := env.newAgent(prov, func(o *Options) {
+		o.LazyContext = tracker
+	})
+
+	events, drain := collectEvents[bus.LazyContextLoaded](t, env.Bus, 8)
+	_ = events
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("read lib/main.go")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	got := waitForLazyContextLoadedEvents(t, events, 1)
+	got = append(got, drain()...)
+
+	if len(got) == 0 {
+		t.Fatal("want at least one LazyContextLoaded event, got none")
+	}
+	ev := got[0]
+	if ev.SessionID != env.sessionID {
+		t.Fatalf("event.SessionID = %q, want %q", ev.SessionID, env.sessionID)
+	}
+	if len(ev.Files) == 0 {
+		t.Fatal("event.Files is empty; expected at least one file path")
+	}
+	// The relative path should identify the file without revealing full contents.
+	found := false
+	for _, f := range ev.Files {
+		if strings.Contains(f, "AGENTS.md") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("event.Files = %v; expected an entry containing AGENTS.md", ev.Files)
+	}
+}
+
+// TestSend_LazyContextLoadedEventNotEmittedWhenNoNewContext verifies that
+// no LazyContextLoaded event is published when a tool call touches a path
+// whose containing directory was already seen by the tracker (i.e. the
+// second tool call to the same directory).
+func TestSend_LazyContextLoadedEventNotEmittedWhenNoNewContext(t *testing.T) {
+	env := newTestEnv(t)
+
+	subdir := filepath.Join(env.pwd, "lib")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "AGENTS.md"), []byte("lib rules"), 0o600); err != nil {
+		t.Fatalf("write agents: %v", err)
+	}
+	target := filepath.Join(subdir, "main.go")
+	if err := os.WriteFile(target, []byte("package lib"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(env.pwd, ".git"), nil, 0o600); err != nil {
+		t.Fatalf("write .git marker: %v", err)
+	}
+
+	tracker := agentsmd.NewLazyTracker("", env.pwd, nil)
+
+	// Three turns: two tool calls to the same path, then final text.
+	// Only the first tool call should fire a LazyContextLoaded event.
+	prov := newFakeProvider("fake",
+		scriptToolUse("", toolUseEvent(t, "tu1", "read", map[string]any{"path": target})),
+		scriptToolUse("", toolUseEvent(t, "tu2", "read", map[string]any{"path": target})),
+		scriptText("done", provider.Usage{InputTokens: 1, OutputTokens: 1}),
+	)
+
+	a := env.newAgent(prov, func(o *Options) {
+		o.LazyContext = tracker
+	})
+
+	events, drain := collectEvents[bus.LazyContextLoaded](t, env.Bus, 8)
+	_ = events
+
+	if _, err := a.Send(context.Background(), env.sessionID, userText("read twice")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	got := waitForLazyContextLoadedEvents(t, events, 1)
+	got = append(got, drain()...)
+
+	// Exactly one event: from the first tool call.  The second call touches
+	// an already-seen directory so no new blocks are returned by Touch.
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 LazyContextLoaded event, got %d", len(got))
+	}
+}
+
+func waitForLazyContextLoadedEvents(t *testing.T, events <-chan bus.LazyContextLoaded, want int) []bus.LazyContextLoaded {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	got := make([]bus.LazyContextLoaded, 0, want)
+	for len(got) < want {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatalf("events channel closed while waiting for %d LazyContextLoaded events; got %d", want, len(got))
+			}
+			got = append(got, ev)
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d LazyContextLoaded events; got %d", want, len(got))
+		}
+	}
+	return got
 }
