@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
@@ -171,6 +173,27 @@ func TestMaterializeInitStyleAssignsPerComponentModels(t *testing.T) {
 	}
 }
 
+func TestInitStyleSelectModel_ShowsAllStylesNoPagination(t *testing.T) {
+	m := newInitStyleSelectModelForTest(availableInitStyles())
+
+	if m.list.Paginator.TotalPages != 1 {
+		t.Fatalf("TotalPages = %d, want 1 (all styles must fit on one page)", m.list.Paginator.TotalPages)
+	}
+	if m.list.Paginator.PerPage < len(availableInitStyles()) {
+		t.Fatalf("PerPage = %d, want >= %d", m.list.Paginator.PerPage, len(availableInitStyles()))
+	}
+	if m.list.ShowPagination() {
+		t.Fatalf("ShowPagination() = true; expected pagination to be disabled for small init style list")
+	}
+
+	view := regexp.MustCompile(`\x1b\[[0-9;]*[mA-Za-z]`).ReplaceAllString(m.View().Content, "")
+	for _, style := range availableInitStyles() {
+		if !strings.Contains(view, style.Name) {
+			t.Fatalf("rendered view missing init style %q:\n%s", style.Name, view)
+		}
+	}
+}
+
 func TestInitPickerModelsCancelOnCtrlC(t *testing.T) {
 	styleModel := initStyleSelectModel{list: list.New([]list.Item{initStyleSelectItem{style: availableInitStyles()[0]}}, list.NewDefaultDelegate(), 40, 8)}
 	updatedStyle, _ := styleModel.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -192,6 +215,25 @@ func TestInitPickerModelsCancelOnCtrlC(t *testing.T) {
 	if !ok || !gotModel.cancelled {
 		t.Fatalf("model picker did not cancel on ctrl+c: %#v", updatedModel)
 	}
+}
+
+func newInitStyleSelectModelForTest(styles []initStyle) initStyleSelectModel {
+	items := make([]list.Item, 0, len(styles))
+	for _, style := range styles {
+		items = append(items, initStyleSelectItem{style: style})
+	}
+	delegate := newInitListDelegate()
+	initStyleListHeight := len(items)*2 + 5
+	l := list.New(items, delegate, 76, initStyleListHeight)
+	l.Title = "Initialize Hygge"
+	styleInitList(&l)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(true)
+	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
+	l.AdditionalShortHelpKeys = func() []key.Binding { return nil }
+	return initStyleSelectModel{list: l}
 }
 
 func seedInitAuth(t *testing.T, home, providerName string) {
