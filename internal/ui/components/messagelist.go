@@ -716,21 +716,25 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 			accentColor = fg
 		}
 	}
+	hoverIndicator := ""
 	if m.HoverUserMsgID != "" && m.HoverUserMsgID == msg.MessageID {
 		if m.Theme != nil {
-			fg := m.Theme.Style(styles.AtomAccent).GetForeground()
+			accentStyle := m.Theme.Style(styles.AtomAccent)
+			fg := accentStyle.GetForeground()
 			if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
 				accentColor = fg
 			}
+			hoverIndicator = accentStyle.Render("↵")
+		} else {
+			hoverIndicator = "↵"
 		}
-		body = "↵ " + body
 	}
 
 	b := bubble.Bubble{
 		Width:           width,
 		BubbleWidth:     bubbleW,
 		Alignment:       bubble.AlignRight,
-		HeaderLeft:      "",
+		HeaderLeft:      hoverIndicator,
 		HeaderRight:     headerRight,
 		Body:            body,
 		Theme:           m.Theme,

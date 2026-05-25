@@ -84,6 +84,9 @@ func TestUserMsgMouseMotion_HoversClickableBubble(t *testing.T) {
 	if !strings.Contains(view, "↵") || !strings.Contains(view, "hover me") {
 		t.Fatalf("hover affordance not rendered in view:\n%s", view)
 	}
+	if strings.Contains(view, "↵ hover me") {
+		t.Fatalf("hover indicator should not mutate message body flow:\n%s", view)
+	}
 
 	app.Update(tea.MouseMotionMsg{X: app.layout.leftW + 2, Y: screenY})
 	if app.hoverUserMsgID != "" {
