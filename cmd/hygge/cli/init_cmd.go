@@ -299,10 +299,14 @@ func pickInitStyleInteractive(cmd *cobra.Command, styles []initStyle) (initStyle
 	}
 	delegate := newInitListDelegate()
 
-	l := list.New(items, delegate, 76, min(12, max(8, len(items)+5)))
+	// Height accounts for title/help chrome plus 2 lines per item so the
+	// small built-in style list is visible at once without pagination.
+	initStyleListHeight := len(items)*2 + 5
+	l := list.New(items, delegate, 76, initStyleListHeight)
 	l.Title = "Initialize Hygge"
 	styleInitList(&l)
 	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(true)
 	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
