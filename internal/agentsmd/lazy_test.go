@@ -55,10 +55,10 @@ func TestLazyTracker_WalksUpAndLoadsSubdirContext(t *testing.T) {
 	}
 }
 
-// TestLazyTracker_LoadsMultipleFilesPerDir verifies AGENTS.md,
-// CLAUDE.md, and CLAUDE.local.md in the same directory are all
-// surfaced.
-func TestLazyTracker_LoadsMultipleFilesPerDir(t *testing.T) {
+// TestLazyTracker_AgentsTakesPrecedenceOverClaude verifies that when
+// AGENTS.md and CLAUDE.md exist in the same subdirectory, only AGENTS.md
+// is surfaced.
+func TestLazyTracker_AgentsTakesPrecedenceOverClaude(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "svc")
 	mkFile(t, filepath.Join(sub, "AGENTS.md"), "a")
@@ -67,8 +67,11 @@ func TestLazyTracker_LoadsMultipleFilesPerDir(t *testing.T) {
 
 	tr := NewLazyTracker("", root, nil)
 	blocks := tr.Touch(root, []string{sub})
-	if len(blocks) != 3 {
-		t.Fatalf("want 3 blocks, got %d: %+v", len(blocks), blocks)
+	if len(blocks) != 1 {
+		t.Fatalf("want 1 block, got %d: %+v", len(blocks), blocks)
+	}
+	if !strings.HasSuffix(blocks[0].Path, "AGENTS.md") {
+		t.Fatalf("want AGENTS.md, got %q", blocks[0].Path)
 	}
 }
 
