@@ -576,7 +576,53 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 	if dryRunLog.Len() > 0 {
 		printf(out(cmd), "%s", dryRunLog.String())
 	}
+
+	// Print the branded exit card after the TUI exits cleanly.
+	// Use app.CurrentSessionID() rather than the initial sessionID parameter
+	// so that sessions created lazily during the run (fresh "hygge" with no
+	// --resume flag) are captured correctly.  The initial sessionID is empty
+	// for fresh sessions until the user sends their first message; by the
+	// time prog.Run() returns the App has settled and CurrentSessionID()
+	// reflects whatever session ended up active (created or resumed).
+	// Not shown in dry-run mode (no real session is persisted there).
+	if finalSID := app.CurrentSessionID(); !rt.DryRun && finalSID != "" {
+		printRaw(out(cmd), exitSummaryFor(ctx, rt, finalSID))
+	}
+
 	return nil
+}
+
+// exitSummaryFor builds the branded exit card for the given session.
+// Fetches the session's slug/first-message preview to populate the title.
+// On any store error the card is still shown with the short ID as title.
+func exitSummaryFor(ctx context.Context, rt *appRuntime, sessionID string) string {
+	var title string
+	if sess, err := rt.Store.GetSession(ctx, sessionID); err == nil {
+		if sess.Slug != "" {
+			title = sess.Slug
+		} else if sess.FirstMessagePreview != "" {
+			title = truncateRunes(sess.FirstMessagePreview, 48)
+		}
+	}
+	return ui.ExitSummary(ui.ExitSummaryOptions{
+		SessionID:    sessionID,
+		SessionTitle: title,
+		Theme:        rt.Theme,
+	})
+}
+
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 // setupTUILog redirects slog output to $XDG_STATE_HOME/hygge/hygge.log so
