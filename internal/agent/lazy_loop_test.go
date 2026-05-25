@@ -285,7 +285,10 @@ func waitForLazyContextLoadedEvents(t *testing.T, events <-chan bus.LazyContextL
 	got := make([]bus.LazyContextLoaded, 0, want)
 	for len(got) < want {
 		select {
-		case ev := <-events:
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatalf("events channel closed while waiting for %d LazyContextLoaded events; got %d", want, len(got))
+			}
 			got = append(got, ev)
 		case <-deadline:
 			t.Fatalf("timed out waiting for %d LazyContextLoaded events; got %d", want, len(got))
