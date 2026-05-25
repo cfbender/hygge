@@ -75,7 +75,7 @@ func enumerateSources(
 	// Load hygge.toml first, then hygge.local.toml so the local variant wins.
 	for _, name := range []string{"hygge.toml", "hygge.local.toml"} {
 		p := filepath.Join(opts.Pwd, name)
-		if _, err := os.Stat(p); err == nil {
+		if fileExists(p) {
 			sources = append(sources, configSource{
 				path:   p,
 				source: Source{File: p},
