@@ -637,6 +637,277 @@ func TestExplain_UnknownKey(t *testing.T) {
 	}
 }
 
+// --- ExplainAll tests ---------------------------------------------------------
+
+// TestExplainAll_DefaultsOnly verifies the merged TOML view when only
+// built-in defaults are active.  Every known section must appear and
+// each value must carry a "<defaults>" inline source comment.
+func TestExplainAll_DefaultsOnly(t *testing.T) {
+	tmp := t.TempDir()
+	opts := hermeticOpts(t, tmp, nil)
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	output := ExplainAll(prov, cfg)
+
+	// Section headers with default values must be present.
+	for _, header := range []string{"[permission]", "[theme]", "[ui]", "[compaction]", "[session]", "[notifications]"} {
+		if !strings.Contains(output, header) {
+			t.Errorf("ExplainAll missing section %q:\n%s", header, output)
+		}
+	}
+
+	// At least one permission key must appear.
+	if !strings.Contains(output, "shell =") {
+		t.Errorf("ExplainAll missing shell key:\n%s", output)
+	}
+
+	// Defaults source must be annotated.
+	if !strings.Contains(output, "<defaults>") {
+		t.Errorf("ExplainAll missing <defaults> annotation:\n%s", output)
+	}
+
+	// The output must NOT use raw dotted-path labels for section keys.
+	if strings.Contains(output, "permission.shell") {
+		t.Errorf("ExplainAll should not emit raw dotted path 'permission.shell':\n%s", output)
+	}
+}
+
+// TestExplainAll_OverrideShowsChain verifies that when a user config
+// overrides a default value, the inline comment lists the winning source
+// together with the overridden source chain.
+func TestExplainAll_OverrideShowsChain(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[permission]
+shell = "deny"
+`)
+
+	opts := hermeticOpts(t, tmp, nil)
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	output := ExplainAll(prov, cfg)
+
+	// The winning value "deny" must appear.
+	if !strings.Contains(output, `"deny"`) {
+		t.Errorf("ExplainAll missing winning value 'deny':\n%s", output)
+	}
+
+	// The override comment must mention the chain.
+	if !strings.Contains(output, "overrides") {
+		t.Errorf("ExplainAll should show 'overrides' for multi-source key:\n%s", output)
+	}
+
+	// Both the config file and defaults must appear in the comment.
+	if !strings.Contains(output, "config.toml") {
+		t.Errorf("ExplainAll should mention the user config file:\n%s", output)
+	}
+	if !strings.Contains(output, "<defaults>") {
+		t.Errorf("ExplainAll should still mention <defaults> in override chain:\n%s", output)
+	}
+}
+
+// TestExplainAll_EnvOverrideChain verifies that an env-var override is
+// shown as the winning source with the prior file sources in the chain.
+func TestExplainAll_EnvOverrideChain(t *testing.T) {
+	tmp := t.TempDir()
+
+	rootDir := filepath.Join(tmp, "root")
+	writeTOML(t, filepath.Join(rootDir, ".hygge", "config.toml"), `
+[permission]
+shell = "allow"
+`)
+
+	t.Setenv("HYGGE_permission__shell", "deny")
+	opts := LoadOptions{
+		HomeDir:   tmp,
+		Pwd:       rootDir,
+		EnvLookup: os.LookupEnv,
+	}
+
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	output := ExplainAll(prov, cfg)
+
+	// Winning source is <env>.
+	if !strings.Contains(output, "<env>") {
+		t.Errorf("ExplainAll should show <env> as winning source:\n%s", output)
+	}
+	// The value from env must be shown.
+	if !strings.Contains(output, `"deny"`) {
+		t.Errorf("ExplainAll missing env-winning value 'deny':\n%s", output)
+	}
+}
+
+// TestExplainAll_DeprecatedTopLevelModelFieldsOmitted verifies that legacy
+// model.provider/model.name compatibility fields still load, but are not shown
+// in the merged explain view because [[modes]] is the canonical model shape.
+func TestExplainAll_DeprecatedTopLevelModelFieldsOmitted(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[model]
+provider = "openai"
+name = "gpt-4o"
+small_provider = "anthropic"
+`)
+
+	opts := hermeticOpts(t, tmp, nil)
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Model.Provider != "openai" || cfg.Model.Name != "gpt-4o" {
+		t.Fatalf("deprecated model fields should still load: %#v", cfg.Model)
+	}
+
+	output := ExplainAll(prov, cfg)
+
+	if !strings.Contains(output, "[model]") {
+		t.Errorf("ExplainAll missing [model] section for non-deprecated model fields:\n%s", output)
+	}
+	if strings.Contains(output, `provider = "openai"`) || strings.Contains(output, `name = "gpt-4o"`) {
+		t.Errorf("ExplainAll should omit deprecated model.provider/model.name:\n%s", output)
+	}
+	if !strings.Contains(output, `small_provider = "anthropic"`) {
+		t.Errorf("ExplainAll should keep non-deprecated model fields:\n%s", output)
+	}
+}
+
+func TestExplainAll_FullMergedDynamicConfig(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[[modes]]
+name = "smart"
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+reasoning = "medium"
+description = "Daily driver"
+
+[subagents.reviewer]
+description = "Reviews code"
+prompt = "Be strict"
+tools = ["read", "grep"]
+model = "small"
+
+[mcp.github]
+command = "github-mcp"
+args = ["stdio"]
+
+[plugins]
+sources = ["local:./plugins/policy"]
+
+[plugins.policy]
+strict = true
+blocked_patterns = ["rm -rf", "sudo"]
+`)
+
+	opts := hermeticOpts(t, tmp, nil)
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	output := ExplainAll(prov, cfg)
+
+	for _, want := range []string{
+		"[[modes]]",
+		`name = "smart"`,
+		`provider = "anthropic"`,
+		`model = "claude-sonnet-4-5"`,
+		"[subagents.reviewer]",
+		`tools = ["read", "grep"]`,
+		"[mcp.github]",
+		`command = "github-mcp"`,
+		"[plugins]",
+		`sources = ["local:./plugins/policy"]`,
+		"[plugins.policy]",
+		"strict = true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("ExplainAll missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, `# (not set)`) {
+		t.Errorf("ExplainAll should have provenance for every value in this config:\n%s", output)
+	}
+	if strings.Index(output, `sources = ["local:./plugins/policy"]`) > strings.Index(output, "[plugins.policy]") {
+		t.Errorf("plugins.sources should render before nested plugin tables:\n%s", output)
+	}
+}
+
+// TestExplainAll_RenderKeyLineFormat checks the low-level formatting of
+// renderKeyLine directly, verifying the assignment+comment pattern.
+func TestExplainAll_RenderKeyLineFormat(t *testing.T) {
+	cases := []struct {
+		name    string
+		toml    string
+		value   any
+		sources []Source
+		wantVal string
+		wantCmt string
+	}{
+		{
+			name:    "single defaults source",
+			toml:    "shell",
+			value:   PermissionMode("ask"),
+			sources: []Source{{File: "<defaults>"}},
+			wantVal: `"ask"`,
+			wantCmt: "<defaults>",
+		},
+		{
+			name:    "two sources shows overrides",
+			toml:    "shell",
+			value:   PermissionMode("deny"),
+			sources: []Source{{File: "<defaults>"}, {File: "/home/user/.config/hygge/config.toml", Line: 5}},
+			wantVal: `"deny"`,
+			wantCmt: "overrides",
+		},
+		{
+			name:    "env source wins",
+			toml:    "shell",
+			value:   PermissionMode("deny"),
+			sources: []Source{{File: "<defaults>"}, {File: "<env>"}},
+			wantVal: `"deny"`,
+			wantCmt: "<env>",
+		},
+		{
+			name:    "bool value",
+			toml:    "nerd_fonts",
+			value:   true,
+			sources: []Source{{File: "<defaults>"}},
+			wantVal: "true",
+			wantCmt: "<defaults>",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			line := renderKeyLine(c.toml, c.value, c.sources)
+			if !strings.Contains(line, c.wantVal) {
+				t.Errorf("renderKeyLine(%q) = %q; missing value %q", c.toml, line, c.wantVal)
+			}
+			if !strings.Contains(line, c.wantCmt) {
+				t.Errorf("renderKeyLine(%q) = %q; missing comment fragment %q", c.toml, line, c.wantCmt)
+			}
+			// The line must contain " # " separating assignment from comment.
+			if !strings.Contains(line, " # ") {
+				t.Errorf("renderKeyLine(%q) = %q; missing ' # ' separator", c.toml, line)
+			}
+		})
+	}
+}
+
 // --- test 12: profile depth limit -------------------------------------------
 
 func TestLoad_ProfileDepthLimit(t *testing.T) {
