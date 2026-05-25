@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -51,6 +52,42 @@ func TestUserMsgClick_OpensMessageActionModal(t *testing.T) {
 	}
 	if app.messageActionModal.MessageText != "hello from click test" {
 		t.Errorf("modal.MessageText = %q want %q", app.messageActionModal.MessageText, "hello from click test")
+	}
+}
+
+func TestUserMsgMouseMotion_HoversClickableBubble(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "hover me"}},
+		},
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	app.hydrateMessagesFromStore(app.opts.SessionID)
+	_ = app.View()
+
+	if len(app.userMsgHitZones) == 0 {
+		t.Fatal("expected userMsgHitZones to be populated after View()")
+	}
+	zone := app.userMsgHitZones[0]
+	screenY := headerHeight + zone.StartLine + 1 - app.msgViewport.YOffset()
+	screenX := app.layout.leftW / 2
+
+	app.Update(tea.MouseMotionMsg{X: screenX, Y: screenY})
+
+	if app.hoverUserMsgID != zone.MessageID {
+		t.Fatalf("hoverUserMsgID = %q; want %q", app.hoverUserMsgID, zone.MessageID)
+	}
+
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	if !strings.Contains(view, "↵") || !strings.Contains(view, "hover me") {
+		t.Fatalf("hover affordance not rendered in view:\n%s", view)
+	}
+
+	app.Update(tea.MouseMotionMsg{X: app.layout.leftW + 2, Y: screenY})
+	if app.hoverUserMsgID != "" {
+		t.Fatalf("hoverUserMsgID after moving away = %q; want empty", app.hoverUserMsgID)
 	}
 }
 
@@ -147,6 +184,47 @@ func TestMessageActionModal_ForkAction(t *testing.T) {
 	// A fork cmd should have been returned (it runs the fork async).
 	if cmd == nil {
 		t.Fatal("expected fork cmd from 'f' in message-action modal; got nil")
+	}
+}
+
+func TestMessageActionModal_ForkSwitchToastSaysNewSession(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "fork toast"}},
+		},
+	})
+	app.hydrateMessagesFromStore(app.opts.SessionID)
+
+	var msgID string
+	for _, m := range app.messages {
+		if m.Role == components.RoleUser && m.MessageID != "" {
+			msgID = m.MessageID
+			break
+		}
+	}
+	if msgID == "" {
+		t.Fatal("no user message with MessageID found after hydration")
+	}
+
+	cmd := app.applyForkSession(app.opts.SessionID, msgID)
+	if cmd == nil {
+		t.Fatal("expected fork command")
+	}
+	msg := cmd()
+	switchMsg, ok := msg.(switchSessionMsg)
+	if !ok {
+		t.Fatalf("fork command returned %T; want switchSessionMsg", msg)
+	}
+
+	app.Update(switchMsg)
+
+	if app.toast == nil {
+		t.Fatal("expected fork switch toast")
+	}
+	if app.toast.title != "Session forked" || app.toast.body != "New session" {
+		t.Fatalf("toast = {%q, %q}; want {Session forked, New session}", app.toast.title, app.toast.body)
 	}
 }
 

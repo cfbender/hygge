@@ -188,6 +188,9 @@ type MessageList struct {
 	// HoverURL is the URL currently under the mouse cursor. When set, matching
 	// visible URL text in user/assistant bubbles renders with hover styling.
 	HoverURL string
+	// HoverUserMsgID is the user message currently under the mouse cursor.
+	// When set, that user bubble renders with clickable hover styling.
+	HoverUserMsgID string
 
 	// ExpandedTools is the set of ToolUseIDs whose output is fully expanded
 	// (not truncated). Nil means all tools are collapsed.
@@ -712,6 +715,15 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
 			accentColor = fg
 		}
+	}
+	if m.HoverUserMsgID != "" && m.HoverUserMsgID == msg.MessageID {
+		if m.Theme != nil {
+			fg := m.Theme.Style(styles.AtomAccent).GetForeground()
+			if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
+				accentColor = fg
+			}
+		}
+		body = "↵ " + body
 	}
 
 	b := bubble.Bubble{

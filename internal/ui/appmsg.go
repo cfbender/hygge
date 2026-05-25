@@ -82,7 +82,9 @@ type subagentTickMsg struct {
 
 // switchSessionMsg asks the App to change the foreground session.
 type switchSessionMsg struct {
-	ID string
+	ID            string
+	ToastTitle    string
+	ToastSubtitle string
 }
 
 // --- Compaction messages ----------------------------------------------------

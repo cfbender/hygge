@@ -353,6 +353,8 @@ type App struct {
 	hoverSubagentID string
 	// hoverURL is the message URL under the mouse cursor, or "".
 	hoverURL string
+	// hoverUserMsgID is the user message under the mouse cursor, or "".
+	hoverUserMsgID string
 
 	// msgViewport is the fixed-height scrollable container for the message list.
 	// Its Height is recomputed on every WindowSizeMsg and View() call so it
@@ -1026,7 +1028,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case switchSessionMsg:
-		return a, a.applySwitchSession(m.ID)
+		return a, a.applySwitchSessionWithToast(m.ID, m.ToastTitle, m.ToastSubtitle)
 
 	case modelSwitchResult:
 		if m.err != nil {
@@ -1232,16 +1234,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Track hover over clickable message regions.
 			prevSubagentID := a.hoverSubagentID
 			prevURL := a.hoverURL
+			prevUserMsgID := a.hoverUserMsgID
 			a.hoverSubagentID = a.subagentAtScreen(m.X, m.Y)
 			a.hoverURL = ""
+			a.hoverUserMsgID = ""
 			if a.hoverSubagentID == "" {
 				a.hoverURL = a.urlAtScreen(m.X, m.Y)
 			}
-			if a.hoverSubagentID != prevSubagentID || a.hoverURL != prevURL {
+			if a.hoverSubagentID == "" && a.hoverURL == "" {
+				if zone := a.userMsgAtScreen(m.X, m.Y); zone != nil {
+					a.hoverUserMsgID = zone.MessageID
+				}
+			}
+			if a.hoverSubagentID != prevSubagentID || a.hoverURL != prevURL || a.hoverUserMsgID != prevUserMsgID {
 				a.invalidateMsgCache()
 			}
 			// Skip text selection when hovering a clickable region.
-			if a.hoverSubagentID == "" && a.hoverURL == "" {
+			if a.hoverSubagentID == "" && a.hoverURL == "" && a.hoverUserMsgID == "" {
 				a.handleMouseMotion(m.X, m.Y)
 			}
 		}
