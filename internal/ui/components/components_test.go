@@ -640,6 +640,42 @@ func TestPermissionModal_LongTargetStaysWithinViewport(t *testing.T) {
 	}
 }
 
+func TestPermissionModal_WideTargetStaysWithinViewport(t *testing.T) {
+	t.Parallel()
+	const viewportWidth = 80
+	wideTarget := strings.Repeat("好🙂", 120)
+	wideWhy := strings.Repeat("🙂好", 120)
+	m := PermissionModal{
+		Width:  viewportWidth,
+		Height: 24,
+		Theme:  styles.DefaultTheme(),
+		Request: PermissionRequest{
+			RequestID: "req-wide",
+			ToolName:  "bash",
+			Category:  "shell",
+			Target:    wideTarget,
+			Why:       wideWhy,
+		},
+	}
+	out := m.View()
+
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > viewportWidth {
+			t.Errorf("line %d width=%d exceeds viewport %d; line=%q", i, got, viewportWidth, line)
+		}
+	}
+
+	plain := stripANSI(out)
+	for _, want := range []string{"[y]", "[Y]", "[A]", "[n]"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("action button %q missing from modal with wide target; got:\n%s", want, plain)
+		}
+	}
+	if !strings.Contains(plain, "…") {
+		t.Errorf("wide target should be truncated with '…'; got:\n%s", plain)
+	}
+}
+
 func TestInputBuildsAndReports(t *testing.T) {
 	t.Parallel()
 	in := NewInput(styles.DefaultTheme())
