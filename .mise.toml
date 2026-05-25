@@ -36,14 +36,6 @@ run = ["mise run fix", "mise run lint", "mise run test", "mise run build", "stat
 description = "Run linters with auto-fix enabled"
 run = "go fix ./..."
 
-[tasks.bump]
-description = "Bump major/minor/patch version, commit, tag, and push"
-run = "bash ./scripts/bump.sh $@"
-
-[tasks.changelog]
-description = "Generate CHANGELOG.md for the next major/minor/patch version"
-run = "bash ./scripts/changelog.sh $@"
-
 [tasks.release]
 description = "Generate release for the next major/minor/patch version"
-run = ["mise run changelog -- $@", "mise run bump -- $@"]
+run = ["bash ./scripts/changelog.sh $@", "bash ./scripts/bump.sh $@"]
