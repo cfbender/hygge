@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -16,6 +18,10 @@ import (
 	"github.com/cfbender/hygge/internal/auth"
 	"github.com/cfbender/hygge/internal/provider"
 )
+
+// ansiEscapeRE strips ANSI/VT100 escape sequences from rendered output so
+// tests can match against plain text.
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[mA-Za-z]`)
 
 // authOptsFor returns LoadOptions for the hermetic home dir.
 func authOptsFor(home string) auth.LoadOptions {
@@ -537,5 +543,114 @@ func TestRequireAnyKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-from-env")
 	if err := requireAnyKey(nil, "OPENAI_API_KEY"); err != nil {
 		t.Errorf("env var set: want nil, got %v", err)
+	}
+}
+
+// newAuthMethodSelectModelForTest builds an authMethodSelectModel for the
+// given provider using exactly the same construction as pickAuthMethodInteractive
+// so that unit tests exercise the real list configuration.
+func newAuthMethodSelectModelForTest(providerName string) authMethodSelectModel {
+	options := authMethodOptions(providerName)
+	items := make([]list.Item, 0, len(options))
+	for _, option := range options {
+		items = append(items, authMethodSelectItem{option: option})
+	}
+
+	delegate := list.NewDefaultDelegate()
+	delegate.SetSpacing(0)
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(providerSelectAccentColor())
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(providerSelectMutedColor())
+
+	authMethodListHeight := len(items)*2 + 5
+	l := list.New(items, delegate, 72, authMethodListHeight)
+	l.Title = "Auth method for " + providerName
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(true)
+	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
+	l.AdditionalShortHelpKeys = func() []key.Binding { return nil }
+
+	return authMethodSelectModel{list: l}
+}
+
+// TestAuthMethodSelectModel_OpenAIShowsAllOptionsNoPagination verifies that
+// the two-option openai picker renders both choices on a single page and does
+// not show pagination dots.
+//
+// This is a regression test for HYGGE-28: with the old height formula and
+// showPagination=true, PerPage was calculated as 1, splitting the two options
+// across pages and hiding the OAuth choice behind a paginator.
+func TestAuthMethodSelectModel_OpenAIShowsAllOptionsNoPagination(t *testing.T) {
+	m := newAuthMethodSelectModelForTest("openai")
+
+	// Confirm the list is on a single page.
+	if m.list.Paginator.TotalPages != 1 {
+		t.Errorf("TotalPages = %d, want 1 (both options must fit on one page)", m.list.Paginator.TotalPages)
+	}
+	if m.list.Paginator.PerPage < 2 {
+		t.Errorf("PerPage = %d, want >= 2 (must accommodate both openai auth options)", m.list.Paginator.PerPage)
+	}
+
+	// Confirm both options appear in the rendered view.
+	view := ansiEscapeRE.ReplaceAllString(m.View().Content, "")
+	if !strings.Contains(view, "API key") {
+		t.Errorf("rendered view missing 'API key':\n%s", view)
+	}
+	if !strings.Contains(view, "OAuth") {
+		t.Errorf("rendered view missing 'OAuth' — option is still hidden behind pagination:\n%s", view)
+	}
+
+	// Pagination is disabled; ShowPagination() must return false.
+	if m.list.ShowPagination() {
+		t.Errorf("ShowPagination() = true; expected pagination to be disabled for small auth-method list")
+	}
+}
+
+// TestAuthMethodSelectModel_SingleProviderFitsNoPagination verifies that a
+// provider with only one auth method (e.g. anthropic) also has a single page
+// and no pagination noise.
+func TestAuthMethodSelectModel_SingleProviderFitsNoPagination(t *testing.T) {
+	m := newAuthMethodSelectModelForTest("anthropic")
+
+	if m.list.Paginator.TotalPages != 1 {
+		t.Errorf("TotalPages = %d, want 1", m.list.Paginator.TotalPages)
+	}
+	view := ansiEscapeRE.ReplaceAllString(m.View().Content, "")
+	if !strings.Contains(view, "API key") {
+		t.Errorf("rendered view missing 'API key':\n%s", view)
+	}
+	if m.list.ShowPagination() {
+		t.Errorf("ShowPagination() = true; expected pagination to be disabled for single-option list")
+	}
+}
+
+// TestAuthMethodSelectModel_EnterChoosesCurrentItem mirrors the provider
+// picker test for the auth method model.
+func TestAuthMethodSelectModel_EnterChoosesCurrentItem(t *testing.T) {
+	m := newAuthMethodSelectModelForTest("openai")
+	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got := updated.(authMethodSelectModel)
+	if got.choice != authMethodAPIKey {
+		t.Fatalf("choice got %q, want %q", got.choice, authMethodAPIKey)
+	}
+	if got.cancelled {
+		t.Fatalf("enter should not mark selection cancelled")
+	}
+}
+
+// TestAuthMethodSelectModel_CancelKeys verifies that ESC and ctrl+c cancel
+// the auth method picker.
+func TestAuthMethodSelectModel_CancelKeys(t *testing.T) {
+	for _, msg := range []tea.KeyPressMsg{
+		tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}),
+		tea.KeyPressMsg(tea.Key{Code: 'c', Text: "c", Mod: uv.ModCtrl}),
+	} {
+		m := newAuthMethodSelectModelForTest("openai")
+		updated, _ := m.Update(msg)
+		got := updated.(authMethodSelectModel)
+		if !got.cancelled {
+			t.Fatalf("%s should cancel the auth method picker", msg.Keystroke())
+		}
 	}
 }

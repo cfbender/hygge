@@ -221,9 +221,15 @@ func pickAuthMethodInteractive(cmd *cobra.Command, providerName string, options 
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(providerSelectAccentColor())
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(providerSelectMutedColor())
 
-	l := list.New(items, delegate, 72, min(10, max(7, len(items)+5)))
+	// Height accounts for title (2 lines with bottom padding), help (2 lines
+	// with top padding), and 2 lines per item, plus 1 line of breathing room.
+	// This ensures all options are visible at once without pagination for the
+	// typical small auth-method list (1-2 options).
+	authMethodListHeight := len(items)*2 + 5
+	l := list.New(items, delegate, 72, authMethodListHeight)
 	l.Title = "Auth method for " + providerName
 	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(true)
 	l.KeyMap.ForceQuit.SetHelp("ctrl+c", "cancel")
