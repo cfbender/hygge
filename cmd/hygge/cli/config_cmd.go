@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
-	"sort"
+	"io"
+	"strings"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/spf13/cobra"
 
 	"github.com/cfbender/hygge/internal/config"
@@ -21,7 +23,12 @@ func newConfigCmd() *cobra.Command {
 
 // newConfigExplainCmd builds `hygge config explain [key]`.
 //
-// With no argument, prints every effective key with its winning source.
+// With no argument, prints every known effective config value grouped by
+// section, with a subtle inline comment on each line showing the exact
+// winning source (file path + line when available, or <defaults>, <env>,
+// <flag>).  Override chains are shown concisely so it is immediately clear
+// what is overriding what.
+//
 // With a key argument, prints the full provenance chain for that key
 // using the config package's Explain helper.
 func newConfigExplainCmd() *cobra.Command {
@@ -50,34 +57,29 @@ func newConfigExplainCmd() *cobra.Command {
 				return nil
 			}
 
-			// Print every effective key with the winning source.
-			keys := allKnownKeys(rt.Config)
-			sort.Strings(keys)
-			for _, k := range keys {
-				explained, _, err := config.Explain(rt.Provenance, rt.Config, k)
-				if err != nil {
-					// A key that resolves to its hard-coded default may
-					// not appear in provenance; skip silently.
-					continue
-				}
-				printRaw(out(cmd), explained)
-			}
+			// No key argument: print the full merged TOML view.
+			output := config.ExplainAll(rt.Provenance, rt.Config)
+			printRaw(out(cmd), renderConfigExplainOutput(out(cmd), output))
 			return nil
 		},
 	}
 }
 
-// allKnownKeys enumerates the v0.1 leaf keys we know how to explain.
-// model.options is treated as a single key — its inner contents are
-// per-provider and don't have stable provenance entries.
-func allKnownKeys(_ *config.Config) []string {
-	return []string{
-		"model.provider",
-		"model.name",
-		"permission.file_read_outside_pwd",
-		"permission.file_write",
-		"permission.shell",
-		"permission.network",
-		"theme.name",
+func renderConfigExplainOutput(w io.Writer, output string) string {
+	if !isColorWriter(w) {
+		return output
 	}
+
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(120),
+	)
+	if err != nil {
+		return output
+	}
+	rendered, err := r.Render("```toml\n" + output + "\n```\n")
+	if err != nil {
+		return output
+	}
+	return strings.TrimRight(rendered, "\n") + "\n"
 }
