@@ -584,6 +584,10 @@ func (m MessageList) renderOne(msg UIMessage, msgIdx int, collapseLimit int) str
 		return m.renderMarker(msg)
 	}
 
+	if msg.Role == RoleSystem && strings.HasPrefix(msg.Raw, "context loaded: ") {
+		return m.muted().Render("  ↳ " + msg.Raw)
+	}
+
 	// subagent tool call with a bound subagent: wrap the SubagentBlock in a
 	// distinct bubble container.  No "▌tool: subagent" gutter row.
 	if msg.Role == RoleTool && msg.ToolName == "subagent" && msg.SubagentID != "" {

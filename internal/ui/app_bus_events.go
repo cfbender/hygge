@@ -456,7 +456,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		label := strings.Join(e.Files, ", ")
 		a.messages = append(a.messages, uiMessage{
 			Role: components.RoleSystem,
-			Raw:  "loaded project context: " + label,
+			Raw:  "context loaded: " + label,
 		})
 	}
 	return nil

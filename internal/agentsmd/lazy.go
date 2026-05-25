@@ -13,10 +13,11 @@ package agentsmd
 //
 // Instead, the agent loop hands a LazyTracker every path its tool calls
 // touched.  For each touched directory the tracker walks upward toward
-// the project root looking for AGENTS.md / CLAUDE.md / CLAUDE.local.md
-// in directories the tracker has not yet visited.  Newly-discovered
-// blocks ride along in the NEXT provider turn's system prompt and are
-// then forgotten — they are never persisted into session history.
+// the project root looking for AGENTS.md, or CLAUDE.md / CLAUDE.local.md
+// when no AGENTS.md exists there, in directories the tracker has not yet
+// visited.  Newly-discovered blocks ride along in the NEXT provider turn's
+// system prompt and are then forgotten — they are never persisted into
+// session history.
 //
 // Bounded by MaxLazyContextFiles and MaxLazyContextBytes per session.
 // Once either cap fires the tracker permanently disables itself for
@@ -28,12 +29,12 @@ import (
 	"path/filepath"
 )
 
-// lazyContextFiles enumerates the file names the lazy walker looks for
-// inside each candidate directory.  AGENTS.local.md is intentionally
-// omitted: it is a project-root-only convention (per-machine override
-// of the project-root AGENTS.md) and surfacing it from subdirectories
+// lazyContextFiles enumerates the fallback file names the lazy walker looks
+// for when a candidate directory does not contain AGENTS.md. AGENTS.local.md is
+// intentionally omitted: it is a project-root-only convention (per-machine
+// override of the project-root AGENTS.md) and surfacing it from subdirectories
 // is not a workflow we support yet.
-var lazyContextFiles = []string{"AGENTS.md", "CLAUDE.md", "CLAUDE.local.md"}
+var lazyContextFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
 
 // LazyTracker tracks lazy per-tool-call context loading state for a
 // single agent session.  Not safe for concurrent use — callers must
@@ -101,11 +102,11 @@ func NewLazyTracker(homeDir, projectRoot string, seenDirs []string) *LazyTracker
 // path (absolute or relative to pwd).
 //
 // For each touched path, the tracker walks upward toward projectRoot
-// looking for AGENTS.md, CLAUDE.md, and CLAUDE.local.md in
-// directories not yet seen.  Directories named in LazyExcludeDirs are
-// skipped (the walk treats them as if they didn't exist).  Every
-// visited directory is marked seen whether or not it contained a
-// context file.
+// looking for AGENTS.md, or CLAUDE.md / CLAUDE.local.md when no
+// AGENTS.md exists there, in directories not yet seen.  Directories
+// named in LazyExcludeDirs are skipped (the walk treats them as if they
+// didn't exist).  Every visited directory is marked seen whether or not
+// it contained a context file.
 //
 // Returns any newly-discovered blocks with Source =
 // SourceProjectSubdir.  When MaxLazyContextFiles or
@@ -156,8 +157,8 @@ func (t *LazyTracker) Touch(pwd string, paths []string) []Block {
 }
 
 // walkUp walks from start toward t.projectRoot, marking each visited
-// dir seen and loading any AGENTS.md / CLAUDE.md / CLAUDE.local.md it
-// finds.  Returns the new blocks, a flag that indicates a cap was hit
+// dir seen and loading AGENTS.md, or CLAUDE.md / CLAUDE.local.md when
+// AGENTS.md is absent. Returns the new blocks, a flag that indicates a cap was hit
 // (caller should stop touching), and (when the cap fired) the path of
 // the first file that was skipped.
 //
@@ -186,7 +187,11 @@ func (t *LazyTracker) walkUp(start string) (blocks []Block, hitCap bool, firstSk
 		underExcluded := baseExcluded || (excludedFrom != "" && withinRoot(dir, excludedFrom))
 
 		if !underExcluded {
-			for _, name := range lazyContextFiles {
+			names := lazyContextFiles
+			if info, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err == nil && !info.IsDir() {
+				names = []string{"AGENTS.md"}
+			}
+			for _, name := range names {
 				p := filepath.Join(dir, name)
 				if _, seen := t.seenFiles[p]; seen {
 					continue
