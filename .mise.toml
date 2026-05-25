@@ -38,4 +38,9 @@ run = "go fix ./..."
 
 [tasks.release]
 description = "Generate release for the next major/minor/patch version"
-run = ["bash ./scripts/changelog.sh $@", "bash ./scripts/bump.sh $@"]
+usage = '''
+arg "<part>" help="Version part to bump" {
+  choices "major" "minor" "patch"
+}
+'''
+run = ["bash ./scripts/changelog.sh ${usage_part?}", "bash ./scripts/bump.sh ${usage_part?}"]
