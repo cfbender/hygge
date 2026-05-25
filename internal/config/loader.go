@@ -22,9 +22,17 @@ type configSource struct {
 // Defaults are applied separately in Load.
 //
 // Order:
-//  1. User config
+//  1. User config (config.toml first, hygge.toml second so hygge.toml wins)
 //  2. Profile (chain via extends, base-first)
-//  3. Walk-up .hygge/config.toml files (root-first, so pwd-nearest wins last)
+//  3. Walk-up .hygge/config.toml and .hygge/hygge.toml files (root-first, so pwd-nearest wins last)
+//  4. PWD-level hygge.toml (wins over all walk-up project sources)
+//  5. PWD-level hygge.local.toml (highest precedence among all file sources)
+//
+// Within each scope (user config, each walk-up directory) config.toml is
+// loaded first and hygge.toml second, so hygge.toml values win over
+// config.toml values from the same directory.  This lets projects that
+// already own config.toml introduce a hygge.toml without renaming existing
+// files.
 //
 // The second return value is the resolved profile directory (see
 // resolveProfileChain for the definition).
@@ -36,13 +44,17 @@ func enumerateSources(
 ) ([]configSource, string, error) {
 	var sources []configSource
 
-	// 1. User config.
-	userCfg := filepath.Join(xdgConfigHome, "hygge", "config.toml")
-	if _, err := os.Stat(userCfg); err == nil {
-		sources = append(sources, configSource{
-			path:   userCfg,
-			source: Source{File: userCfg},
-		})
+	// 1. User config — load config.toml first, then hygge.toml so that
+	//    hygge.toml values win within the user config scope.
+	hyggeDir := filepath.Join(xdgConfigHome, "hygge")
+	for _, name := range []string{"config.toml", "hygge.toml"} {
+		p := filepath.Join(hyggeDir, name)
+		if _, err := os.Stat(p); err == nil {
+			sources = append(sources, configSource{
+				path:   p,
+				source: Source{File: p},
+			})
+		}
 	}
 
 	// 2. Profile chain.
@@ -58,6 +70,18 @@ func enumerateSources(
 		return nil, "", err
 	}
 	sources = append(sources, walkSources...)
+
+	// 4 & 5. PWD-level files — highest precedence among all file sources.
+	// Load hygge.toml first, then hygge.local.toml so the local variant wins.
+	for _, name := range []string{"hygge.toml", "hygge.local.toml"} {
+		p := filepath.Join(opts.Pwd, name)
+		if fileExists(p) {
+			sources = append(sources, configSource{
+				path:   p,
+				source: Source{File: p},
+			})
+		}
+	}
 
 	return sources, profileDir, nil
 }
@@ -173,20 +197,33 @@ func fileExists(path string) bool {
 }
 
 // collectWalkupSources walks up from dir toward homeDir, collecting
-// .hygge/config.toml files.  Files are returned in root-first order so
-// that the file closest to dir has the highest precedence (is last in the
-// returned slice → merged last).
+// .hygge/config.toml and .hygge/hygge.toml files.  Files are returned in
+// root-first order so that the file closest to dir has the highest precedence
+// (is last in the returned slice → merged last).
+//
+// Within each directory both config.toml and hygge.toml are loaded when
+// present, with config.toml first so that hygge.toml values win within the
+// same directory.
 func collectWalkupSources(dir, homeDir string) ([]configSource, error) {
-	var files []configSource
+	// dirSources collects per-directory pairs [config.toml?, hygge.toml?].
+	// Each element is a slice of sources for one directory (0, 1, or 2 entries).
+	type dirEntry []configSource
+	var dirs []dirEntry
 
 	current := dir
 	for {
-		candidate := filepath.Join(current, ".hygge", "config.toml")
-		if _, err := os.Stat(candidate); err == nil {
-			files = append(files, configSource{
-				path:   candidate,
-				source: Source{File: candidate},
-			})
+		var entry dirEntry
+		for _, name := range []string{"config.toml", "hygge.toml"} {
+			p := filepath.Join(current, ".hygge", name)
+			if _, err := os.Stat(p); err == nil {
+				entry = append(entry, configSource{
+					path:   p,
+					source: Source{File: p},
+				})
+			}
+		}
+		if len(entry) > 0 {
+			dirs = append(dirs, entry)
 		}
 
 		// Stop at home directory.
@@ -202,10 +239,15 @@ func collectWalkupSources(dir, homeDir string) ([]configSource, error) {
 		current = parent
 	}
 
-	// files is collected nearest-first; reverse to root-first so nearest
-	// ends up highest precedence after all merges.
-	for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
-		files[i], files[j] = files[j], files[i]
+	// dirs is collected nearest-first; reverse to root-first so the nearest
+	// directory ends up highest precedence after all merges.
+	for i, j := 0, len(dirs)-1; i < j; i, j = i+1, j-1 {
+		dirs[i], dirs[j] = dirs[j], dirs[i]
+	}
+
+	var files []configSource
+	for _, entry := range dirs {
+		files = append(files, entry...)
 	}
 	return files, nil
 }
