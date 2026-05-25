@@ -12,7 +12,10 @@
 //     Each directory is checked for .hygge/config.toml then .hygge/hygge.toml;
 //     hygge.toml values win within the same directory.
 //     Directories closer to Pwd have higher precedence overall.
-//  5. Environment variables: HYGGE_model__provider → model.provider.
+//  5. PWD-level files (loaded directly from opts.Pwd, not from .hygge/):
+//     hygge.toml is loaded first; hygge.local.toml is loaded second and wins.
+//     Both have higher precedence than all walk-up project config files.
+//  6. Environment variables: HYGGE_model__provider → model.provider.
 //     Uses "__" (double underscore) as path-segment separator; single
 //     underscores within a segment are preserved as part of the key name.
 //     Format: HYGGE_<segment>__<segment>__<segment>=<value>
@@ -21,7 +24,7 @@
 //     HYGGE_model__provider=openai         → model.provider
 //     HYGGE_permission__file_write=allow   → permission.file_write
 //     Values are best-effort coerced.
-//  6. CLI flags: opts.Flags (dotted-path map[string]any), merged last.
+//  7. CLI flags: opts.Flags (dotted-path map[string]any), merged last.
 //
 // # Unknown-keys policy
 //

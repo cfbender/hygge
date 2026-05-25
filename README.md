@@ -163,6 +163,12 @@ current directory or any parent project directory.  Both are loaded when
 present; `hygge.toml` values win over `config.toml` values within the same
 directory.
 
+Two additional files are loaded directly from the current working directory
+(not from `.hygge/`) with the highest file-based precedence:
+
+- `hygge.toml` — project-root overrides, committed to version control.
+- `hygge.local.toml` — machine-local overrides, add to `.gitignore`; wins over everything except environment variables and CLI flags.
+
 Profiles live in:
 
 ```text

@@ -25,6 +25,8 @@ type configSource struct {
 //  1. User config (config.toml first, hygge.toml second so hygge.toml wins)
 //  2. Profile (chain via extends, base-first)
 //  3. Walk-up .hygge/config.toml and .hygge/hygge.toml files (root-first, so pwd-nearest wins last)
+//  4. PWD-level hygge.toml (wins over all walk-up project sources)
+//  5. PWD-level hygge.local.toml (highest precedence among all file sources)
 //
 // Within each scope (user config, each walk-up directory) config.toml is
 // loaded first and hygge.toml second, so hygge.toml values win over
@@ -68,6 +70,18 @@ func enumerateSources(
 		return nil, "", err
 	}
 	sources = append(sources, walkSources...)
+
+	// 4 & 5. PWD-level files — highest precedence among all file sources.
+	// Load hygge.toml first, then hygge.local.toml so the local variant wins.
+	for _, name := range []string{"hygge.toml", "hygge.local.toml"} {
+		p := filepath.Join(opts.Pwd, name)
+		if _, err := os.Stat(p); err == nil {
+			sources = append(sources, configSource{
+				path:   p,
+				source: Source{File: p},
+			})
+		}
+	}
 
 	return sources, profileDir, nil
 }

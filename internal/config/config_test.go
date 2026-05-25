@@ -2092,3 +2092,112 @@ name = "from-hygge-profile"
 		t.Fatalf("model.name = %q, want from-hygge-profile", cfg.Model.Name)
 	}
 }
+
+// --- PWD-level config file tests ---------------------------------------------
+
+// TestLoad_PWDHyggeTOMLLoads verifies that a hygge.toml placed directly in
+// opts.Pwd is picked up and its values override user-level config.
+func TestLoad_PWDHyggeTOMLLoads(t *testing.T) {
+	tmp := t.TempDir()
+
+	// User config sets shell = "allow".
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+[permission]
+shell = "allow"
+`)
+
+	// PWD hygge.toml overrides shell = "deny".
+	writeTOML(t, filepath.Join(tmp, "hygge.toml"), `
+[permission]
+shell = "deny"
+`)
+
+	opts := hermeticOpts(t, tmp, nil)
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Permission.Shell != PermDeny {
+		t.Errorf("permission.shell: got %q, want deny (PWD hygge.toml should win)", cfg.Permission.Shell)
+	}
+	// Provenance: winning source should be the PWD hygge.toml.
+	sources := prov["permission.shell"]
+	last := sources[len(sources)-1]
+	if !strings.HasSuffix(last.File, "hygge.toml") {
+		t.Errorf("winning source for permission.shell should be hygge.toml, got %q", last.File)
+	}
+	if strings.Contains(last.File, ".hygge") || strings.Contains(last.File, ".config") {
+		t.Errorf("winning source should be PWD hygge.toml, not %q", last.File)
+	}
+}
+
+// TestLoad_PWDHyggeLocalTOMLWinsOverHyggeTOML verifies that hygge.local.toml
+// in opts.Pwd has higher precedence than hygge.toml in opts.Pwd.
+func TestLoad_PWDHyggeLocalTOMLWinsOverHyggeTOML(t *testing.T) {
+	tmp := t.TempDir()
+
+	// PWD hygge.toml sets shell = "deny".
+	writeTOML(t, filepath.Join(tmp, "hygge.toml"), `
+[permission]
+shell = "deny"
+`)
+
+	// PWD hygge.local.toml overrides shell = "ask".
+	writeTOML(t, filepath.Join(tmp, "hygge.local.toml"), `
+[permission]
+shell = "ask"
+`)
+
+	opts := hermeticOpts(t, tmp, nil)
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Permission.Shell != PermAsk {
+		t.Errorf("permission.shell: got %q, want ask (hygge.local.toml should win)", cfg.Permission.Shell)
+	}
+	// Provenance: winning source must be hygge.local.toml.
+	sources := prov["permission.shell"]
+	last := sources[len(sources)-1]
+	if !strings.HasSuffix(last.File, "hygge.local.toml") {
+		t.Errorf("winning source should be hygge.local.toml, got %q", last.File)
+	}
+}
+
+// TestLoad_PWDHyggeLocalTOMLWinsOverWalkup verifies that hygge.local.toml in
+// opts.Pwd has higher precedence than a .hygge/hygge.toml found via walk-up.
+func TestLoad_PWDHyggeLocalTOMLWinsOverWalkup(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Walk-up project config sets shell = "allow".
+	writeTOML(t, filepath.Join(tmp, ".hygge", "hygge.toml"), `
+[permission]
+shell = "allow"
+`)
+
+	// PWD hygge.local.toml overrides shell = "deny".
+	writeTOML(t, filepath.Join(tmp, "hygge.local.toml"), `
+[permission]
+shell = "deny"
+`)
+
+	opts := LoadOptions{
+		HomeDir:   filepath.Dir(tmp), // home above tmp so walk-up can reach tmp
+		Pwd:       tmp,
+		EnvLookup: makeEnvLookup(nil),
+	}
+	cfg, prov, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Permission.Shell != PermDeny {
+		t.Errorf("permission.shell: got %q, want deny (hygge.local.toml should win over walk-up)", cfg.Permission.Shell)
+	}
+	// Provenance: winning source must be hygge.local.toml.
+	sources := prov["permission.shell"]
+	last := sources[len(sources)-1]
+	if !strings.HasSuffix(last.File, "hygge.local.toml") {
+		t.Errorf("winning source should be hygge.local.toml, got %q", last.File)
+	}
+}

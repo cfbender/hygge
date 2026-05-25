@@ -67,9 +67,14 @@ within the same directory.  Merge order (later overrides earlier):
 
 1. Global config (`~/.config/hygge/config.toml`, then `hygge.toml` if present)
 2. Project config (`.hygge/config.toml`, then `.hygge/hygge.toml` if present)
+3. PWD config (`hygge.toml` in the current directory, if present)
+4. PWD local config (`hygge.local.toml` in the current directory, if present) — **highest precedence** among all file-based sources
 
 Use `.hygge/hygge.toml` when `.hygge/config.toml` is already owned by another
 tool in the project.
+
+`hygge.local.toml` is intended for machine-local or personal overrides that
+should not be committed to version control.  Add it to `.gitignore`.
 
 ### 1.3 Environment variable overrides
 
