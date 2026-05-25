@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/provider"
 	"github.com/cfbender/hygge/internal/session"
@@ -25,6 +26,9 @@ func (a *Agent) runLoop(ctx context.Context, sessionID, modelName string) (*sess
 // part in asstMsg, hands them to the lazy tracker, and queues any
 // newly-discovered subdir AGENTS.md / CLAUDE.md blocks for the next
 // turn.  No-op when the lazy tracker is not configured.
+//
+// When new blocks are found, a [bus.LazyContextLoaded] event is published so
+// the UI can display a visible annotation about the loaded context files.
 func (a *Agent) collectLazyContext(sessionID, pwd string, asstMsg *session.Message) {
 	if a.opts.LazyContext == nil || asstMsg == nil {
 		return
@@ -47,6 +51,19 @@ func (a *Agent) collectLazyContext(sessionID, pwd string, asstMsg *session.Messa
 		"session", sessionID,
 		"blocks", len(blocks),
 	)
+	files := make([]string, 0, len(blocks))
+	for _, blk := range blocks {
+		label := blk.RelPath
+		if label == "" {
+			label = blk.Path
+		}
+		files = append(files, label)
+	}
+	bus.Publish(a.opts.Bus, bus.LazyContextLoaded{
+		SessionID: sessionID,
+		Files:     files,
+		At:        a.opts.Now(),
+	})
 	a.appendPendingLazy(sessionID, blocks)
 }
 

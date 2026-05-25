@@ -441,6 +441,23 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		a.sessionTitle = e.Title
+
+	case bus.LazyContextLoaded:
+		// Show a non-intrusive annotation when the lazy tracker discovers
+		// subdir AGENTS.md / CLAUDE.md files during a tool call.  Route to
+		// subagent view when appropriate; ignore background sessions.
+		if a.routeToSubagent(e.SessionID) {
+			// Subagent lazy context is not surfaced in the nested block view.
+			return nil
+		}
+		if !a.isForeground(e.SessionID) {
+			return nil
+		}
+		label := strings.Join(e.Files, ", ")
+		a.messages = append(a.messages, uiMessage{
+			Role: components.RoleSystem,
+			Raw:  "loaded project context: " + label,
+		})
 	}
 	return nil
 }
