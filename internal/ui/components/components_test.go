@@ -629,6 +629,9 @@ func TestPermissionModal_LongTargetStaysWithinViewport(t *testing.T) {
 		switch {
 		case strings.Contains(line, "Target:"):
 			inTarget = true
+			if strings.Contains(trimmed, "x") {
+				targetValueLines = append(targetValueLines, line)
+			}
 		case inTarget && strings.Contains(line, "Why:"):
 			inTarget = false
 		case inTarget && strings.Contains(trimmed, "x"):
