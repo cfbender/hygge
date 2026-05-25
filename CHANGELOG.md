@@ -8,6 +8,15 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.13.1] — 2026-05-25
+
+### Chores
+
+- Update go dependencies (#38) ([`8f8c45e2`](../../commit/8f8c45e2a447b2a335526c37f31e5b9b43e15f91))
+
+### Features
+
+- Add user message action modal (#37) ([`4601d78e`](../../commit/4601d78e883199faead0869beebb038cd5c8fcae))
 ## [0.13.0] — 2026-05-25
 
 ### Features
