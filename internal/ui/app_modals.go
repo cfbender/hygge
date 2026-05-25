@@ -72,7 +72,7 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme, overlayOnboarding:
+		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme, overlayOnboarding, overlayMessageAction:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}
@@ -393,6 +393,46 @@ func (a *App) renderHelpOverlay(width, height int) string {
 		height = 24
 	}
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// --- Message action modal integration -------------------------------------
+
+// handleMessageActionModalKey routes a key press to the message-action modal.
+func (a *App) handleMessageActionModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	sk := components.MessageActionKey{Name: k.String(), Runes: []rune(k.Text)}
+	switch k.String() {
+	case "up", "down", "enter", "esc":
+		sk.Name = k.String()
+	default:
+		if len(k.Text) == 1 {
+			sk.Name = k.Text
+		}
+	}
+	updated, msg := a.messageActionModal.HandleKey(sk)
+	a.messageActionModal = updated
+	if msg == nil {
+		return a, nil
+	}
+	return a, a.applyMessageActionModalMsg(msg)
+}
+
+// applyMessageActionModalMsg dispatches a message-action modal result.
+func (a *App) applyMessageActionModalMsg(msg components.MessageActionModalMsg) tea.Cmd {
+	switch m := msg.(type) {
+	case components.CloseMessageActionModal:
+		a.closeOverlay(overlayMessageAction)
+		return nil
+	case components.CopyMessageAction:
+		a.closeOverlay(overlayMessageAction)
+		if m.Text == "" {
+			return nil
+		}
+		return a.copyToClipboard(m.Text)
+	case components.ForkMessageAction:
+		a.closeOverlay(overlayMessageAction)
+		return a.applyForkSession(m.SessionID, m.MessageID)
+	}
+	return nil
 }
 
 // --- Compaction modal integration -----------------------------------------

@@ -185,7 +185,7 @@ func TestViewWithHitZones_URLZonesInUserBubble(t *testing.T) {
 			Raw:  "see " + url + " for details",
 		}},
 	}
-	_, _, _, _, urlZones := ml.ViewWithHitZones()
+	_, _, _, _, urlZones, _ := ml.ViewWithHitZones()
 	if len(urlZones) == 0 {
 		t.Fatal("expected at least one URL hit zone for user bubble containing a URL")
 	}
@@ -214,7 +214,7 @@ func TestViewWithHitZones_URLZonesInAssistantBubble(t *testing.T) {
 			Raw:  "Check the docs at " + url + " for more.",
 		}},
 	}
-	_, _, _, _, urlZones := ml.ViewWithHitZones()
+	_, _, _, _, urlZones, _ := ml.ViewWithHitZones()
 	if len(urlZones) == 0 {
 		t.Fatal("expected at least one URL hit zone for assistant bubble")
 	}
@@ -241,7 +241,7 @@ func TestViewWithHitZones_URLZonesAbsentForAssistantPlaceholder(t *testing.T) {
 			IsPlaceholder: true,
 		}},
 	}
-	_, _, _, _, urlZones := ml.ViewWithHitZones()
+	_, _, _, _, urlZones, _ := ml.ViewWithHitZones()
 	for _, z := range urlZones {
 		if z.URL == url {
 			t.Fatalf("assistant placeholder URL must not generate a hit zone; got zone %+v", z)
@@ -265,7 +265,7 @@ func TestViewWithHitZones_URLZonesAbsentForToolMessages(t *testing.T) {
 			},
 		},
 	}
-	_, _, _, _, urlZones := ml.ViewWithHitZones()
+	_, _, _, _, urlZones, _ := ml.ViewWithHitZones()
 	for _, z := range urlZones {
 		if z.URL == "https://internal.example.com/file" {
 			t.Errorf("tool-message URL must not generate a hit zone; got zone %+v", z)
@@ -285,7 +285,7 @@ func TestViewWithHitZones_URLHitZoneLineIsInRenderedRange(t *testing.T) {
 			Raw:  "visit " + url,
 		}},
 	}
-	content, _, _, _, urlZones := ml.ViewWithHitZones()
+	content, _, _, _, urlZones, _ := ml.ViewWithHitZones()
 	totalLines := strings.Count(content, "\n") + 1
 	for _, z := range urlZones {
 		if z.Line < 0 || z.Line >= totalLines {
@@ -306,7 +306,7 @@ func TestViewWithHitZones_MultipleMessagesURLZones(t *testing.T) {
 			{Role: RoleAssistant, Raw: "second: " + url2},
 		},
 	}
-	_, _, _, _, urlZones := ml.ViewWithHitZones()
+	_, _, _, _, urlZones, _ := ml.ViewWithHitZones()
 	foundURL1, foundURL2 := false, false
 	for _, z := range urlZones {
 		if z.URL == url1 {
