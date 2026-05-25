@@ -59,8 +59,9 @@ if [[ "${HYGGE_BUMP_DRY_RUN:-}" == "1" ]]; then
 	exit 0
 fi
 
-if ! git diff --quiet || ! git diff --cached --quiet; then
-	printf 'Working tree has uncommitted changes. Commit or stash them before bumping.\n' >&2
+dirty_paths=$( { git diff --name-only; git diff --cached --name-only; } | sort -u | grep -v '^CHANGELOG\.md$' || true )
+if [[ -n "$dirty_paths" ]]; then
+	printf 'Working tree has uncommitted changes outside CHANGELOG.md. Commit or stash them before bumping:\n%s\n' "$dirty_paths" >&2
 	exit 1
 fi
 
