@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.13.3] — 2026-05-25
+
+### Bug Fixes
+
+- Truncate permission modal tool details (#40) ([`31ed8b0b`](../../commit/31ed8b0b7ea4457a574d1ba7885ec89acd76ae55))
 ## [0.13.2] — 2026-05-25
 
 ### Features
