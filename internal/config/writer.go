@@ -179,7 +179,7 @@ func WriteDefaultProfile(opts WriteDefaultProfileOptions, profileName string) (s
 	if profileName == "" {
 		return "", fmt.Errorf("config: default profile name is required")
 	}
-	target := filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+	target := defaultProfileWriteTarget(opts)
 	m := map[string]any{}
 	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // intentional config path
 		parsed, err := parseTOMLBytes(data)
@@ -266,6 +266,13 @@ func themeWriteTarget(opts WriteThemeSelectionOptions) string {
 
 func pluginSourcesWriteTarget(opts WritePluginSourcesOptions) string {
 	if path := lastRealSource(opts.Provenance["plugins.sources"]); path != "" {
+		return path
+	}
+	return filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")
+}
+
+func defaultProfileWriteTarget(opts WriteDefaultProfileOptions) string {
+	if path := lastRealSource(opts.Provenance["default_profile"]); path != "" {
 		return path
 	}
 	return filepath.Join(resolveWriterXDGConfig(opts), "hygge", "config.toml")

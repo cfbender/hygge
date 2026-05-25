@@ -144,20 +144,30 @@ hygge plugins types install
 
 ## Configuration
 
-User config lives at:
+User config lives at (either filename is accepted; `hygge.toml` takes precedence over `config.toml` when both exist):
 
 ```text
-~/.config/hygge/config.toml
+~/.config/hygge/hygge.toml   (preferred when config.toml is already used by another tool)
+~/.config/hygge/config.toml  (existing name, still supported)
 ```
 
-or:
+or using a custom `$XDG_CONFIG_HOME`:
 
 ```text
+$XDG_CONFIG_HOME/hygge/hygge.toml
 $XDG_CONFIG_HOME/hygge/config.toml
 ```
 
-Project config can live in `.hygge/config.toml` in the current directory or any
-parent project directory.
+Project config can live in `.hygge/hygge.toml` or `.hygge/config.toml` in the
+current directory or any parent project directory.  Both are loaded when
+present; `hygge.toml` values win over `config.toml` values within the same
+directory.
+
+Two additional files are loaded directly from the current working directory
+(not from `.hygge/`) with the highest file-based precedence:
+
+- `hygge.toml` — project-root overrides, committed to version control.
+- `hygge.local.toml` — machine-local overrides, add to `.gitignore`; wins over everything except environment variables and CLI flags.
 
 Profiles live in:
 
