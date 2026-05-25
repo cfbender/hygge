@@ -20,11 +20,11 @@ fi
 
 part=$1
 case "$part" in
-	major | minor | patch) ;;
-	*)
-		usage
-		exit 2
-		;;
+major | minor | patch) ;;
+*)
+	usage
+	exit 2
+	;;
 esac
 
 version_file="cmd/hygge/cli/cli.go"
@@ -37,18 +37,18 @@ fi
 
 IFS=. read -r major minor patch <<<"$current"
 case "$part" in
-	major)
-		major=$((major + 1))
-		minor=0
-		patch=0
-		;;
-	minor)
-		minor=$((minor + 1))
-		patch=0
-		;;
-	patch)
-		patch=$((patch + 1))
-		;;
+major)
+	major=$((major + 1))
+	minor=0
+	patch=0
+	;;
+minor)
+	minor=$((minor + 1))
+	patch=0
+	;;
+patch)
+	patch=$((patch + 1))
+	;;
 esac
 
 next="$major.$minor.$patch"
@@ -84,6 +84,7 @@ perl -0pi -e 's/const Version = "\Q'"$current"'\E"/const Version = "'"$next"'"/'
 gofmt -w "$version_file"
 
 git add "$version_file"
+git add CHANGELOG.md
 git commit -m "chore: release $tag"
 git tag -a "$tag" -m "Release $tag"
 git push origin "$branch"

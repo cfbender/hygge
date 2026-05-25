@@ -43,3 +43,7 @@ run = "bash ./scripts/bump.sh $@"
 [tasks.changelog]
 description = "Generate CHANGELOG.md for the next major/minor/patch version"
 run = "bash ./scripts/changelog.sh $@"
+
+[tasks.release]
+description = "Generate release for the next major/minor/patch version"
+run = ["mise run changelog $@", "mise run bump $@"]
