@@ -46,4 +46,4 @@ run = "bash ./scripts/changelog.sh $@"
 
 [tasks.release]
 description = "Generate release for the next major/minor/patch version"
-run = ["mise run changelog $@", "mise run bump $@"]
+run = ["mise run changelog -- $@", "mise run bump -- $@"]
