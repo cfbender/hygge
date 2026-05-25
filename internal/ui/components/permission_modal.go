@@ -102,8 +102,83 @@ func (m PermissionModal) sectionLabel(label string) string {
 }
 
 // field renders a "Label: value" pair with the label muted.
+// Long values can use a second aligned line before truncating with "…" so they
+// never push the modal wider than the content width or hide the action buttons.
 func (m PermissionModal) field(label, value string) string {
-	return m.style(styles.AtomMuted).Render(label+": ") + value
+	prefix := label + ": "
+	prefixW := lipgloss.Width(prefix)
+	// The surrounding border style adds two columns of horizontal padding on each
+	// side, so field content must fit inside that padded text area.
+	lineW := max(m.contentWidth()-4, 1)
+	avail := max(lineW-prefixW, 1)
+	lines := wrapTruncatedFieldValue(value, avail, 2)
+
+	var rendered strings.Builder
+	rendered.WriteString(m.style(styles.AtomMuted).Render(prefix) + lines[0])
+	for _, line := range lines[1:] {
+		rendered.WriteString("\n" + strings.Repeat(" ", prefixW) + line)
+	}
+	return rendered.String()
+}
+
+// wrapTruncatedFieldValue wraps s across at most maxLines of width cells,
+// appending "…" on the final line when the string is longer.
+func wrapTruncatedFieldValue(s string, width, maxLines int) []string {
+	if maxLines <= 0 {
+		return []string{""}
+	}
+	width = max(width, 1)
+	lines := make([]string, 0, maxLines)
+	remaining := s
+	for line := range maxLines {
+		if lipgloss.Width(remaining) <= width {
+			lines = append(lines, remaining)
+			break
+		}
+		if line == maxLines-1 {
+			lines = append(lines, truncateFieldValue(remaining, width))
+			break
+		}
+		part, rest := splitFieldValue(remaining, width)
+		lines = append(lines, part)
+		remaining = rest
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+// splitFieldValue splits s so the first return value fits within width cells.
+func splitFieldValue(s string, width int) (string, string) {
+	if width <= 0 {
+		return "", s
+	}
+	var b strings.Builder
+	for i, r := range s {
+		candidate := b.String() + string(r)
+		if lipgloss.Width(candidate) > width {
+			return b.String(), s[i:]
+		}
+		b.WriteRune(r)
+	}
+	return b.String(), ""
+}
+
+// truncateFieldValue truncates s to at most width visible cells, appending "…"
+// when the string is longer.
+func truncateFieldValue(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	part, _ := splitFieldValue(s, width-1)
+	return part + "…"
 }
 
 // actionRow renders a horizontal group of key-description pairs inside a
