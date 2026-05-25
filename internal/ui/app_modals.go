@@ -72,7 +72,7 @@ func (a *App) syncActiveModal() {
 	a.activeModal = ""
 	for i := len(a.overlays.entries) - 1; i >= 0; i-- {
 		switch a.overlays.entries[i] {
-		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme, overlayOnboarding:
+		case overlayHelp, overlaySessions, overlayMemory, overlayMemoryRemember, overlayMemoryForget, overlayCompactConfirm, overlayModel, overlayAPIKey, overlayTheme, overlayOnboarding, overlayMessageAction:
 			a.activeModal = string(a.overlays.entries[i])
 			return
 		}

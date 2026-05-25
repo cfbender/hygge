@@ -91,3 +91,18 @@ func TestPermissionOverlayRoutesBeforeLowerOverlay(t *testing.T) {
 		t.Fatalf("activeModal = %q, want lower sessions overlay preserved", app.activeModal)
 	}
 }
+
+func TestMessageActionOverlayMirrorsActiveModal(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	app.openOverlay(overlayMessageAction)
+	if app.activeModal != string(overlayMessageAction) {
+		t.Fatalf("activeModal = %q, want %q", app.activeModal, overlayMessageAction)
+	}
+
+	app.closeOverlay(overlayMessageAction)
+	if app.activeModal != "" {
+		t.Fatalf("activeModal after close = %q, want empty", app.activeModal)
+	}
+}
