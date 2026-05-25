@@ -8,7 +8,21 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
-## [0.12.1] — 2026-05-24
+## [0.12.4] — 2026-05-25
+
+### Chores
+
+- Update screenshot ([`b3996f1f`](../../commit/b3996f1f2b0f97ba1c83248bbc22fc608010a9bb))
+- Add release script ([`46618e29`](../../commit/46618e29c2bb7a202f17c9082d80bd806b9607d2))
+- Fix release script ([`3304cad8`](../../commit/3304cad89a49cea8347a3574b52d8e780b02feb8))
+- Drop bump and changelog tasks ([`9aa70f9b`](../../commit/9aa70f9b44e77fb2f21b2a955a736f10eb443d88))
+- Use usage params for release script ([`89c3698e`](../../commit/89c3698ea5b293e4650c7972aaeff9a8b3c4d91c))
+- Allow CHANGELOG changes to bump script ([`42f1fc97`](../../commit/42f1fc978f333463141dd121853d5c60e12a79c4))
+
+### Refactoring
+
+- Improve config explain output (#33) ([`90dfcdcb`](../../commit/90dfcdcb60e65002408e1c2b1e0264d74342fca8))
+## [0.12.3] — 2026-05-24
 
 ### Bug Fixes
 
@@ -16,7 +30,7 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ### Chores
 
-- Update changelog ([`708d1ca4`](../../commit/708d1ca45e2dbf138c270af11a9784553f86d79d))
+- Rectify version ([`60104be5`](../../commit/60104be598ef05efd101593f66d30869dbccf167))
 
 ### Features
 
