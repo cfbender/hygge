@@ -2201,3 +2201,133 @@ shell = "deny"
 		t.Errorf("winning source should be hygge.local.toml, got %q", last.File)
 	}
 }
+
+// TestLoad_PWDHyggeLocalTOMLDefaultProfileOverridesBase verifies that
+// default_profile in PWD hygge.local.toml overrides default_profile set in
+// the user/base config and causes the local profile to be loaded.
+func TestLoad_PWDHyggeLocalTOMLDefaultProfileOverridesBase(t *testing.T) {
+	tmp := t.TempDir()
+
+	// User config sets default_profile = "base".
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	profilesDir := filepath.Join(cfgDir, "profiles")
+	writeTOML(t, filepath.Join(cfgDir, "hygge.toml"), `default_profile = "base"`)
+	writeTOML(t, filepath.Join(profilesDir, "base.toml"), `
+[model]
+name = "from-base-profile"
+`)
+	writeTOML(t, filepath.Join(profilesDir, "local.toml"), `
+[model]
+name = "from-local-profile"
+`)
+
+	// PWD hygge.local.toml overrides default_profile = "local".
+	writeTOML(t, filepath.Join(tmp, "hygge.local.toml"), `default_profile = "local"`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "local" {
+		t.Fatalf("Profile = %q, want local (PWD hygge.local.toml default_profile should win)", cfg.Profile)
+	}
+	if cfg.Model.Name != "from-local-profile" {
+		t.Fatalf("model.name = %q, want from-local-profile", cfg.Model.Name)
+	}
+}
+
+// TestLoad_PWDHyggeTOMLDefaultProfileOverridesBase verifies that
+// default_profile in PWD hygge.toml (without a local override) also overrides
+// the user/base config default_profile.
+func TestLoad_PWDHyggeTOMLDefaultProfileOverridesBase(t *testing.T) {
+	tmp := t.TempDir()
+
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	profilesDir := filepath.Join(cfgDir, "profiles")
+	writeTOML(t, filepath.Join(cfgDir, "hygge.toml"), `default_profile = "base"`)
+	writeTOML(t, filepath.Join(profilesDir, "base.toml"), `
+[model]
+name = "from-base-profile"
+`)
+	writeTOML(t, filepath.Join(profilesDir, "project.toml"), `
+[model]
+name = "from-project-profile"
+`)
+
+	// PWD hygge.toml (no hygge.local.toml) overrides default_profile = "project".
+	writeTOML(t, filepath.Join(tmp, "hygge.toml"), `default_profile = "project"`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "project" {
+		t.Fatalf("Profile = %q, want project (PWD hygge.toml default_profile should win)", cfg.Profile)
+	}
+	if cfg.Model.Name != "from-project-profile" {
+		t.Fatalf("model.name = %q, want from-project-profile", cfg.Model.Name)
+	}
+}
+
+// TestLoad_PWDHyggeLocalTOMLDefaultProfileWinsOverPWDHyggeTOML verifies that
+// default_profile in PWD hygge.local.toml beats default_profile in PWD hygge.toml.
+func TestLoad_PWDHyggeLocalTOMLDefaultProfileWinsOverPWDHyggeTOML(t *testing.T) {
+	tmp := t.TempDir()
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+	writeTOML(t, filepath.Join(profilesDir, "project.toml"), `
+[model]
+name = "from-project-profile"
+`)
+	writeTOML(t, filepath.Join(profilesDir, "local.toml"), `
+[model]
+name = "from-local-profile"
+`)
+
+	// hygge.toml sets project, hygge.local.toml overrides with local.
+	writeTOML(t, filepath.Join(tmp, "hygge.toml"), `default_profile = "project"`)
+	writeTOML(t, filepath.Join(tmp, "hygge.local.toml"), `default_profile = "local"`)
+
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "local" {
+		t.Fatalf("Profile = %q, want local (hygge.local.toml default_profile should beat hygge.toml)", cfg.Profile)
+	}
+	if cfg.Model.Name != "from-local-profile" {
+		t.Fatalf("model.name = %q, want from-local-profile", cfg.Model.Name)
+	}
+}
+
+// TestLoad_ExplicitProfileWinsOverPWDHyggeLocalTOMLDefaultProfile verifies
+// that opts.Profile still takes precedence over PWD hygge.local.toml default_profile.
+func TestLoad_ExplicitProfileWinsOverPWDHyggeLocalTOMLDefaultProfile(t *testing.T) {
+	tmp := t.TempDir()
+
+	profilesDir := filepath.Join(tmp, ".config", "hygge", "profiles")
+	writeTOML(t, filepath.Join(profilesDir, "explicit.toml"), `
+[model]
+name = "from-explicit-profile"
+`)
+	writeTOML(t, filepath.Join(profilesDir, "local.toml"), `
+[model]
+name = "from-local-profile"
+`)
+
+	// hygge.local.toml says "local", but explicit opts.Profile says "explicit".
+	writeTOML(t, filepath.Join(tmp, "hygge.local.toml"), `default_profile = "local"`)
+
+	opts := hermeticOpts(t, tmp, nil)
+	opts.Profile = "explicit"
+	cfg, _, err := Load(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Profile != "explicit" {
+		t.Fatalf("Profile = %q, want explicit (opts.Profile must still win)", cfg.Profile)
+	}
+	if cfg.Model.Name != "from-explicit-profile" {
+		t.Fatalf("model.name = %q, want from-explicit-profile", cfg.Model.Name)
+	}
+}

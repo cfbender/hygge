@@ -482,10 +482,25 @@ func xdgStateDir(opts LoadOptions) string {
 }
 
 // resolveProfileName picks the active profile name via the precedence:
-// opts.Profile → user config default_profile → state file (active_profile) → "default".
+// opts.Profile → PWD local default_profile → user config default_profile → state file (active_profile) → "default".
+//
+// "PWD local default_profile" is the highest-precedence file signal: it reads
+// opts.Pwd/hygge.toml and then opts.Pwd/hygge.local.toml (in that order so
+// hygge.local.toml wins), mirroring the file-merge order in enumerateSources.
 func resolveProfileName(opts LoadOptions, xdgConfigHome, xdgStateHome string) (string, error) {
 	if opts.Profile != "" {
 		return opts.Profile, nil
+	}
+
+	// Consult PWD-level files first (highest-precedence file sources).
+	// hygge.toml is checked before hygge.local.toml so that hygge.local.toml
+	// wins when both declare default_profile.
+	pwdProfile, err := defaultProfileFromPWDFiles(opts.Pwd)
+	if err != nil {
+		return "", err
+	}
+	if pwdProfile != "" {
+		return pwdProfile, nil
 	}
 
 	profileName, err := defaultProfileFromUserConfig(xdgConfigHome)
@@ -513,6 +528,32 @@ func resolveProfileName(opts LoadOptions, xdgConfigHome, xdgStateHome string) (s
 	}
 
 	return "default", nil
+}
+
+// defaultProfileFromPWDFiles reads default_profile from opts.Pwd/hygge.toml
+// and opts.Pwd/hygge.local.toml (in that order).  The last non-empty value
+// wins, so hygge.local.toml beats hygge.toml.  Returns "" when neither file
+// exists or neither sets default_profile.
+func defaultProfileFromPWDFiles(pwd string) (string, error) {
+	result := ""
+	for _, name := range []string{"hygge.toml", "hygge.local.toml"} {
+		path := filepath.Join(pwd, name)
+		data, err := os.ReadFile(path) //nolint:gosec // intentional config path
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("config: read PWD config for default profile: %w", err)
+		}
+		m, err := parseTOMLBytes(data)
+		if err != nil {
+			return "", &ParseError{File: path, Err: err}
+		}
+		if profileName, _ := m["default_profile"].(string); strings.TrimSpace(profileName) != "" {
+			result = strings.TrimSpace(profileName)
+		}
+	}
+	return result, nil
 }
 
 func defaultProfileFromUserConfig(xdgConfigHome string) (string, error) {
