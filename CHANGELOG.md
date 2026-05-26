@@ -8,6 +8,15 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.13.4] — 2026-05-26
+
+### Bug Fixes
+
+- Default profile from hygge.local.toml (#42) ([`edd19e6a`](../../commit/edd19e6a240973c14fe3783b675df03d46420ed0))
+
+### Features
+
+- Add nix flake (#41) ([`ca0d69d4`](../../commit/ca0d69d4fc34df38d646499beeff1806f6269bcb))
 ## [0.13.3] — 2026-05-25
 
 ### Bug Fixes
