@@ -42,6 +42,7 @@ type AppendServerSpec struct {
 	Dir                string
 	URL                string
 	Headers            map[string]string // values should be $VAR refs
+	OAuth              bool              // true → write oauth = true
 	Enabled            *bool             // nil → omit (default true)
 	PermissionCategory string            // empty → omit (default "mcp")
 }
@@ -147,6 +148,9 @@ func AppendServer(opts AppendServerOptions) error {
 			sb.WriteString(quoteStringTOML(spec.Headers[k]))
 		}
 		sb.WriteString(" }\n")
+	}
+	if spec.OAuth {
+		sb.WriteString("oauth = true\n")
 	}
 	if spec.Enabled != nil && !*spec.Enabled {
 		sb.WriteString("enabled = false\n")

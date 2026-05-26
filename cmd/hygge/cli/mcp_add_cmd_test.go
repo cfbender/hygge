@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -156,6 +157,7 @@ func TestMCPAdd_HTTPWithAuth(t *testing.T) {
 	input := mcpAddInput(
 		"http",                     // transport
 		"https://api.example.com/", // url
+		"header",                   // auth method
 		"Authorization",            // auth header name
 		"Bearer super-secret-tok",  // auth header value (non-TTY path)
 	)
@@ -208,6 +210,35 @@ func TestMCPAdd_HTTPWithAuth(t *testing.T) {
 	}
 }
 
+func TestMCPAdd_HTTPWithOAuthFlag(t *testing.T) {
+	home := hermeticHome(t)
+
+	input := mcpAddInput(
+		"http",
+		"https://api.example.com/mcp",
+		"none",
+	)
+
+	root := NewRootCmd()
+	root.SetIn(input)
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "add", "remote-oauth", "--scope", "global", "--oauth"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v\noutput: %s", err, buf.String())
+	}
+
+	mcpTOML := filepath.Join(home, ".config", "hygge", "mcp.toml")
+	data, err := os.ReadFile(mcpTOML) //nolint:gosec // test-controlled temp path
+	if err != nil {
+		t.Fatalf("mcp.toml not written: %v", err)
+	}
+	if !strings.Contains(string(data), "oauth = true") {
+		t.Fatalf("mcp.toml missing oauth=true:\n%s", data)
+	}
+}
+
 func TestMCPAuthEnvLookupSourcesStoredHeaders(t *testing.T) {
 	home := hermeticHome(t)
 	xdgConfig := filepath.Join(home, ".config")
@@ -228,6 +259,41 @@ func TestMCPAuthEnvLookupSourcesStoredHeaders(t *testing.T) {
 	}
 	if got := cfgs[0].Headers["Authorization"]; got != "Bearer stored-token" {
 		t.Fatalf("Authorization header = %q, want stored token", got)
+	}
+}
+
+func TestApplyMCPOAuthInjectsBearerHeader(t *testing.T) {
+	home := hermeticHome(t)
+	xdgConfig := filepath.Join(home, ".config")
+	xdgState := filepath.Join(home, ".local", "state")
+
+	mcpTOML := filepath.Join(xdgConfig, "hygge", "mcp.toml")
+	if err := mcp.AppendServer(mcp.AppendServerOptions{
+		Path: mcpTOML,
+		Server: mcp.AppendServerSpec{
+			Name:      "oauth-srv",
+			Transport: "http",
+			URL:       "https://mcp.example.com/mcp",
+			OAuth:     true,
+		},
+	}); err != nil {
+		t.Fatalf("AppendServer: %v", err)
+	}
+	if err := mcp.SetAuth("oauth-srv", mcp.AuthEntry{OAuth: &mcp.OAuthCredential{AccessToken: "oauth-token"}}, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+
+	cfgs, err := mcp.LoadConfigs(mcp.LoadOptions{HomeDir: home, XDGConfigHome: xdgConfig})
+	if err != nil {
+		t.Fatalf("LoadConfigs: %v", err)
+	}
+	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cfgs = applyMCPOAuth(cfgs, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}, fixedNow)
+	if !cfgs[0].OAuth.Enabled {
+		t.Fatal("OAuth not enabled from config")
+	}
+	if got := cfgs[0].Headers["Authorization"]; got != "Bearer oauth-token" {
+		t.Fatalf("Authorization = %q, want OAuth bearer token", got)
 	}
 }
 
@@ -278,7 +344,7 @@ func TestMCPAdd_SSENoAuth(t *testing.T) {
 	input := mcpAddInput(
 		"sse",                     // transport
 		"https://sse.example.com", // url
-		"",                        // auth header name blank → skip
+		"none",                    // auth method
 	)
 
 	root := NewRootCmd()
@@ -504,6 +570,7 @@ func TestMCPAdd_RejectsAuthPlaceholderCollision(t *testing.T) {
 	input := mcpAddInput(
 		"http",
 		"https://api.example.com/mcp",
+		"header",
 		"Authorization",
 		"Bearer second",
 	)
@@ -591,6 +658,9 @@ func TestMCPAddWizard_HTTPAuthFlow(t *testing.T) {
 	updated, _ := m.advance()
 	m = updated.(mcpAddWizardModel)
 	m.input.SetValue("https://api.example.com/mcp")
+	updated, _ = m.advance()
+	m = updated.(mcpAddWizardModel)
+	m.moveChoice(1) // header
 	updated, _ = m.advance()
 	m = updated.(mcpAddWizardModel)
 	m.input.SetValue("Authorization")

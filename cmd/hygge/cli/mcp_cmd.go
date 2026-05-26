@@ -20,6 +20,7 @@ func newMCPCmd() *cobra.Command {
 	}
 	root.AddCommand(
 		newMCPAddCmd(),
+		newMCPOAuthCmd(),
 		newMCPListCmd(),
 		newMCPPingCmd(),
 		newMCPToolsCmd(),
@@ -292,11 +293,18 @@ func newMCPDoctorCmd() *cobra.Command {
 // by `hygge mcp ping` to look up a server without going through full
 // bootstrap.
 func loadMCPConfigs() ([]mcp.ServerConfig, error) {
-	return mcp.LoadConfigs(mcp.LoadOptions{
-		HomeDir:       mcpHomeDir(),
+	home := mcpHomeDir()
+	xdgState := mcpXDGStateHome()
+	configs, err := mcp.LoadConfigs(mcp.LoadOptions{
+		HomeDir:       home,
 		XDGConfigHome: mcpXDGConfig(),
 		Pwd:           mcpPwd(),
+		EnvLookup:     mcpAuthEnvLookup(bootstrapOptions{HomeDir: home, XDGStateHome: xdgState}),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return applyMCPOAuth(configs, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}, time.Now()), nil
 }
 
 // loadMCPConfigsFromPath parses ONE mcp.toml file and returns its

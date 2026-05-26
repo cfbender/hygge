@@ -85,9 +85,14 @@ type ServerConfig struct {
 	URL string
 
 	// Headers are sent on every HTTP request for SSE and Streamable
-	// HTTP transports.  Values may reference $VAR / ${VAR} which are
+	// HTTP transports. Values may reference $VAR / ${VAR} which are
 	// expanded at load time via os.LookupEnv.
 	Headers map[string]string
+
+	// OAuth enables OAuth bearer-token injection from mcp-auth.json for
+	// SSE and Streamable HTTP transports and optionally carries OAuth
+	// client configuration.
+	OAuth OAuthConfig
 
 	// Enabled defaults to true when unset.  Disabled servers are
 	// returned from LoadConfigs so `hygge mcp list` can show them,
@@ -135,6 +140,7 @@ type tomlServer struct {
 	Dir                string            `toml:"dir"`
 	URL                string            `toml:"url"`
 	Headers            map[string]string `toml:"headers"`
+	OAuth              any               `toml:"oauth"`
 	Enabled            *bool             `toml:"enabled"`
 	PermissionCategory string            `toml:"permission_category"`
 }
@@ -273,6 +279,10 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 	// Transport-specific validation.
 	command := interpolate(s.Command, envLookup)
 	sseURL := interpolate(s.URL, envLookup)
+	oauthConfig, err := normalizeOAuthConfig(s.OAuth)
+	if err != nil {
+		return ServerConfig{}, err
+	}
 
 	switch transport {
 	case "stdio":
@@ -286,6 +296,9 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 		if len(s.Headers) > 0 {
 			slog.Warn("mcp: headers field is ignored for stdio transport",
 				"path", path, "server", name)
+		}
+		if oauthConfig.Enabled {
+			return ServerConfig{}, fmt.Errorf("oauth cannot be used with transport %q", transport)
 		}
 	case "sse", "http":
 		if strings.TrimSpace(sseURL) == "" {
@@ -348,6 +361,7 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 		Dir:                interpolate(s.Dir, envLookup),
 		URL:                sseURL,
 		Headers:            headers,
+		OAuth:              oauthConfig,
 		Enabled:            enabled,
 		PermissionCategory: permCat,
 		Source:             src,
@@ -359,6 +373,38 @@ func normalizeServer(s tomlServer, src Source, path string, envLookup func(strin
 // from envLookup.  Unknown vars are replaced with the empty string —
 // the same behaviour os.ExpandEnv ships with.  Backslash-escaped
 // dollars are preserved literally to give users an escape hatch.
+func normalizeOAuthConfig(raw any) (OAuthConfig, error) {
+	if raw == nil {
+		return OAuthConfig{}, nil
+	}
+	switch v := raw.(type) {
+	case bool:
+		return OAuthConfig{Enabled: v}, nil
+	case map[string]any:
+		cfg := OAuthConfig{Enabled: true}
+		if b, ok := v["enabled"].(bool); ok {
+			cfg.Enabled = b
+		}
+		if s, ok := v["client_id"].(string); ok {
+			cfg.ClientID = strings.TrimSpace(s)
+		}
+		if s, ok := v["client_secret"].(string); ok {
+			cfg.ClientSecret = strings.TrimSpace(s)
+		}
+		if s, ok := v["scope"].(string); ok {
+			cfg.Scope = strings.TrimSpace(s)
+		}
+		if s, ok := v["redirect_uri"].(string); ok {
+			cfg.RedirectURI = strings.TrimSpace(s)
+		}
+		return cfg, nil
+	case map[string]string:
+		return OAuthConfig{Enabled: true, ClientID: strings.TrimSpace(v["client_id"]), ClientSecret: strings.TrimSpace(v["client_secret"]), Scope: strings.TrimSpace(v["scope"]), RedirectURI: strings.TrimSpace(v["redirect_uri"])}, nil
+	default:
+		return OAuthConfig{}, fmt.Errorf("oauth must be a boolean or table")
+	}
+}
+
 func interpolate(s string, envLookup func(string) string) string {
 	if !strings.ContainsRune(s, '$') {
 		return s
