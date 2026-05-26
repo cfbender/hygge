@@ -30,7 +30,7 @@
           inherit go;
 
           # Replace with the hash printed by `nix build` on first run.
-          vendorHash = pkgs.lib.fakeHash;
+          vendorHash = "sha256-PTRkyUs7f3oOQ/rkW5owWGglwzizI4xLIFxZSs2+OEg=";
 
           subPackages = [ "cmd/hygge" ];
 
