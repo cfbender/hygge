@@ -796,3 +796,124 @@ func TestSave_RaceDetectorClean(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// --- ToggleFavoriteModel tests -----------------------------------------------
+
+func TestToggleFavoriteModel_AddAndRemove(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	// Add two favorites.
+	if err := ToggleFavoriteModel("anthropic/claude-opus-4-5", o); err != nil {
+		t.Fatalf("ToggleFavoriteModel add 1: %v", err)
+	}
+	if err := ToggleFavoriteModel("openai/gpt-4o", o); err != nil {
+		t.Fatalf("ToggleFavoriteModel add 2: %v", err)
+	}
+
+	s, err := Load(o)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(s.FavoriteModels) != 2 {
+		t.Fatalf("FavoriteModels len: got %d, want 2; %v", len(s.FavoriteModels), s.FavoriteModels)
+	}
+	if s.FavoriteModels[0] != "anthropic/claude-opus-4-5" {
+		t.Errorf("FavoriteModels[0]: got %q, want anthropic/claude-opus-4-5", s.FavoriteModels[0])
+	}
+	if s.FavoriteModels[1] != "openai/gpt-4o" {
+		t.Errorf("FavoriteModels[1]: got %q, want openai/gpt-4o", s.FavoriteModels[1])
+	}
+
+	// Toggle off the first one.
+	if err := ToggleFavoriteModel("anthropic/claude-opus-4-5", o); err != nil {
+		t.Fatalf("ToggleFavoriteModel remove: %v", err)
+	}
+
+	s, err = Load(o)
+	if err != nil {
+		t.Fatalf("Load after remove: %v", err)
+	}
+	if len(s.FavoriteModels) != 1 {
+		t.Fatalf("FavoriteModels len after remove: got %d, want 1; %v", len(s.FavoriteModels), s.FavoriteModels)
+	}
+	if s.FavoriteModels[0] != "openai/gpt-4o" {
+		t.Errorf("FavoriteModels[0] after remove: got %q, want openai/gpt-4o", s.FavoriteModels[0])
+	}
+}
+
+func TestToggleFavoriteModel_IdempotentRemove(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	// Remove a model that was never added: should result in empty list.
+	if err := ToggleFavoriteModel("openai/gpt-4o", o); err != nil {
+		t.Fatalf("ToggleFavoriteModel add: %v", err)
+	}
+	if err := ToggleFavoriteModel("openai/gpt-4o", o); err != nil {
+		t.Fatalf("ToggleFavoriteModel remove: %v", err)
+	}
+	if err := ToggleFavoriteModel("openai/gpt-4o", o); err != nil {
+		t.Fatalf("ToggleFavoriteModel re-add: %v", err)
+	}
+
+	s, err := Load(o)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(s.FavoriteModels) != 1 || s.FavoriteModels[0] != "openai/gpt-4o" {
+		t.Errorf("FavoriteModels: got %v, want [openai/gpt-4o]", s.FavoriteModels)
+	}
+}
+
+func TestToggleFavoriteModel_RejectsInvalidRefs(t *testing.T) {
+	tests := []string{"", "openai", "/gpt-4o", "openai/", "openai/gpt/extra"}
+	for _, ref := range tests {
+		ref := ref
+		t.Run(ref, func(t *testing.T) {
+			dir := t.TempDir()
+			o := opts(dir)
+			if err := ToggleFavoriteModel(ref, o); err == nil {
+				t.Fatalf("ToggleFavoriteModel(%q): expected error", ref)
+			}
+			if _, err := os.Stat(statePath(t, dir)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("state file should not be created for invalid ref; stat err = %v", err)
+			}
+		})
+	}
+}
+
+func TestToggleFavoriteModel_PropagatesLoadError(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+	writeFile(t, statePath(t, dir), "not json")
+
+	if err := ToggleFavoriteModel("openai/gpt-4o", o); !errors.Is(err, ErrCorruptState) {
+		t.Errorf("ToggleFavoriteModel: expected ErrCorruptState, got %v", err)
+	}
+}
+
+func TestToggleFavoriteModel_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	o := opts(dir)
+
+	refs := []string{"anthropic/claude-opus-4-5", "openai/gpt-4o", "openrouter/mistral-7b"}
+	for _, ref := range refs {
+		if err := ToggleFavoriteModel(ref, o); err != nil {
+			t.Fatalf("ToggleFavoriteModel(%q): %v", ref, err)
+		}
+	}
+
+	s, err := Load(o)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(s.FavoriteModels) != len(refs) {
+		t.Fatalf("FavoriteModels len: got %d, want %d; %v", len(s.FavoriteModels), len(refs), s.FavoriteModels)
+	}
+	for i, want := range refs {
+		if s.FavoriteModels[i] != want {
+			t.Errorf("FavoriteModels[%d]: got %q, want %q", i, s.FavoriteModels[i], want)
+		}
+	}
+}

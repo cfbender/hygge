@@ -39,6 +39,10 @@ type ModelModal struct {
 	Query         string
 	Cursor        int
 	Models        []ModelOption
+	// Favorites is the ordered list of "provider/model" refs the user has
+	// starred.  Loaded from global state when the modal opens; toggled via
+	// ctrl+f.  Favorites are shown first under a "Favorites" heading.
+	Favorites []string
 }
 
 // ModelKey is the dialog-local key event shape used by tests and the UI app.
@@ -56,26 +60,77 @@ type CloseModelModal struct{}
 // SelectModelAction requests switching to Provider/Model for the current session.
 type SelectModelAction struct{ Provider, Model string }
 
-func (CloseModelModal) modelModalMsg()   {}
-func (SelectModelAction) modelModalMsg() {}
+// ToggleFavoriteModelAction requests adding or removing the given model from
+// the global favorites list.
+type ToggleFavoriteModelAction struct{ Provider, Model string }
 
-// Filtered returns the model list after applying the current search query.
-func (m ModelModal) Filtered() []ModelOption {
+func (CloseModelModal) modelModalMsg()           {}
+func (SelectModelAction) modelModalMsg()         {}
+func (ToggleFavoriteModelAction) modelModalMsg() {}
+
+// filteredResult is the internal split of filtered models into favorites (first)
+// and the rest.  FavCount is the number of entries at the start that are
+// favorites; Rest entries follow immediately.
+type filteredResult struct {
+	All      []ModelOption
+	FavCount int // number of leading favorite entries
+}
+
+// favoriteSet returns a set of "provider/model" refs for O(1) lookup.
+func (m ModelModal) favoriteSet() map[string]bool {
+	if len(m.Favorites) == 0 {
+		return nil
+	}
+	s := make(map[string]bool, len(m.Favorites))
+	for _, f := range m.Favorites {
+		s[f] = true
+	}
+	return s
+}
+
+// filteredSections returns the filtered list split into favorites-first order
+// together with the count of leading favorite entries.
+func (m ModelModal) filteredSections() filteredResult {
 	q := strings.ToLower(strings.TrimSpace(m.Query))
-	out := make([]ModelOption, 0, len(m.Models))
+	favSet := m.favoriteSet()
+
+	var favs, rest []ModelOption
 	for _, opt := range m.Models {
 		hay := strings.ToLower(opt.Provider + " " + opt.Entry.ID + " " + opt.Entry.Name)
-		if q == "" || strings.Contains(hay, q) {
-			out = append(out, opt)
+		if q != "" && !strings.Contains(hay, q) {
+			continue
+		}
+		ref := opt.Provider + "/" + opt.Entry.ID
+		if favSet[ref] {
+			favs = append(favs, opt)
+		} else {
+			rest = append(rest, opt)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Provider == out[j].Provider {
-			return out[i].Entry.ID < out[j].Entry.ID
-		}
-		return out[i].Provider < out[j].Provider
-	})
-	return out
+
+	// Sort each section by provider then model id.
+	sortOpts := func(slice []ModelOption) {
+		sort.SliceStable(slice, func(i, j int) bool {
+			if slice[i].Provider == slice[j].Provider {
+				return slice[i].Entry.ID < slice[j].Entry.ID
+			}
+			return slice[i].Provider < slice[j].Provider
+		})
+	}
+	sortOpts(favs)
+	sortOpts(rest)
+
+	all := make([]ModelOption, 0, len(favs)+len(rest))
+	all = append(all, favs...)
+	all = append(all, rest...)
+	return filteredResult{All: all, FavCount: len(favs)}
+}
+
+// Filtered returns the model list after applying the current search query.
+// Favorite models appear first (sorted within their group), followed by the
+// remaining models sorted by provider then model id.
+func (m ModelModal) Filtered() []ModelOption {
+	return m.filteredSections().All
 }
 
 // HandleKey updates dialog state for one key and may emit an action message.
@@ -98,6 +153,13 @@ func (m ModelModal) HandleKey(k ModelKey) (ModelModal, ModelModalMsg) {
 		}
 		opt := filtered[m.Cursor]
 		return m, SelectModelAction{Provider: opt.Provider, Model: opt.Entry.ID}
+	case "ctrl+f":
+		// Toggle favorite on the currently-highlighted model.
+		if len(filtered) == 0 {
+			return m, nil
+		}
+		opt := filtered[m.Cursor]
+		return m, ToggleFavoriteModelAction{Provider: opt.Provider, Model: opt.Entry.ID}
 	case "backspace":
 		if m.Query != "" {
 			r := []rune(m.Query)
@@ -126,13 +188,16 @@ func (m ModelModal) View() string {
 	primary := lipgloss.NewStyle().Bold(true)
 	muted := lipgloss.NewStyle().Faint(true)
 	highlight := lipgloss.NewStyle().Bold(true)
+	heading := lipgloss.NewStyle().Bold(true)
 	if m.Theme != nil {
 		border = border.BorderForeground(m.Theme.Style(styles.AtomModalBorder).GetForeground())
 		primary = m.Theme.Style(styles.AtomPrimary).Bold(true)
 		muted = m.Theme.Style(styles.AtomMuted)
 		highlight = m.Theme.Style(styles.AtomAccent).Bold(true)
+		heading = m.Theme.Style(styles.AtomPrimary).Bold(true)
 	}
-	filtered := m.Filtered()
+	sections := m.filteredSections()
+	filtered := sections.All
 	var b strings.Builder
 	b.WriteString(primary.Render("Select model") + "\n")
 	b.WriteString(muted.Render("Search provider, model id, or display name") + "\n\n")
@@ -143,12 +208,32 @@ func (m ModelModal) View() string {
 	} else if len(filtered) == 0 {
 		b.WriteString("\n" + muted.Render("No models match the current search."))
 	} else {
-		limit := minInt(len(filtered), maxInt(4, height-12))
+		limit := minInt(len(filtered), maxInt(1, height-12))
 		start := 0
 		if m.Cursor >= limit {
 			start = m.Cursor - limit + 1
 		}
+		visibleSectionLines := 0
+		if sections.FavCount > 0 && start == 0 {
+			visibleSectionLines++
+		}
+		if sections.FavCount > 0 && sections.FavCount < len(filtered) && start <= sections.FavCount && sections.FavCount < start+limit {
+			visibleSectionLines += 2 // blank spacer + "All models" heading
+		}
+		if visibleSectionLines > 0 {
+			limit = maxInt(1, limit-visibleSectionLines)
+			if m.Cursor >= start+limit {
+				start = m.Cursor - limit + 1
+			}
+		}
 		for i := start; i < len(filtered) && i < start+limit; i++ {
+			if sections.FavCount > 0 && i == 0 {
+				b.WriteString(heading.Render("  Favorites") + "\n")
+			}
+			if sections.FavCount > 0 && sections.FavCount < len(filtered) && i == sections.FavCount {
+				b.WriteString("\n" + heading.Render("  All models") + "\n")
+			}
+
 			opt := filtered[i]
 			name := opt.Entry.Name
 			if name == "" {
@@ -177,7 +262,7 @@ func (m ModelModal) View() string {
 			b.WriteString(line + "\n")
 		}
 	}
-	b.WriteString("\n" + muted.Render("↑/↓ ctrl+n/ctrl+p navigate   enter select   esc close"))
+	b.WriteString("\n" + muted.Render("↑/↓ ctrl+n/ctrl+p navigate   enter select   ctrl+f favorite   esc close"))
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, border.Render(b.String()))
 }
 
