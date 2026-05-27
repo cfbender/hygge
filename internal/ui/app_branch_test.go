@@ -37,6 +37,9 @@ func newBranchTestApp(t *testing.T, projectDir string) (*App, *bus.Bus) {
 		Bus:           b,
 		Theme:         styles.DefaultTheme(),
 		ProjectDir:    projectDir,
+		// Set HomeDir equal to ProjectDir so collapsedProjectPath() returns "~",
+		// keeping the sidebar path short enough for branch display in view tests.
+		HomeDir:       projectDir,
 		ModelProvider: "provider-placeholder",
 		ModelName:     "model-placeholder",
 		Now:           now,

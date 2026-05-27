@@ -346,32 +346,50 @@ func (s Sidebar) renderBottom(innerW int, mutedStyle, accentStyle lipgloss.Style
 }
 
 // pathBranchLine returns the project path + branch string truncated to budget.
+//
+// Render order: PWD, then branch symbol, then branch name.
+// PWD is always shown in full; only the branch name is truncated from the tail.
 func (s Sidebar) pathBranchLine(budget int) string {
 	if s.ProjectPath == "" && s.GitBranch == "" {
 		return ""
 	}
-	var branch string
+
+	// Build the branch symbol prefix (separator between PWD and branch name).
+	var branchSep string
 	if s.GitBranch != "" {
 		if s.NerdFonts {
-			branch = "  \ueafc " + s.GitBranch
+			branchSep = "  \ueafc "
 		} else {
-			branch = ":" + s.GitBranch
+			branchSep = ":"
 		}
 	}
-	full := s.ProjectPath + branch
-	if lipgloss.Width(full) <= budget {
-		return full
+
+	pwdW := lipgloss.Width(s.ProjectPath)
+	sepW := lipgloss.Width(branchSep)
+
+	// Budget remaining for the branch name after PWD and separator.
+	branchBudget := budget - pwdW - sepW
+
+	if s.GitBranch == "" || branchBudget <= 0 {
+		// No room for branch at all (or no branch): just show PWD.
+		return s.ProjectPath
 	}
-	// Trim from the left.
-	runes := []rune(full)
+
+	branchName := s.GitBranch
+	if lipgloss.Width(branchName) <= branchBudget {
+		return s.ProjectPath + branchSep + branchName
+	}
+
+	// Truncate branch name from the tail, preserving the beginning.
+	runes := []rune(branchName)
 	for len(runes) > 0 {
-		candidate := "…" + string(runes)
-		if lipgloss.Width(candidate) <= budget {
-			return candidate
+		runes = runes[:len(runes)-1]
+		if lipgloss.Width(string(runes)+"…") <= branchBudget {
+			return s.ProjectPath + branchSep + string(runes) + "…"
 		}
-		runes = runes[1:]
 	}
-	return "…"
+	// Branch name too long even with single char + ellipsis; just show PWD.
+	return s.ProjectPath
 }
 
 // appVersionLine builds "● AppName Version" with accent dot.
