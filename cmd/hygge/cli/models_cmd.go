@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -58,7 +59,7 @@ By default, hygge groups models by provider. Pass a provider id or use
 }
 
 func printModels(cmd *cobra.Command, cat *catalog.Catalog, providerID string, limit int, availableProviders []string) error {
-	styles := modelsCLIStyles()
+	styles := modelsCLIStyles(out(cmd))
 	loaded := cat.Loaded()
 	available := providerSet(availableProviders)
 	providers := filterCatalogProviders(cat.Providers(), available)
@@ -141,17 +142,34 @@ type modelsStyles struct {
 	Muted       lipgloss.Style
 }
 
-func modelsCLIStyles() modelsStyles {
+func modelsCLIStyles(w io.Writer) modelsStyles {
+	plain := lipgloss.NewStyle()
+	if !isColorWriter(w) {
+		return modelsStyles{
+			Title:       plain,
+			Meta:        plain,
+			Section:     plain,
+			Configured:  plain,
+			Model:       plain,
+			Detail:      plain,
+			Capability:  plain,
+			Capability2: plain,
+			Muted:       plain,
+		}
+	}
+	// Colors are sourced from the shared inspectStyles palette so that
+	// `hygge models` matches other CLI inspection commands (skills,
+	// subagents, etc.) on terminals that support color.
 	return modelsStyles{
-		Title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A78BFA")),
-		Meta:        lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")),
-		Section:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#38BDF8")),
+		Title:       lipgloss.NewStyle().Bold(true).Underline(true).Foreground(inspectHeaderColor()),
+		Meta:        lipgloss.NewStyle().Foreground(inspectMutedColor()),
+		Section:     lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()),
 		Configured:  lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
 		Model:       lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
-		Detail:      lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")),
+		Detail:      lipgloss.NewStyle().Foreground(inspectMutedColor()),
 		Capability:  lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
-		Capability2: lipgloss.NewStyle().Foreground(lipgloss.Color("#14B8A6")),
-		Muted:       lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")),
+		Capability2: lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
+		Muted:       lipgloss.NewStyle().Foreground(inspectMutedColor()),
 	}
 }
 
