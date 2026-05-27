@@ -866,6 +866,23 @@ func TestToggleFavoriteModel_IdempotentRemove(t *testing.T) {
 	}
 }
 
+func TestToggleFavoriteModel_RejectsInvalidRefs(t *testing.T) {
+	tests := []string{"", "openai", "/gpt-4o", "openai/", "openai/gpt/extra"}
+	for _, ref := range tests {
+		ref := ref
+		t.Run(ref, func(t *testing.T) {
+			dir := t.TempDir()
+			o := opts(dir)
+			if err := ToggleFavoriteModel(ref, o); err == nil {
+				t.Fatalf("ToggleFavoriteModel(%q): expected error", ref)
+			}
+			if _, err := os.Stat(statePath(t, dir)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("state file should not be created for invalid ref; stat err = %v", err)
+			}
+		})
+	}
+}
+
 func TestToggleFavoriteModel_PropagatesLoadError(t *testing.T) {
 	dir := t.TempDir()
 	o := opts(dir)

@@ -21,6 +21,30 @@ func testModelOption(provider, id string) ModelOption {
 	}
 }
 
+func TestModelModalCtrlFToggleKeepsCursor(t *testing.T) {
+	t.Parallel()
+	modal := ModelModal{
+		Cursor: 2,
+		Models: []ModelOption{
+			testModelOption("anthropic", "claude-opus"),
+			testModelOption("openai", "gpt-4o"),
+			testModelOption("openai", "gpt-4.1"),
+		},
+	}
+
+	updated, msg := modal.HandleKey(ModelKey{Name: "ctrl+f"})
+	if updated.Cursor != 2 {
+		t.Fatalf("Cursor = %d after ctrl+f, want 2", updated.Cursor)
+	}
+	action, ok := msg.(ToggleFavoriteModelAction)
+	if !ok {
+		t.Fatalf("msg = %T, want ToggleFavoriteModelAction", msg)
+	}
+	if action.Provider != "openai" || action.Model != "gpt-4o" {
+		t.Fatalf("action = %s/%s, want openai/gpt-4o", action.Provider, action.Model)
+	}
+}
+
 func TestModelModalFavoritesDoNotExceedConfiguredHeight(t *testing.T) {
 	t.Parallel()
 	models := make([]ModelOption, 0, 20)

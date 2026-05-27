@@ -1047,6 +1047,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toggleFavoriteResult:
 		if m.err != nil {
+			a.modelModal.Favorites = toggleStringSlice(a.modelModal.Favorites, m.ref)
 			return a, a.setNotice("favorite toggle failed: " + m.err.Error())
 		}
 		// Sync the in-memory FavoriteModels list in opts so future modal opens

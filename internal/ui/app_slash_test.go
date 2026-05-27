@@ -1669,6 +1669,39 @@ func TestModelDialogCtrlFKeyTogglesAndPersists(t *testing.T) {
 	}
 }
 
+func TestModelDialogToggleFavoriteFailureRollsBackOptimisticFavorite(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.opts.ToggleFavoriteModel = func(context.Context, string, string) error {
+		return errors.New("disk full")
+	}
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	filtered := app.modelModal.Filtered()
+	if len(filtered) == 0 {
+		t.Fatal("expected models in picker")
+	}
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected toggle cmd after ctrl+f")
+	}
+	if len(app.modelModal.Favorites) != 1 {
+		t.Fatalf("modal Favorites = %v after optimistic toggle, want one favorite", app.modelModal.Favorites)
+	}
+
+	runSlashTestCmd(app, cmd)
+	if len(app.modelModal.Favorites) != 0 {
+		t.Fatalf("modal Favorites = %v after failed persist, want rollback to []", app.modelModal.Favorites)
+	}
+	if len(app.opts.FavoriteModels) != 0 {
+		t.Fatalf("opts.FavoriteModels = %v after failed persist, want []", app.opts.FavoriteModels)
+	}
+	if !strings.Contains(app.notice, "favorite toggle failed: disk full") {
+		t.Fatalf("notice = %q, want favorite toggle failure", app.notice)
+	}
+}
+
 // TestModelDialogFKeyTypesIntoSearch verifies that plain 'f' remains a search
 // character; ctrl+f is the favorite shortcut.
 func TestModelDialogFKeyTypesIntoSearch(t *testing.T) {

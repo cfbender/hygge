@@ -159,7 +159,6 @@ func (m ModelModal) HandleKey(k ModelKey) (ModelModal, ModelModalMsg) {
 			return m, nil
 		}
 		opt := filtered[m.Cursor]
-		m.Cursor = 0
 		return m, ToggleFavoriteModelAction{Provider: opt.Provider, Model: opt.Entry.ID}
 	case "backspace":
 		if m.Query != "" {

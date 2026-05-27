@@ -1,7 +1,9 @@
 package state
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -93,6 +95,14 @@ func IsConfigTrusted(absPath string, expectedSha256 string, opts LoadOptions) (b
 // present, or removes it if it is.  The list preserves insertion order; new
 // favorites are appended.  ref should be in "provider/model" form.
 func ToggleFavoriteModel(ref string, opts LoadOptions) error {
+	if strings.Count(ref, "/") != 1 {
+		return fmt.Errorf("state: ToggleFavoriteModel: %w", errors.New("favorite model ref must be in provider/model form"))
+	}
+	parts := strings.SplitN(ref, "/", 2)
+	if parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("state: ToggleFavoriteModel: %w", errors.New("favorite model ref must include non-empty provider and model"))
+	}
+
 	s, err := Load(opts)
 	if err != nil {
 		return fmt.Errorf("state: ToggleFavoriteModel: %w", err)
