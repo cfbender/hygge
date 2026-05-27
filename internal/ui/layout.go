@@ -31,7 +31,7 @@ type uiLayout struct {
 
 const (
 	sidebarMinTermWidth = 110
-	sidebarFixedWidth   = 38
+	sidebarFixedWidth   = 36
 	contentWidthRatio   = 0.80
 	editorMinHeight     = 3
 	editorMaxHeight     = 8

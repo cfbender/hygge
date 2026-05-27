@@ -1140,6 +1140,76 @@ func TestSidebar_MCPStatus_Markers(t *testing.T) {
 	}
 }
 
+// ── pathBranchLine truncation tests ──────────────────────────────────────────
+
+// TestPathBranchLine_ShortFits verifies that a short PWD + short branch
+// renders in full without truncation.
+func TestPathBranchLine_ShortFits(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{ProjectPath: "~/code", GitBranch: "main", NerdFonts: false}
+	got := sb.pathBranchLine(30)
+	if got != "~/code:main" {
+		t.Errorf("pathBranchLine = %q, want %q", got, "~/code:main")
+	}
+}
+
+// TestPathBranchLine_LongBranchTruncatesFromEnd verifies that when the branch
+// name is too long to fit, it is truncated from the end (beginning preserved).
+func TestPathBranchLine_LongBranchTruncatesFromEnd(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		ProjectPath: "~/code",
+		GitBranch:   "feat/a-very-long-branch-name-that-wont-fit",
+		NerdFonts:   false,
+	}
+	// Budget: 20; PWD "~/code" = 6, sep ":" = 1, branch budget = 13.
+	// Branch beginning must be preserved; "…" must be at the end.
+	got := sb.pathBranchLine(20)
+	// Must start with PWD and separator.
+	if !strings.HasPrefix(got, "~/code:") {
+		t.Errorf("pathBranchLine %q must start with PWD + separator", got)
+	}
+	// Must end with "…" (tail truncation).
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("pathBranchLine %q must end with … (tail truncation)", got)
+	}
+	// The beginning of the branch name must be preserved.
+	if !strings.Contains(got, "feat/") {
+		t.Errorf("pathBranchLine %q must preserve branch beginning 'feat/'", got)
+	}
+	// Total visible width must not exceed the budget.
+	if lipgloss.Width(got) > 20 {
+		t.Errorf("pathBranchLine %q width = %d, must be <= 20", got, lipgloss.Width(got))
+	}
+}
+
+// TestPathBranchLine_PWDAlwaysShown verifies that the PWD is never truncated
+// even when the branch name is very long.
+func TestPathBranchLine_PWDAlwaysShown(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{
+		ProjectPath: "~/projects/myapp",
+		GitBranch:   "feat/a-very-long-branch-name-that-wont-fit",
+		NerdFonts:   false,
+	}
+	const budget = 18 // tight: PWD "~/projects/myapp" = 16, no room for branch
+	got := sb.pathBranchLine(budget)
+	// PWD must be the entire line when there is no room for a branch.
+	if got != "~/projects/myapp" {
+		t.Errorf("pathBranchLine = %q, want %q", got, "~/projects/myapp")
+	}
+}
+
+// TestPathBranchLine_NoBranch verifies that a missing branch returns only the PWD.
+func TestPathBranchLine_NoBranch(t *testing.T) {
+	t.Parallel()
+	sb := Sidebar{ProjectPath: "~/code", NerdFonts: false}
+	got := sb.pathBranchLine(30)
+	if got != "~/code" {
+		t.Errorf("pathBranchLine = %q, want %q", got, "~/code")
+	}
+}
+
 func TestFormatTokens(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
