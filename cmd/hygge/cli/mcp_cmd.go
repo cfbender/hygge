@@ -98,6 +98,8 @@ func newMCPPingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			home := mcpHomeDir()
+			cfgs = applyMCPOAuth(cfgs, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: mcpXDGStateHome()}, time.Now())
 			var target *mcp.ServerConfig
 			for i := range cfgs {
 				if cfgs[i].Name == name {
@@ -295,16 +297,12 @@ func newMCPDoctorCmd() *cobra.Command {
 func loadMCPConfigs() ([]mcp.ServerConfig, error) {
 	home := mcpHomeDir()
 	xdgState := mcpXDGStateHome()
-	configs, err := mcp.LoadConfigs(mcp.LoadOptions{
+	return mcp.LoadConfigs(mcp.LoadOptions{
 		HomeDir:       home,
 		XDGConfigHome: mcpXDGConfig(),
 		Pwd:           mcpPwd(),
 		EnvLookup:     mcpAuthEnvLookup(bootstrapOptions{HomeDir: home, XDGStateHome: xdgState}),
 	})
-	if err != nil {
-		return nil, err
-	}
-	return applyMCPOAuth(configs, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}, time.Now()), nil
 }
 
 // loadMCPConfigsFromPath parses ONE mcp.toml file and returns its

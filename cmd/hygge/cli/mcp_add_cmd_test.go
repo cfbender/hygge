@@ -2,9 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -294,6 +297,69 @@ func TestApplyMCPOAuthInjectsBearerHeader(t *testing.T) {
 	}
 	if got := cfgs[0].Headers["Authorization"]; got != "Bearer oauth-token" {
 		t.Fatalf("Authorization = %q, want OAuth bearer token", got)
+	}
+}
+
+func TestApplyMCPOAuthSkipsDisabledServers(t *testing.T) {
+	home := hermeticHome(t)
+	xdgState := filepath.Join(home, ".local", "state")
+	authOpts := mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cfgs := []mcp.ServerConfig{{
+		Name:      "disabled-oauth",
+		Transport: "http",
+		URL:       "https://mcp.example.com/mcp",
+		OAuth:     mcp.OAuthConfig{Enabled: true},
+		Enabled:   false,
+	}}
+	if err := mcp.SetAuth("disabled-oauth", mcp.AuthEntry{Tokens: &mcp.OAuthTokens{
+		AccessToken:  "old-access",
+		RefreshToken: "refresh-token",
+		TokenURL:     "https://127.0.0.1:1/token",
+		ExpiresAt:    now.Add(-time.Minute).UnixMilli(),
+	}}, authOpts); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+
+	got := applyMCPOAuth(cfgs, authOpts, now)
+	if _, ok := got[0].Headers["Authorization"]; ok {
+		t.Fatalf("disabled server received Authorization header: %#v", got[0].Headers)
+	}
+}
+
+func TestApplyMCPOAuthLoadOnlyDoesNotRefreshExpiredToken(t *testing.T) {
+	home := hermeticHome(t)
+	xdgState := filepath.Join(home, ".local", "state")
+	authOpts := mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var refreshCalls atomic.Int32
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		refreshCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer refreshServer.Close()
+	cfgs := []mcp.ServerConfig{{
+		Name:      "oauth-srv",
+		Transport: "http",
+		URL:       "https://mcp.example.com/mcp",
+		OAuth:     mcp.OAuthConfig{Enabled: true},
+		Enabled:   true,
+	}}
+	if err := mcp.SetAuth("oauth-srv", mcp.AuthEntry{Tokens: &mcp.OAuthTokens{
+		AccessToken:  "old-access",
+		RefreshToken: "refresh-token",
+		TokenURL:     refreshServer.URL,
+		ExpiresAt:    now.Add(-time.Minute).UnixMilli(),
+	}}, authOpts); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+
+	got := applyMCPOAuthLoadOnly(cfgs, authOpts)
+	if got[0].Headers["Authorization"] != "Bearer old-access" {
+		t.Fatalf("Authorization = %q, want stored access token", got[0].Headers["Authorization"])
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("refresh endpoint called %d times, want 0", got)
 	}
 }
 

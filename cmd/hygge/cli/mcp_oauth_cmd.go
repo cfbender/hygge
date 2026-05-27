@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -247,10 +248,18 @@ func startMCPOAuthCallback(redirectURI, wantState string) (*mcpOAuthCallbackServ
 		q := r.URL.Query()
 		state := q.Get("state")
 		if state == "" {
+			select {
+			case errCh <- fmt.Errorf("missing OAuth state"):
+			default:
+			}
 			http.Error(w, "Missing OAuth state", http.StatusBadRequest)
 			return
 		}
 		if state != wantState {
+			select {
+			case errCh <- fmt.Errorf("invalid OAuth state"):
+			default:
+			}
 			http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 			return
 		}
@@ -265,6 +274,10 @@ func startMCPOAuthCallback(redirectURI, wantState string) (*mcpOAuthCallbackServ
 		}
 		code := q.Get("code")
 		if code == "" {
+			select {
+			case errCh <- fmt.Errorf("missing OAuth authorization code"):
+			default:
+			}
 			http.Error(w, "Missing OAuth authorization code", http.StatusBadRequest)
 			return
 		}
@@ -272,10 +285,14 @@ func startMCPOAuthCallback(redirectURI, wantState string) (*mcpOAuthCallbackServ
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(oauthCallbackSuccessHTML()))
 	})
-	server := &http.Server{Addr: u.Host, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	ln, err := net.Listen("tcp", u.Host)
+	if err != nil {
+		return nil, fmt.Errorf("start OAuth callback listener: %w", err)
+	}
+	server := &http.Server{Addr: ln.Addr().String(), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	cb := &mcpOAuthCallbackServer{server: server, result: resultCh, errs: errCh}
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()

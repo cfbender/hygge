@@ -382,19 +382,39 @@ func normalizeOAuthConfig(raw any) (OAuthConfig, error) {
 		return OAuthConfig{Enabled: v}, nil
 	case map[string]any:
 		cfg := OAuthConfig{Enabled: true}
-		if b, ok := v["enabled"].(bool); ok {
+		if value, ok := v["enabled"]; ok {
+			b, ok := value.(bool)
+			if !ok {
+				return OAuthConfig{}, fmt.Errorf("oauth.enabled must be a bool")
+			}
 			cfg.Enabled = b
 		}
-		if s, ok := v["client_id"].(string); ok {
+		if value, ok := v["client_id"]; ok {
+			s, ok := value.(string)
+			if !ok {
+				return OAuthConfig{}, fmt.Errorf("oauth.client_id must be a string")
+			}
 			cfg.ClientID = strings.TrimSpace(s)
 		}
-		if s, ok := v["client_secret"].(string); ok {
+		if value, ok := v["client_secret"]; ok {
+			s, ok := value.(string)
+			if !ok {
+				return OAuthConfig{}, fmt.Errorf("oauth.client_secret must be a string")
+			}
 			cfg.ClientSecret = strings.TrimSpace(s)
 		}
-		if s, ok := v["scope"].(string); ok {
+		if value, ok := v["scope"]; ok {
+			s, ok := value.(string)
+			if !ok {
+				return OAuthConfig{}, fmt.Errorf("oauth.scope must be a string")
+			}
 			cfg.Scope = strings.TrimSpace(s)
 		}
-		if s, ok := v["redirect_uri"].(string); ok {
+		if value, ok := v["redirect_uri"]; ok {
+			s, ok := value.(string)
+			if !ok {
+				return OAuthConfig{}, fmt.Errorf("oauth.redirect_uri must be a string")
+			}
 			cfg.RedirectURI = strings.TrimSpace(s)
 		}
 		return cfg, nil

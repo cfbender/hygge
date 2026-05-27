@@ -71,6 +71,9 @@ func AppendServer(opts AppendServerOptions) error {
 	}
 	switch transport {
 	case "stdio":
+		if spec.OAuth {
+			return fmt.Errorf("mcp writer: oauth cannot be used with transport %q", transport)
+		}
 		if strings.TrimSpace(spec.Command) == "" {
 			return fmt.Errorf("mcp writer: command is required for transport %q", transport)
 		}
@@ -149,7 +152,7 @@ func AppendServer(opts AppendServerOptions) error {
 		}
 		sb.WriteString(" }\n")
 	}
-	if spec.OAuth {
+	if spec.OAuth && transport != "stdio" {
 		sb.WriteString("oauth = true\n")
 	}
 	if spec.Enabled != nil && !*spec.Enabled {

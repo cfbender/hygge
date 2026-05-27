@@ -170,6 +170,18 @@ func randomURLEncoded(n int) (string, error) {
 
 // BuildAuthorizationURL constructs an OAuth authorization URL with PKCE.
 func BuildAuthorizationURL(endpoint OAuthEndpoints, clientID, redirectURI, scope, state, codeChallenge string) (string, error) {
+	if strings.TrimSpace(clientID) == "" {
+		return "", fmt.Errorf("mcp-auth: client_id is required")
+	}
+	if strings.TrimSpace(redirectURI) == "" {
+		return "", fmt.Errorf("mcp-auth: redirect_uri is required")
+	}
+	if strings.TrimSpace(state) == "" {
+		return "", fmt.Errorf("mcp-auth: state is required")
+	}
+	if strings.TrimSpace(codeChallenge) == "" {
+		return "", fmt.Errorf("mcp-auth: code_challenge is required")
+	}
 	if endpoint.AuthorizationEndpoint == "" {
 		return "", fmt.Errorf("mcp-auth: authorization endpoint is required")
 	}
@@ -442,6 +454,7 @@ func fetchAuthorizationServerMetadata(ctx context.Context, client *http.Client, 
 		return nil, err
 	}
 	var lastErr error
+	var validationErr error
 	for _, candidate := range candidates {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
 		if err != nil {
@@ -467,11 +480,24 @@ func fetchAuthorizationServerMetadata(ctx context.Context, client *http.Client, 
 			lastErr = err
 			continue
 		}
+		if strings.TrimSpace(meta.Issuer) == "" {
+			lastErr = fmt.Errorf("%s: meta.Issuer is empty for candidate %s", candidate, candidate)
+			validationErr = lastErr
+			continue
+		}
+		if strings.TrimRight(meta.Issuer, "/") != strings.TrimRight(issuer, "/") {
+			lastErr = fmt.Errorf("%s: meta.Issuer %q does not match authorization server %q", candidate, meta.Issuer, issuer)
+			validationErr = lastErr
+			continue
+		}
 		if meta.AuthorizationEndpoint == "" || meta.TokenEndpoint == "" {
 			lastErr = fmt.Errorf("%s: missing authorization_endpoint or token_endpoint", candidate)
 			continue
 		}
 		return &meta, nil
+	}
+	if validationErr != nil {
+		lastErr = validationErr
 	}
 	return nil, fmt.Errorf("mcp-auth: discover authorization server metadata for %s: %w", issuer, lastErr)
 }

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -399,6 +400,32 @@ func TestBuildAuthorizationURLIncludesPKCEAndResource(t *testing.T) {
 	}
 }
 
+func TestBuildAuthorizationURLRequiresOAuthFields(t *testing.T) {
+	t.Parallel()
+	endpoint := OAuthEndpoints{AuthorizationEndpoint: "https://auth.example/authorize"}
+	cases := []struct {
+		name          string
+		clientID      string
+		redirectURI   string
+		state         string
+		codeChallenge string
+		want          string
+	}{
+		{name: "client", redirectURI: "http://127.0.0.1/callback", state: "state", codeChallenge: "challenge", want: "client_id is required"},
+		{name: "redirect", clientID: "client", state: "state", codeChallenge: "challenge", want: "redirect_uri is required"},
+		{name: "state", clientID: "client", redirectURI: "http://127.0.0.1/callback", codeChallenge: "challenge", want: "state is required"},
+		{name: "challenge", clientID: "client", redirectURI: "http://127.0.0.1/callback", state: "state", want: "code_challenge is required"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildAuthorizationURL(endpoint, tt.clientID, tt.redirectURI, "", tt.state, tt.codeChallenge)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRefreshOAuth_ClearsStaleTokenExpiryWhenOmitted(t *testing.T) {
 	errCh := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -456,6 +483,34 @@ func TestAuthorizationServerMetadataCandidates_PathScoped(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("candidate[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestDiscoverOAuthEndpointsRejectsIssuerMismatch(t *testing.T) {
+	t.Parallel()
+
+	var baseURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-protected-resource":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"resource":"` + baseURL + `/mcp","authorization_servers":["` + baseURL + `/as"]}`))
+		case "/as/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"` + baseURL + `/other","authorization_endpoint":"` + baseURL + `/authorize","token_endpoint":"` + baseURL + `/token"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	baseURL = srv.URL
+
+	_, err := DiscoverOAuthEndpoints(context.Background(), srv.Client(), srv.URL+"/mcp")
+	if err == nil {
+		t.Fatal("expected issuer mismatch error")
+	}
+	if !strings.Contains(err.Error(), "meta.Issuer") || !strings.Contains(err.Error(), baseURL+"/as") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

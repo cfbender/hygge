@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"net/http"
 	"path/filepath"
 	"testing"
 	"time"
@@ -43,12 +45,39 @@ func TestClearMCPOAuthTransientState_PreservesTokensAndClient(t *testing.T) {
 	}
 }
 
+func TestOAuthCallbackReportsBrowserErrorsToWait(t *testing.T) {
+	for name, path := range map[string]string{
+		"missing-state": "?code=abc",
+		"invalid-state": "?state=wrong&code=abc",
+		"missing-code":  "?state=want",
+	} {
+		t.Run(name, func(t *testing.T) {
+			callback, err := startMCPOAuthCallback("http://127.0.0.1:0/mcp/oauth/callback", "want")
+			if err != nil {
+				t.Fatalf("startMCPOAuthCallback: %v", err)
+			}
+			defer callback.Close()
+
+			resp, err := http.Get("http://" + callback.server.Addr + "/mcp/oauth/callback" + path)
+			if err != nil {
+				t.Fatalf("Get callback: %v", err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			if _, err := callback.Wait(context.Background()); err == nil {
+				t.Fatal("Wait error = nil")
+			}
+		})
+	}
+}
+
 func TestClientSecretExpiredUsesUnixMilliseconds(t *testing.T) {
-	nowMs := time.Now().UnixMilli()
-	if clientSecretExpired(&mcp.OAuthClientInfo{ClientSecretExpiresAt: nowMs + 60_000}) {
+	if clientSecretExpired(&mcp.OAuthClientInfo{ClientSecretExpiresAt: 4_102_444_800_000}) {
 		t.Fatal("future millisecond expiry should not be expired")
 	}
-	if !clientSecretExpired(&mcp.OAuthClientInfo{ClientSecretExpiresAt: nowMs - 60_000}) {
+	if !clientSecretExpired(&mcp.OAuthClientInfo{ClientSecretExpiresAt: 946_684_800_000}) {
 		t.Fatal("past millisecond expiry should be expired")
 	}
 }
