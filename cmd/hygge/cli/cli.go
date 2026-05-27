@@ -87,6 +87,7 @@ func Execute() int {
 	if err := fang.Execute(
 		context.Background(),
 		cmd,
+		fang.WithColorSchemeFunc(cliFangColorScheme),
 		fang.WithVersion(Version),
 		fang.WithNotifySignal(os.Interrupt),
 	); err != nil {

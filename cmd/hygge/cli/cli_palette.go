@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -19,6 +20,27 @@ func cliSuccessColor() color.Color       { return lipgloss.Color("2") }
 func cliWarnColor() color.Color          { return lipgloss.Color("3") }
 func cliSelectedColor() color.Color      { return lipgloss.Color("15") }
 func cliSelectedMutedColor() color.Color { return lipgloss.Color("7") }
+
+func cliFangColorScheme(lipgloss.LightDarkFunc) fang.ColorScheme {
+	return fang.ColorScheme{
+		Base:           cliValueColor(),
+		Title:          cliHeaderColor(),
+		Description:    cliValueColor(),
+		Codeblock:      nil,
+		Program:        cliAccentColor(),
+		DimmedArgument: cliMutedColor(),
+		Comment:        cliMutedColor(),
+		Flag:           cliWarnColor(),
+		FlagDefault:    cliMutedColor(),
+		Command:        cliInfoColor(),
+		QuotedString:   cliSuccessColor(),
+		Argument:       cliValueColor(),
+		Help:           cliValueColor(),
+		Dash:           cliMutedColor(),
+		ErrorHeader:    [2]color.Color{cliSelectedColor(), cliWarnColor()},
+		ErrorDetails:   cliWarnColor(),
+	}
+}
 
 type cliStyles struct {
 	Title   lipgloss.Style
