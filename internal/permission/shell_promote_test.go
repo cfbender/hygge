@@ -20,7 +20,7 @@ func TestPromoteShellTarget(t *testing.T) {
 	}{
 		// Issue examples.
 		{name: "cat_file_in_dir", input: "cat internal/main.go", want: "cat internal/**/*"},
-		{name: "ls_dot", input: "ls .", want: "ls **/*"},
+		{name: "ls_dot", input: "ls .", want: "ls ./**/*"},
 
 		// Flags preserved verbatim.
 		{name: "ls_flag_only", input: "ls -la", want: "ls -la"},
@@ -78,9 +78,12 @@ func TestPromoteShellArg(t *testing.T) {
 		arg  string
 		want string
 	}{
-		{".", "**/*"},
-		{"..", "**/*"},
-		{"./", "**/*"},
+		{".", "./**/*"},
+		{"..", "../**/*"},
+		{"./", "./**/*"},
+		{"/", "/**/*"},
+		{"/tmp", "/tmp/**/*"},
+		{"../foo", "../foo/**/*"},
 		{"./src/", "src/**/*"},
 		{"src/main.go", "src/**/*"},
 		{"main.go", "main.go"}, // bare filename — not promoted (conservative)

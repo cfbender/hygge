@@ -661,7 +661,7 @@ func promoteTarget(cat Category, target string) string {
 //
 // Promotion rules per argument:
 //   - flags (starting with "-") are kept verbatim
-//   - "." or "./" → "**/*"
+//   - "." or "./" → "./**/*"
 //   - a path with a directory component → "<dir>/**/*"
 //   - bare words with no "/" are kept verbatim (conservative: may be a
 //     subcommand argument, not a filesystem path)
@@ -670,7 +670,7 @@ func promoteTarget(cat Category, target string) string {
 // Examples:
 //
 //	"cat internal/main.go"  → "cat internal/**/*"
-//	"ls ."                  → "ls **/*"
+//	"ls ."                  → "ls ./**/*"
 //	"ls -la ./src"          → "ls -la src/**/*"
 //	"go test ./..."         → "go test ./..."   (... treated as wildcard: kept)
 //	"git status"            → "git status"       (no path-like arg)
@@ -734,17 +734,26 @@ func promoteShellArg(arg string) string {
 		return arg
 	}
 
-	// Strip trailing slashes for clean handling.
+	// Strip trailing slashes for clean handling, preserving root-like tokens.
 	clean := strings.TrimRight(arg, "/")
-	if clean == "" || clean == "." || clean == ".." {
-		return "**/*"
+	if clean == "" {
+		if strings.HasPrefix(arg, "/") {
+			return "/**/*"
+		}
+		return arg
+	}
+	if clean == "." || clean == ".." {
+		return clean + "/**/*"
 	}
 	clean = strings.TrimPrefix(clean, "./")
 	if clean == "" || clean == "." {
-		return "**/*"
+		return "./**/*"
 	}
 
 	dir := path.Dir(clean)
+	if dir == "/" || dir == ".." {
+		return clean + "/**/*"
+	}
 	if dir == "." || dir == "" {
 		// e.g. "./src" should cover the src tree, not every relative tree.
 		return clean + "/**/*"
