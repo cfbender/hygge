@@ -450,9 +450,9 @@ type initStyles struct {
 func initCLIStyles() initStyles {
 	return initStyles{
 		Title: lipgloss.NewStyle().Bold(true).Foreground(initSuccessColor()),
-		Label: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#38BDF8")).Width(10),
-		Value: lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
-		Path:  lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")),
+		Label: lipgloss.NewStyle().Bold(true).Foreground(cliHeaderColor()).Width(10),
+		Value: lipgloss.NewStyle().Foreground(cliValueColor()),
+		Path:  lipgloss.NewStyle().Foreground(cliAccentColor()),
 		Muted: initMutedStyle(),
 	}
 }
@@ -483,13 +483,13 @@ func styleInitList(l *list.Model) {
 }
 
 func initMutedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(initMutedColor()) }
-func initAccentColor() color.Color   { return lipgloss.Color("#A78BFA") }
-func initMutedColor() color.Color    { return lipgloss.Color("#9CA3AF") }
-func initSuccessColor() color.Color  { return lipgloss.Color("#22C55E") }
-func initHelpColor() color.Color     { return lipgloss.Color("#6B7280") }
+func initAccentColor() color.Color   { return cliAccentColor() }
+func initMutedColor() color.Color    { return cliMutedColor() }
+func initSuccessColor() color.Color  { return cliSuccessColor() }
+func initHelpColor() color.Color     { return cliMutedColor() }
 
-func initSelectedForegroundColor() color.Color      { return lipgloss.Color("#F8FAFC") }
-func initSelectedMutedForegroundColor() color.Color { return lipgloss.Color("#D1D5DB") }
+func initSelectedForegroundColor() color.Color      { return cliSelectedColor() }
+func initSelectedMutedForegroundColor() color.Color { return cliSelectedMutedColor() }
 
 func materializeInitStyle(xdgConfigHome string, style initStyle, providerName string, componentModels map[string]string) (config.InitStyleConfig, error) {
 	promptDir := filepath.Join(xdgConfigHome, "hygge", "prompts", style.Name)

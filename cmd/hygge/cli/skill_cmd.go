@@ -45,11 +45,11 @@ func newInspectStylesFor(w io.Writer) inspectStyles {
 		return inspectStyles{
 			Header: lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()),
 			Label:  lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()).Width(13),
-			Value:  lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
+			Value:  lipgloss.NewStyle().Foreground(cliValueColor()),
 			Muted:  lipgloss.NewStyle().Foreground(inspectMutedColor()),
-			Path:   lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")),
-			OK:     lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
-			Warn:   lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
+			Path:   lipgloss.NewStyle().Foreground(cliAccentColor()),
+			OK:     lipgloss.NewStyle().Foreground(cliSuccessColor()),
+			Warn:   lipgloss.NewStyle().Foreground(cliWarnColor()),
 		}
 	}
 	plain := lipgloss.NewStyle()
@@ -78,8 +78,8 @@ func isColorWriter(w io.Writer) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
-func inspectHeaderColor() color.Color { return lipgloss.Color("#38BDF8") }
-func inspectMutedColor() color.Color  { return lipgloss.Color("#6B7280") }
+func inspectHeaderColor() color.Color { return cliHeaderColor() }
+func inspectMutedColor() color.Color  { return cliMutedColor() }
 
 // newSkillsCmd builds the `hygge skills` subcommand group.
 func newSkillsCmd() *cobra.Command {

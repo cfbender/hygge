@@ -164,11 +164,11 @@ func modelsCLIStyles(w io.Writer) modelsStyles {
 		Title:       lipgloss.NewStyle().Bold(true).Underline(true).Foreground(inspectHeaderColor()),
 		Meta:        lipgloss.NewStyle().Foreground(inspectMutedColor()),
 		Section:     lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()),
-		Configured:  lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
-		Model:       lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
+		Configured:  lipgloss.NewStyle().Foreground(cliSuccessColor()),
+		Model:       lipgloss.NewStyle().Foreground(cliValueColor()),
 		Detail:      lipgloss.NewStyle().Foreground(inspectMutedColor()),
-		Capability:  lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
-		Capability2: lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
+		Capability:  lipgloss.NewStyle().Foreground(cliWarnColor()),
+		Capability2: lipgloss.NewStyle().Foreground(cliInfoColor()),
 		Muted:       lipgloss.NewStyle().Foreground(inspectMutedColor()),
 	}
 }
