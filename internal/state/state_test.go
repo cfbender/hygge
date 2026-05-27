@@ -869,7 +869,6 @@ func TestToggleFavoriteModel_IdempotentRemove(t *testing.T) {
 func TestToggleFavoriteModel_RejectsInvalidRefs(t *testing.T) {
 	tests := []string{"", "openai", "/gpt-4o", "openai/", "openai/gpt/extra"}
 	for _, ref := range tests {
-		ref := ref
 		t.Run(ref, func(t *testing.T) {
 			dir := t.TempDir()
 			o := opts(dir)
