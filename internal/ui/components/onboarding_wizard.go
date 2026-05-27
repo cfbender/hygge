@@ -743,20 +743,22 @@ func (w OnboardingWizard) View() string {
 		body.WriteString("\n" + muted.Render("↑/↓ navigate   enter select   esc back"))
 
 	case OnboardStepModeName:
-		body.WriteString(primary.Render("Name this mode") + "\n")
-		body.WriteString(muted.Render("A short label shown in the mode picker. Default: General") + "\n\n")
+		body.WriteString(primary.Render("Name your first mode") + "\n")
+		body.WriteString(muted.Render("A mode is a reusable agent setup: provider/model choice and system instructions for a kind of work.") + "\n")
+		body.WriteString(muted.Render("The label appears in the mode picker. Default: General") + "\n\n")
 		fmt.Fprintf(&body, "Name: %s\n", w.inputBuf)
 		body.WriteString("\n" + muted.Render("enter confirm (empty = General)   backspace edit   esc back"))
 
 	case OnboardStepModeIdea:
-		body.WriteString(primary.Render("Describe this mode's behavior") + "\n")
-		body.WriteString(muted.Render("One sentence: what should this mode help you do?") + "\n")
-		body.WriteString(muted.Render("Leave empty to skip prompt generation.") + "\n\n")
+		body.WriteString(primary.Render("Describe how this mode should work") + "\n")
+		body.WriteString(muted.Render("Tell Hygge what this agent should be good at, how it should behave, or when to use it.") + "\n")
+		body.WriteString(muted.Render("One sentence is enough; leave empty to skip prompt generation.") + "\n\n")
 		fmt.Fprintf(&body, "Idea: %s\n", w.inputBuf)
 		body.WriteString("\n" + muted.Render("enter generate (or skip if empty)   esc back"))
 
 	case OnboardStepPromptReview:
-		body.WriteString(primary.Render("System prompt for mode: "+w.ModeName) + "\n\n")
+		body.WriteString(primary.Render("Instructions for mode: "+w.ModeName) + "\n")
+		body.WriteString(muted.Render("These instructions guide this mode whenever you select it. You can edit them later.") + "\n\n")
 		if w.PromptLoading {
 			body.WriteString(accent.Render("⟳ Generating prompt…") + "\n\n")
 			body.WriteString(muted.Render("s skip generation"))

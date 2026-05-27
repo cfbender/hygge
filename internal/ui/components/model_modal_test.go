@@ -49,7 +49,7 @@ func TestModelModalFavoritesDoNotExceedConfiguredHeight(t *testing.T) {
 	t.Parallel()
 	models := make([]ModelOption, 0, 20)
 	models = append(models, testModelOption("anthropic", "claude-opus"))
-	for i := 0; i < 19; i++ {
+	for i := range 19 {
 		models = append(models, testModelOption("openai", fmt.Sprintf("gpt-%02d", i)))
 	}
 	modal := ModelModal{

@@ -41,7 +41,12 @@ Launch Hygge to start the onboarding flow:
 hygge
 ```
 
-To set up a starter agent layout from the CLI, authenticate at least one provider,
+Onboarding creates your first **mode**. A mode is a reusable agent setup: a
+name, provider/model choice, and system instructions for a kind of work. Start
+with the default `General` mode, then add more focused modes when you want
+different behavior without rewriting prompts every session.
+
+To set up a starter mode layout from the CLI, authenticate at least one provider,
 then run `hygge init` and pick a style:
 
 ```sh

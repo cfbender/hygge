@@ -23,23 +23,25 @@ type onboardOptions struct {
 }
 
 // newOnboardCmd builds `hygge onboard`, a first-run helper that writes the
-// General agent's provider/model selection to the user's config file.
+// General mode's provider/model selection to the user's config file.
 func newOnboardCmd() *cobra.Command {
 	opts := onboardOptions{}
 	cmd := &cobra.Command{
 		Use:   "onboard",
-		Short: "Configure the General agent model",
-		Long: `Configure the General agent model.
+		Short: "Configure the General mode model",
+		Long: `Configure the General mode model.
 
-The selected provider and model are written to the user config at
-$XDG_CONFIG_HOME/hygge/config.toml (normally ~/.config/hygge/config.toml).`,
+A mode is a reusable agent setup: a name, provider/model choice, and
+instructions for a kind of work. The selected provider and model are written to
+the user config at $XDG_CONFIG_HOME/hygge/config.toml (normally
+~/.config/hygge/config.toml).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runOnboard(cmd, opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.provider, "provider", "", "provider to use for the General agent")
-	cmd.Flags().StringVar(&opts.model, "model", "", "model to use for the General agent")
+	cmd.Flags().StringVar(&opts.provider, "provider", "", "provider to use for the General mode")
+	cmd.Flags().StringVar(&opts.model, "model", "", "model to use for the General mode")
 	return cmd
 }
 
@@ -94,7 +96,7 @@ func runOnboard(cmd *cobra.Command, opts onboardOptions) error {
 		return err
 	}
 
-	printf(out(cmd), "Configured General agent: %s/%s\n", providerName, modelName)
+	printf(out(cmd), "Configured General mode: %s/%s\n", providerName, modelName)
 	printf(out(cmd), "Wrote user config: %s\n", target)
 	return nil
 }
