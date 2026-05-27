@@ -22,6 +22,11 @@ type Runtime struct {
 	titleModel         fantasy.LanguageModel
 	titleModelExplicit bool
 	tools              *tool.Registry
+	// providerName is the hygge provider id (lower-case, e.g. "openrouter").
+	// Used by usageFromFantasy to apply provider-specific token-accounting
+	// quirks (see usageFromFantasy). May be empty in tests that exercise
+	// Runtime without a real provider; the conversion is a no-op then.
+	providerName string
 }
 
 // RuntimeOptions configures Runtime.
@@ -29,13 +34,24 @@ type RuntimeOptions struct {
 	Model      fantasy.LanguageModel
 	TitleModel fantasy.LanguageModel
 	Tools      *tool.Registry
+	// ProviderName is the hygge provider id (e.g. "openrouter"). Optional;
+	// when set, drives provider-specific token-accounting normalization in
+	// Runtime's no-tool summary/title calls. Lower-case is expected to match
+	// the same convention used by the parent Agent's Provider.Name().
+	ProviderName string
 }
 
 // NewRuntime constructs the turn runtime. Tools may be nil only in tests that
 // do not execute turns; Agent.New validates the production path first.
 func NewRuntime(opts RuntimeOptions) *Runtime {
 	titleModel := opts.TitleModel
-	return &Runtime{model: opts.Model, titleModel: titleModel, titleModelExplicit: titleModel != nil, tools: opts.Tools}
+	return &Runtime{
+		model:              opts.Model,
+		titleModel:         titleModel,
+		titleModelExplicit: titleModel != nil,
+		tools:              opts.Tools,
+		providerName:       opts.ProviderName,
+	}
 }
 
 // SetModel replaces the Fantasy language model used to create future agents.
@@ -50,6 +66,16 @@ func (r *Runtime) SetModel(model fantasy.LanguageModel) {
 	if !r.titleModelExplicit {
 		r.titleModel = model
 	}
+}
+
+// SetProviderName updates the hygge provider id used by usageFromFantasy to
+// pick the right token-accounting normalization. Call in lockstep with
+// SetModel when the runtime model is hot-swapped to a different provider.
+func (r *Runtime) SetProviderName(name string) {
+	if r == nil {
+		return
+	}
+	r.providerName = name
 }
 
 func (r *Runtime) hasFantasyModel() bool {
@@ -94,7 +120,7 @@ func (r *Runtime) Summarize(ctx context.Context, messages []fantasy.Message, max
 	if summary == "" {
 		summary = res.Response.Content.Text()
 	}
-	return strings.TrimSpace(summary), usageFromFantasy(res.TotalUsage), nil
+	return strings.TrimSpace(summary), usageFromFantasy(r.providerName, res.TotalUsage), nil
 }
 
 // GenerateTitle is the narrow no-tool seam for model-generated session titles.
@@ -140,7 +166,7 @@ func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens in
 	}
 	out = strings.TrimSpace(out)
 	slog.Debug("runtime: title model returned", "model", modelName, "text", out)
-	return out, usageFromFantasy(res.TotalUsage), nil
+	return out, usageFromFantasy(r.providerName, res.TotalUsage), nil
 }
 
 func (r *Runtime) buildFantasyTools(opts fantasyToolOptions) []fantasy.AgentTool {

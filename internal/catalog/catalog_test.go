@@ -421,6 +421,142 @@ func TestLookup_HitMissAndCaseInsensitivity(t *testing.T) {
 	}
 }
 
+// TestLookup_OpenRouterDashDotFallback verifies that Catalog.Lookup
+// tolerates dash↔dot variants of OpenRouter model ids.  Real-world
+// rationale: OpenRouter accepts both forms server-side (e.g.
+// "anthropic/claude-opus-4-7" and "anthropic/claude-opus-4.7"
+// resolve to the same upstream model), but Catwalk catalogs each
+// model under a single canonical id.  Users routinely have configs
+// in one form and a catalog in the other, which previously left
+// every dependent surface — context-window display, cost — with
+// zero/unknown values.
+func TestLookup_OpenRouterDashDotFallback(t *testing.T) {
+	t.Parallel()
+	// Build a tiny fixture: catalog stores the dotted form only.
+	orProviders := []catwalk.Provider{
+		{
+			ID:   "openrouter",
+			Name: "OpenRouter",
+			Type: catwalk.TypeOpenAI,
+			Models: []catwalk.Model{
+				{
+					ID:               "anthropic/claude-opus-4.7",
+					Name:             "Claude Opus 4.7 (dotted)",
+					CostPer1MIn:      5,
+					CostPer1MOut:     25,
+					ContextWindow:    1_000_000,
+					DefaultMaxTokens: 64_000,
+				},
+				{
+					ID:               "anthropic/claude-sonnet-4-5",
+					Name:             "Claude Sonnet 4.5 (dashed)",
+					CostPer1MIn:      3,
+					CostPer1MOut:     15,
+					ContextWindow:    200_000,
+					DefaultMaxTokens: 8_192,
+				},
+			},
+		},
+		// A non-OpenRouter provider with version suffixes, used to
+		// prove the fallback is scoped to openrouter and does not
+		// leak into stricter providers.
+		{
+			ID:   "anthropic",
+			Name: "Anthropic",
+			Type: catwalk.TypeAnthropic,
+			Models: []catwalk.Model{
+				{
+					ID:            "claude-sonnet-4-5",
+					Name:          "Claude Sonnet 4.5",
+					ContextWindow: 200_000,
+				},
+			},
+		},
+	}
+	snap := snapshotFromCatwalkProviders(orProviders, "")
+	f := &fakeFetcher{snap: snap}
+	c, err := Load(LoadOptions{
+		StateDir:          tempStateDir(t),
+		Source:            f,
+		BackgroundRefresh: new(false),
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Canonical form still resolves.
+	if e, ok := c.Lookup("openrouter", "anthropic/claude-opus-4.7"); !ok || e.Limit.ContextWindow != 1_000_000 {
+		t.Errorf("canonical dotted form: ok=%v ctx=%d, want hit ctx=1_000_000", ok, e.Limit.ContextWindow)
+	}
+
+	// Dashed query resolves to the dotted catalog entry.
+	if e, ok := c.Lookup("openrouter", "anthropic/claude-opus-4-7"); !ok {
+		t.Fatalf("dashed query should fall back to dotted entry; ok=%v", ok)
+	} else if e.Limit.ContextWindow != 1_000_000 || e.Cost.Input != 5 || e.Cost.Output != 25 {
+		t.Errorf("dashed fallback returned wrong entry: %+v", e)
+	}
+
+	// Reverse direction: catalog has the dashed form, query uses dotted.
+	if e, ok := c.Lookup("openrouter", "anthropic/claude-sonnet-4.5"); !ok {
+		t.Fatalf("dotted query should fall back to dashed entry; ok=%v", ok)
+	} else if e.Limit.ContextWindow != 200_000 || e.Cost.Input != 3 {
+		t.Errorf("dotted fallback returned wrong entry: %+v", e)
+	}
+
+	// Fallback respects case-insensitivity.
+	if _, ok := c.Lookup("openrouter", "Anthropic/Claude-Opus-4-7"); !ok {
+		t.Errorf("dash↔dot fallback should also tolerate case")
+	}
+
+	// Negative: still misses when no alternate exists.
+	if _, ok := c.Lookup("openrouter", "anthropic/claude-never"); ok {
+		t.Errorf("unknown model should still miss")
+	}
+
+	// Negative: fallback must not leak to non-OpenRouter providers.
+	// Catalog has anthropic/claude-sonnet-4-5; a dotted query must
+	// NOT resolve, otherwise typos would be silently accepted under
+	// stricter providers.
+	if _, ok := c.Lookup("anthropic", "claude-sonnet-4.5"); ok {
+		t.Errorf("dash↔dot fallback must not apply to non-openrouter providers")
+	}
+}
+
+func TestOpenRouterAlternateModelID(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in       string
+		wantAlt  string
+		wantSwap bool
+	}{
+		// Only digit-adjacent separators swap; word separators stay.
+		{"anthropic/claude-opus-4-7", "anthropic/claude-opus-4.7", true},
+		{"anthropic/claude-opus-4.7", "anthropic/claude-opus-4-7", true},
+		{"google/gemini-2.5-pro", "google/gemini-2-5-pro", true},
+		// No digit-adjacent separator → no swap.
+		{"plainmodel", "", false},
+		{"claude-opus", "", false},
+		{"", "", false},
+		{"a", "", false},
+		// Mixed: only digit-adjacent separators swap, others left alone.
+		{"foo-bar-1.2-baz", "foo-bar-1-2-baz", true},
+		// Numbers separated only by version dot in a longer id.
+		{"openai/gpt-5.5", "openai/gpt-5-5", true},
+	}
+	for _, tc := range cases {
+		alt, swapped := openRouterAlternateModelID(tc.in)
+		if swapped != tc.wantSwap {
+			t.Errorf("openRouterAlternateModelID(%q) swapped=%v, want %v (alt=%q)", tc.in, swapped, tc.wantSwap, alt)
+		}
+		if swapped && alt != tc.wantAlt {
+			t.Errorf("openRouterAlternateModelID(%q) = %q, want %q", tc.in, alt, tc.wantAlt)
+		}
+	}
+}
+
 func TestModels_SortedAndProviderScoped(t *testing.T) {
 	t.Parallel()
 	c, err := Load(LoadOptions{
