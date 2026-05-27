@@ -384,7 +384,7 @@ func (s Sidebar) pathBranchLine(budget int) string {
 	runes := []rune(branchName)
 	for len(runes) > 0 {
 		runes = runes[:len(runes)-1]
-		if lipgloss.Width(string(runes)+"…") <= branchBudget {
+		if len(runes) > 0 && lipgloss.Width(string(runes)+"…") <= branchBudget {
 			return s.ProjectPath + branchSep + string(runes) + "…"
 		}
 	}

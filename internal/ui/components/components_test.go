@@ -1194,9 +1194,9 @@ func TestPathBranchLine_PWDAlwaysShown(t *testing.T) {
 	}
 	const budget = 18 // tight: PWD "~/projects/myapp" = 16, no room for branch
 	got := sb.pathBranchLine(budget)
-	// PWD must always appear in full.
-	if !strings.HasPrefix(got, "~/projects/myapp") {
-		t.Errorf("pathBranchLine %q must contain PWD %q", got, "~/projects/myapp")
+	// PWD must be the entire line when there is no room for a branch.
+	if got != "~/projects/myapp" {
+		t.Errorf("pathBranchLine = %q, want %q", got, "~/projects/myapp")
 	}
 }
 

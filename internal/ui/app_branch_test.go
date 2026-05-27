@@ -34,9 +34,9 @@ func newBranchTestApp(t *testing.T, projectDir string) (*App, *bus.Bus) {
 	b := bus.New()
 	now := func() time.Time { return time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC) }
 	app, err := New(AppOptions{
-		Bus:           b,
-		Theme:         styles.DefaultTheme(),
-		ProjectDir:    projectDir,
+		Bus:        b,
+		Theme:      styles.DefaultTheme(),
+		ProjectDir: projectDir,
 		// Set HomeDir equal to ProjectDir so collapsedProjectPath() returns "~",
 		// keeping the sidebar path short enough for branch display in view tests.
 		HomeDir:       projectDir,
