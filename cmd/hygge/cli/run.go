@@ -363,7 +363,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			if err != nil {
 				return fmt.Errorf("onboarding: build provider: %w", err)
 			}
-			resolved, err := llm.ResolveProviderModel(ictx, result.Mode.Provider, result.Mode.Model, modelOpts, rt.catalogSrc)
+			resolved, err := llm.ResolveProviderModelWith(ictx, result.Mode.Provider, result.Mode.Model, modelOpts, rt.catalogSrc, rt.providerBuildOpts)
 			if err != nil {
 				return fmt.Errorf("onboarding: resolve model: %w", err)
 			}
@@ -379,16 +379,18 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			return nil
 		},
 		GeneratePrompt: func(ictx context.Context, providerName, modelName, apiKey, idea string) (string, error) {
-			// Build a one-shot provider with the given credentials to generate a prompt.
+			// Build a one-shot Fantasy model with the given credentials so prompt
+			// generation uses the same provider-specific streaming path as normal
+			// agent turns instead of calling the legacy provider stream directly.
 			opts := map[string]any{}
 			if apiKey != "" {
 				opts["api_key"] = apiKey
 			}
-			prv, err := buildProviderForName(providerName, rt.ProviderFactory, opts)
+			resolved, err := llm.ResolveProviderModelWith(ictx, providerName, modelName, opts, rt.catalogSrc, rt.providerBuildOpts)
 			if err != nil {
-				return "", fmt.Errorf("prompt gen: build provider: %w", err)
+				return "", fmt.Errorf("prompt gen: resolve model: %w", err)
 			}
-			return ui.GenerateSystemPrompt(ictx, prv, modelName, idea)
+			return ui.GenerateSystemPromptWithModel(ictx, resolved.Model, idea)
 		},
 		OnSessionCreated: func(id string) {
 			sessionID = id
@@ -408,7 +410,7 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 			if err != nil {
 				return err
 			}
-			resolved, err := llm.ResolveProviderModel(ctx, providerName, modelName, modelOpts, rt.catalogSrc)
+			resolved, err := llm.ResolveProviderModelWith(ctx, providerName, modelName, modelOpts, rt.catalogSrc, rt.providerBuildOpts)
 			if err != nil {
 				return err
 			}

@@ -104,6 +104,9 @@ type appRuntime struct {
 	// catalogSrc is the raw catalog.Catalog closed by Close to stop
 	// any periodic-refresh ticker goroutine.
 	catalogSrc *catalog.Catalog
+	// providerBuildOpts carries per-provider Fantasy construction options that
+	// must be reused by one-shot model builds, such as OpenRouter session headers.
+	providerBuildOpts llm.ProviderBuildOptions
 }
 
 // MCPServerStatus summarises the boot-time outcome of one MCP server
@@ -866,41 +869,42 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	slog.Debug("bootstrap complete", "elapsed_ms", time.Since(bootstrapStart).Milliseconds())
 
 	rt = &appRuntime{
-		Config:           cfg,
-		Provenance:       prov,
-		State:            st,
-		StateOpts:        stateOpts,
-		XDGConfigHome:    xdgConfig,
-		Bus:              b,
-		Store:            stOpen,
-		Provider:         prv,
-		ProviderFactory:  opts.ProviderFactory,
-		Permission:       permEngine,
-		Tools:            tools,
-		Catalog:          catalog,
-		Agent:            ag,
-		MemoryStore:      memoryStore,
-		Theme:            thm,
-		Skills:           skillReg,
-		Subagents:        subagentReg,
-		SubagentRunner:   subRunner,
-		Commands:         cmdReg,
-		Hooks:            hookReg,
-		AgentsBlocks:     agentsBlocks,
-		MCPClients:       mcpClients,
-		MCPConfigs:       mcpConfigs,
-		MCPStatuses:      mcpStatuses,
-		mcpAsyncConfigs:  mcpConfigs,
-		mcpAuthOpts:      mcpAuthLoadOptionsFromBootstrap(opts),
-		mcpNow:           opts.Now,
-		BaseSystemPrompt: baseSysPrompt,
-		SystemPrompt:     sysPrompt,
-		Pwd:              opts.Pwd,
-		Plugins:          pluginReg,
-		PluginPM:         pluginPM,
-		DryRun:           opts.DryRun,
-		catalogSrc:       catSrc,
-		logCloser:        logCloser,
+		Config:            cfg,
+		Provenance:        prov,
+		State:             st,
+		StateOpts:         stateOpts,
+		XDGConfigHome:     xdgConfig,
+		Bus:               b,
+		Store:             stOpen,
+		Provider:          prv,
+		ProviderFactory:   opts.ProviderFactory,
+		Permission:        permEngine,
+		Tools:             tools,
+		Catalog:           catalog,
+		Agent:             ag,
+		MemoryStore:       memoryStore,
+		Theme:             thm,
+		Skills:            skillReg,
+		Subagents:         subagentReg,
+		SubagentRunner:    subRunner,
+		Commands:          cmdReg,
+		Hooks:             hookReg,
+		AgentsBlocks:      agentsBlocks,
+		MCPClients:        mcpClients,
+		MCPConfigs:        mcpConfigs,
+		MCPStatuses:       mcpStatuses,
+		mcpAsyncConfigs:   mcpConfigs,
+		mcpAuthOpts:       mcpAuthLoadOptionsFromBootstrap(opts),
+		mcpNow:            opts.Now,
+		BaseSystemPrompt:  baseSysPrompt,
+		SystemPrompt:      sysPrompt,
+		Pwd:               opts.Pwd,
+		Plugins:           pluginReg,
+		PluginPM:          pluginPM,
+		DryRun:            opts.DryRun,
+		catalogSrc:        catSrc,
+		providerBuildOpts: orBuildOpts,
+		logCloser:         logCloser,
 	}
 	return rt, nil
 }
