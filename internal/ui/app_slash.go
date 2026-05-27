@@ -122,9 +122,10 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 			a.updateInputFocus()
 		case command.ModalModel:
 			a.modelModal = components.ModelModal{
-				Theme:   a.opts.Theme,
-				Current: a.opts.ModelProvider + "/" + a.opts.ModelName,
-				Models:  a.catalogModelOptions(),
+				Theme:     a.opts.Theme,
+				Current:   a.opts.ModelProvider + "/" + a.opts.ModelName,
+				Models:    a.catalogModelOptions(),
+				Favorites: append([]string(nil), a.opts.FavoriteModels...),
 			}
 			a.openOverlay(overlayModel)
 			a.updateInputFocus()
@@ -403,6 +404,44 @@ type modelSwitchResult struct {
 type yoloSwitchResult struct {
 	enabled bool
 	err     error
+}
+
+type toggleFavoriteResult struct {
+	ref string
+	err error
+}
+
+// toggleStringSlice adds ref to slice if not present, or removes it if present.
+// Returns a new slice; does not modify the original.
+func toggleStringSlice(slice []string, ref string) []string {
+	out := make([]string, 0, len(slice))
+	found := false
+	for _, v := range slice {
+		if v == ref {
+			found = true
+			continue
+		}
+		out = append(out, v)
+	}
+	if !found {
+		out = append(out, ref)
+	}
+	return out
+}
+
+// toggleFavoriteModelCmd calls opts.ToggleFavoriteModel if wired, ignoring
+// errors non-fatally (a missing persist is cosmetically silent; the in-memory
+// modal state is already updated).
+func (a *App) toggleFavoriteModelCmd(providerName, modelName string) tea.Cmd {
+	ref := providerName + "/" + modelName
+	return func() tea.Msg {
+		if a.opts.ToggleFavoriteModel != nil {
+			if err := a.opts.ToggleFavoriteModel(a.ctx, providerName, modelName); err != nil {
+				return toggleFavoriteResult{ref: ref, err: err}
+			}
+		}
+		return toggleFavoriteResult{ref: ref}
+	}
 }
 
 func (a *App) switchYoloCmd(value string) tea.Cmd {

@@ -1513,6 +1513,175 @@ func TestSlashCommandSteerSendsActiveTurnGuidance(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Favorite models tests (issue #50)
+// ---------------------------------------------------------------------------
+
+// TestModelDialogFavoritesRenderedFirst verifies that when FavoriteModels is
+// set on AppOptions, the modal renders a "Favorites" heading and the favorited
+// model appears above the "All models" section.
+func TestModelDialogFavoritesRenderedFirst(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	// Pick one of the embedded catalog models as a favorite.
+	all := app.catalogModelOptions()
+	if len(all) == 0 {
+		t.Fatal("expected embedded catalog models")
+	}
+	favRef := all[0].Provider + "/" + all[0].Entry.ID
+	app.opts.FavoriteModels = []string{favRef}
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	if !strings.Contains(view, "Favorites") {
+		t.Fatalf("view should contain 'Favorites' heading:\n%s", view)
+	}
+	if !strings.Contains(view, "All models") {
+		t.Fatalf("view should contain 'All models' heading:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	favIdx := lineIndexContaining(lines, "Favorites")
+	allIdx := lineIndexContaining(lines, "All models")
+	if favIdx == -1 {
+		t.Fatal("'Favorites' heading not found")
+	}
+	if allIdx == -1 {
+		t.Fatal("'All models' heading not found")
+	}
+	if favIdx >= allIdx {
+		t.Errorf("Favorites heading at line %d should be before All models heading at line %d", favIdx, allIdx)
+	}
+}
+
+// TestModelDialogNoFavoritesNoHeadings verifies that when no favorites are set,
+// neither section heading appears.
+func TestModelDialogNoFavoritesNoHeadings(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	// Default: no favorites.
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	view := ansiEscapeRE.ReplaceAllString(app.View().Content, "")
+	if strings.Contains(view, "Favorites") {
+		t.Errorf("view should not contain 'Favorites' when none are set:\n%s", view)
+	}
+	if strings.Contains(view, "All models") {
+		t.Errorf("view should not contain 'All models' when no favorites are set:\n%s", view)
+	}
+}
+
+// TestModelDialogSearchFindsBothSections verifies that search finds models
+// regardless of whether they are favorites or not.
+func TestModelDialogSearchFindsBothSections(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	all := app.catalogModelOptions()
+	if len(all) < 2 {
+		t.Fatal("need at least 2 models to test cross-section search")
+	}
+	// Favorite only the first model.
+	favRef := all[0].Provider + "/" + all[0].Entry.ID
+	app.opts.FavoriteModels = []string{favRef}
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	// With no search query, both sections exist.
+	filtered := app.modelModal.Filtered()
+	if len(filtered) != len(all) {
+		t.Fatalf("Filtered len with no query: got %d, want %d", len(filtered), len(all))
+	}
+	// First entry must be the favorite.
+	if filtered[0].Provider+"/"+filtered[0].Entry.ID != favRef {
+		t.Errorf("Filtered[0] = %s/%s, want favorite %s", filtered[0].Provider, filtered[0].Entry.ID, favRef)
+	}
+
+	// Search should narrow the list; if the query matches both favorite and
+	// non-favorite models, both must appear.
+	beforeFilter := len(app.modelModal.Filtered())
+	typeInto(app, "claude")
+	afterFilter := len(app.modelModal.Filtered())
+	if afterFilter == 0 {
+		t.Fatal("search for 'claude' should return at least one result")
+	}
+	if afterFilter > beforeFilter {
+		t.Errorf("search should narrow results, got %d > %d", afterFilter, beforeFilter)
+	}
+}
+
+// TestModelDialogCtrlFKeyTogglesAndPersists verifies that pressing ctrl+f on a
+// model emits a ToggleFavoriteModelAction which (a) updates the modal's
+// Favorites slice immediately and (b) calls the ToggleFavoriteModel seam.
+func TestModelDialogCtrlFKeyTogglesAndPersists(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	var toggled []string
+	app.opts.ToggleFavoriteModel = func(_ context.Context, providerName, modelName string) error {
+		toggled = append(toggled, providerName+"/"+modelName)
+		return nil
+	}
+
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	filtered := app.modelModal.Filtered()
+	if len(filtered) == 0 {
+		t.Fatal("expected models in picker")
+	}
+	targetRef := filtered[0].Provider + "/" + filtered[0].Entry.ID
+
+	// Press ctrl+f to favorite the currently-highlighted (first) model.
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected toggle cmd after ctrl+f")
+	}
+	// The modal's Favorites should already have the model (optimistic update).
+	favs := app.modelModal.Favorites
+	if len(favs) != 1 || favs[0] != targetRef {
+		t.Fatalf("modal Favorites = %v, want [%s]", favs, targetRef)
+	}
+	// Drive the cmd to call the seam.
+	runSlashTestCmd(app, cmd)
+	if len(toggled) != 1 || toggled[0] != targetRef {
+		t.Fatalf("ToggleFavoriteModel seam calls = %v, want [%s]", toggled, targetRef)
+	}
+	// opts.FavoriteModels should now include the toggled ref.
+	if len(app.opts.FavoriteModels) != 1 || app.opts.FavoriteModels[0] != targetRef {
+		t.Fatalf("opts.FavoriteModels = %v after toggle, want [%s]", app.opts.FavoriteModels, targetRef)
+	}
+
+	// Press ctrl+f again to un-favorite.
+	_, cmd = app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected toggle cmd after second ctrl+f")
+	}
+	if len(app.modelModal.Favorites) != 0 {
+		t.Fatalf("modal Favorites = %v after un-favorite, want []", app.modelModal.Favorites)
+	}
+	runSlashTestCmd(app, cmd)
+	if len(toggled) != 2 {
+		t.Fatalf("ToggleFavoriteModel seam total calls = %d, want 2", len(toggled))
+	}
+	if len(app.opts.FavoriteModels) != 0 {
+		t.Fatalf("opts.FavoriteModels = %v after un-favorite, want []", app.opts.FavoriteModels)
+	}
+}
+
+// TestModelDialogFKeyTypesIntoSearch verifies that plain 'f' remains a search
+// character; ctrl+f is the favorite shortcut.
+func TestModelDialogFKeyTypesIntoSearch(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/model")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	app.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	if app.modelModal.Query != "f" {
+		t.Errorf("Query = %q after 'f'; want f", app.modelModal.Query)
+	}
+}
+
 func TestSlashCommandSteerViaEnterWhileBusyDoesNotQueue(t *testing.T) {
 	t.Parallel()
 	app, _, _ := newSlashApp(t)

@@ -131,6 +131,13 @@ type AppOptions struct {
 	// failures are surfaced to the UI without rolling back the runtime switch.
 	SaveModel  func(ctx context.Context, providerName, modelName string) error
 	SaveAPIKey func(ctx context.Context, providerName, apiKey string) error
+	// ToggleFavoriteModel persists a favorite-model toggle to global state.
+	// When nil, the toggle still takes effect in-memory for the current modal
+	// session but does not survive restart.
+	ToggleFavoriteModel func(ctx context.Context, providerName, modelName string) error
+	// FavoriteModels is the initial list of favorited "provider/model" refs,
+	// loaded from global state at startup and passed into the model modal on open.
+	FavoriteModels []string
 	// RememberMemory persists project/global memory. Session memory uses Store.
 	RememberMemory func(ctx context.Context, scope session.MemoryScope, content string) (*session.Memory, error)
 	// ForgetMemory deletes project/global memory. Session memory uses Store.
@@ -1037,6 +1044,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.opts.ModelProvider = m.provider
 		a.opts.ModelName = m.model
 		return a, a.showToast("Model switched", "Using "+m.provider+"/"+m.model)
+
+	case toggleFavoriteResult:
+		if m.err != nil {
+			return a, a.setNotice("favorite toggle failed: " + m.err.Error())
+		}
+		// Sync the in-memory FavoriteModels list in opts so future modal opens
+		// reflect the latest favorites without a restart.
+		a.opts.FavoriteModels = toggleStringSlice(a.opts.FavoriteModels, m.ref)
+		return a, nil
 
 	case apiKeySaveResult:
 		if m.err != nil {

@@ -60,6 +60,10 @@ type State struct {
 	RecentSessions []string          `json:"recent_sessions,omitempty"`
 	TrustedConfigs map[string]string `json:"trusted_configs,omitempty"` // absolute path -> sha256 hex
 	AllowedRules   []AllowRule       `json:"allowed_rules,omitempty"`
+	// FavoriteModels is an ordered list of "provider/model" strings the user
+	// has marked as favorites in the model picker.  Stored globally so the
+	// list is shared across all projects and survives restarts.
+	FavoriteModels []string `json:"favorite_models,omitempty"`
 }
 
 // AllowRule is a persisted "always-allow" decision made by the user through a

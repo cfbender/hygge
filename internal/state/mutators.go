@@ -89,6 +89,30 @@ func IsConfigTrusted(absPath string, expectedSha256 string, opts LoadOptions) (b
 	return stored == expectedSha256, nil
 }
 
+// ToggleFavoriteModel adds ref to [State.FavoriteModels] if it is not already
+// present, or removes it if it is.  The list preserves insertion order; new
+// favorites are appended.  ref should be in "provider/model" form.
+func ToggleFavoriteModel(ref string, opts LoadOptions) error {
+	s, err := Load(opts)
+	if err != nil {
+		return fmt.Errorf("state: ToggleFavoriteModel: %w", err)
+	}
+	found := false
+	filtered := s.FavoriteModels[:0:0]
+	for _, v := range s.FavoriteModels {
+		if v == ref {
+			found = true
+			continue // drop it (toggle off)
+		}
+		filtered = append(filtered, v)
+	}
+	if !found {
+		filtered = append(filtered, ref) // toggle on
+	}
+	s.FavoriteModels = filtered
+	return Save(s, opts)
+}
+
 // AddAllowRule appends rule to [State.AllowedRules] and persists.  If a rule
 // with the same Category and Pattern already exists, it is left in place and
 // the timestamp is not refreshed (idempotent).  The CreatedAt field is set
