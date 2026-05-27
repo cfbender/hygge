@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"charm.land/fang/v2"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Version is the human-facing version string surfaced by CLI and TUI chrome.
@@ -109,6 +111,7 @@ Run hygge with no arguments to launch the TUI.  Use the subcommands to
 manage sessions, profiles, configuration, and themes.`,
 		SilenceUsage: true,
 	}
+	installCLIHelp(root)
 
 	root.PersistentFlags().StringVar(&rootFlags.Profile, "profile", "", "name of the profile to use (overrides state.json)")
 	root.PersistentFlags().StringVar(&rootFlags.ConfigFile, "config", "", "explicit user config file (advisory; v0.1 falls back to default discovery)")
@@ -151,6 +154,109 @@ manage sessions, profiles, configuration, and themes.`,
 	)
 
 	return root
+}
+
+func installCLIHelp(root *cobra.Command) {
+	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+		printCLIHelp(cmd)
+	})
+}
+
+func printCLIHelp(cmd *cobra.Command) {
+	styles := newCLIStylesFor(out(cmd))
+	w := out(cmd)
+	if cmd.Long != "" {
+		writeln(w, styles.Value.Render(cmd.Long))
+	} else if cmd.Short != "" {
+		writeln(w, styles.Value.Render(cmd.Short))
+	}
+	writeln(w)
+
+	writeln(w, styles.Header.Render("Usage:"))
+	writeln(w, "  "+styles.Value.Render(cmd.UseLine()))
+
+	if aliases := cmd.Aliases; len(aliases) > 0 {
+		writeln(w)
+		writeln(w, styles.Header.Render("Aliases:"))
+		writeln(w, "  "+styles.Value.Render(strings.Join(aliases, ", ")))
+	}
+
+	commands := visibleSubcommands(cmd)
+	if len(commands) > 0 {
+		writeln(w)
+		writeln(w, styles.Header.Render("Available Commands:"))
+		for _, child := range commands {
+			printf(w, "  %s  %s\n", styles.Accent.Render(cliPadRight(child.Name(), commandNameWidth(commands))), styles.Muted.Render(child.Short))
+		}
+	}
+
+	flags := cmd.NonInheritedFlags()
+	if flags.HasAvailableFlags() {
+		writeln(w)
+		writeln(w, styles.Header.Render("Flags:"))
+		printCLIFlagHelp(w, styles, flags)
+	}
+
+	inherited := cmd.InheritedFlags()
+	if inherited.HasAvailableFlags() {
+		writeln(w)
+		writeln(w, styles.Header.Render("Global Flags:"))
+		printCLIFlagHelp(w, styles, inherited)
+	}
+
+	if cmd.HasAvailableSubCommands() {
+		writeln(w)
+		printf(w, "Use %s for more information about a command.\n", styles.Value.Render(cmd.CommandPath()+" [command] --help"))
+	}
+}
+
+func visibleSubcommands(cmd *cobra.Command) []*cobra.Command {
+	commands := make([]*cobra.Command, 0, len(cmd.Commands()))
+	for _, child := range cmd.Commands() {
+		if !child.IsAvailableCommand() && child.Name() != "help" {
+			continue
+		}
+		commands = append(commands, child)
+	}
+	return commands
+}
+
+func commandNameWidth(commands []*cobra.Command) int {
+	width := 0
+	for _, cmd := range commands {
+		if n := len(cmd.Name()); n > width {
+			width = n
+		}
+	}
+	return width
+}
+
+func printCLIFlagHelp(w io.Writer, styles cliStyles, flags *pflag.FlagSet) {
+	rows := make([][2]string, 0)
+	width := 0
+	flags.VisitAll(func(flag *pflag.Flag) {
+		if flag.Hidden {
+			return
+		}
+		name := "--" + flag.Name
+		if flag.Shorthand != "" {
+			name = "-" + flag.Shorthand + ", " + name
+		}
+		if flag.Value.Type() != "bool" {
+			name += " " + flag.Value.Type()
+		}
+		if len(name) > width {
+			width = len(name)
+		}
+		usage := flag.Usage
+		if flag.DefValue != "" && flag.DefValue != "false" {
+			usage += fmt.Sprintf(" (default %q)", flag.DefValue)
+		}
+		rows = append(rows, [2]string{name, usage})
+	})
+	for _, row := range rows {
+		printf(w, "  %s  %s\n", styles.Accent.Render(cliPadRight(row[0], width)), styles.Muted.Render(row[1]))
+	}
 }
 
 // out returns the writer for the cobra command's standard output.  Tests

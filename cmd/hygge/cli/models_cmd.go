@@ -157,19 +157,19 @@ func modelsCLIStyles(w io.Writer) modelsStyles {
 			Muted:       plain,
 		}
 	}
-	// Colors are sourced from the shared inspectStyles palette so that
-	// `hygge models` matches other CLI inspection commands (skills,
-	// subagents, etc.) on terminals that support color.
+	// Colors are sourced from the shared CLI palette so that `hygge models`
+	// matches other command output on terminals that support color.
+	cli := newCLIStylesFor(w)
 	return modelsStyles{
-		Title:       lipgloss.NewStyle().Bold(true).Underline(true).Foreground(inspectHeaderColor()),
-		Meta:        lipgloss.NewStyle().Foreground(inspectMutedColor()),
-		Section:     lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()),
-		Configured:  lipgloss.NewStyle().Foreground(cliSuccessColor()),
-		Model:       lipgloss.NewStyle().Foreground(cliValueColor()),
-		Detail:      lipgloss.NewStyle().Foreground(inspectMutedColor()),
-		Capability:  lipgloss.NewStyle().Foreground(cliWarnColor()),
-		Capability2: lipgloss.NewStyle().Foreground(cliInfoColor()),
-		Muted:       lipgloss.NewStyle().Foreground(inspectMutedColor()),
+		Title:       cli.Title,
+		Meta:        cli.Muted,
+		Section:     cli.Header,
+		Configured:  cli.Success,
+		Model:       cli.Value,
+		Detail:      cli.Muted,
+		Capability:  cli.Warn,
+		Capability2: cli.Info,
+		Muted:       cli.Muted,
 	}
 }
 

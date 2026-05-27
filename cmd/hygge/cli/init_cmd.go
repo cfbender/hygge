@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -224,7 +225,7 @@ func readInitStyleFromLine(cmd *cobra.Command, reader *bufio.Reader, styles []in
 	line, err := readLineWithContext(cmd.Context(), reader)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+			writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 			return initStyle{}, errInitCancelled
 		}
 		return initStyle{}, fmt.Errorf("read init style: %w", err)
@@ -256,7 +257,7 @@ func readInitProviderFromLine(cmd *cobra.Command, reader *bufio.Reader, provider
 	line, err := readLineWithContext(cmd.Context(), reader)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+			writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 			return "", errInitCancelled
 		}
 		return "", fmt.Errorf("read provider selection: %w", err)
@@ -320,7 +321,7 @@ func pickInitStyleInteractive(cmd *cobra.Command, styles []initStyle) (initStyle
 	}
 	selected, ok := finalModel.(initStyleSelectModel)
 	if !ok || selected.cancelled || selected.choice.Name == "" {
-		writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+		writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 		return initStyle{}, errInitCancelled
 	}
 	return selected.choice, nil
@@ -384,7 +385,7 @@ func pickInitProviderInteractive(cmd *cobra.Command, providers []string) (string
 	}
 	selected, ok := finalModel.(initProviderSelectModel)
 	if !ok || selected.cancelled || selected.choice == "" {
-		writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+		writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 		return "", errInitCancelled
 	}
 	return selected.choice, nil
@@ -430,7 +431,7 @@ func (m initProviderSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m initProviderSelectModel) View() tea.View { return tea.NewView(m.list.View()) }
 
 func printInitSuccess(cmd *cobra.Command, style initStyle, providerName, configPath, promptDir string) {
-	styles := initCLIStyles()
+	styles := initCLIStyles(out(cmd))
 	writeln(out(cmd), styles.Title.Render("✓ Hygge initialized"))
 	printf(out(cmd), "%s %s %s\n", styles.Label.Render("Style"), styles.Value.Render(style.Name), styles.Muted.Render(style.Description))
 	printf(out(cmd), "%s %s\n", styles.Label.Render("Provider"), styles.Value.Render(providerName))
@@ -447,13 +448,14 @@ type initStyles struct {
 	Muted lipgloss.Style
 }
 
-func initCLIStyles() initStyles {
+func initCLIStyles(w io.Writer) initStyles {
+	styles := newCLIStylesFor(w)
 	return initStyles{
-		Title: lipgloss.NewStyle().Bold(true).Foreground(initSuccessColor()),
-		Label: lipgloss.NewStyle().Bold(true).Foreground(cliHeaderColor()).Width(10),
-		Value: lipgloss.NewStyle().Foreground(cliValueColor()),
-		Path:  lipgloss.NewStyle().Foreground(cliAccentColor()),
-		Muted: initMutedStyle(),
+		Title: styles.Success.Bold(true),
+		Label: styles.Label.Width(10),
+		Value: styles.Value,
+		Path:  styles.Accent,
+		Muted: styles.Muted,
 	}
 }
 
@@ -482,11 +484,9 @@ func styleInitList(l *list.Model) {
 	l.Styles.DividerDot = lipgloss.NewStyle().Foreground(initHelpColor()).SetString(" • ")
 }
 
-func initMutedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(initMutedColor()) }
-func initAccentColor() color.Color   { return cliAccentColor() }
-func initMutedColor() color.Color    { return cliMutedColor() }
-func initSuccessColor() color.Color  { return cliSuccessColor() }
-func initHelpColor() color.Color     { return cliMutedColor() }
+func initAccentColor() color.Color { return cliAccentColor() }
+func initMutedColor() color.Color  { return cliMutedColor() }
+func initHelpColor() color.Color   { return cliMutedColor() }
 
 func initSelectedForegroundColor() color.Color      { return cliSelectedColor() }
 func initSelectedMutedForegroundColor() color.Color { return cliSelectedMutedColor() }
@@ -590,7 +590,7 @@ func pickInitModel(cmd *cobra.Command, reader *bufio.Reader, isTTY bool, models 
 		line, err := readLineWithContext(cmd.Context(), reader)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+				writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 				return "", errInitCancelled
 			}
 			return "", fmt.Errorf("read model name: %w", err)
@@ -628,7 +628,7 @@ func pickInitModelInteractive(cmd *cobra.Command, models []catalog.Entry, compon
 	}
 	selected, ok := finalModel.(initModelSelectModel)
 	if !ok || selected.cancelled || selected.choice == "" {
-		writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+		writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 		return "", errInitCancelled
 	}
 	return selected.choice, nil
@@ -638,7 +638,7 @@ func readInitModelFromLine(cmd *cobra.Command, reader *bufio.Reader, models []ca
 	line, err := readLineWithContext(cmd.Context(), reader)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			writeln(out(cmd), initMutedStyle().Render("Cancelled."))
+			writeln(out(cmd), newCLIStylesFor(out(cmd)).Muted.Render("Cancelled."))
 			return "", errInitCancelled
 		}
 		return "", fmt.Errorf("read model selection: %w", err)
