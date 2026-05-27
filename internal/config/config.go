@@ -65,11 +65,39 @@ import (
 // [subagents.<name>] table in config.toml (or in a profile file).  The schema
 // is identical to the entries accepted by subagents.toml so both sources are
 // interchangeable.
+//
+// Provider and Model can be specified two ways:
+//
+//   - Split form, mirroring [[modes]]:
+//
+//     [subagents.librarian]
+//     provider = "openrouter"
+//     model    = "anthropic/claude-sonnet-4.6"
+//
+//   - Combined form, where provider is encoded as a prefix on Model:
+//
+//     [subagents.librarian]
+//     model = "openrouter/anthropic/claude-sonnet-4.6"
+//
+// The two forms are equivalent; the split form is preferred because it
+// is symmetric with [[modes]] and avoids the "everything before the
+// first slash is the provider" gotcha when model ids themselves contain
+// slashes (OpenRouter).  Setting both Provider and a Model that
+// already includes a provider prefix is a conflict: the split fields
+// win and a warning is logged.
 type SubagentEntry struct {
 	Description string   `mapstructure:"description"`
 	Prompt      string   `mapstructure:"prompt"`
 	Tools       []string `mapstructure:"tools"`
-	Model       string   `mapstructure:"model"`
+	// Provider is the hygge provider id (e.g. "openrouter"). Optional.
+	// When non-empty, [Model] must be the bare model id (no provider
+	// prefix); the subagent loader joins them into the canonical
+	// "<provider>/<model-id>" form expected by the resolver.
+	Provider string `mapstructure:"provider"`
+	// Model is the model id.  When [Provider] is empty, Model must
+	// itself be a "<provider>/<model-id>" reference; when Provider is
+	// set, Model is the bare model id only.
+	Model string `mapstructure:"model"`
 }
 
 // Config is the typed, fully-resolved configuration.

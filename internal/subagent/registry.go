@@ -174,7 +174,11 @@ type tomlEntry struct {
 	Description string   `toml:"description"`
 	Prompt      string   `toml:"prompt"`
 	Tools       []string `toml:"tools"`
-	Model       string   `toml:"model"`
+	// Provider is the hygge provider id (e.g. "openrouter"). Optional;
+	// see [config.SubagentEntry] for the full schema and the
+	// relationship with Model.
+	Provider string `toml:"provider"`
+	Model    string `toml:"model"`
 }
 
 // loadOneFile reads path (when present) and merges its entries into
@@ -233,6 +237,7 @@ func loadFromConfig(byName map[string]Type, cfg *config.Config, baseDir string) 
 			Description: entry.Description,
 			Prompt:      entry.Prompt,
 			Tools:       append([]string(nil), entry.Tools...),
+			Provider:    entry.Provider,
 			Model:       entry.Model,
 		}, "user", baseDir)
 		if err != nil {
@@ -274,7 +279,36 @@ func normalizeEntry(name string, e tomlEntry, source, baseDir string) (Type, err
 		tools = append(tools, t)
 	}
 	model := strings.TrimSpace(e.Model)
-	if model != "" && !IsValidModelRef(model) {
+	provider := strings.TrimSpace(e.Provider)
+	switch {
+	case provider != "" && model == "":
+		slog.Warn("subagent: provider set but model is empty; falling back to parent's model",
+			"type", name, "provider", provider)
+		model = ""
+	case provider != "":
+		// Split form: join "<provider>/<model>".  Model may itself
+		// contain slashes (OpenRouter uses "vendor/id" model names
+		// like "anthropic/claude-sonnet-4.6"), so a slash here is
+		// NOT a sign that the user double-specified the provider.
+		// The one real footgun is when model starts with the same
+		// provider prefix the user already specified — that's an
+		// accidental duplicate; strip it and warn so the user can
+		// clean their config.
+		if dup, after := stripDuplicateProviderPrefix(provider, model); dup {
+			slog.Warn("subagent: provider duplicated as model prefix; stripping",
+				"type", name, "provider", provider, "model", model)
+			model = after
+		}
+		joined := provider + "/" + model
+		if !IsValidModelRef(joined) {
+			slog.Warn("subagent: provider+model do not form a valid model reference; falling back to parent's model",
+				"type", name, "provider", provider, "model", model,
+				"want_shape", "<provider>/<model-id>")
+			model = ""
+		} else {
+			model = joined
+		}
+	case model != "" && !IsValidModelRef(model):
 		slog.Warn("subagent: malformed model override; falling back to parent's model",
 			"type", name, "requested_model", model,
 			"want_shape", "<provider>/<model-id>")
@@ -288,6 +322,27 @@ func normalizeEntry(name string, e tomlEntry, source, baseDir string) (Type, err
 		Source:       source,
 		Model:        model,
 	}, nil
+}
+
+// stripDuplicateProviderPrefix detects the case where the user
+// explicitly set Provider AND prefixed Model with the same provider
+// — e.g. provider = "openrouter", model = "openrouter/google/x".
+// Returns (true, "google/x") in that case so the caller can strip
+// the redundant prefix before joining; otherwise (false, model)
+// unchanged.  The comparison is case-insensitive on the prefix to
+// match the relaxed casing the rest of the resolver tolerates.
+func stripDuplicateProviderPrefix(provider, model string) (bool, string) {
+	if provider == "" || model == "" {
+		return false, model
+	}
+	prefix := provider + "/"
+	if len(model) <= len(prefix) {
+		return false, model
+	}
+	if !strings.EqualFold(model[:len(prefix)], prefix) {
+		return false, model
+	}
+	return true, model[len(prefix):]
 }
 
 // Get returns the registered type with the given name.

@@ -156,6 +156,14 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		ctx = a.opts.TurnContextDecorator(ctx, sessionID)
 	}
 
+	// Freeze the active provider id for the whole turn.  Callbacks
+	// (OnStreamFinish, OnStepFinish) consult usageFromFantasy
+	// repeatedly during a stream, and Agent.SetModel can swap the
+	// provider between turns; reading a.providerName() inside the
+	// callbacks would race the swap and could even mix providers
+	// within a single turn's accounting.
+	providerID := a.providerName()
+
 	msgs, marker, err := a.opts.Store.MessagesSinceLatestMarker(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load messages: %w", err)
@@ -345,12 +353,12 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		},
 		OnStreamFinish: func(usage fantasy.Usage, _ fantasy.FinishReason, _ fantasy.ProviderMetadata) error {
 			mu.Lock()
-			pendingUsage = usageFromFantasy(usage)
+			pendingUsage = usageFromFantasy(providerID, usage)
 			mu.Unlock()
 			return nil
 		},
 		OnStepFinish: func(step fantasy.StepResult) error {
-			u := usageFromFantasy(step.Usage)
+			u := usageFromFantasy(providerID, step.Usage)
 			if len(step.Content.ToolCalls()) == 0 {
 				return appendAssistant(u)
 			}
@@ -631,8 +639,57 @@ func toFantasyRole(role session.Role) fantasy.MessageRole {
 	}
 }
 
-func usageFromFantasy(u fantasy.Usage) provider.Usage {
-	return provider.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheCreationTokens}
+// usageFromFantasy converts fantasy.Usage to provider.Usage, normalizing
+// per-provider quirks in how cached prompt tokens are reported.
+//
+// Hygge's downstream cost and context-window math (see internal/cost and
+// internal/agent.recordUsage) follow the Anthropic-native convention:
+// InputTokens are NEW prompt tokens not served from cache; CacheReadTokens
+// are reported separately and ADDITIVE to the prompt size.
+//
+// OpenAI's chat-completions API (and OpenRouter, which proxies it) reports
+// prompt_tokens INCLUSIVE of cached tokens, with the cached portion broken
+// out under prompt_tokens_details.cached_tokens. Fantasy's OpenAI provider
+// subtracts the cached portion before exposing the value as InputTokens, but
+// its OpenRouter provider does NOT — see
+// charm.land/fantasy/providers/openrouter/language_model_hooks.go. Without
+// the subtraction here, OpenRouter cached tokens would be billed twice (once
+// at the full input rate, once at the cache-read rate) and counted twice in
+// the displayed context window percentage.
+//
+// providerID is the hygge provider id (lower-case, e.g. "openrouter"). When
+// it identifies a provider known to report inclusive prompt tokens, we
+// subtract CacheReadTokens from InputTokens, clamped to zero. Unknown or
+// empty providerIDs leave the value untouched so the conservative default
+// matches existing Anthropic behaviour.
+func usageFromFantasy(providerID string, u fantasy.Usage) provider.Usage {
+	input := u.InputTokens
+	if inputIncludesCachedTokens(providerID) && u.CacheReadTokens > 0 {
+		input = max(u.InputTokens-u.CacheReadTokens, 0)
+	}
+	return provider.Usage{
+		InputTokens:      input,
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheCreationTokens,
+	}
+}
+
+// inputIncludesCachedTokens reports whether a provider's reported input/prompt
+// token count already includes cached prompt tokens. Returning true causes
+// usageFromFantasy to subtract CacheReadTokens from InputTokens before billing
+// and context-window math.
+//
+// Today only OpenRouter is in this set: Fantasy's OpenAI provider already
+// subtracts before exporting fantasy.Usage, and Anthropic-native reports
+// InputTokens exclusive of cached tokens by API convention.
+func inputIncludesCachedTokens(providerID string) bool {
+	switch providerID {
+	case "openrouter":
+		return true
+	default:
+		return false
+	}
 }
 
 func fantasyToolResultText(out fantasy.ToolResultOutputContent) (string, bool) {

@@ -276,9 +276,10 @@ func New(opts Options) (*Agent, error) {
 		queues:                 make(map[string][]QueuedSend),
 	}
 	a.runtime = NewRuntime(RuntimeOptions{
-		Model:      opts.FantasyModel,
-		TitleModel: opts.TitleFantasyModel,
-		Tools:      opts.Tools,
+		Model:        opts.FantasyModel,
+		TitleModel:   opts.TitleFantasyModel,
+		Tools:        opts.Tools,
+		ProviderName: providerNameFor(opts.Provider),
 	})
 	a.session = NewSessionAgent(a, a.runtime)
 	return a, nil
@@ -304,6 +305,7 @@ func (a *Agent) SetModel(providerName, modelName string, prv provider.Provider, 
 	a.model = session.ModelRef{Provider: providerName, Name: modelName}
 	if a.runtime != nil {
 		a.runtime.SetModel(fm)
+		a.runtime.SetProviderName(providerNameFor(prv))
 	}
 	return nil
 }
@@ -313,6 +315,34 @@ func modelName(m fantasy.LanguageModel) string {
 		return ""
 	}
 	return m.Model()
+}
+
+// providerNameFor returns the lower-case provider id for prv, or "" if prv is
+// nil. Used to feed RuntimeOptions.ProviderName and a.providerName() so
+// per-provider token-accounting normalization in usageFromFantasy stays in
+// sync with the active provider.
+func providerNameFor(prv provider.Provider) string {
+	if prv == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(prv.Name()))
+}
+
+// providerName returns the active provider id for use by usageFromFantasy.
+// Returns "" when the agent has no provider configured (test fixtures).
+//
+// Acquires a.mu because Agent.SetModel writes a.opts.Provider under the
+// same mutex; calling this without synchronisation would race a concurrent
+// SetModel.  Hot-path callers in the turn loop should capture the value
+// once at turn start instead of calling this in every callback.
+func (a *Agent) providerName() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.Lock()
+	prv := a.opts.Provider
+	a.mu.Unlock()
+	return providerNameFor(prv)
 }
 
 // SetSystemPrompt replaces the system prompt used by subsequent sends. It does
