@@ -48,7 +48,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -596,6 +598,9 @@ func (e *Engine) warnIfProjectHyggeTracked(req Request, pattern string) {
 //	../crush/internal/cli/foo.go → ../crush/**               (relative, dotdot)
 //	./src/main.go                → ./src/**
 func promoteTarget(cat Category, target string) string {
+	if cat == CategoryShell {
+		return promoteShellTarget(target)
+	}
 	if cat != CategoryFileRead && cat != CategoryFileWrite {
 		return target
 	}
@@ -646,6 +651,111 @@ func promoteTarget(cat Category, target string) string {
 	return filepath.Dir(target) + "/**"
 }
 
+// promoteShellTarget promotes filesystem-looking arguments in a shell command
+// to reusable glob patterns so that similar commands in the same directory
+// tree are covered by a single session approval.
+//
+// Only simple whitespace-split commands are handled; complex shell constructs
+// (pipes, redirections, subshells) are returned unchanged to keep this
+// conservative and safe.
+//
+// Promotion rules per argument:
+//   - flags (starting with "-") are kept verbatim
+//   - "." or "./" → "**/*"
+//   - a path with a directory component → "<dir>/**/*"
+//   - bare words with no "/" are kept verbatim (conservative: may be a
+//     subcommand argument, not a filesystem path)
+//   - arguments that already contain glob characters are kept verbatim
+//
+// Examples:
+//
+//	"cat internal/main.go"  → "cat internal/**/*"
+//	"ls ."                  → "ls **/*"
+//	"ls -la ./src"          → "ls -la src/**/*"
+//	"go test ./..."         → "go test ./..."   (... treated as wildcard: kept)
+//	"git status"            → "git status"       (no path-like arg)
+func promoteShellTarget(cmd string) string {
+	if cmd == "" {
+		return cmd
+	}
+	// Bail out on shell metacharacters to stay conservative.
+	for _, meta := range []string{"|", ";", "&&", "||", ">", "<", "`", "$(", "&"} {
+		if strings.Contains(cmd, meta) {
+			return cmd
+		}
+	}
+
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return cmd
+	}
+
+	promoted := make([]string, len(parts))
+	promoted[0] = parts[0] // command name is never promoted
+	changed := false
+	for i, arg := range parts[1:] {
+		p := promoteShellArg(arg)
+		promoted[i+1] = p
+		if p != arg {
+			changed = true
+		}
+	}
+	if !changed {
+		return cmd
+	}
+	return strings.Join(promoted, " ")
+}
+
+// promoteShellArg promotes a single shell argument that looks like a
+// filesystem path.  Flags and non-path tokens are returned unchanged.
+func promoteShellArg(arg string) string {
+	if arg == "" {
+		return arg
+	}
+	// Flags are kept verbatim.
+	if strings.HasPrefix(arg, "-") {
+		return arg
+	}
+	// Already-recursive Go paths (for example ./...) are kept verbatim.
+	if strings.Contains(arg, "...") {
+		return arg
+	}
+	// Glob expressions already present — keep them (don't double-promote).
+	if strings.Contains(arg, "*") || strings.Contains(arg, "?") {
+		return arg
+	}
+	// Determine whether the arg looks like a path.
+	looksLikePath := strings.ContainsAny(arg, "/") ||
+		arg == "." || arg == ".." ||
+		strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") ||
+		strings.HasPrefix(arg, "~/")
+
+	if !looksLikePath {
+		return arg
+	}
+
+	// Strip trailing slashes for clean handling.
+	clean := strings.TrimRight(arg, "/")
+	if clean == "" || clean == "." || clean == ".." {
+		return "**/*"
+	}
+	clean = strings.TrimPrefix(clean, "./")
+	if clean == "" || clean == "." {
+		return "**/*"
+	}
+
+	dir := path.Dir(clean)
+	if dir == "." || dir == "" {
+		// e.g. "./src" should cover the src tree, not every relative tree.
+		return clean + "/**/*"
+	}
+	// e.g. "internal/main.go" → "internal/**/*"
+	//      "./src/foo.go"     → "src/**/*"
+	//      "../other/foo.go"  → "../other/**/*"
+	//      "~/.config/foo"    → "~/.config/**/*"
+	return dir + "/**/*"
+}
+
 // splitPath splits a filepath into its components.
 func splitPath(p string) []string {
 	var parts []string
@@ -682,6 +792,17 @@ func (e *Engine) lookupSession(req Request) (Decision, bool) {
 				continue
 			}
 			if ok, _ := doublestar.PathMatch(key.Target, req.Target); ok {
+				return d, true
+			}
+		}
+	}
+	// Check if any cached promoted shell command pattern covers this target.
+	if req.Category == CategoryShell {
+		for key, d := range e.sessionCache {
+			if key.Category != CategoryShell || !strings.Contains(key.Target, "*") {
+				continue
+			}
+			if ok, _ := doublestar.Match(key.Target, req.Target); ok {
 				return d, true
 			}
 		}
