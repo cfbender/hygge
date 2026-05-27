@@ -8,6 +8,16 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.14.1] — 2026-05-27
+
+### Bug Fixes
+
+- Parse timestamps for expires at (#47) ([`ccacfc5b`](../../commit/ccacfc5ba13649fcd4781c9d70a5c6835a4dc599))
+- Correct OpenRouter cost/context and add subagent split form (#49) ([`f2991ac0`](../../commit/f2991ac0d095968955c03a9cfff9e0ca705a4569))
+
+### Style
+
+- Smaller sidebar by two columns (#48) ([`06a8b239`](../../commit/06a8b239460e9352608de9a761e175d4a9f2e002))
 ## [0.14.0] — 2026-05-27
 
 ### Features
