@@ -198,6 +198,114 @@ func TestSetAuth_EmptyName(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// LoadAuth tolerates non-canonical expires_at shapes
+//
+// Files written by other MCP clients (or earlier Hygge shapes that stored
+// time.Time) may serialise expires_at as an RFC3339 string instead of the
+// canonical Unix-millisecond integer. LoadAuth must accept both, and the
+// next persistence should normalise the value back to an integer.
+// ---------------------------------------------------------------------------
+
+func TestLoadAuth_AcceptsExpiresAtAsRFC3339String(t *testing.T) {
+	_, opts := hermeticMCPAuth(t)
+	path, err := AuthPath(opts)
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	expires := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	raw := fmt.Sprintf(`{
+  "servers": {
+    "srv": {
+      "tokens": {"access_token":"a","refresh_token":"r","token_url":"https://t","expires_at":%q},
+      "oauth": {"access_token":"a2","refresh_token":"r2","token_url":"https://t2","expires_at":%q},
+      "added_at": "0001-01-01T00:00:00Z"
+    }
+  }
+}`, expires.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := LoadAuth(opts)
+	if err != nil {
+		t.Fatalf("LoadAuth: %v", err)
+	}
+	entry, ok := s.GetAuth("srv")
+	if !ok {
+		t.Fatal("missing srv entry")
+	}
+	want := expires.UnixMilli()
+	if entry.Tokens == nil || entry.Tokens.ExpiresAt != want {
+		t.Fatalf("Tokens.ExpiresAt = %v, want %v", entry.Tokens, want)
+	}
+	if entry.OAuth == nil || entry.OAuth.ExpiresAt != want {
+		t.Fatalf("OAuth.ExpiresAt = %v, want %v", entry.OAuth, want)
+	}
+
+	// Persisting again must normalise the value to an integer so a later
+	// version with stricter decoding stays happy.
+	if err := SetAuth("srv", entry, opts); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+	got, err := os.ReadFile(path) //nolint:gosec // test-controlled temp path
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	wantSubstr := fmt.Sprintf(`"expires_at": %d`, want)
+	if !strings.Contains(string(got), wantSubstr) {
+		t.Fatalf("expected normalised %q in file:\n%s", wantSubstr, got)
+	}
+}
+
+func TestLoadAuth_AcceptsExpiresAtAsNumericString(t *testing.T) {
+	_, opts := hermeticMCPAuth(t)
+	path, err := AuthPath(opts)
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	want := int64(1_700_000_000_000)
+	raw := fmt.Sprintf(`{"servers":{"srv":{"tokens":{"access_token":"a","expires_at":"%d"},"added_at":"0001-01-01T00:00:00Z"}}}`, want)
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s, err := LoadAuth(opts)
+	if err != nil {
+		t.Fatalf("LoadAuth: %v", err)
+	}
+	entry, ok := s.GetAuth("srv")
+	if !ok {
+		t.Fatal("missing srv entry")
+	}
+	if entry.Tokens == nil || entry.Tokens.ExpiresAt != want {
+		t.Fatalf("Tokens.ExpiresAt = %v, want %d", entry.Tokens, want)
+	}
+}
+
+func TestLoadAuth_RejectsExpiresAtAsGibberish(t *testing.T) {
+	_, opts := hermeticMCPAuth(t)
+	path, err := AuthPath(opts)
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{"servers":{"srv":{"tokens":{"access_token":"a","expires_at":"not-a-time"}}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := LoadAuth(opts); err == nil {
+		t.Fatal("expected corrupt-file error for unrecognised expires_at")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // File has mode 0600
 // ---------------------------------------------------------------------------
 
