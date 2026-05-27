@@ -156,6 +156,14 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		ctx = a.opts.TurnContextDecorator(ctx, sessionID)
 	}
 
+	// Freeze the active provider id for the whole turn.  Callbacks
+	// (OnStreamFinish, OnStepFinish) consult usageFromFantasy
+	// repeatedly during a stream, and Agent.SetModel can swap the
+	// provider between turns; reading a.providerName() inside the
+	// callbacks would race the swap and could even mix providers
+	// within a single turn's accounting.
+	providerID := a.providerName()
+
 	msgs, marker, err := a.opts.Store.MessagesSinceLatestMarker(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load messages: %w", err)
@@ -345,12 +353,12 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		},
 		OnStreamFinish: func(usage fantasy.Usage, _ fantasy.FinishReason, _ fantasy.ProviderMetadata) error {
 			mu.Lock()
-			pendingUsage = usageFromFantasy(a.providerName(), usage)
+			pendingUsage = usageFromFantasy(providerID, usage)
 			mu.Unlock()
 			return nil
 		},
 		OnStepFinish: func(step fantasy.StepResult) error {
-			u := usageFromFantasy(a.providerName(), step.Usage)
+			u := usageFromFantasy(providerID, step.Usage)
 			if len(step.Content.ToolCalls()) == 0 {
 				return appendAssistant(u)
 			}

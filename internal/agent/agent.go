@@ -330,11 +330,19 @@ func providerNameFor(prv provider.Provider) string {
 
 // providerName returns the active provider id for use by usageFromFantasy.
 // Returns "" when the agent has no provider configured (test fixtures).
+//
+// Acquires a.mu because Agent.SetModel writes a.opts.Provider under the
+// same mutex; calling this without synchronisation would race a concurrent
+// SetModel.  Hot-path callers in the turn loop should capture the value
+// once at turn start instead of calling this in every callback.
 func (a *Agent) providerName() string {
 	if a == nil {
 		return ""
 	}
-	return providerNameFor(a.opts.Provider)
+	a.mu.Lock()
+	prv := a.opts.Provider
+	a.mu.Unlock()
+	return providerNameFor(prv)
 }
 
 // SetSystemPrompt replaces the system prompt used by subsequent sends. It does
