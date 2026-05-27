@@ -209,10 +209,23 @@ func (m ModelModal) View() string {
 	} else if len(filtered) == 0 {
 		b.WriteString("\n" + muted.Render("No models match the current search."))
 	} else {
-		limit := minInt(len(filtered), maxInt(4, height-12))
+		limit := minInt(len(filtered), maxInt(1, height-12))
 		start := 0
 		if m.Cursor >= limit {
 			start = m.Cursor - limit + 1
+		}
+		visibleSectionLines := 0
+		if sections.FavCount > 0 && start == 0 {
+			visibleSectionLines++
+		}
+		if sections.FavCount > 0 && sections.FavCount < len(filtered) && start <= sections.FavCount && sections.FavCount < start+limit {
+			visibleSectionLines += 2 // blank spacer + "All models" heading
+		}
+		if visibleSectionLines > 0 {
+			limit = maxInt(1, limit-visibleSectionLines)
+			if m.Cursor >= start+limit {
+				start = m.Cursor - limit + 1
+			}
 		}
 		for i := start; i < len(filtered) && i < start+limit; i++ {
 			if sections.FavCount > 0 && i == 0 {
