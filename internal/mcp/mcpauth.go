@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,13 +23,154 @@ var mcpAuthFileMu sync.Mutex
 // rather than in the shared mcp.toml, which is often committed to VCS.
 type AuthEntry struct {
 	// Headers is the map of header-name → value that will be injected
-	// at runtime.  Values are stored in plaintext with mode 0o600 on
+	// at runtime. Values are stored in plaintext with mode 0o600 on
 	// the auth file; they should contain literal secret values, not
 	// $VAR references (those belong in mcp.toml).
 	Headers map[string]string `json:"headers,omitempty"`
 
+	// OAuth holds the legacy bearer-token shape for MCP servers that support
+	// OAuth-based authorization. New auth flows populate Tokens with token
+	// sets (access token, refresh token, expiry, scope) and ClientInfo with
+	// OAuth client metadata; OAuthCredential is retained for compatibility.
+	OAuth *OAuthCredential `json:"oauth,omitempty"`
+
+	// Tokens and ClientInfo are the current OAuth auth-flow storage shape.
+	Tokens       *OAuthTokens     `json:"tokens,omitempty"`
+	ClientInfo   *OAuthClientInfo `json:"client_info,omitempty"`
+	CodeVerifier string           `json:"code_verifier,omitempty"`
+	OAuthState   string           `json:"oauth_state,omitempty"`
+	ServerURL    string           `json:"server_url,omitempty"`
+
 	// AddedAt is the time the entry was first recorded.
 	AddedAt time.Time `json:"added_at"`
+}
+
+// OAuthCredential is OAuth bearer-token material for one MCP server.
+type OAuthCredential struct {
+	AccessToken  string `json:"access_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	TokenURL     string `json:"token_url,omitempty"`
+	ClientID     string `json:"client_id,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"`
+	ExpiresAt    int64  `json:"expires_at,omitempty"` // Unix milliseconds.
+	Scope        string `json:"scope,omitempty"`
+}
+
+// OAuthTokens is the current OAuth token shape stored for an MCP server.
+type OAuthTokens struct {
+	AccessToken  string `json:"access_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	TokenURL     string `json:"token_url,omitempty"`
+	ExpiresAt    int64  `json:"expires_at,omitempty"` // Unix milliseconds.
+	Scope        string `json:"scope,omitempty"`
+}
+
+// OAuthClientInfo is cached dynamic-client-registration state.
+type OAuthClientInfo struct {
+	ClientID              string `json:"client_id,omitempty"`
+	ClientSecret          string `json:"client_secret,omitempty"`
+	ClientIDIssuedAt      int64  `json:"client_id_issued_at,omitempty"`
+	ClientSecretExpiresAt int64  `json:"client_secret_expires_at,omitempty"`
+}
+
+// HeadersWithOAuth returns entry.Headers plus an Authorization bearer
+// header when OAuth access-token material is present. Explicit stored
+// Authorization headers take precedence so existing auth-header configs
+// keep their behaviour.
+func (e AuthEntry) HeadersWithOAuth() map[string]string {
+	out := make(map[string]string, len(e.Headers)+1)
+	maps.Copy(out, e.Headers)
+	for key := range out {
+		if strings.EqualFold(key, "Authorization") {
+			return out
+		}
+	}
+	if e.Tokens != nil && e.Tokens.AccessToken != "" {
+		out["Authorization"] = "Bearer " + e.Tokens.AccessToken
+		return out
+	}
+	if e.OAuth != nil && e.OAuth.AccessToken != "" {
+		out["Authorization"] = "Bearer " + e.OAuth.AccessToken
+	}
+	return out
+}
+
+// RefreshOAuth refreshes the OAuth access token when it is close to expiry.
+// It returns true when the entry changed and should be persisted.
+func (e *AuthEntry) RefreshOAuth(client *http.Client, now time.Time) (bool, error) {
+	if e == nil {
+		return false, nil
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if e.Tokens != nil {
+		if e.Tokens.RefreshToken == "" || e.Tokens.TokenURL == "" {
+			return false, nil
+		}
+		if e.Tokens.AccessToken != "" && e.Tokens.ExpiresAt > 0 && now.Add(2*time.Minute).UnixMilli() < e.Tokens.ExpiresAt {
+			return false, nil
+		}
+		clientID, clientSecret := "", ""
+		if e.ClientInfo != nil {
+			clientID = e.ClientInfo.ClientID
+			clientSecret = e.ClientInfo.ClientSecret
+		}
+		fresh, err := RefreshOAuthToken(client, OAuthRefreshRequest{
+			TokenURL:     e.Tokens.TokenURL,
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RefreshToken: e.Tokens.RefreshToken,
+		})
+		if err != nil {
+			return false, err
+		}
+		if fresh.AccessToken != "" {
+			e.Tokens.AccessToken = fresh.AccessToken
+		}
+		if fresh.RefreshToken != "" {
+			e.Tokens.RefreshToken = fresh.RefreshToken
+		}
+		if fresh.ExpiresIn > 0 {
+			e.Tokens.ExpiresAt = now.Add(time.Duration(fresh.ExpiresIn) * time.Second).UnixMilli()
+		} else {
+			e.Tokens.ExpiresAt = 0
+		}
+		if fresh.Scope != "" {
+			e.Tokens.Scope = fresh.Scope
+		}
+		return true, nil
+	}
+	if e.OAuth == nil || e.OAuth.RefreshToken == "" || e.OAuth.TokenURL == "" {
+		return false, nil
+	}
+	if e.OAuth.AccessToken != "" && e.OAuth.ExpiresAt > 0 && now.Add(2*time.Minute).UnixMilli() < e.OAuth.ExpiresAt {
+		return false, nil
+	}
+	fresh, err := RefreshOAuthToken(client, OAuthRefreshRequest{
+		TokenURL:     e.OAuth.TokenURL,
+		ClientID:     e.OAuth.ClientID,
+		ClientSecret: e.OAuth.ClientSecret,
+		RefreshToken: e.OAuth.RefreshToken,
+	})
+	if err != nil {
+		return false, err
+	}
+	if fresh.AccessToken != "" {
+		e.OAuth.AccessToken = fresh.AccessToken
+	}
+	if fresh.RefreshToken != "" {
+		e.OAuth.RefreshToken = fresh.RefreshToken
+	}
+	if fresh.ExpiresIn > 0 {
+		e.OAuth.ExpiresAt = now.Add(time.Duration(fresh.ExpiresIn) * time.Second).UnixMilli()
+	} else {
+		e.OAuth.ExpiresAt = 0
+	}
+	if fresh.Scope != "" {
+		e.OAuth.Scope = fresh.Scope
+	}
+	return true, nil
 }
 
 // AuthStore is the loaded mcp-auth.json file.

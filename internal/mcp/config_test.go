@@ -585,3 +585,60 @@ func copyTestdata(t *testing.T, src, dst string) {
 	}
 	writeFile(t, dst, string(data))
 }
+
+func TestLoadConfigs_OAuthRejectsMistypedTableValues(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"enabled":       `enabled = "yes"`,
+		"client_id":     "client_id = true",
+		"client_secret": "client_secret = true",
+		"scope":         "scope = true",
+		"redirect_uri":  "redirect_uri = true",
+	}
+	for name, field := range cases {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			configDir := filepath.Join(home, ".config", "hygge")
+			path := filepath.Join(configDir, "mcp.toml")
+			writeFile(t, path, `[[servers]]
+name = "remote-oauth"
+transport = "http"
+url = "https://mcp.example/mcp"
+[servers.oauth]
+`+field+`
+`)
+
+			_, err := LoadConfigs(LoadOptions{HomeDir: home, XDGConfigHome: filepath.Join(home, ".config")})
+			if err == nil {
+				t.Fatal("expected mistyped OAuth field error")
+			}
+			if !strings.Contains(err.Error(), "oauth."+name+" must be") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigs_OAuthRejectedForStdio(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "hygge")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(configDir, "mcp.toml")
+	if err := os.WriteFile(path, []byte(`[[servers]]
+name = "local-oauth"
+command = "echo"
+oauth = true
+`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := LoadConfigs(LoadOptions{HomeDir: home, XDGConfigHome: filepath.Join(home, ".config")})
+	if err == nil {
+		t.Fatal("expected oauth/stdout transport validation error")
+	}
+	if !strings.Contains(err.Error(), `oauth cannot be used with transport "stdio"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

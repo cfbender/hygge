@@ -238,6 +238,21 @@ func TestAppendServer_ValidationMissingCommand(t *testing.T) {
 	}
 }
 
+func TestAppendServer_RejectsOAuthForStdio(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mcp.toml")
+	err := AppendServer(AppendServerOptions{
+		Path:   p,
+		Server: AppendServerSpec{Name: "srv", Transport: "stdio", Command: "echo", OAuth: true},
+	})
+	if err == nil {
+		t.Fatal("expected error for oauth with stdio transport")
+	}
+	if !strings.Contains(err.Error(), `oauth cannot be used with transport "stdio"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAppendServer_ValidationMissingURL(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mcp.toml")

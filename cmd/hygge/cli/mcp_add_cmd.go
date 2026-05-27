@@ -46,6 +46,7 @@ var errMCPAddScopeCancelled = errors.New("mcp add scope selection cancelled")
 // newMCPAddCmd builds `hygge mcp add [name]`.
 func newMCPAddCmd() *cobra.Command {
 	var scopeFlag string
+	var oauthFlag bool
 	cmd := &cobra.Command{
 		Use:   "add [name]",
 		Short: "Add a new MCP server to the user or project config",
@@ -88,16 +89,28 @@ environment-variable placeholders in the config file.`,
 				if err != nil {
 					return err
 				}
-				spec, authHeaders, err = readMCPAddNonInteractive(cmd, reader, initialName)
+				req, err := readMCPAddNonInteractive(cmd, reader, initialName)
 				if err != nil {
 					return err
 				}
+				spec = req.spec
+				authHeaders = req.authHeaders
 			}
 
+			if oauthFlag {
+				if spec.Transport != "sse" && spec.Transport != "http" {
+					return die(cmd, "--oauth is only supported for sse or http MCP transports")
+				}
+				if len(authHeaders) > 0 || len(spec.Headers) > 0 {
+					return die(cmd, "--oauth cannot be combined with header auth; choose OAuth or a stored auth header")
+				}
+				spec.OAuth = true
+			}
 			return writeMCPAddConfig(cmd, scope, scopePath, spec, authHeaders)
 		},
 	}
 	cmd.Flags().StringVar(&scopeFlag, "scope", "", "config scope to write: project or global")
+	cmd.Flags().BoolVar(&oauthFlag, "oauth", false, "mark this HTTP/SSE server as using OAuth credentials from mcp-auth.json")
 	return cmd
 }
 
@@ -143,90 +156,105 @@ type mcpAddRequest struct {
 	authHeaders map[string]string
 }
 
-func readMCPAddNonInteractive(cmd *cobra.Command, reader *bufio.Reader, initialName string) (mcp.AppendServerSpec, map[string]string, error) {
+func readMCPAddNonInteractive(cmd *cobra.Command, reader *bufio.Reader, initialName string) (mcpAddRequest, error) {
 	name := strings.TrimSpace(initialName)
 	if name == "" {
 		var err error
 		name, err = mcpAddPromptLine(cmd, reader, false, "")
 		if err != nil {
-			return mcp.AppendServerSpec{}, nil, fmt.Errorf("read name: %w", err)
+			return mcpAddRequest{}, fmt.Errorf("read name: %w", err)
 		}
 		name = strings.TrimSpace(name)
 	}
 	if name == "" {
-		return mcp.AppendServerSpec{}, nil, die(cmd, "server name is required")
+		return mcpAddRequest{}, die(cmd, "server name is required")
 	}
 
 	transportRaw, err := mcpAddPromptLine(cmd, reader, false, "")
 	if err != nil {
-		return mcp.AppendServerSpec{}, nil, fmt.Errorf("read transport: %w", err)
+		return mcpAddRequest{}, fmt.Errorf("read transport: %w", err)
 	}
 	transport := strings.ToLower(strings.TrimSpace(transportRaw))
 	if transport == "" {
 		transport = "stdio"
 	}
 	if !mcpAddValidTransport(transport) {
-		return mcp.AppendServerSpec{}, nil, die(cmd, "unknown transport %q; supported: stdio, sse, http", transport)
+		return mcpAddRequest{}, die(cmd, "unknown transport %q; supported: stdio, sse, http", transport)
 	}
 
 	spec := mcp.AppendServerSpec{Name: name, Transport: transport}
+	var authHeaders map[string]string
 	switch transport {
 	case "stdio":
 		cmdStr, err := mcpAddPromptLine(cmd, reader, false, "")
 		if err != nil {
-			return mcp.AppendServerSpec{}, nil, fmt.Errorf("read command: %w", err)
+			return mcpAddRequest{}, fmt.Errorf("read command: %w", err)
 		}
 		cmdStr = strings.TrimSpace(cmdStr)
 		if cmdStr == "" {
-			return mcp.AppendServerSpec{}, nil, die(cmd, "command is required for stdio transport")
+			return mcpAddRequest{}, die(cmd, "command is required for stdio transport")
 		}
 		spec.Command = cmdStr
 
 		argsRaw, err := mcpAddPromptLine(cmd, reader, false, "")
 		if err != nil {
-			return mcp.AppendServerSpec{}, nil, fmt.Errorf("read args: %w", err)
+			return mcpAddRequest{}, fmt.Errorf("read args: %w", err)
 		}
 		if argsRaw = strings.TrimSpace(argsRaw); argsRaw != "" {
 			spec.Args = strings.Fields(argsRaw)
 		}
+		authHeaders = map[string]string{}
 	case "sse", "http":
 		urlStr, err := mcpAddPromptLine(cmd, reader, false, "")
 		if err != nil {
-			return mcp.AppendServerSpec{}, nil, fmt.Errorf("read url: %w", err)
+			return mcpAddRequest{}, fmt.Errorf("read url: %w", err)
 		}
 		urlStr = strings.TrimSpace(urlStr)
 		if urlStr == "" {
-			return mcp.AppendServerSpec{}, nil, die(cmd, "url is required for %s transport", transport)
+			return mcpAddRequest{}, die(cmd, "url is required for %s transport", transport)
 		}
 		spec.URL = urlStr
-	}
 
-	authHeaders, err := mcpAddResolveAuthHeaders(name, spec.Transport, "", "")
-	if err != nil {
-		return mcp.AppendServerSpec{}, nil, err
-	}
-	if spec.Transport == "sse" || spec.Transport == "http" {
-		headerNameRaw, err := mcpAddPromptLine(cmd, reader, false, "")
+		authModeRaw, err := mcpAddPromptLine(cmd, reader, false, "")
 		if err != nil {
-			return mcp.AppendServerSpec{}, nil, fmt.Errorf("read auth header name: %w", err)
+			return mcpAddRequest{}, fmt.Errorf("read auth method: %w", err)
 		}
-		headerName := strings.TrimSpace(headerNameRaw)
-		if headerName != "" {
-			headerVal, err := mcpAddPromptLine(cmd, reader, false, "")
+		authMode := strings.ToLower(strings.TrimSpace(authModeRaw))
+		if authMode == "" {
+			authMode = "none"
+		}
+		switch authMode {
+		case "none", "skip", "no":
+			authHeaders = map[string]string{}
+		case "header":
+			headerNameRaw, err := mcpAddPromptLine(cmd, reader, false, "")
 			if err != nil {
-				return mcp.AppendServerSpec{}, nil, fmt.Errorf("read auth header value: %w", err)
+				return mcpAddRequest{}, fmt.Errorf("read auth header name: %w", err)
+			}
+			headerName := strings.TrimSpace(headerNameRaw)
+			if headerName == "" {
+				return mcpAddRequest{}, die(cmd, "auth header name is required when auth method is header")
+			}
+			headerVal, err := mcpAddPromptLine(cmd, reader, true, "")
+			if err != nil {
+				return mcpAddRequest{}, fmt.Errorf("read auth header value: %w", err)
 			}
 			authHeaders, err = mcpAddResolveAuthHeaders(name, spec.Transport, headerName, strings.TrimSpace(headerVal))
 			if err != nil {
-				return mcp.AppendServerSpec{}, nil, err
+				return mcpAddRequest{}, err
 			}
 			if len(authHeaders) > 0 {
 				spec.Headers = map[string]string{headerName: "$" + mcpAuthEnvVar(name, headerName)}
 			}
+		case "oauth":
+			spec.OAuth = true
+			authHeaders = map[string]string{}
+		default:
+			return mcpAddRequest{}, die(cmd, "unknown auth method %q; supported: none, header, oauth", authMode)
 		}
 	}
 
-	return spec, authHeaders, nil
+	return mcpAddRequest{spec: spec, authHeaders: authHeaders}, nil
 }
 
 func mcpAddValidTransport(transport string) bool {
@@ -267,11 +295,12 @@ func mcpAddResolveAuthHeaders(name, transport, headerName, headerValue string) (
 func writeMCPAddConfig(cmd *cobra.Command, scope mcpAddScope, scopePath string, spec mcp.AppendServerSpec, authHeaders map[string]string) error {
 	// Persist auth first so that if this step fails we have not yet written
 	// the server entry to mcp.toml — avoiding a partial state where the
-	// config references a $VAR placeholder that is never populated.
+	// config references unavailable auth material.
 	var authPath string
 	if len(authHeaders) > 0 {
 		authOpts := mcp.AuthLoadOptions{HomeDir: mcpHomeDir(), XDGStateHome: mcpXDGStateHome()}
-		if err := mcp.SetAuth(spec.Name, mcp.AuthEntry{Headers: authHeaders}, authOpts); err != nil {
+		entry := mcp.AuthEntry{Headers: authHeaders}
+		if err := mcp.SetAuth(spec.Name, entry, authOpts); err != nil {
 			return fmt.Errorf("write mcp-auth.json: %w", err)
 		}
 		authPath, _ = mcp.AuthPath(authOpts)
@@ -299,6 +328,7 @@ const (
 	mcpAddWizardStepCommand
 	mcpAddWizardStepArgs
 	mcpAddWizardStepURL
+	mcpAddWizardStepAuthMethod
 	mcpAddWizardStepAuthName
 	mcpAddWizardStepAuthValue
 )
@@ -315,6 +345,7 @@ type mcpAddWizardModel struct {
 	command      string
 	args         string
 	url          string
+	authMethod   string
 	authName     string
 	authValue    string
 	done         bool
@@ -400,7 +431,7 @@ func (m mcpAddWizardModel) View() tea.View {
 }
 
 func (m mcpAddWizardModel) isChoiceStep() bool {
-	return m.step == mcpAddWizardStepScope || m.step == mcpAddWizardStepTransport
+	return m.step == mcpAddWizardStepScope || m.step == mcpAddWizardStepTransport || m.step == mcpAddWizardStepAuthMethod
 }
 
 func (m *mcpAddWizardModel) moveChoice(delta int) {
@@ -429,6 +460,12 @@ func (m mcpAddWizardModel) choiceOptions() []mcpAddWizardChoice {
 			{value: "stdio", title: "stdio", description: "Run a local command over stdin/stdout"},
 			{value: "http", title: "http", description: "Connect to a Streamable HTTP endpoint"},
 			{value: "sse", title: "sse", description: "Connect to a server-sent events endpoint"},
+		}
+	case mcpAddWizardStepAuthMethod:
+		return []mcpAddWizardChoice{
+			{value: "none", title: "No auth", description: "Connect without stored auth material"},
+			{value: "header", title: "Header / token", description: "Store a literal HTTP auth header in mcp-auth.json"},
+			{value: "oauth", title: "OAuth", description: "Store OAuth tokens and refresh them at startup"},
 		}
 	default:
 		return nil
@@ -505,8 +542,10 @@ func (m mcpAddWizardModel) promptText() string {
 		return "Args (space-separated, blank for none)"
 	case mcpAddWizardStepURL:
 		return "URL"
+	case mcpAddWizardStepAuthMethod:
+		return "Authentication method"
 	case mcpAddWizardStepAuthName:
-		return "Auth header name (for example Authorization, blank to skip)"
+		return "Auth header name (for example Authorization)"
 	case mcpAddWizardStepAuthValue:
 		return "Auth header value (hidden)"
 	default:
@@ -568,13 +607,30 @@ func (m mcpAddWizardModel) advance() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.url = value
-		m.step = mcpAddWizardStepAuthName
-	case mcpAddWizardStepAuthName:
-		m.authName = value
-		if value == "" {
+		m.step = mcpAddWizardStepAuthMethod
+	case mcpAddWizardStepAuthMethod:
+		m.authMethod = m.selectedChoiceValue()
+		m.choiceCursor = 0
+		switch m.authMethod {
+		case "none", "":
+			m.authMethod = "none"
 			m.done = true
 			return m, tea.Quit
+		case "header":
+			m.step = mcpAddWizardStepAuthName
+		case "oauth":
+			m.done = true
+			return m, tea.Quit
+		default:
+			m.err = "Choose no auth, header, or OAuth."
+			return m, nil
 		}
+	case mcpAddWizardStepAuthName:
+		if value == "" {
+			m.err = "Auth header name is required."
+			return m, nil
+		}
+		m.authName = value
 		m.step = mcpAddWizardStepAuthValue
 	case mcpAddWizardStepAuthValue:
 		if value == "" {
@@ -642,12 +698,23 @@ func (m mcpAddWizardModel) request() (mcpAddRequest, error) {
 	default:
 		return mcpAddRequest{}, fmt.Errorf("unknown transport %q; supported: stdio, sse, http", transport)
 	}
-	authHeaders, err := mcpAddResolveAuthHeaders(name, transport, m.authName, m.authValue)
-	if err != nil {
-		return mcpAddRequest{}, err
-	}
-	if len(authHeaders) > 0 {
-		spec.Headers = map[string]string{strings.TrimSpace(m.authName): "$" + mcpAuthEnvVar(name, m.authName)}
+	var authHeaders map[string]string
+	switch m.authMethod {
+	case "", "none":
+		authHeaders = map[string]string{}
+	case "header":
+		var err error
+		authHeaders, err = mcpAddResolveAuthHeaders(name, transport, m.authName, m.authValue)
+		if err != nil {
+			return mcpAddRequest{}, err
+		}
+		if len(authHeaders) > 0 {
+			spec.Headers = map[string]string{strings.TrimSpace(m.authName): "$" + mcpAuthEnvVar(name, m.authName)}
+		}
+	case "oauth":
+		spec.OAuth = true
+	default:
+		return mcpAddRequest{}, fmt.Errorf("unknown auth method %q; supported: none, header, oauth", m.authMethod)
 	}
 	return mcpAddRequest{scope: m.scope, scopePath: mcpAddScopePath(m.scope), spec: spec, authHeaders: authHeaders}, nil
 }
