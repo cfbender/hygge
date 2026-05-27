@@ -38,7 +38,7 @@ func TestOnboardWritesGeneralModelToUserConfig(t *testing.T) {
 	if !strings.Contains(config, `model = 'openai/gpt-4o-mini'`) && !strings.Contains(config, `model = "openai/gpt-4o-mini"`) {
 		t.Fatalf("config missing selected model:\n%s", config)
 	}
-	if !strings.Contains(out.String(), "Configured General agent") {
+	if !strings.Contains(out.String(), "Configured General mode") {
 		t.Fatalf("output missing success message:\n%s", out.String())
 	}
 }
