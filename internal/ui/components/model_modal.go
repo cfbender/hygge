@@ -219,7 +219,7 @@ func (m ModelModal) View() string {
 				b.WriteString(heading.Render("  Favorites") + "\n")
 			}
 			if sections.FavCount > 0 && sections.FavCount < len(filtered) && i == sections.FavCount {
-				b.WriteString(heading.Render("  All models") + "\n")
+				b.WriteString("\n" + heading.Render("  All models") + "\n")
 			}
 
 			opt := filtered[i]
