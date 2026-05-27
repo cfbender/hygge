@@ -42,6 +42,7 @@ type AppendServerSpec struct {
 	Dir                string
 	URL                string
 	Headers            map[string]string // values should be $VAR refs
+	OAuth              bool              // true → write oauth = true
 	Enabled            *bool             // nil → omit (default true)
 	PermissionCategory string            // empty → omit (default "mcp")
 }
@@ -70,6 +71,9 @@ func AppendServer(opts AppendServerOptions) error {
 	}
 	switch transport {
 	case "stdio":
+		if spec.OAuth {
+			return fmt.Errorf("mcp writer: oauth cannot be used with transport %q", transport)
+		}
 		if strings.TrimSpace(spec.Command) == "" {
 			return fmt.Errorf("mcp writer: command is required for transport %q", transport)
 		}
@@ -147,6 +151,9 @@ func AppendServer(opts AppendServerOptions) error {
 			sb.WriteString(quoteStringTOML(spec.Headers[k]))
 		}
 		sb.WriteString(" }\n")
+	}
+	if spec.OAuth && transport != "stdio" {
+		sb.WriteString("oauth = true\n")
 	}
 	if spec.Enabled != nil && !*spec.Enabled {
 		sb.WriteString("enabled = false\n")

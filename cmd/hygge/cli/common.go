@@ -80,6 +80,8 @@ type appRuntime struct {
 	MCPConfigs      []mcp.ServerConfig
 	MCPStatuses     []MCPServerStatus
 	logCloser       func()
+	mcpAuthOpts     mcp.AuthLoadOptions
+	mcpNow          func() time.Time
 	mcpMu           sync.Mutex
 	mcpWG           sync.WaitGroup
 	mcpCancel       context.CancelFunc
@@ -889,6 +891,8 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		MCPConfigs:       mcpConfigs,
 		MCPStatuses:      mcpStatuses,
 		mcpAsyncConfigs:  mcpConfigs,
+		mcpAuthOpts:      mcpAuthLoadOptionsFromBootstrap(opts),
+		mcpNow:           opts.Now,
 		BaseSystemPrompt: baseSysPrompt,
 		SystemPrompt:     sysPrompt,
 		Pwd:              opts.Pwd,
@@ -921,7 +925,7 @@ func composeModeSystemPrompt(basePrompt, modePrompt string) string {
 }
 
 func mcpAuthEnvLookup(opts bootstrapOptions) func(string) string {
-	store, err := mcp.LoadAuth(mcp.AuthLoadOptions{HomeDir: opts.HomeDir, XDGStateHome: opts.XDGStateHome})
+	store, err := mcp.LoadAuth(mcpAuthLoadOptionsFromBootstrap(opts))
 	if err != nil {
 		slog.Warn("cli: failed to load mcp-auth.json; falling back to process environment", "err", err)
 		return os.Getenv
@@ -958,6 +962,66 @@ func mcpAuthEnvLookup(opts bootstrapOptions) func(string) string {
 	}
 }
 
+func mcpAuthLoadOptionsFromBootstrap(opts bootstrapOptions) mcp.AuthLoadOptions {
+	return mcp.AuthLoadOptions{HomeDir: opts.HomeDir, XDGStateHome: opts.XDGStateHome}
+}
+
+func applyMCPOAuth(configs []mcp.ServerConfig, authOpts mcp.AuthLoadOptions, now time.Time) []mcp.ServerConfig {
+	return applyMCPOAuthWithRefresh(configs, authOpts, now, true)
+}
+
+func applyMCPOAuthLoadOnly(configs []mcp.ServerConfig, authOpts mcp.AuthLoadOptions) []mcp.ServerConfig {
+	return applyMCPOAuthWithRefresh(configs, authOpts, time.Time{}, false)
+}
+
+func applyMCPOAuthWithRefresh(configs []mcp.ServerConfig, authOpts mcp.AuthLoadOptions, now time.Time, refresh bool) []mcp.ServerConfig {
+	store, err := mcp.LoadAuth(authOpts)
+	if err != nil {
+		slog.Warn("cli: failed to load mcp-auth.json for MCP OAuth; proceeding without OAuth", "err", err)
+		return configs
+	}
+	if refresh && now.IsZero() {
+		now = time.Now()
+	}
+	changed := false
+	for i := range configs {
+		if !configs[i].Enabled || !configs[i].OAuth.Enabled || (configs[i].Transport != "sse" && configs[i].Transport != "http") {
+			continue
+		}
+		entry, ok := store.GetAuth(configs[i].Name)
+		if !ok || (entry.Tokens == nil && entry.OAuth == nil) {
+			slog.Warn("cli: MCP server has oauth=true but no OAuth credential in mcp-auth.json", "server", configs[i].Name)
+			continue
+		}
+		if refresh {
+			refreshed, err := entry.RefreshOAuth(nil, now)
+			if err != nil {
+				slog.Warn("cli: failed to refresh MCP OAuth token; using stored token", "server", configs[i].Name, "err", err)
+			} else if refreshed {
+				if store.Servers == nil {
+					store.Servers = map[string]mcp.AuthEntry{}
+				}
+				store.Servers[configs[i].Name] = entry
+				changed = true
+			}
+		}
+		merged := entry.HeadersWithOAuth()
+		maps.Copy(merged, configs[i].Headers)
+		configs[i].Headers = merged
+	}
+	if changed {
+		for server, entry := range store.Servers {
+			if entry.Tokens == nil && entry.OAuth == nil {
+				continue
+			}
+			if err := mcp.SetAuth(server, entry, authOpts); err != nil {
+				slog.Warn("cli: failed to persist refreshed MCP OAuth token", "server", server, "err", err)
+			}
+		}
+	}
+	return configs
+}
+
 // bootstrapMCP loads mcp.toml files, spawns each enabled server, and
 // registers its tools.  Returns the live clients, the discovered
 // configs (including disabled ones), and a status summary for the
@@ -976,6 +1040,11 @@ func bootstrapMCP(ctx context.Context, opts bootstrapOptions, xdgConfig string, 
 	if err != nil {
 		slog.Warn("cli: failed to load mcp.toml; MCP support disabled for this run", "err", err)
 		return nil, nil, nil
+	}
+	if opts.Now != nil {
+		configs = applyMCPOAuth(configs, mcpAuthLoadOptionsFromBootstrap(opts), opts.Now())
+	} else {
+		configs = applyMCPOAuth(configs, mcpAuthLoadOptionsFromBootstrap(opts), time.Now())
 	}
 	if len(configs) == 0 {
 		return nil, nil, nil
@@ -1042,6 +1111,7 @@ func prepareAsyncMCP(opts bootstrapOptions, xdgConfig string) ([]mcp.ServerConfi
 		slog.Warn("cli: failed to load mcp.toml; MCP support disabled for this run", "err", err)
 		return nil, nil
 	}
+	configs = applyMCPOAuthLoadOnly(configs, mcpAuthLoadOptionsFromBootstrap(opts))
 	statuses := make([]MCPServerStatus, 0, len(configs))
 	for _, cfg := range configs {
 		status := MCPServerStatus{
@@ -1071,7 +1141,15 @@ func (r *appRuntime) StartAsyncMCP(ctx context.Context) {
 	mcpCtx, cancel := context.WithCancel(ctx)
 	r.mcpCancel = cancel
 	configs := append([]mcp.ServerConfig(nil), r.mcpAsyncConfigs...)
+	authOpts := r.mcpAuthOpts
+	nowFunc := r.mcpNow
 	r.mcpMu.Unlock()
+
+	if nowFunc != nil {
+		configs = applyMCPOAuth(configs, authOpts, nowFunc())
+	} else {
+		configs = applyMCPOAuth(configs, authOpts, time.Now())
+	}
 
 	for _, cfg := range configs {
 		if !cfg.Enabled {

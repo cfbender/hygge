@@ -20,6 +20,7 @@ func newMCPCmd() *cobra.Command {
 	}
 	root.AddCommand(
 		newMCPAddCmd(),
+		newMCPOAuthCmd(),
 		newMCPListCmd(),
 		newMCPPingCmd(),
 		newMCPToolsCmd(),
@@ -97,6 +98,8 @@ func newMCPPingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			home := mcpHomeDir()
+			cfgs = applyMCPOAuth(cfgs, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: mcpXDGStateHome()}, time.Now())
 			var target *mcp.ServerConfig
 			for i := range cfgs {
 				if cfgs[i].Name == name {
@@ -292,10 +295,13 @@ func newMCPDoctorCmd() *cobra.Command {
 // by `hygge mcp ping` to look up a server without going through full
 // bootstrap.
 func loadMCPConfigs() ([]mcp.ServerConfig, error) {
+	home := mcpHomeDir()
+	xdgState := mcpXDGStateHome()
 	return mcp.LoadConfigs(mcp.LoadOptions{
-		HomeDir:       mcpHomeDir(),
+		HomeDir:       home,
 		XDGConfigHome: mcpXDGConfig(),
 		Pwd:           mcpPwd(),
+		EnvLookup:     mcpAuthEnvLookup(bootstrapOptions{HomeDir: home, XDGStateHome: xdgState}),
 	})
 }
 

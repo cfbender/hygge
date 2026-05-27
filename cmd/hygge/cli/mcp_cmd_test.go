@@ -2,10 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/cfbender/hygge/internal/mcp"
 )
 
 func writeMCPTomlAt(t *testing.T, path, content string) {
@@ -159,6 +165,44 @@ command = "true"
 	got := buf.String()
 	if !strings.Contains(got, "invalid") && !strings.Contains(got, "unknown transport") {
 		t.Errorf("expected invalid-transport diagnostic:\n%s", got)
+	}
+}
+
+func TestMCPDoctorDoesNotRefreshOAuth(t *testing.T) {
+	home := hermeticHome(t)
+	xdgState := filepath.Join(home, ".local", "state")
+	var refreshCalls atomic.Int32
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		refreshCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer refreshServer.Close()
+	writeMCPTomlAt(t, filepath.Join(home, ".agents", "mcp.toml"), `
+[[servers]]
+name = "oauth-srv"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+oauth = true
+`)
+	if err := mcp.SetAuth("oauth-srv", mcp.AuthEntry{Tokens: &mcp.OAuthTokens{
+		AccessToken:  "old-access",
+		RefreshToken: "refresh-token",
+		TokenURL:     refreshServer.URL,
+		ExpiresAt:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).Add(-time.Minute).UnixMilli(),
+	}}, mcp.AuthLoadOptions{HomeDir: home, XDGStateHome: xdgState}); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "doctor"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("refresh endpoint called %d times, want 0", got)
 	}
 }
 
