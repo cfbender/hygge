@@ -182,6 +182,22 @@ func configuredProvidersForRuntime(rt *appRuntime) []string {
 	return authConfiguredProviders(rt.StateOpts)
 }
 
+func toggleFavoriteRef(refs []string, ref string) []string {
+	out := make([]string, 0, len(refs))
+	found := false
+	for _, existing := range refs {
+		if existing == ref {
+			found = true
+			continue
+		}
+		out = append(out, existing)
+	}
+	if !found {
+		out = append(out, ref)
+	}
+	return out
+}
+
 func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID string, openSessionsModalOnStart bool) error {
 	// Determine whether the wizard must run before regular chat is available.
 	// The TUI always opens; onboarding replaces the main view when needed.
@@ -246,6 +262,20 @@ func runTUI(ctx context.Context, cmd *cobra.Command, rt *appRuntime, sessionID s
 		MCPStatuses:             mcpStatuses,
 		NeedsOnboarding:         needsOnboarding,
 		KnownProviders:          knownProviders(),
+		FavoriteModels:          append([]string(nil), rt.State.FavoriteModels...),
+		ToggleFavoriteModel: func(_ context.Context, providerName, modelName string) error {
+			ref := providerName + "/" + modelName
+			if rt.DryRun {
+				printf(dryRunOut, "[dry-run] would toggle favorite model: %s\n", ref)
+				rt.State.FavoriteModels = toggleFavoriteRef(rt.State.FavoriteModels, ref)
+				return nil
+			}
+			if err := state.ToggleFavoriteModel(ref, rt.StateOpts); err != nil {
+				return err
+			}
+			rt.State.FavoriteModels = toggleFavoriteRef(rt.State.FavoriteModels, ref)
+			return nil
+		},
 		SaveOnboardingResult: func(ictx context.Context, result ui.OnboardingResult) error {
 			// 1. Persist every provider API key collected during onboarding.
 			providerKeys := result.ProviderAPIKeys

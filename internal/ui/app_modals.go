@@ -336,7 +336,7 @@ func (a *App) configuredModelProviders() map[string]bool {
 func (a *App) handleModelModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	sk := components.ModelKey{Name: k.String(), Runes: []rune(k.Text)}
 	switch k.String() {
-	case "up", "down", "enter", "esc", "ctrl+n", "ctrl+p":
+	case "up", "down", "enter", "esc", "ctrl+n", "ctrl+p", "ctrl+f":
 		sk.Name = k.String()
 	case "backspace", "delete":
 		sk.Name = "backspace"
@@ -357,6 +357,12 @@ func (a *App) handleModelModalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case components.SelectModelAction:
 		a.closeOverlay(overlayModel)
 		return a, a.switchModelCmd(m.Provider, m.Model)
+	case components.ToggleFavoriteModelAction:
+		ref := m.Provider + "/" + m.Model
+		// Update local Favorites slice immediately so the view reflects the
+		// change without waiting for the async persist round-trip.
+		a.modelModal.Favorites = toggleStringSlice(a.modelModal.Favorites, ref)
+		return a, a.toggleFavoriteModelCmd(m.Provider, m.Model)
 	}
 	return a, nil
 }

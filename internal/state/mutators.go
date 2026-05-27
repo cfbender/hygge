@@ -1,7 +1,9 @@
 package state
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -87,6 +89,38 @@ func IsConfigTrusted(absPath string, expectedSha256 string, opts LoadOptions) (b
 		return false, nil
 	}
 	return stored == expectedSha256, nil
+}
+
+// ToggleFavoriteModel adds ref to [State.FavoriteModels] if it is not already
+// present, or removes it if it is.  The list preserves insertion order; new
+// favorites are appended.  ref should be in "provider/model" form.
+func ToggleFavoriteModel(ref string, opts LoadOptions) error {
+	if strings.Count(ref, "/") != 1 {
+		return fmt.Errorf("state: ToggleFavoriteModel: %w", errors.New("favorite model ref must be in provider/model form"))
+	}
+	parts := strings.SplitN(ref, "/", 2)
+	if parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("state: ToggleFavoriteModel: %w", errors.New("favorite model ref must include non-empty provider and model"))
+	}
+
+	s, err := Load(opts)
+	if err != nil {
+		return fmt.Errorf("state: ToggleFavoriteModel: %w", err)
+	}
+	found := false
+	filtered := s.FavoriteModels[:0:0]
+	for _, v := range s.FavoriteModels {
+		if v == ref {
+			found = true
+			continue // drop it (toggle off)
+		}
+		filtered = append(filtered, v)
+	}
+	if !found {
+		filtered = append(filtered, ref) // toggle on
+	}
+	s.FavoriteModels = filtered
+	return Save(s, opts)
 }
 
 // AddAllowRule appends rule to [State.AllowedRules] and persists.  If a rule
