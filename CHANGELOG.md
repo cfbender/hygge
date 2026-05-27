@@ -8,6 +8,12 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.14.0] — 2026-05-27
+
+### Features
+
+- Support OAuth for MCP servers (#45) ([`3d3a5529`](../../commit/3d3a552970160cd857d3f23cb9eedfc2a5abd1dc))
+- Group shell permission approvals (#46) ([`d6d5617c`](../../commit/d6d5617c3ac13134ac29e2ef62a5acc6014dece3))
 ## [0.13.4] — 2026-05-26
 
 ### Bug Fixes
