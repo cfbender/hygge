@@ -89,10 +89,48 @@ func renderConfigExplainLine(styles cliStyles, line string) string {
 	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 		return styles.Header.Render(line)
 	}
-	if before, after, ok := strings.Cut(line, "#"); ok {
-		return renderConfigAssignment(styles, strings.TrimRight(before, " ")) + " " + styles.Muted.Render("#"+after)
+	if idx := unquotedHashIndex(line); idx >= 0 {
+		before, after := line[:idx], line[idx:]
+		return renderConfigAssignment(styles, strings.TrimRight(before, " ")) + " " + styles.Muted.Render(after)
 	}
 	return renderConfigAssignment(styles, line)
+}
+
+func unquotedHashIndex(line string) int {
+	inSingleQuote := false
+	inDoubleQuote := false
+	escaped := false
+	for i, r := range line {
+		if inDoubleQuote {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				inDoubleQuote = false
+			}
+			continue
+		}
+		if inSingleQuote {
+			if r == '\'' {
+				inSingleQuote = false
+			}
+			continue
+		}
+		switch r {
+		case '#':
+			return i
+		case '"':
+			inDoubleQuote = true
+		case '\'':
+			inSingleQuote = true
+		}
+	}
+	return -1
 }
 
 func renderConfigAssignment(styles cliStyles, line string) string {
