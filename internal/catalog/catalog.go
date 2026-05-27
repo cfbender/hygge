@@ -510,7 +510,84 @@ func (c *Catalog) Lookup(provider, model string) (Entry, bool) {
 			return e, true
 		}
 	}
+	// OpenRouter alias pass: OpenRouter accepts both dashed and
+	// dotted forms of version suffixes server-side (e.g.
+	// "anthropic/claude-opus-4-7" and "anthropic/claude-opus-4.7"
+	// resolve to the same upstream model), but Catwalk catalogs
+	// each model under a single canonical id.  When the caller
+	// supplies a form the catalog does not have, try its
+	// dash-versus-dot counterpart so config files written against
+	// OpenRouter's looser naming still match the canonical entry.
+	// Scoped to openrouter to keep stricter providers (anthropic,
+	// openai) unaffected — they use deterministic ids and a false
+	// match would mask a typo.
+	if pkey == "openrouter" {
+		if alt, swapped := openRouterAlternateModelID(model); swapped {
+			if e, ok := mods[strings.ToLower(alt)]; ok {
+				e.Source = src
+				return e, true
+			}
+			if e, ok := mods[alt]; ok {
+				e.Source = src
+				return e, true
+			}
+			for k, e := range mods {
+				if strings.EqualFold(k, alt) {
+					e.Source = src
+					return e, true
+				}
+			}
+		}
+	}
 	return Entry{}, false
+}
+
+// openRouterAlternateModelID returns the dash↔dot alternate of model when
+// the swap changes the string, and reports swapped=true.  Used by
+// Catalog.Lookup as a final fallback for OpenRouter model ids: the
+// upstream service accepts both spellings of a version suffix
+// (e.g. "claude-opus-4-7" ≡ "claude-opus-4.7"), and human-authored
+// configs frequently use the dashed form while the catalog stores
+// the dotted one (or vice-versa).
+//
+// To avoid breaking words like "claude-opus" (which would never be
+// spelled "claude.opus"), the swap is restricted to dashes/dots that
+// sit BETWEEN two digits — i.e. the version-suffix segments that
+// OpenRouter actually canonicalises differently.  Other dashes and
+// dots are left alone.  Returns (alt, true) only when at least one
+// such separator changed.
+func openRouterAlternateModelID(model string) (string, bool) {
+	if len(model) < 3 {
+		return "", false
+	}
+	if !strings.ContainsAny(model, "-.") {
+		return "", false
+	}
+	b := []byte(model)
+	swapped := false
+	for i := 1; i < len(b)-1; i++ {
+		c := b[i]
+		if c != '-' && c != '.' {
+			continue
+		}
+		if !isASCIIDigit(b[i-1]) || !isASCIIDigit(b[i+1]) {
+			continue
+		}
+		if c == '-' {
+			b[i] = '.'
+		} else {
+			b[i] = '-'
+		}
+		swapped = true
+	}
+	if !swapped {
+		return "", false
+	}
+	return string(b), true
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
 }
 
 // Models returns every entry for the given provider, sorted by id.

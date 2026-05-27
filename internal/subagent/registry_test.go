@@ -570,3 +570,195 @@ func equalSlices(a, b []string) bool {
 	}
 	return true
 }
+
+// ---------------------------------------------------------------------------
+// Split provider+model form (mirrors [[modes]])
+// ---------------------------------------------------------------------------
+
+// TestLoad_SubagentSplitProviderModel verifies that the split form
+// (provider + model as two TOML keys, mirroring [[modes]]) is joined
+// into the canonical "<provider>/<model-id>" form expected by the
+// runtime resolver.  This is the form users reach for when they
+// configure a mode and try to do the same for a subagent.
+func TestLoad_SubagentSplitProviderModel(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
+[subagents.librarian]
+description = "looks things up"
+prompt = "go"
+provider = "openrouter"
+model = "anthropic/claude-sonnet-4.6"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("librarian")
+	if !ok {
+		t.Fatal("librarian missing")
+	}
+	want := "openrouter/anthropic/claude-sonnet-4.6"
+	if got.Model != want {
+		t.Fatalf("split form not joined: got %q want %q", got.Model, want)
+	}
+}
+
+// TestLoad_ConfigSubagentSplitProviderModel verifies the same split form works
+// when entries come from config.toml (the [subagents.<name>] tables) rather
+// than from a standalone subagents.toml.  Both sources use the same schema
+// per the package contract.
+func TestLoad_ConfigSubagentSplitProviderModel(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Subagents: map[string]config.SubagentEntry{
+			"carpenter": {
+				Description: "writes code",
+				Prompt:      "go",
+				Provider:    "openrouter",
+				Model:       "anthropic/claude-sonnet-4.6",
+			},
+		},
+	}
+	reg, err := Load(LoadOptions{HomeDir: home, Config: cfg})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("carpenter")
+	if !ok {
+		t.Fatal("carpenter missing")
+	}
+	want := "openrouter/anthropic/claude-sonnet-4.6"
+	if got.Model != want {
+		t.Fatalf("split form not joined: got %q want %q", got.Model, want)
+	}
+}
+
+// TestLoad_SubagentCombinedFormStillWorks confirms the legacy combined
+// form "<provider>/<model-id>" continues to load unchanged when the
+// new Provider field is empty.  This guarantees backward compatibility
+// for every user who already wrote configs against the v0.x schema.
+func TestLoad_SubagentCombinedFormStillWorks(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
+[subagents.legacy]
+description = "old style"
+prompt = "go"
+model = "openrouter/anthropic/claude-sonnet-4.6"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("legacy")
+	if !ok {
+		t.Fatal("legacy missing")
+	}
+	if got.Model != "openrouter/anthropic/claude-sonnet-4.6" {
+		t.Fatalf("combined form mutated: got %q", got.Model)
+	}
+}
+
+// TestLoad_SubagentProviderWithoutModelDropped covers the degenerate
+// case where the user sets provider but forgets model.  We treat it
+// as "no override" rather than failing the load — the subagent runs
+// against the parent's model.
+func TestLoad_SubagentProviderWithoutModelDropped(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
+[subagents.broken]
+description = "x"
+prompt = "go"
+provider = "openrouter"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("broken")
+	if !ok {
+		t.Fatal("broken should still load with parent fallback")
+	}
+	if got.Model != "" {
+		t.Fatalf("provider-without-model should drop the override; got %q", got.Model)
+	}
+}
+
+// TestLoad_SubagentExplicitProviderStripsDuplicate covers the case where
+// the user sets provider AND prefixes the model with the same provider
+// — an accidental duplicate.  The loader strips the redundant prefix
+// and warns so the canonical reference still resolves cleanly.
+func TestLoad_SubagentExplicitProviderStripsDuplicate(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
+[subagents.duped]
+description = "x"
+prompt = "go"
+provider = "openrouter"
+model = "openrouter/anthropic/claude-sonnet-4.6"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("duped")
+	if !ok {
+		t.Fatal("duped missing")
+	}
+	want := "openrouter/anthropic/claude-sonnet-4.6"
+	if got.Model != want {
+		t.Fatalf("duplicate prefix should be stripped: got %q want %q", got.Model, want)
+	}
+}
+
+// TestLoad_SubagentSplitWithVendorModel verifies the normal split-form
+// case for OpenRouter where the model id itself contains a slash
+// (vendor/model namespace) — this is NOT a duplicate provider prefix.
+// The loader must join provider+model as-is, without warning.
+func TestLoad_SubagentSplitWithVendorModel(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
+[subagents.search]
+description = "looks things up"
+prompt = "go"
+provider = "openrouter"
+model = "google/gemini-3.5-flash"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("search")
+	if !ok {
+		t.Fatal("search missing")
+	}
+	want := "openrouter/google/gemini-3.5-flash"
+	if got.Model != want {
+		t.Fatalf("vendor-prefixed model should be joined verbatim: got %q want %q", got.Model, want)
+	}
+}
+
+// TestLoad_SubagentSplitFormMalformedDropped guards against junk in the
+// provider field producing a junk joined reference.  The split form
+// must still validate against [IsValidModelRef]; failures fall back
+// to the parent's model just like the combined-form path.
+func TestLoad_SubagentSplitFormMalformedDropped(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "subagents.toml"), `
+[subagents.bad]
+description = "x"
+prompt = "go"
+provider = "Bad-Provider!"
+model = "anthropic/claude-sonnet-4.6"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := reg.Get("bad")
+	if !ok {
+		t.Fatal("bad should still load with parent fallback")
+	}
+	if got.Model != "" {
+		t.Fatalf("malformed split form should drop the override; got %q", got.Model)
+	}
+}
