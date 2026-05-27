@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,88 @@ type OAuthClientInfo struct {
 	ClientSecret          string `json:"client_secret,omitempty"`
 	ClientIDIssuedAt      int64  `json:"client_id_issued_at,omitempty"`
 	ClientSecretExpiresAt int64  `json:"client_secret_expires_at,omitempty"`
+}
+
+// UnmarshalJSON decodes OAuthTokens while accepting expires_at in either
+// the canonical numeric form (Unix milliseconds) or as a JSON string. The
+// string form covers files written by other MCP clients or earlier shapes
+// that serialised expiry as an RFC3339 timestamp or a decimal-string Unix
+// epoch. Decoded values are normalised to Unix milliseconds; the field is
+// always marshalled back as an integer.
+func (t *OAuthTokens) UnmarshalJSON(data []byte) error {
+	type alias OAuthTokens
+	aux := struct {
+		ExpiresAt json.RawMessage `json:"expires_at,omitempty"`
+		*alias
+	}{alias: (*alias)(t)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	ms, err := parseExpiresAtMillis(aux.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("expires_at: %w", err)
+	}
+	t.ExpiresAt = ms
+	return nil
+}
+
+// UnmarshalJSON decodes OAuthCredential with the same expires_at
+// tolerance as [OAuthTokens.UnmarshalJSON].
+func (c *OAuthCredential) UnmarshalJSON(data []byte) error {
+	type alias OAuthCredential
+	aux := struct {
+		ExpiresAt json.RawMessage `json:"expires_at,omitempty"`
+		*alias
+	}{alias: (*alias)(c)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	ms, err := parseExpiresAtMillis(aux.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("expires_at: %w", err)
+	}
+	c.ExpiresAt = ms
+	return nil
+}
+
+// parseExpiresAtMillis converts a JSON expires_at value into Unix
+// milliseconds. Accepted shapes:
+//
+//   - missing / null / empty → 0
+//   - JSON number (integer)  → used verbatim as Unix milliseconds
+//   - JSON string containing an RFC3339 / RFC3339Nano timestamp
+//   - JSON string containing a decimal Unix-millisecond integer
+//
+// All other shapes return an error.
+func parseExpiresAtMillis(raw json.RawMessage) (int64, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return 0, nil
+	}
+	if trimmed[0] != '"' {
+		var n int64
+		if err := json.Unmarshal(trimmed, &n); err != nil {
+			return 0, fmt.Errorf("expected integer milliseconds or RFC3339 string: %w", err)
+		}
+		return n, nil
+	}
+	var s string
+	if err := json.Unmarshal(trimmed, &s); err != nil {
+		return 0, err
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n, nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if ts, err := time.Parse(layout, s); err == nil {
+			return ts.UnixMilli(), nil
+		}
+	}
+	return 0, fmt.Errorf("unrecognised timestamp %q (want Unix milliseconds or RFC3339)", s)
 }
 
 // HeadersWithOAuth returns entry.Headers plus an Authorization bearer
