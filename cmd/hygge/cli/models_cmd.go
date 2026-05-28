@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -58,7 +59,7 @@ By default, hygge groups models by provider. Pass a provider id or use
 }
 
 func printModels(cmd *cobra.Command, cat *catalog.Catalog, providerID string, limit int, availableProviders []string) error {
-	styles := modelsCLIStyles()
+	styles := modelsCLIStyles(out(cmd))
 	loaded := cat.Loaded()
 	available := providerSet(availableProviders)
 	providers := filterCatalogProviders(cat.Providers(), available)
@@ -141,17 +142,34 @@ type modelsStyles struct {
 	Muted       lipgloss.Style
 }
 
-func modelsCLIStyles() modelsStyles {
+func modelsCLIStyles(w io.Writer) modelsStyles {
+	plain := lipgloss.NewStyle()
+	if !isColorWriter(w) {
+		return modelsStyles{
+			Title:       plain,
+			Meta:        plain,
+			Section:     plain,
+			Configured:  plain,
+			Model:       plain,
+			Detail:      plain,
+			Capability:  plain,
+			Capability2: plain,
+			Muted:       plain,
+		}
+	}
+	// Colors are sourced from the shared CLI palette so that `hygge models`
+	// matches other command output on terminals that support color.
+	cli := newCLIStylesFor(w)
 	return modelsStyles{
-		Title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A78BFA")),
-		Meta:        lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")),
-		Section:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#38BDF8")),
-		Configured:  lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
-		Model:       lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
-		Detail:      lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")),
-		Capability:  lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
-		Capability2: lipgloss.NewStyle().Foreground(lipgloss.Color("#14B8A6")),
-		Muted:       lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")),
+		Title:       cli.Title,
+		Meta:        cli.Muted,
+		Section:     cli.Header,
+		Configured:  cli.Success,
+		Model:       cli.Value,
+		Detail:      cli.Muted,
+		Capability:  cli.Warn,
+		Capability2: cli.Info,
+		Muted:       cli.Muted,
 	}
 }
 

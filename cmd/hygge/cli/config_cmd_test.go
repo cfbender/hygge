@@ -152,6 +152,28 @@ args = ["stdio"]
 	}
 }
 
+func TestUnquotedHashIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want int
+	}{
+		{name: "comment", line: `name = "value"  # <defaults>`, want: 16},
+		{name: "double quoted hash", line: `url = "https://example.test/#fragment"  # <defaults>`, want: 40},
+		{name: "single quoted hash", line: `url = 'https://example.test/#fragment'  # <defaults>`, want: 40},
+		{name: "escaped quote before hash", line: `name = "value \"# not comment\""  # <defaults>`, want: 34},
+		{name: "no comment", line: `name = "value # still value"`, want: -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unquotedHashIndex(tt.line); got != tt.want {
+				t.Fatalf("unquotedHashIndex(%q) = %d, want %d", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigExplainKey(t *testing.T) {
 	hermeticHome(t)
 

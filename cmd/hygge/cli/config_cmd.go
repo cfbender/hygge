@@ -5,7 +5,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/spf13/cobra"
 
 	"github.com/cfbender/hygge/internal/config"
@@ -70,16 +69,74 @@ func renderConfigExplainOutput(w io.Writer, output string) string {
 		return output
 	}
 
-	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(120),
-	)
-	if err != nil {
-		return output
+	styles := newCLIStylesFor(w)
+	var b strings.Builder
+	for line := range strings.SplitSeq(strings.TrimRight(output, "\n"), "\n") {
+		b.WriteString(renderConfigExplainLine(styles, line))
+		b.WriteByte('\n')
 	}
-	rendered, err := r.Render("```toml\n" + output + "\n```\n")
-	if err != nil {
-		return output
+	return b.String()
+}
+
+func renderConfigExplainLine(styles cliStyles, line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return ""
 	}
-	return strings.TrimRight(rendered, "\n") + "\n"
+	if strings.HasPrefix(trimmed, "#") {
+		return styles.Muted.Render(line)
+	}
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		return styles.Header.Render(line)
+	}
+	if idx := unquotedHashIndex(line); idx >= 0 {
+		before, after := line[:idx], line[idx:]
+		return renderConfigAssignment(styles, strings.TrimRight(before, " ")) + " " + styles.Muted.Render(after)
+	}
+	return renderConfigAssignment(styles, line)
+}
+
+func unquotedHashIndex(line string) int {
+	inSingleQuote := false
+	inDoubleQuote := false
+	escaped := false
+	for i, r := range line {
+		if inDoubleQuote {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				inDoubleQuote = false
+			}
+			continue
+		}
+		if inSingleQuote {
+			if r == '\'' {
+				inSingleQuote = false
+			}
+			continue
+		}
+		switch r {
+		case '#':
+			return i
+		case '"':
+			inDoubleQuote = true
+		case '\'':
+			inSingleQuote = true
+		}
+	}
+	return -1
+}
+
+func renderConfigAssignment(styles cliStyles, line string) string {
+	key, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return styles.Value.Render(line)
+	}
+	return styles.Label.Render(strings.TrimRight(key, " ")) + styles.Muted.Render(" =") + styles.Value.Render(value)
 }

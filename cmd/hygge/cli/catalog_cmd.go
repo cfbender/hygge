@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/cfbender/hygge/internal/catalog"
@@ -71,13 +71,17 @@ func newCatalogListCmd() *cobra.Command {
 
 // printCatalogProviders writes the "by provider" summary table.
 func printCatalogProviders(cmd *cobra.Command, cat *catalog.Catalog) error {
+	styles := newCLIStylesFor(out(cmd))
 	loaded := cat.Loaded()
-	printf(out(cmd), "source: %s   fetched: %s   age: %s\n",
-		loaded.Source, formatLoadedTime(loaded.FetchedAt), formatAge(loaded.Age))
-	printf(out(cmd), "models: %d across %d providers\n\n", loaded.Models, loaded.Providers)
+	printf(out(cmd), "%s %s   %s %s   %s %s\n",
+		styles.Label.Render("source:"), styles.Value.Render(string(loaded.Source)),
+		styles.Label.Render("fetched:"), styles.Value.Render(formatLoadedTime(loaded.FetchedAt)),
+		styles.Label.Render("age:"), styles.Value.Render(formatAge(loaded.Age)))
+	printf(out(cmd), "%s %s %s %s\n\n",
+		styles.Label.Render("models:"), styles.Value.Render(fmt.Sprintf("%d", loaded.Models)),
+		styles.Muted.Render("across"), styles.Value.Render(fmt.Sprintf("%d providers", loaded.Providers)))
 
-	tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-	writeln(tw, "PROVIDER\tMODELS\tREASONING")
+	rows := [][]string{{"PROVIDER", "MODELS", "REASONING"}}
 	for _, p := range cat.Providers() {
 		entries := cat.Models(p)
 		reason := 0
@@ -86,9 +90,10 @@ func printCatalogProviders(cmd *cobra.Command, cat *catalog.Catalog) error {
 				reason++
 			}
 		}
-		printf(tw, "%s\t%d\t%d\n", p, len(entries), reason)
+		rows = append(rows, []string{p, fmt.Sprintf("%d", len(entries)), fmt.Sprintf("%d", reason)})
 	}
-	return tw.Flush()
+	printCLITable(cmd, styles, rows)
+	return nil
 }
 
 // printCatalogProvider writes the per-provider model table.
@@ -97,18 +102,54 @@ func printCatalogProvider(cmd *cobra.Command, cat *catalog.Catalog, providerID s
 	if len(entries) == 0 {
 		return die(cmd, "no models for provider %q", providerID)
 	}
-	tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-	writeln(tw, "MODEL\tCONTEXT\tCAPABILITIES\tINPUT$/MTok\tOUTPUT$/MTok")
+	styles := newCLIStylesFor(out(cmd))
+	rows := [][]string{{"MODEL", "CONTEXT", "CAPABILITIES", "INPUT$/MTok", "OUTPUT$/MTok"}}
 	for _, e := range entries {
-		printf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			e.ID,
 			formatContext(e.Limit.ContextWindow),
 			formatCapabilities(e.Capabilities),
 			formatMoney(e.Cost.Input),
 			formatMoney(e.Cost.Output),
-		)
+		})
 	}
-	return tw.Flush()
+	printCLITable(cmd, styles, rows)
+	return nil
+}
+
+func printCLITable(cmd *cobra.Command, styles cliStyles, rows [][]string) {
+	if len(rows) == 0 {
+		return
+	}
+	widths := make([]int, len(rows[0]))
+	for _, row := range rows {
+		for i, cell := range row {
+			if i < len(widths) && lipgloss.Width(cell) > widths[i] {
+				widths[i] = lipgloss.Width(cell)
+			}
+		}
+	}
+	for rowIdx, row := range rows {
+		for i, cell := range row {
+			if i > 0 {
+				printf(out(cmd), "  ")
+			}
+			style := styles.Value
+			if rowIdx == 0 {
+				style = styles.Header
+			} else if i == 0 {
+				style = styles.Accent
+			} else if i == 2 {
+				style = styles.Info
+			}
+			printf(out(cmd), "%s", style.Render(cliPadRight(cell, widths[i])))
+		}
+		printf(out(cmd), "\n")
+	}
+}
+
+func printCLIField(cmd *cobra.Command, styles cliStyles, label, value string) {
+	printf(out(cmd), "%s  %s\n", styles.Label.Render(cliPadRight(label, 16)), styles.Value.Render(value))
 }
 
 // newCatalogShowCmd builds `hygge catalog show <provider>/<model>`.
@@ -151,32 +192,31 @@ func newCatalogShowCmd() *cobra.Command {
 
 // printCatalogEntry writes the full per-entry detail block.
 func printCatalogEntry(cmd *cobra.Command, e catalog.Entry) {
-	tw := tabwriter.NewWriter(out(cmd), 0, 0, 2, ' ', 0)
-	printf(tw, "provider:\t%s\n", e.Provider)
-	printf(tw, "id:\t%s\n", e.ID)
+	styles := newCLIStylesFor(out(cmd))
+	printCLIField(cmd, styles, "provider:", e.Provider)
+	printCLIField(cmd, styles, "id:", e.ID)
 	if e.Name != "" {
-		printf(tw, "name:\t%s\n", e.Name)
+		printCLIField(cmd, styles, "name:", e.Name)
 	}
-	printf(tw, "source:\t%s\n", e.Source)
-	printf(tw, "\n")
-	printf(tw, "context_window:\t%s\n", formatContext(e.Limit.ContextWindow))
-	printf(tw, "max_output:\t%s\n", formatContext(e.Limit.MaxOutput))
-	printf(tw, "\n")
-	printf(tw, "capabilities:\n")
-	printf(tw, "  reasoning:\t%v\n", e.Capabilities.Reasoning)
-	printf(tw, "  tool_calling:\t%v\n", e.Capabilities.ToolCalling)
-	printf(tw, "  attachment:\t%v\n", e.Capabilities.Attachment)
-	printf(tw, "  input_text:\t%v\n", e.Capabilities.InputText)
-	printf(tw, "  input_images:\t%v\n", e.Capabilities.InputImages)
-	printf(tw, "  output_text:\t%v\n", e.Capabilities.OutputText)
-	printf(tw, "  output_images:\t%v\n", e.Capabilities.OutputImages)
-	printf(tw, "\n")
-	printf(tw, "cost (USD per 1M tokens):\n")
-	printf(tw, "  input:\t%s\n", formatMoney(e.Cost.Input))
-	printf(tw, "  output:\t%s\n", formatMoney(e.Cost.Output))
-	printf(tw, "  cache_read:\t%s\n", formatMoney(e.Cost.CacheRead))
-	printf(tw, "  cache_write:\t%s\n", formatMoney(e.Cost.CacheWrite))
-	_ = tw.Flush()
+	printCLIField(cmd, styles, "source:", string(e.Source))
+	writeln(out(cmd), "")
+	printCLIField(cmd, styles, "context_window:", formatContext(e.Limit.ContextWindow))
+	printCLIField(cmd, styles, "max_output:", formatContext(e.Limit.MaxOutput))
+	writeln(out(cmd), "")
+	writeln(out(cmd), styles.Header.Render("capabilities:"))
+	printCLIField(cmd, styles, "  reasoning:", fmt.Sprintf("%v", e.Capabilities.Reasoning))
+	printCLIField(cmd, styles, "  tool_calling:", fmt.Sprintf("%v", e.Capabilities.ToolCalling))
+	printCLIField(cmd, styles, "  attachment:", fmt.Sprintf("%v", e.Capabilities.Attachment))
+	printCLIField(cmd, styles, "  input_text:", fmt.Sprintf("%v", e.Capabilities.InputText))
+	printCLIField(cmd, styles, "  input_images:", fmt.Sprintf("%v", e.Capabilities.InputImages))
+	printCLIField(cmd, styles, "  output_text:", fmt.Sprintf("%v", e.Capabilities.OutputText))
+	printCLIField(cmd, styles, "  output_images:", fmt.Sprintf("%v", e.Capabilities.OutputImages))
+	writeln(out(cmd), "")
+	writeln(out(cmd), styles.Header.Render("cost (USD per 1M tokens):"))
+	printCLIField(cmd, styles, "  input:", formatMoney(e.Cost.Input))
+	printCLIField(cmd, styles, "  output:", formatMoney(e.Cost.Output))
+	printCLIField(cmd, styles, "  cache_read:", formatMoney(e.Cost.CacheRead))
+	printCLIField(cmd, styles, "  cache_write:", formatMoney(e.Cost.CacheWrite))
 }
 
 // newCatalogRefreshCmd builds `hygge catalog refresh [--quiet]`.

@@ -30,7 +30,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -477,11 +476,11 @@ func (m providerSelectModel) View() tea.View {
 }
 
 func providerSelectAccentColor() color.Color {
-	return lipgloss.Color("#A78BFA")
+	return cliAccentColor()
 }
 
 func providerSelectMutedColor() color.Color {
-	return lipgloss.Color("#9CA3AF")
+	return cliMutedColor()
 }
 
 // newProviderListCmd builds `hygge provider list`.
