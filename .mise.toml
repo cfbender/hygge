@@ -1,4 +1,5 @@
 [tools]
+docker-cli = "latest"
 git-cliff = "latest"
 go = "1.26"
 golangci-lint = "2"
@@ -28,9 +29,35 @@ run = "rm -rf ./bin ./coverage.out"
 description = "Build and run the hygge binary (pass args after --)"
 run = ["mise run build", "./bin/hygge $@"]
 
+[tasks.flake-update]
+description = "Update flake.lock using Docker-provided Nix"
+run = '''
+command -v docker >/dev/null || {
+  echo "docker CLI is required to update flake.lock without a local Nix install" >&2
+  exit 127
+}
+
+docker_context="$(docker context show)"
+docker_config="$(mktemp -d)"
+trap 'rm -rf "$docker_config"' EXIT
+
+if [ -d "${DOCKER_CONFIG:-$HOME/.docker}/contexts" ]; then
+  cp -R "${DOCKER_CONFIG:-$HOME/.docker}/contexts" "$docker_config/contexts"
+fi
+printf '{"currentContext":"%s"}\n' "$docker_context" > "$docker_config/config.json"
+
+DOCKER_CONFIG="$docker_config" docker run --rm \
+  -e HOST_UID="$(id -u)" \
+  -e HOST_GID="$(id -g)" \
+  -v "$PWD:/work" \
+  -w /work \
+  nixos/nix:latest \
+  sh -c 'nix --extra-experimental-features "nix-command flakes" flake update && chown "$HOST_UID:$HOST_GID" flake.lock'
+'''
+
 [tasks.precommit]
 description = "All final checks before committing code"
-run = ["mise run fix", "mise run lint", "mise run test", "mise run build", "staticcheck ./..."]
+run = ["mise run fix", "mise run flake-update", "mise run lint", "mise run test", "mise run build", "staticcheck ./..."]
 
 [tasks.fix]
 description = "Run linters with auto-fix enabled"

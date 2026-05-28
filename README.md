@@ -289,10 +289,11 @@ type definitions and avoid editor diagnostics for the `hygge` plugin API.
 
 ```sh
 mise install
-mise run build       # compile ./bin/hygge
-mise run test        # go test ./... -race -count=1
-mise run lint        # golangci-lint run
-mise run precommit   # fix + lint + test + build
+mise run build        # compile ./bin/hygge
+mise run test         # go test ./... -race -count=1
+mise run lint         # golangci-lint run
+mise run flake-update # update flake.lock via Docker-provided Nix
+mise run precommit    # fix + flake-update + lint + test + build
 ```
 
 Release helper:
