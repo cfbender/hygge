@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.15.1] — 2026-05-28
+
+### Features
+
+- Compact mode (#62) ([`b0557f5b`](../../commit/b0557f5b23cf6a61cbc10e2399e3fef22c9b50aa))
 ## [0.15.0] — 2026-05-28
 
 ### Bug Fixes
