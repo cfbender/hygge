@@ -418,6 +418,11 @@ type App struct {
 	// the next slash invocation.
 	notice string
 
+	// layoutOverride is the in-session layout mode set by /layout.
+	// "" means "use config value"; "default" or "compact" override it
+	// for this session only and are never persisted to Config.
+	layoutOverride string
+
 	// pendingAttachments are one-shot local files included with the next user
 	// message. They clear after Agent.Send accepts the turn/enqueue.
 	pendingAttachments []promptAttachment

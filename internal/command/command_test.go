@@ -64,6 +64,7 @@ func TestCommandInterfaceImplementations(t *testing.T) {
 	var _ Command = (*memoryCmd)(nil)
 	var _ Command = (*forgetCmd)(nil)
 	var _ Command = (*versionCmd)(nil)
+	var _ Command = (*layoutCmd)(nil)
 	var _ Command = (*templateCommand)(nil)
 	var _ App = (*fakeApp)(nil)
 }
@@ -175,7 +176,7 @@ func TestBuiltinHelpListsEverything(t *testing.T) {
 	if out.OpenModal != ModalHelp {
 		t.Errorf("OpenModal = %q, want %q", out.OpenModal, ModalHelp)
 	}
-	for _, name := range []string{"help", "new", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "yolo", "version"} {
+	for _, name := range []string{"help", "new", "clear", "compact", "cost", "sessions", "fork", "model", "reason", "yolo", "layout", "version"} {
 		if !strings.Contains(out.Notice, "/"+name) {
 			t.Errorf("/help notice missing /%s:\n%s", name, out.Notice)
 		}
@@ -509,6 +510,51 @@ func TestBuiltinOutcomes(t *testing.T) {
 			check: func(t *testing.T, o Outcome) {
 				if got := o.Updates[UpdateForgetMemory]; got != "global\n01GLOBALMEMORY" {
 					t.Errorf("Updates[forget_memory]=%q", got)
+				}
+			},
+		},
+		{
+			name:    "layout-toggle",
+			cmdName: "layout",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateLayout]; got != "toggle" {
+					t.Errorf("Updates[layout]=%q, want toggle", got)
+				}
+				if o.Notice != "" {
+					t.Errorf("command-layer notice = %q, want empty so UI can report resolved layout", o.Notice)
+				}
+			},
+		},
+		{
+			name:    "layout-compact",
+			cmdName: "layout",
+			input:   "compact",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateLayout]; got != "compact" {
+					t.Errorf("Updates[layout]=%q, want compact", got)
+				}
+			},
+		},
+		{
+			name:    "layout-default",
+			cmdName: "layout",
+			input:   "default",
+			check: func(t *testing.T, o Outcome) {
+				if got := o.Updates[UpdateLayout]; got != "default" {
+					t.Errorf("Updates[layout]=%q, want default", got)
+				}
+			},
+		},
+		{
+			name:    "layout-invalid",
+			cmdName: "layout",
+			input:   "wide",
+			check: func(t *testing.T, o Outcome) {
+				if len(o.Updates) != 0 {
+					t.Errorf("invalid layout arg should not produce updates, got %v", o.Updates)
+				}
+				if !strings.Contains(o.Notice, "expected") {
+					t.Errorf("expected hint notice, got %q", o.Notice)
 				}
 			},
 		},

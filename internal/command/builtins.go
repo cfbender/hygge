@@ -53,6 +53,7 @@ func builtinCommandsFor(reg *Registry) []Command {
 		&rememberCmd{},
 		&forgetCmd{},
 		&versionCmd{},
+		&layoutCmd{},
 	}
 }
 
@@ -573,6 +574,29 @@ func (*versionCmd) Source() string      { return "builtin" }
 func (*versionCmd) Args() []ArgSpec     { return nil }
 func (*versionCmd) Execute(_ context.Context, _ App, _ string) (Outcome, error) {
 	return Outcome{Notice: fmt.Sprintf("hygge %s", currentVersion())}, nil
+}
+
+// --- /layout --------------------------------------------------------------
+
+type layoutCmd struct{}
+
+func (*layoutCmd) Name() string        { return "layout" }
+func (*layoutCmd) Description() string { return "Toggle or set in-session layout (default | compact)" }
+func (*layoutCmd) Source() string      { return "builtin" }
+func (*layoutCmd) Args() []ArgSpec {
+	return []ArgSpec{{Name: "mode", Description: "default | compact (omit to toggle)", Required: false}}
+}
+func (*layoutCmd) Execute(_ context.Context, _ App, input string) (Outcome, error) {
+	mode := strings.ToLower(strings.TrimSpace(input))
+	if mode == "" {
+		mode = "toggle"
+	}
+	switch mode {
+	case "default", "compact", "toggle":
+		return Outcome{Updates: map[string]string{UpdateLayout: mode}}, nil
+	default:
+		return Outcome{Notice: `/layout: expected "default", "compact", or omit to toggle`}, nil
+	}
 }
 
 // AttachHelpRegistry wires reg into the /help command so it sees the
