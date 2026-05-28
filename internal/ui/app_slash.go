@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -170,8 +171,8 @@ func (a *App) applyOutcome(out command.Outcome) tea.Cmd {
 		}
 	}
 
-	for k, v := range out.Updates {
-		if cmd := a.applyUpdate(k, v); cmd != nil {
+	for _, key := range orderedUpdateKeys(out.Updates) {
+		if cmd := a.applyUpdate(key, out.Updates[key]); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -233,6 +234,27 @@ func (a *App) steerCmd(text string) tea.Cmd {
 // applyUpdate dispatches a single Outcome.Updates entry. Unknown keys are
 // logged and ignored. Model changes return a command so provider/model rebuilds
 // happen off the render loop; reasoning remains local UI state.
+func orderedUpdateKeys(updates map[string]string) []string {
+	if len(updates) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(updates))
+	for _, key := range []string{command.UpdateMode, command.UpdateModel} {
+		if _, ok := updates[key]; ok {
+			keys = append(keys, key)
+		}
+	}
+	rest := make([]string, 0, len(updates)-len(keys))
+	for key := range updates {
+		if key != command.UpdateMode && key != command.UpdateModel {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
+	return keys
+}
+
 func (a *App) applyUpdate(key, value string) tea.Cmd {
 	switch key {
 	case command.UpdateModel:
@@ -244,6 +266,8 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 		if name != "" {
 			return a.switchThemeCmd(name)
 		}
+	case command.UpdateMode:
+		return a.switchModeByName(value)
 	case command.UpdateYolo:
 		return a.switchYoloCmd(value)
 	case command.UpdateRememberSessionMemory:

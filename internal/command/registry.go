@@ -1,8 +1,10 @@
 package command
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -212,16 +214,27 @@ func fuzzyCommandScore(name, query string) (int, bool) {
 // Load discovers and registers commands in precedence order:
 //
 //  1. Built-ins ([RegisterBuiltins]).
-//  2. ~/.agents/commands.toml             (user, vendor-neutral)
-//  3. ~/.config/hygge/commands.toml       (user, hygge-native)
-//  4. <project-root>/.agents/commands.toml   (project, vendor-neutral)
-//  5. <project-root>/.hygge/commands.toml    (project, hygge-native)
+//  2. ~/.agents/commands.toml              (user, vendor-neutral, TOML file)
+//  3. ~/.agents/commands/                  (user, vendor-neutral, directory)
+//  4. ~/.config/hygge/commands.toml        (user, hygge-native, TOML file)
+//  5. ~/.config/hygge/commands/            (user, hygge-native, directory)
+//  6. <project-root>/.agents/commands.toml  (project, vendor-neutral, TOML file)
+//  7. <project-root>/.agents/commands/      (project, vendor-neutral, directory)
+//  8. <project-root>/.hygge/commands.toml   (project, hygge-native, TOML file)
+//  9. <project-root>/.hygge/commands/       (project, hygge-native, directory)
 //
-// Later layers override earlier same-named entries.  Built-ins CAN
-// be overridden by user TOML — that's the documented extension
-// point.  Missing files are silently ignored; malformed files emit
-// slog.Warn and are skipped (one bad file does not deny the user
-// the rest of the registry).
+// Directory layers load every .md and .toml file found directly inside the
+// directory (non-recursive). For .md files the filename stem (e.g. "test")
+// becomes the command name "/test"; frontmatter (between --- delimiters)
+// supplies description, mode (or its alias agent), and model.  For .toml
+// files inside a commands directory the same [[commands]] table structure
+// is supported.
+//
+// Later layers override earlier same-named entries.  Built-ins CAN be
+// overridden by user definitions — that's the documented extension point.
+// Missing files/directories are silently ignored; malformed files emit
+// slog.Warn and are skipped (one bad file does not deny the user the rest
+// of the registry).
 func Load(opts LoadOptions) (*Registry, error) {
 	homeDir := opts.HomeDir
 	if homeDir == "" {
@@ -239,15 +252,25 @@ func Load(opts LoadOptions) (*Registry, error) {
 	reg := New()
 	RegisterBuiltins(reg)
 
+	// User layers: .agents then .config/hygge, TOML file then directory.
 	loadOneFile(reg, filepath.Join(homeDir, ".agents", "commands.toml"), "user")
+	loadOneDir(reg, filepath.Join(homeDir, ".agents", "commands"), "user")
 	loadOneFile(reg, filepath.Join(xdgConfig, "hygge", "commands.toml"), "user")
+	loadOneDir(reg, filepath.Join(xdgConfig, "hygge", "commands"), "user")
 
 	if opts.Pwd != "" {
+		// Project layers: .agents then .hygge, TOML file then directory.
 		if p := findProjectFile(opts.Pwd, filepath.Join(".agents", "commands.toml"), homeDir); p != "" {
 			loadOneFile(reg, p, "project")
 		}
+		if d := findProjectDir(opts.Pwd, filepath.Join(".agents", "commands"), homeDir); d != "" {
+			loadOneDir(reg, d, "project")
+		}
 		if p := findProjectFile(opts.Pwd, filepath.Join(".hygge", "commands.toml"), homeDir); p != "" {
 			loadOneFile(reg, p, "project")
+		}
+		if d := findProjectDir(opts.Pwd, filepath.Join(".hygge", "commands"), homeDir); d != "" {
+			loadOneDir(reg, d, "project")
 		}
 	}
 
@@ -258,13 +281,27 @@ func Load(opts LoadOptions) (*Registry, error) {
 // tomlFile is the surface shape of commands.toml.  Only the
 // [commands] table is consumed; other top-level keys produce a warn
 // so the user notices their typo without losing the valid entries.
-type tomlFile struct {
+type tomlMapFile struct {
 	Commands map[string]tomlEntry `toml:"commands"`
+}
+
+type tomlArrayFile struct {
+	Commands []tomlNamedEntry `toml:"commands"`
+}
+
+type tomlNamedEntry struct {
+	Name string `toml:"name"`
+	tomlEntry
 }
 
 type tomlEntry struct {
 	Description string         `toml:"description"`
+	Mode        string         `toml:"mode"`
+	Agent       string         `toml:"agent"`
+	Provider    string         `toml:"provider"`
+	Model       string         `toml:"model"`
 	Prompt      string         `toml:"prompt"`
+	Command     string         `toml:"command"`
 	Args        []tomlArgEntry `toml:"args"`
 }
 
@@ -298,13 +335,13 @@ func loadOneFile(reg *Registry, path, source string) {
 		}
 	}
 
-	var schema tomlFile
-	if err := toml.Unmarshal(data, &schema); err != nil {
+	entries, err := parseTOMLCommands(data)
+	if err != nil {
 		slog.Warn("command: parse failed", "path", path, "err", err)
 		return
 	}
 
-	for name, entry := range schema.Commands {
+	for name, entry := range entries {
 		cmd, err := buildTemplateCommand(name, entry, source, path)
 		if err != nil {
 			slog.Warn("command: skipping entry", "path", path, "name", name, "err", err)
@@ -314,6 +351,37 @@ func loadOneFile(reg *Registry, path, source string) {
 			slog.Warn("command: registration failed", "path", path, "name", name, "err", err)
 		}
 	}
+}
+
+func parseTOMLCommands(data []byte) (map[string]tomlEntry, error) {
+	var rawTop map[string]any
+	if err := toml.Unmarshal(data, &rawTop); err != nil {
+		return nil, err
+	}
+	rawCommands, ok := rawTop["commands"]
+	if !ok {
+		return map[string]tomlEntry{}, nil
+	}
+	entries := map[string]tomlEntry{}
+	switch rawCommands.(type) {
+	case []any:
+		var schema tomlArrayFile
+		if err := toml.Unmarshal(data, &schema); err != nil {
+			return nil, err
+		}
+		for _, named := range schema.Commands {
+			name := strings.TrimSpace(named.Name)
+			entry := named.tomlEntry
+			entries[name] = entry
+		}
+	default:
+		var schema tomlMapFile
+		if err := toml.Unmarshal(data, &schema); err != nil {
+			return nil, err
+		}
+		maps.Copy(entries, schema.Commands)
+	}
+	return entries, nil
 }
 
 // buildTemplateCommand validates one TOML entry and produces a
@@ -329,6 +397,9 @@ func buildTemplateCommand(name string, e tomlEntry, source, path string) (Comman
 		return nil, fmt.Errorf("description is required")
 	}
 	prompt := e.Prompt
+	if prompt == "" {
+		prompt = e.Command
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
@@ -373,13 +444,42 @@ func buildTemplateCommand(name string, e tomlEntry, source, path string) (Comman
 		}
 	}
 
+	mode := strings.TrimSpace(e.Mode)
+	if mode == "" {
+		mode = strings.TrimSpace(e.Agent)
+	}
+	model, err := normalizeCommandModel(e.Provider, e.Model)
+	if err != nil {
+		return nil, err
+	}
+
 	return &templateCommand{
 		name:        name,
 		description: desc,
 		source:      source,
 		args:        args,
 		prompt:      prompt,
+		mode:        mode,
+		model:       model,
 	}, nil
+}
+
+func normalizeCommandModel(providerValue, modelValue string) (string, error) {
+	model := strings.TrimSpace(modelValue)
+	if model == "" {
+		return "", nil
+	}
+	provider := strings.TrimSpace(providerValue)
+	if provider != "" {
+		if strings.HasPrefix(model, provider+"/") {
+			return model, nil
+		}
+		return provider + "/" + model, nil
+	}
+	if strings.Contains(model, "/") {
+		return model, nil
+	}
+	return "", fmt.Errorf("model %q must include provider prefix or set provider", model)
 }
 
 // findProjectFile walks parents of start looking for a file at the
@@ -407,4 +507,196 @@ func findProjectFile(start, rel, homeStop string) string {
 		}
 		dir = parent
 	}
+}
+
+// findProjectDir walks parents of start looking for a directory at the
+// relative path rel.  Follows the same halting rules as [findProjectFile].
+func findProjectDir(start, rel, homeStop string) string {
+	dir := filepath.Clean(start)
+	homeStop = filepath.Clean(homeStop)
+	for {
+		if homeStop != "" && dir == homeStop {
+			return ""
+		}
+		candidate := filepath.Join(dir, rel)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		if info, err := os.Stat(filepath.Join(dir, ".git")); err == nil && (info.IsDir() || info.Mode().IsRegular()) {
+			return ""
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// loadOneDir reads every .md and .toml file at the top level of dirPath
+// and merges the discovered commands into reg.  Files are processed in
+// sorted order for deterministic results.  Errors for individual files
+// emit slog.Warn and do not abort loading of sibling files.
+func loadOneDir(reg *Registry, dirPath, source string) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("command: read dir failed", "path", dirPath, "err", err)
+		}
+		return
+	}
+	// Sort for determinism.
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		n := e.Name()
+		if strings.HasSuffix(n, ".md") || strings.HasSuffix(n, ".toml") {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		fullPath := filepath.Join(dirPath, name)
+		switch {
+		case strings.HasSuffix(name, ".md"):
+			loadOneMDFile(reg, fullPath, source)
+		case strings.HasSuffix(name, ".toml"):
+			loadOneFile(reg, fullPath, source)
+		}
+	}
+}
+
+// mdFrontmatter holds the parsed YAML-style frontmatter from a markdown
+// command definition.
+type mdFrontmatter struct {
+	Description string `toml:"description"`
+	// Mode is the preferred field name; Agent is the accepted alias.
+	Mode     string `toml:"mode"`
+	Agent    string `toml:"agent"`
+	Provider string `toml:"provider"`
+	Model    string `toml:"model"`
+}
+
+// frontmatterSep is the YAML-style delimiter that separates the
+// frontmatter block from the prompt body.
+var frontmatterSep = []byte("---")
+
+// loadOneMDFile loads a single markdown command file.  The command
+// name is derived from the filename stem (basename without extension).
+// The file may optionally begin with TOML frontmatter enclosed by
+// `---` lines; the remainder is the prompt body.
+func loadOneMDFile(reg *Registry, path, source string) {
+	data, err := os.ReadFile(path) //nolint:gosec // path is built from controlled discovery roots
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("command: read failed", "path", path, "err", err)
+		}
+		return
+	}
+
+	name := strings.TrimSuffix(filepath.Base(path), ".md")
+	cmd, err := parseMDCommand(name, data, source)
+	if err != nil {
+		slog.Warn("command: skipping markdown command", "path", path, "err", err)
+		return
+	}
+	if err := reg.registerOrReplace(cmd); err != nil {
+		slog.Warn("command: registration failed", "path", path, "name", name, "err", err)
+	}
+}
+
+func findClosingFrontmatter(data []byte) (int, int, error) {
+	idx := bytes.Index(data, []byte("\n---"))
+	if idx < 0 {
+		return 0, 0, fmt.Errorf("frontmatter closing delimiter is required")
+	}
+	lineStart := idx + 1
+	lineEnd := lineStart + len(frontmatterSep)
+	if len(data) > lineEnd && data[lineEnd] != '\r' && data[lineEnd] != '\n' {
+		return 0, 0, fmt.Errorf("frontmatter closing delimiter must be on its own line")
+	}
+	if len(data) > lineEnd && data[lineEnd] == '\r' && (len(data) == lineEnd+1 || data[lineEnd+1] != '\n') {
+		return 0, 0, fmt.Errorf("frontmatter closing delimiter must be followed by a newline")
+	}
+	return lineStart, len(frontmatterSep), nil
+}
+
+// parseMDCommand parses a markdown command definition.  name must be a
+// valid command name (pre-validated from the filename stem).  data is
+// the full file contents.  An optional TOML frontmatter block between
+// `---` delimiters supplies description, mode/agent, and model metadata;
+// the remainder is the prompt body.  A missing or empty frontmatter
+// description produces an error (description is required).  A missing
+// prompt body also produces an error.
+func parseMDCommand(name string, data []byte, source string) (Command, error) {
+	name = strings.TrimSpace(name)
+	if !nameRe.MatchString(name) {
+		return nil, fmt.Errorf("invalid name %q (must match %s)", name, nameRe)
+	}
+
+	var fm mdFrontmatter
+	body := data
+
+	// Attempt to parse optional frontmatter.
+	trimmed := bytes.TrimLeft(data, " \t\r\n")
+	if bytes.HasPrefix(trimmed, frontmatterSep) {
+		// The first line must be exactly "---".
+		rest := trimmed[len(frontmatterSep):]
+		if bytes.HasPrefix(rest, []byte("\r\n")) {
+			rest = rest[2:]
+		} else if bytes.HasPrefix(rest, []byte("\n")) {
+			rest = rest[1:]
+		} else {
+			return nil, fmt.Errorf("frontmatter opening delimiter must be on its own line")
+		}
+
+		idx, delimiterLen, err := findClosingFrontmatter(rest)
+		if err != nil {
+			return nil, err
+		}
+		fmBytes := bytes.TrimRight(rest[:idx], "\r\n")
+		afterClose := rest[idx+delimiterLen:]
+		if bytes.HasPrefix(afterClose, []byte("\r\n")) {
+			afterClose = afterClose[2:]
+		} else if bytes.HasPrefix(afterClose, []byte("\n")) {
+			afterClose = afterClose[1:]
+		}
+		body = afterClose
+		if err := toml.Unmarshal(fmBytes, &fm); err != nil {
+			return nil, fmt.Errorf("frontmatter parse error: %w", err)
+		}
+	}
+
+	// Resolve mode: prefer `mode`, fall back to `agent` alias.
+	mode := strings.TrimSpace(fm.Mode)
+	if mode == "" {
+		mode = strings.TrimSpace(fm.Agent)
+	}
+
+	desc := strings.TrimSpace(fm.Description)
+	if desc == "" {
+		return nil, fmt.Errorf("description is required (add a frontmatter block with description = \"…\")")
+	}
+
+	prompt := string(body)
+	if len(prompt) == 0 {
+		return nil, fmt.Errorf("prompt body is required")
+	}
+
+	model, err := normalizeCommandModel(fm.Provider, fm.Model)
+	if err != nil {
+		return nil, err
+	}
+
+	return &templateCommand{
+		name:        name,
+		description: desc,
+		mode:        mode,
+		model:       model,
+		source:      source,
+		prompt:      prompt,
+	}, nil
 }

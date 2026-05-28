@@ -1910,3 +1910,25 @@ func TestSlashCommandSteerViaEnterWhileBusyDoesNotQueue(t *testing.T) {
 		t.Fatalf("steering should appear in chat, messages = %#v", app.messages)
 	}
 }
+
+func TestOrderedUpdateKeysSortsRestKeys(t *testing.T) {
+	updates := map[string]string{
+		"zeta":                     "1",
+		command.UpdateModel:        "openrouter/gpt-5",
+		"alpha":                    "2",
+		command.UpdateMode:         "smart",
+		command.UpdateReasoning:    "high",
+		command.UpdateQueueMessage: "queued",
+	}
+
+	got := orderedUpdateKeys(updates)
+	want := []string{command.UpdateMode, command.UpdateModel, "alpha", command.UpdateQueueMessage, command.UpdateReasoning, "zeta"}
+	if len(got) != len(want) {
+		t.Fatalf("orderedUpdateKeys len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("orderedUpdateKeys = %v, want %v", got, want)
+		}
+	}
+}
