@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"image/color"
 	"io"
 	"os"
 	"path/filepath"
@@ -41,26 +40,19 @@ type inspectStyles struct {
 // break column alignment.  Only "show" commands that write one field per
 // line should pass the real command writer.
 func newInspectStylesFor(w io.Writer) inspectStyles {
+	styles := newCLIStylesFor(w)
+	label := styles.Label
 	if isColorWriter(w) {
-		return inspectStyles{
-			Header: lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()),
-			Label:  lipgloss.NewStyle().Bold(true).Foreground(inspectHeaderColor()).Width(13),
-			Value:  lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")),
-			Muted:  lipgloss.NewStyle().Foreground(inspectMutedColor()),
-			Path:   lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")),
-			OK:     lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
-			Warn:   lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
-		}
+		label = label.Width(13)
 	}
-	plain := lipgloss.NewStyle()
 	return inspectStyles{
-		Header: plain,
-		Label:  plain,
-		Value:  plain,
-		Muted:  plain,
-		Path:   plain,
-		OK:     plain,
-		Warn:   plain,
+		Header: styles.Header,
+		Label:  label,
+		Value:  styles.Value,
+		Muted:  styles.Muted,
+		Path:   styles.Accent,
+		OK:     styles.Success,
+		Warn:   styles.Warn,
 	}
 }
 
@@ -77,9 +69,6 @@ func isColorWriter(w io.Writer) bool {
 	}
 	return term.IsTerminal(int(f.Fd()))
 }
-
-func inspectHeaderColor() color.Color { return lipgloss.Color("#38BDF8") }
-func inspectMutedColor() color.Color  { return lipgloss.Color("#6B7280") }
 
 // newSkillsCmd builds the `hygge skills` subcommand group.
 func newSkillsCmd() *cobra.Command {
