@@ -8,9 +8,9 @@ import (
 	"unicode"
 )
 
-// templateCommand is a TOML-declared prompt template.  Execute renders
-// the template against the user's input and returns it as an
-// [Outcome.Message] for the TUI to send as a normal user turn.
+// templateCommand is a TOML-declared or markdown-declared prompt template.
+// Execute renders the template against the user's input and returns it as
+// an [Outcome.Message] for the TUI to send as a normal user turn.
 // Template commands never mutate app state.
 type templateCommand struct {
 	name        string
@@ -18,11 +18,19 @@ type templateCommand struct {
 	source      string
 	args        []ArgSpec
 	prompt      string
+	// mode is the optional agent/mode to apply when executing this command.
+	// Sourced from the `mode` (or its `agent` alias) frontmatter field.
+	mode string
+	// model is the optional model string to apply when executing this command.
+	// Sourced from the `model` frontmatter field.
+	model string
 }
 
 func (t *templateCommand) Name() string        { return t.name }
 func (t *templateCommand) Description() string { return t.description }
 func (t *templateCommand) Source() string      { return t.source }
+func (t *templateCommand) Mode() string        { return t.mode }
+func (t *templateCommand) Model() string       { return t.model }
 func (t *templateCommand) Args() []ArgSpec {
 	out := make([]ArgSpec, len(t.args))
 	copy(out, t.args)
@@ -32,7 +40,10 @@ func (t *templateCommand) Args() []ArgSpec {
 // Execute renders the prompt template against input and returns it
 // as the outcome's Message.  A required arg missing at runtime
 // produces a Notice outcome (not an error) so the TUI surfaces the
-// validation message without crashing the input loop.
+// validation message without crashing the input loop.  When the
+// command was declared with a `model` field, Execute also emits an
+// [UpdateModel] update so the TUI switches models before sending
+// the rendered message.
 func (t *templateCommand) Execute(_ context.Context, _ App, input string) (Outcome, error) {
 	values, tail, err := parseArgs(input, t.args)
 	if err != nil {
@@ -42,7 +53,17 @@ func (t *templateCommand) Execute(_ context.Context, _ App, input string) (Outco
 		return Outcome{Notice: fmt.Sprintf("/%s: %s", t.name, err.Error())}, nil
 	}
 	rendered := renderTemplate(t.prompt, values, tail)
-	return Outcome{Message: rendered}, nil
+	out := Outcome{Message: rendered}
+	if t.mode != "" || t.model != "" {
+		out.Updates = map[string]string{}
+		if t.mode != "" {
+			out.Updates[UpdateMode] = t.mode
+		}
+		if t.model != "" {
+			out.Updates[UpdateModel] = t.model
+		}
+	}
+	return out, nil
 }
 
 // placeholderRe matches `{{name}}` references in a template.  Names

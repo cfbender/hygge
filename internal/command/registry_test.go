@@ -158,6 +158,173 @@ args = [{ name = "topic", required = true }]
 	}
 }
 
+func TestLoadMarkdownCommandDirectory(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	writeFile(t, filepath.Join(pwd, ".hygge", "commands", "test.md"), "---\ndescription = \"Run tests with coverage\"\nmode = \"build\"\nmodel = \"anthropic/claude-3-5-sonnet-20241022\"\n---\n\nRun tests for {{tail}}.\n")
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmd, ok := reg.Get("test")
+	if !ok {
+		t.Fatal("missing /test")
+	}
+	if cmd.Source() != "project" {
+		t.Errorf("source = %q, want project", cmd.Source())
+	}
+	if cmd.Description() != "Run tests with coverage" {
+		t.Errorf("description = %q", cmd.Description())
+	}
+	out, err := cmd.Execute(context.Background(), nil, "internal/command")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Message != "Run tests for internal/command." {
+		t.Errorf("message = %q", out.Message)
+	}
+	if got := out.Updates[UpdateMode]; got != "build" {
+		t.Errorf("Updates[mode] = %q", got)
+	}
+	if got := out.Updates[UpdateModel]; got != "anthropic/claude-3-5-sonnet-20241022" {
+		t.Errorf("Updates[model] = %q", got)
+	}
+}
+
+func TestLoadMarkdownCommandDirectorySupportsAgentAliasAndCRLF(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands", "cover.md"), "---\r\ndescription = \"Coverage\"\r\nagent = \"build\"\r\n---\r\n\r\nRun coverage.\r\n")
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmd, ok := reg.Get("cover")
+	if !ok {
+		t.Fatal("missing /cover")
+	}
+	tcmd, ok := cmd.(*templateCommand)
+	if !ok {
+		t.Fatalf("/cover type = %T, want *templateCommand", cmd)
+	}
+	if tcmd.Mode() != "build" {
+		t.Errorf("mode = %q, want build", tcmd.Mode())
+	}
+	out, err := cmd.Execute(context.Background(), nil, "")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Message != "Run coverage." {
+		t.Errorf("message = %q", out.Message)
+	}
+}
+
+func TestLoadMarkdownCommandRejectsMalformedFrontmatterDelimiter(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands", "bad.md"), "---\ndescription = \"Bad\"\n--- nope\nBody\n")
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := reg.Get("bad"); ok {
+		t.Fatal("malformed frontmatter delimiter should skip /bad")
+	}
+}
+
+func TestLoadCommandDirectoryPrecedence(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands", "brief.md"), "---\ndescription = \"user agents\"\n---\nUSER AGENTS\n")
+	writeFile(t, filepath.Join(home, ".config", "hygge", "commands", "brief.md"), "---\ndescription = \"user hygge\"\n---\nUSER HYGGE\n")
+	writeFile(t, filepath.Join(pwd, ".agents", "commands", "brief.md"), "---\ndescription = \"project agents\"\n---\nPROJECT AGENTS\n")
+	writeFile(t, filepath.Join(pwd, ".hygge", "commands", "brief.md"), "---\ndescription = \"project hygge\"\n---\nPROJECT HYGGE\n")
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmd, ok := reg.Get("brief")
+	if !ok {
+		t.Fatal("missing /brief")
+	}
+	if cmd.Description() != "project hygge" {
+		t.Errorf("description = %q, want project hygge", cmd.Description())
+	}
+	out, err := cmd.Execute(context.Background(), nil, "")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Message != "PROJECT HYGGE" {
+		t.Errorf("message = %q", out.Message)
+	}
+}
+
+func TestLoadTOMLArrayCommandSyntax(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands.toml"), `
+[[commands]]
+name = "test"
+description = "Run tests with coverage"
+mode = "smart"
+provider = "openrouter"
+model = "openai/gpt-5.4-mini"
+command = "Run the full test suite with {{tail}}."
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmd, ok := reg.Get("test")
+	if !ok {
+		t.Fatal("missing /test")
+	}
+	tcmd := cmd.(*templateCommand)
+	if tcmd.Mode() != "smart" {
+		t.Errorf("mode = %q, want smart", tcmd.Mode())
+	}
+	out, err := cmd.Execute(context.Background(), nil, "with coverage")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Message != "Run the full test suite with with coverage." {
+		t.Errorf("message = %q", out.Message)
+	}
+	if got := out.Updates[UpdateMode]; got != "smart" {
+		t.Errorf("Updates[mode] = %q", got)
+	}
+	if got := out.Updates[UpdateModel]; got != "openrouter/openai/gpt-5.4-mini" {
+		t.Errorf("Updates[model] = %q", got)
+	}
+}
+
+func TestLoadTOMLCommandDirectory(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	pwd := t.TempDir()
+	writeFile(t, filepath.Join(pwd, ".agents", "commands", "commands.toml"), `
+[[commands]]
+name = "ship"
+description = "Ship it"
+agent = "build"
+command = "Ship {{tail}}"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmd, ok := reg.Get("ship")
+	if !ok {
+		t.Fatal("missing /ship")
+	}
+	tcmd := cmd.(*templateCommand)
+	if tcmd.Mode() != "build" {
+		t.Errorf("mode = %q, want build", tcmd.Mode())
+	}
+}
+
 func TestLoadMalformedFileWarnsButContinues(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()

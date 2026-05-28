@@ -61,6 +61,9 @@ const (
 	// Value shape: "<provider>/<model-id>".
 	UpdateModel = "model"
 
+	// UpdateMode asks the TUI to switch to a configured mode by name.
+	UpdateMode = "mode"
+
 	// UpdateReasoning asks the TUI to switch the reasoning effort.
 	// Value: "off" | "low" | "medium" | "high".
 	UpdateReasoning = "reasoning"
