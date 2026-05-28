@@ -296,8 +296,7 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 			a.notice = fmt.Sprintf("cleared %d attachment(s)", n)
 		}
 	case command.UpdateLayout:
-		a.applyLayoutOverride(value)
-		a.msgCacheValid = false
+		return a.applyLayoutOverride(value)
 	default:
 		if key == "apikey_provider" {
 			return nil
@@ -620,7 +619,7 @@ var _ command.App = (*commandAppAdapter)(nil)
 
 // applyLayoutOverride processes a /layout UpdateLayout value.  It toggles or
 // sets a.layoutOverride without touching a.opts.Config.
-func (a *App) applyLayoutOverride(value string) {
+func (a *App) applyLayoutOverride(value string) tea.Cmd {
 	switch value {
 	case "compact":
 		a.layoutOverride = "compact"
@@ -633,9 +632,11 @@ func (a *App) applyLayoutOverride(value string) {
 			a.layoutOverride = "compact"
 		}
 	}
-	if a.layoutOverride != "" {
-		a.notice = fmt.Sprintf("layout: %s", a.layoutOverride)
+	a.msgCacheValid = false
+	if a.layoutOverride == "" {
+		return nil
 	}
+	return a.showToast("Layout", fmt.Sprintf("Using %s layout", a.layoutOverride))
 }
 
 // effectiveLayout returns the active layout name ("default" or "compact"),

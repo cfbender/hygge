@@ -1537,8 +1537,11 @@ func TestSlashCommandLayoutToggleDefaultToCompact(t *testing.T) {
 	if app.layoutOverride != "compact" {
 		t.Errorf("layoutOverride = %q, want compact", app.layoutOverride)
 	}
-	if app.notice != "layout: compact" {
-		t.Errorf("notice = %q, want resolved compact notice", app.notice)
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using compact layout" {
+		t.Fatalf("toast = %#v, want compact layout toast", app.toast)
 	}
 }
 
@@ -1555,8 +1558,11 @@ func TestSlashCommandLayoutToggleCompactToDefault(t *testing.T) {
 	if got := app.effectiveLayout(); got != "default" {
 		t.Errorf("after toggle from compact, effectiveLayout = %q, want default", got)
 	}
-	if app.notice != "layout: default" {
-		t.Errorf("notice = %q, want resolved default notice", app.notice)
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using default layout" {
+		t.Fatalf("toast = %#v, want default layout toast", app.toast)
 	}
 }
 
@@ -1571,8 +1577,11 @@ func TestSlashCommandLayoutExplicitCompact(t *testing.T) {
 	if got := app.effectiveLayout(); got != "compact" {
 		t.Errorf("effectiveLayout = %q, want compact", got)
 	}
-	if app.notice != "layout: compact" {
-		t.Errorf("notice = %q, want compact notice", app.notice)
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using compact layout" {
+		t.Fatalf("toast = %#v, want compact layout toast", app.toast)
 	}
 }
 
@@ -1588,8 +1597,11 @@ func TestSlashCommandLayoutExplicitDefault(t *testing.T) {
 	if got := app.effectiveLayout(); got != "default" {
 		t.Errorf("effectiveLayout = %q, want default", got)
 	}
-	if app.notice != "layout: default" {
-		t.Errorf("notice = %q, want default notice", app.notice)
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using default layout" {
+		t.Fatalf("toast = %#v, want default layout toast", app.toast)
 	}
 }
 
