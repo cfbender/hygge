@@ -492,12 +492,8 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 		}
 	}
 
-	// Compact mode uses a single newline between parts (tighter spacing).
-	// Default mode uses a blank line separator.
+	// Keep one blank line between rendered messages in all layouts.
 	sep := "\n\n"
-	if m.Compact {
-		sep = "\n"
-	}
 	joined := strings.Join(parts, sep)
 
 	// Walk the joined string to compute actual line offsets for each zone.
@@ -543,11 +539,8 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 			}
 			line += partLines
 			if i < len(parts)-1 {
-				// Default mode: "\n\n" separator adds one blank line between parts.
-				// Compact mode: "\n" separator adds no blank line.
-				if !m.Compact {
-					line++
-				}
+				// "\n\n" separator adds one blank line between parts.
+				line++
 			}
 		}
 	}
@@ -736,9 +729,10 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	body = m.highlightHoveredURL(body)
 	body = LinkifyURLs(body)
 
-	// Header-right: relative timestamp.
+	// Header-right: relative timestamp. Compact mode removes the separate
+	// user header row in the same way assistant compact bubbles do.
 	headerRight := ""
-	if !msg.Timestamp.IsZero() {
+	if !m.Compact && !msg.Timestamp.IsZero() {
 		headerRight = relativeTimestamp(msg.Timestamp, m.now())
 	}
 
@@ -763,6 +757,9 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		} else {
 			hoverIndicator = "↵"
 		}
+	}
+	if m.Compact {
+		hoverIndicator = ""
 	}
 
 	b := bubble.Bubble{

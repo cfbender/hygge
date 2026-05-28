@@ -259,22 +259,43 @@ func TestMessageListCompactHidesCollapsedToolOutput(t *testing.T) {
 	}
 }
 
-func TestMessageListCompactUsesTighterMessageSpacing(t *testing.T) {
+func TestMessageListCompactKeepsBlankLineBetweenMessages(t *testing.T) {
 	t.Parallel()
 	messages := []UIMessage{
 		{Role: RoleUser, Raw: "first"},
 		{Role: RoleUser, Raw: "second"},
 	}
-	defaultOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Messages: messages}.View())
 	compactOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Compact: true, Messages: messages}.View())
 
 	if !strings.Contains(compactOut, "first") || !strings.Contains(compactOut, "second") {
 		t.Fatalf("compact layout should keep messages visible:\n%s", compactOut)
 	}
-	defaultLines := strings.Count(defaultOut, "\n")
-	compactLines := strings.Count(compactOut, "\n")
-	if compactLines >= defaultLines {
-		t.Fatalf("compact layout should render fewer lines than default; compact=%d default=%d\ncompact:\n%s\ndefault:\n%s", compactLines, defaultLines, compactOut, defaultOut)
+	if !strings.Contains(compactOut, "\n\n") {
+		t.Fatalf("compact layout should keep a blank line between messages:\n%s", compactOut)
+	}
+}
+
+func TestMessageListCompactRemovesUserHeader(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	msg := UIMessage{
+		Role:      RoleUser,
+		Raw:       "hello",
+		Timestamp: now.Add(-time.Minute),
+		MessageID: "msg-1",
+	}
+
+	defaultOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Now: now, HoverUserMsgID: "msg-1", Messages: []UIMessage{msg}}.View())
+	compactOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Now: now, HoverUserMsgID: "msg-1", Compact: true, Messages: []UIMessage{msg}}.View())
+
+	if !strings.Contains(defaultOut, "1 minute ago") || !strings.Contains(defaultOut, "↵") {
+		t.Fatalf("default user bubble should include header metadata:\n%s", defaultOut)
+	}
+	if strings.Contains(compactOut, "1 minute ago") || strings.Contains(compactOut, "↵") {
+		t.Fatalf("compact user bubble should remove the header row:\n%s", compactOut)
+	}
+	if !strings.Contains(compactOut, "hello") {
+		t.Fatalf("compact user bubble should keep body text:\n%s", compactOut)
 	}
 }
 
