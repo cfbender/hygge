@@ -343,11 +343,12 @@ type SubagentHitZone struct {
 	partIndex    int // internal: index into parts array during construction
 }
 
-// UserMsgHitZone maps a range of content lines to a user message.
-// Clicking anywhere on those lines opens the message-action modal.
+// UserMsgHitZone maps a rendered user bubble rectangle to a user message.
 type UserMsgHitZone struct {
 	StartLine   int // inclusive, relative to message-list content
 	EndLine     int // exclusive
+	StartCol    int // inclusive visual column within the chat column
+	EndCol      int // exclusive visual column within the chat column
 	MessageID   string
 	MessageText string // raw message text (for copy action)
 	partIndex   int    // internal: index into rendered parts array
@@ -437,7 +438,15 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 			// Only finalized (non-streaming) user messages with a MessageID
 			// are registered, as streaming messages have no stable ID.
 			if chunk.single.Role == RoleUser && !chunk.single.IsStreaming && chunk.single.MessageID != "" && chunk.single.Raw != "" && text != "" {
+				width := m.Width
+				if width <= 0 {
+					width = 80
+				}
+				bubbleW := userBubbleWidth(width)
+				startCol := max(width-bubbleW, 0)
 				userMsgZones = append(userMsgZones, UserMsgHitZone{
+					StartCol:    startCol,
+					EndCol:      width,
 					MessageID:   chunk.single.MessageID,
 					MessageText: chunk.single.Raw,
 					partIndex:   len(parts),
@@ -671,9 +680,7 @@ func (m MessageList) highlightHoveredURL(body string) string {
 	return HighlightURL(body, m.HoverURL, style)
 }
 
-// renderUserBubble renders a RoleUser message as a right-aligned chat bubble.
-func (m MessageList) renderUserBubble(msg UIMessage) string {
-	width := m.Width
+func userBubbleWidth(width int) int {
 	if width <= 0 {
 		width = 80
 	}
@@ -688,6 +695,16 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	if bubbleW < 1 {
 		bubbleW = 1
 	}
+	return bubbleW
+}
+
+// renderUserBubble renders a RoleUser message as a right-aligned chat bubble.
+func (m MessageList) renderUserBubble(msg UIMessage) string {
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
+	bubbleW := userBubbleWidth(width)
 
 	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
 	body := msg.Raw

@@ -39,8 +39,8 @@ func TestUserMsgClick_OpensMessageActionModal(t *testing.T) {
 	// Translate zone line to screen Y. Same formula as url_hitzones_test.go
 	// (leading blank line → offset 1; subtract scroll offset).
 	screenY := headerHeight + zone.StartLine + 1 - app.msgViewport.YOffset()
-	// X in the middle of the left column so it is within the bubble area.
-	screenX := app.layout.leftW / 2
+	// X within the rendered bubble bounds.
+	screenX := zone.StartCol
 
 	app.Update(tea.MouseClickMsg{X: screenX, Y: screenY, Button: tea.MouseLeft})
 
@@ -52,6 +52,66 @@ func TestUserMsgClick_OpensMessageActionModal(t *testing.T) {
 	}
 	if app.messageActionModal.MessageText != "hello from click test" {
 		t.Errorf("modal.MessageText = %q want %q", app.messageActionModal.MessageText, "hello from click test")
+	}
+}
+
+func TestUserMsgClick_LeftGutterDoesNotOpenMessageActionModal(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "left gutter click test"}},
+		},
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	app.hydrateMessagesFromStore(app.opts.SessionID)
+	_ = app.View()
+
+	if len(app.userMsgHitZones) == 0 {
+		t.Fatal("expected userMsgHitZones to be populated after View()")
+	}
+
+	zone := app.userMsgHitZones[0]
+	if zone.StartCol <= 0 {
+		t.Fatalf("test requires a left gutter before the user bubble; StartCol = %d", zone.StartCol)
+	}
+	screenY := headerHeight + zone.StartLine + 1 - app.msgViewport.YOffset()
+	screenX := zone.StartCol - 1
+
+	app.Update(tea.MouseClickMsg{X: screenX, Y: screenY, Button: tea.MouseLeft})
+
+	if app.overlays.Has(overlayMessageAction) {
+		t.Fatal("overlayMessageAction should not open after clicking left of a user message bubble")
+	}
+}
+
+func TestUserMsgMouseMotion_LeftGutterDoesNotHoverClickableBubble(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "left gutter hover test"}},
+		},
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	app.hydrateMessagesFromStore(app.opts.SessionID)
+	_ = app.View()
+
+	if len(app.userMsgHitZones) == 0 {
+		t.Fatal("expected userMsgHitZones to be populated after View()")
+	}
+
+	zone := app.userMsgHitZones[0]
+	if zone.StartCol <= 0 {
+		t.Fatalf("test requires a left gutter before the user bubble; StartCol = %d", zone.StartCol)
+	}
+	screenY := headerHeight + zone.StartLine + 1 - app.msgViewport.YOffset()
+	screenX := zone.StartCol - 1
+
+	app.Update(tea.MouseMotionMsg{X: screenX, Y: screenY})
+
+	if app.hoverUserMsgID != "" {
+		t.Fatalf("hoverUserMsgID after hovering left of bubble = %q; want empty", app.hoverUserMsgID)
 	}
 }
 
@@ -72,7 +132,7 @@ func TestUserMsgMouseMotion_HoversClickableBubble(t *testing.T) {
 	}
 	zone := app.userMsgHitZones[0]
 	screenY := headerHeight + zone.StartLine + 1 - app.msgViewport.YOffset()
-	screenX := app.layout.leftW / 2
+	screenX := zone.StartCol
 
 	app.Update(tea.MouseMotionMsg{X: screenX, Y: screenY})
 
