@@ -267,11 +267,17 @@ func TestMessageListCompactKeepsBlankLineBetweenMessages(t *testing.T) {
 	}
 	compactOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Compact: true, Messages: messages}.View())
 
-	if !strings.Contains(compactOut, "first") || !strings.Contains(compactOut, "second") {
+	firstIdx := strings.Index(compactOut, "first")
+	secondIdx := strings.Index(compactOut, "second")
+	if firstIdx == -1 || secondIdx == -1 {
 		t.Fatalf("compact layout should keep messages visible:\n%s", compactOut)
 	}
-	if !strings.Contains(compactOut, "\n\n") {
-		t.Fatalf("compact layout should keep a blank line between messages:\n%s", compactOut)
+	if firstIdx >= secondIdx {
+		t.Fatalf("compact layout rendered messages out of order:\n%s", compactOut)
+	}
+	betweenMessages := compactOut[firstIdx:secondIdx]
+	if !strings.Contains(betweenMessages, "\n\n") {
+		t.Fatalf("compact layout should keep a blank line between messages; gap=%q\noutput:\n%s", betweenMessages, compactOut)
 	}
 }
 
