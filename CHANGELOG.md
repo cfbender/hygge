@@ -8,6 +8,18 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.15.0] — 2026-05-28
+
+### Bug Fixes
+
+- Route prompt generation through fantasy (#58) ([`581417fa`](../../commit/581417fab3a4c0730a7d959bc98c769d877c72e6))
+- Use terminal colors for models command (#59) ([`3e8d86be`](../../commit/3e8d86be85ab27824e7004faa9326b612287c76a))
+- Bound user message click zone (#60) ([`09584605`](../../commit/09584605874807ada8637ec917cd13ab58efdf75))
+
+### Features
+
+- Add favorite models (#55) ([`49195ceb`](../../commit/49195ceb4f419eb39bf48c4a7ac6e0cc4f8d0e7e))
+- Better mode explanation (#57) ([`f1b79f24`](../../commit/f1b79f2464c433abfa4e249809e12c084841c369))
 ## [0.14.1] — 2026-05-27
 
 ### Bug Fixes
