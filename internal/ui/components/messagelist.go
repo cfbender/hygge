@@ -204,6 +204,11 @@ type MessageList struct {
 	// ExpandedThinking. It keeps expansion state stable when scrollback is capped
 	// and a synthetic notice is prepended to the rendered slice.
 	MessageIndexOffset int
+
+	// Compact enables compact layout mode: tighter message spacing, no separate
+	// assistant header row with model metadata (mode name goes inside the bubble),
+	// tool output hidden until explicitly expanded, subagent blocks two lines.
+	Compact bool
 }
 
 // now returns the reference time for relative timestamps.
@@ -487,7 +492,9 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 		}
 	}
 
-	joined := strings.Join(parts, "\n\n")
+	// Keep one blank line between rendered messages in all layouts.
+	sep := "\n\n"
+	joined := strings.Join(parts, sep)
 
 	// Walk the joined string to compute actual line offsets for each zone.
 	var urlZones []URLHitZone
@@ -532,6 +539,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 			}
 			line += partLines
 			if i < len(parts)-1 {
+				// "\n\n" separator adds one blank line between parts.
 				line++
 			}
 		}
@@ -654,7 +662,10 @@ func (m MessageList) renderOne(msg UIMessage, msgIdx int, collapseLimit int) str
 	// non-streaming, plain content (no markdown).
 	if msg.Role == RoleTool {
 		expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
-		if !expanded {
+		if m.Compact && !expanded {
+			// Compact mode: completely hide tool output until expanded.
+			body = ""
+		} else if !expanded {
 			body = m.collapseToolBody(body, collapseLimit)
 		} else {
 			body = m.muted().Render(body)
@@ -718,9 +729,10 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	body = m.highlightHoveredURL(body)
 	body = LinkifyURLs(body)
 
-	// Header-right: relative timestamp.
+	// Header-right: relative timestamp. Compact mode removes the separate
+	// user header row in the same way assistant compact bubbles do.
 	headerRight := ""
-	if !msg.Timestamp.IsZero() {
+	if !m.Compact && !msg.Timestamp.IsZero() {
 		headerRight = relativeTimestamp(msg.Timestamp, m.now())
 	}
 
@@ -745,6 +757,9 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		} else {
 			hoverIndicator = "↵"
 		}
+	}
+	if m.Compact {
+		hoverIndicator = ""
 	}
 
 	b := bubble.Bubble{
@@ -869,11 +884,28 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 
 	accentColor := m.agentAccentColor(msg)
 
+	// Compact mode: suppress the separate header row; fold the mode name
+	// directly into the top of the bubble body instead.
+	headerLeft := agentType
+	if m.Compact {
+		// Prepend a muted mode-name line inside the bubble body.
+		var modeStyle lipgloss.Style
+		if m.Theme != nil {
+			modeStyle = m.Theme.Style(styles.AtomMuted).Bold(true)
+		} else {
+			modeStyle = lipgloss.NewStyle().Faint(true).Bold(true)
+		}
+		modePrefix := modeStyle.Render(agentType)
+		body = modePrefix + "\n" + body
+		headerLeft = ""
+		headerRight = ""
+	}
+
 	b := bubble.Bubble{
 		Width:           width,
 		BubbleWidth:     bubbleW,
 		Alignment:       bubble.AlignLeft,
-		HeaderLeft:      agentType,
+		HeaderLeft:      headerLeft,
 		HeaderRight:     headerRight,
 		Body:            body,
 		Theme:           m.Theme,
@@ -1044,6 +1076,14 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 			label = truncateTarget(label, innerW)
 		}
 		rows = append(rows, label)
+
+		// Compact mode: suppress all tool output until explicitly expanded.
+		if m.Compact {
+			expanded := m.ExpandedTools != nil && m.ExpandedTools[msg.ToolUseID]
+			if !expanded {
+				continue
+			}
+		}
 
 		if diff := m.toolDiffPreview(msg, innerW); diff != "" {
 			rows = append(rows, "")
@@ -1227,6 +1267,7 @@ func (m MessageList) nestedFor(msg UIMessage) string {
 		Now:     m.Now,
 		Anim:    an,
 		Hovered: msg.SubagentID == m.HoverSubagentID,
+		Compact: m.Compact,
 	}
 	return block.View()
 }

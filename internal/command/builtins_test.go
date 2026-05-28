@@ -16,6 +16,7 @@ func TestBuiltinSetIsLocked(t *testing.T) {
 		"forget",
 		"fork",
 		"help",
+		"layout",
 		"memory",
 		"model",
 		"new",

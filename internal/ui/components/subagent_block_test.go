@@ -264,7 +264,49 @@ func TestMessageListNoNestedWhenSubagentIDMissing(t *testing.T) {
 	}
 }
 
-// TestFormatElapsedRanges ensures formatElapsed covers the spec cases.
+// TestSubagentBlockCompactTwoLines verifies that Compact=true renders exactly
+// two lines: heading + subtitle, with no hint line and no blank spacer.
+func TestSubagentBlockCompactTwoLines(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	end := start.Add(4*time.Second + 200*time.Millisecond)
+	st := &SubagentState{
+		SubSessionID: "sub-compact",
+		Type:         "general",
+		Description:  "compact test",
+		StartedAt:    start,
+		EndedAt:      end,
+		Model:        "test-model",
+		Cost:         0.001,
+		OutputTokens: 10,
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "read"},
+		},
+	}
+	out := SubagentBlock{State: st, Theme: styles.DefaultTheme(), Now: end, Compact: true}.View()
+
+	// Heading and subtitle must be present.
+	if !strings.Contains(out, "General Subagent") {
+		t.Errorf("compact view missing heading; got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 toolcalls") {
+		t.Errorf("compact view missing subtitle; got:\n%s", out)
+	}
+	// The ctrl+g hint must NOT appear.
+	if strings.Contains(out, "ctrl+g") {
+		t.Errorf("compact view must NOT contain ctrl+g hint; got:\n%s", out)
+	}
+	// There must be no blank line (two consecutive newlines).
+	if strings.Contains(out, "\n\n") {
+		t.Errorf("compact view must NOT contain blank line; got:\n%s", out)
+	}
+	// Exactly one newline: heading + "\n" + subtitle.
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Errorf("compact view should have exactly 2 lines, got %d:\n%s", len(lines), out)
+	}
+}
+
 func TestFormatElapsedRanges(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

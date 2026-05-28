@@ -101,6 +101,10 @@ const (
 
 	// UpdateSteerMessage asks the TUI to send active-turn steering to the agent.
 	UpdateSteerMessage = "steer_message"
+
+	// UpdateLayout asks the TUI to switch the in-session layout mode without
+	// persisting to config.  Value: "default" | "compact" | "toggle".
+	UpdateLayout = "layout"
 )
 
 // Well-known modal names a command may request via [Outcome.OpenModal].

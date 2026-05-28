@@ -100,6 +100,9 @@ type SubagentBlock struct {
 	Now     time.Time
 	Anim    *anim.Anim
 	Hovered bool
+	// Compact, when true, renders the block as only two lines (heading +
+	// subtitle) without the blank spacer line or ctrl+g hint.
+	Compact bool
 }
 
 // View renders the compact block.  Returns the empty string when State is nil.
@@ -115,6 +118,11 @@ func (b SubagentBlock) View() string {
 
 	// Subtitle: state-dependent one-liner.
 	subtitle := b.subtitle()
+
+	if b.Compact {
+		// Two-line layout: heading + subtitle only.
+		return heading + "\n" + subtitle
+	}
 
 	// Hint line.
 	hint := b.hintLine()

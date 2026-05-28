@@ -16,6 +16,7 @@ import (
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/catalog"
 	"github.com/cfbender/hygge/internal/command"
+	"github.com/cfbender/hygge/internal/config"
 	"github.com/cfbender/hygge/internal/cost"
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/store"
@@ -1514,7 +1515,168 @@ func TestSlashCommandSteerSendsActiveTurnGuidance(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Favorite models tests (issue #50)
+// /layout command tests
+// ---------------------------------------------------------------------------
+
+// TestSlashCommandLayoutToggleDefaultToCompact verifies that /layout with no
+// argument switches the in-session layout from default to compact.
+func TestSlashCommandLayoutToggleDefaultToCompact(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	// Default state: no override, config is nil → effectiveLayout == "default".
+	if got := app.effectiveLayout(); got != "default" {
+		t.Fatalf("initial effectiveLayout = %q, want default", got)
+	}
+
+	typeInto(app, "/layout")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := app.effectiveLayout(); got != "compact" {
+		t.Errorf("after /layout toggle, effectiveLayout = %q, want compact", got)
+	}
+	if app.layoutOverride != "compact" {
+		t.Errorf("layoutOverride = %q, want compact", app.layoutOverride)
+	}
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using compact layout" {
+		t.Fatalf("toast = %#v, want compact layout toast", app.toast)
+	}
+}
+
+// TestSlashCommandLayoutToggleCompactToDefault verifies toggling back from
+// compact to default.
+func TestSlashCommandLayoutToggleCompactToDefault(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.layoutOverride = "compact"
+
+	typeInto(app, "/layout")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := app.effectiveLayout(); got != "default" {
+		t.Errorf("after toggle from compact, effectiveLayout = %q, want default", got)
+	}
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using default layout" {
+		t.Fatalf("toast = %#v, want default layout toast", app.toast)
+	}
+}
+
+// TestSlashCommandLayoutExplicitCompact verifies /layout compact sets compact.
+func TestSlashCommandLayoutExplicitCompact(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	typeInto(app, "/layout compact")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := app.effectiveLayout(); got != "compact" {
+		t.Errorf("effectiveLayout = %q, want compact", got)
+	}
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using compact layout" {
+		t.Fatalf("toast = %#v, want compact layout toast", app.toast)
+	}
+}
+
+// TestSlashCommandLayoutExplicitDefault verifies /layout default sets default.
+func TestSlashCommandLayoutExplicitDefault(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	app.layoutOverride = "compact"
+
+	typeInto(app, "/layout default")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := app.effectiveLayout(); got != "default" {
+		t.Errorf("effectiveLayout = %q, want default", got)
+	}
+	if app.notice != "" {
+		t.Errorf("notice = %q, want empty because layout feedback uses toast", app.notice)
+	}
+	if app.toast == nil || app.toast.title != "Layout" || app.toast.body != "Using default layout" {
+		t.Fatalf("toast = %#v, want default layout toast", app.toast)
+	}
+}
+
+// TestSlashCommandLayoutInvalidArgShowsError verifies that an unknown arg
+// produces an error notice and leaves layout unchanged.
+func TestSlashCommandLayoutInvalidArgShowsError(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+
+	typeInto(app, "/layout wide")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !strings.Contains(app.notice, "expected") {
+		t.Errorf("notice = %q, want hint about valid args", app.notice)
+	}
+	if app.layoutOverride != "" {
+		t.Errorf("layoutOverride = %q, want empty (no change on invalid arg)", app.layoutOverride)
+	}
+}
+
+// TestSlashCommandLayoutDoesNotMutateConfig verifies that /layout never writes
+// to opts.Config.Layout (success criteria 3).
+func TestSlashCommandLayoutDoesNotMutateConfig(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	cfg := &config.Config{}
+	cfg.Layout = "default"
+	app.opts.Config = cfg
+
+	typeInto(app, "/layout compact")
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if cfg.Layout != "default" {
+		t.Errorf("Config.Layout = %q, want unchanged default", cfg.Layout)
+	}
+	if app.effectiveLayout() != "compact" {
+		t.Errorf("effectiveLayout = %q, want compact", app.effectiveLayout())
+	}
+}
+
+// TestEffectiveLayoutFallsBackToConfig verifies that when layoutOverride is
+// empty, effectiveLayout reads from Config.Layout.
+func TestEffectiveLayoutFallsBackToConfig(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	cfg := &config.Config{}
+	cfg.Layout = "compact"
+	app.opts.Config = cfg
+
+	if got := app.effectiveLayout(); got != "compact" {
+		t.Errorf("effectiveLayout = %q, want compact from config", got)
+	}
+
+	// Override wins over config.
+	app.layoutOverride = "default"
+	if got := app.effectiveLayout(); got != "default" {
+		t.Errorf("effectiveLayout = %q, want default from override", got)
+	}
+}
+
+// TestSlashCommandLayoutAppearsInPalette verifies /layout shows in the
+// slash-command palette.
+func TestSlashCommandLayoutAppearsInPalette(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newSlashApp(t)
+	typeInto(app, "/lay")
+	if matches := app.paletteMatches(); len(matches) == 0 || matches[0].Name() != "layout" {
+		t.Fatalf("palette matches = %#v, want /layout first", matches)
+	}
+	view := app.View().Content
+	if !strings.Contains(view, "/layout") {
+		t.Errorf("palette should show /layout for /lay buffer:\n%s", view)
+	}
+}
+
 // ---------------------------------------------------------------------------
 
 // TestModelDialogFavoritesRenderedFirst verifies that when FavoriteModels is
