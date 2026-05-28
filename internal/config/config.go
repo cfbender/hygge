@@ -137,6 +137,12 @@ type Config struct {
 	// onboarding instead of synthesizing a fallback mode.
 	Modes []ModeConfig `mapstructure:"modes"`
 
+	// Layout controls the visual density of the chat UI.
+	// Accepted values: "default" (spacious, separate message headers) and
+	// "compact" (tight spacing, no separate headers, collapsed tool output).
+	// Empty/absent values are normalised to "default" at load time.
+	Layout string `mapstructure:"layout"`
+
 	// Plugins holds plugin source and per-plugin configuration.
 	// Sources is the list of plugin source URIs declared in [plugins].sources.
 	// PluginSettings maps plugin names to their [plugins.<name>] config tables.
@@ -723,6 +729,19 @@ func validateConfig(cfg *Config) error {
 		slog.Warn("config: invalid session.resume_default, resetting to new",
 			"value", cfg.Session.ResumeDefault)
 		cfg.Session.ResumeDefault = "new"
+	}
+
+	// Layout: normalise and validate.  Invalid values warn and reset to
+	// "default" so a typo cannot block startup.
+	switch strings.ToLower(strings.TrimSpace(cfg.Layout)) {
+	case "", "default":
+		cfg.Layout = "default"
+	case "compact":
+		cfg.Layout = "compact"
+	default:
+		slog.Warn("config: invalid layout, resetting to default",
+			"value", cfg.Layout)
+		cfg.Layout = "default"
 	}
 
 	// Catalog refresh_interval: validate by parsing; bad values warn and

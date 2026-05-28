@@ -295,6 +295,8 @@ func (a *App) applyUpdate(key, value string) tea.Cmd {
 			a.pendingAttachments = nil
 			a.notice = fmt.Sprintf("cleared %d attachment(s)", n)
 		}
+	case command.UpdateLayout:
+		return a.applyLayoutOverride(value)
 	default:
 		if key == "apikey_provider" {
 			return nil
@@ -614,6 +616,40 @@ func (c *commandAppAdapter) Sessions(ctx context.Context, limit int) ([]*session
 
 // Compile-time guard that the adapter satisfies the interface.
 var _ command.App = (*commandAppAdapter)(nil)
+
+// applyLayoutOverride processes a /layout UpdateLayout value.  It toggles or
+// sets a.layoutOverride without touching a.opts.Config.
+func (a *App) applyLayoutOverride(value string) tea.Cmd {
+	switch value {
+	case "compact":
+		a.layoutOverride = "compact"
+	case "default":
+		a.layoutOverride = "default"
+	case "toggle":
+		if a.effectiveLayout() == "compact" {
+			a.layoutOverride = "default"
+		} else {
+			a.layoutOverride = "compact"
+		}
+	}
+	a.msgCacheValid = false
+	if a.layoutOverride == "" {
+		return nil
+	}
+	return a.showToast("Layout", fmt.Sprintf("Using %s layout", a.layoutOverride))
+}
+
+// effectiveLayout returns the active layout name ("default" or "compact"),
+// preferring the in-session override over the persisted config value.
+func (a *App) effectiveLayout() string {
+	if a.layoutOverride != "" {
+		return a.layoutOverride
+	}
+	if a.opts.Config != nil && a.opts.Config.Layout == "compact" {
+		return "compact"
+	}
+	return "default"
+}
 
 // slogWarnUnknownModal is a thin helper so the call site stays
 // readable; pulls the slog line into one place.

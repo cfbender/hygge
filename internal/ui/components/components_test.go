@@ -231,6 +231,80 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	}
 }
 
+func TestMessageListCompactHidesCollapsedToolOutput(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width:   80,
+		Theme:   styles.DefaultTheme(),
+		Compact: true,
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "bash", ToolUseID: "tool-1", Target: "echo hi", Raw: "secret output"},
+		},
+	}
+
+	out := ml.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "Bash") {
+		t.Fatalf("compact tool should keep the tool label visible:\n%s", plain)
+	}
+	if strings.Contains(plain, "secret output") {
+		t.Fatalf("compact collapsed tool should hide output until expanded:\n%s", plain)
+	}
+
+	ml.ExpandedTools = map[string]bool{"tool-1": true}
+	out = ml.View()
+	plain = stripANSI(out)
+	if !strings.Contains(plain, "secret output") {
+		t.Fatalf("compact expanded tool should show output:\n%s", plain)
+	}
+}
+
+func TestMessageListCompactKeepsBlankLineBetweenMessages(t *testing.T) {
+	t.Parallel()
+	messages := []UIMessage{
+		{Role: RoleUser, Raw: "first"},
+		{Role: RoleUser, Raw: "second"},
+	}
+	compactOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Compact: true, Messages: messages}.View())
+
+	firstIdx := strings.Index(compactOut, "first")
+	secondIdx := strings.Index(compactOut, "second")
+	if firstIdx == -1 || secondIdx == -1 {
+		t.Fatalf("compact layout should keep messages visible:\n%s", compactOut)
+	}
+	if firstIdx >= secondIdx {
+		t.Fatalf("compact layout rendered messages out of order:\n%s", compactOut)
+	}
+	betweenMessages := compactOut[firstIdx:secondIdx]
+	if !strings.Contains(betweenMessages, "\n\n") {
+		t.Fatalf("compact layout should keep a blank line between messages; gap=%q\noutput:\n%s", betweenMessages, compactOut)
+	}
+}
+
+func TestMessageListCompactRemovesUserHeader(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	msg := UIMessage{
+		Role:      RoleUser,
+		Raw:       "hello",
+		Timestamp: now.Add(-time.Minute),
+		MessageID: "msg-1",
+	}
+
+	defaultOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Now: now, HoverUserMsgID: "msg-1", Messages: []UIMessage{msg}}.View())
+	compactOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Now: now, HoverUserMsgID: "msg-1", Compact: true, Messages: []UIMessage{msg}}.View())
+
+	if !strings.Contains(defaultOut, "1 minute ago") || !strings.Contains(defaultOut, "↵") {
+		t.Fatalf("default user bubble should include header metadata:\n%s", defaultOut)
+	}
+	if strings.Contains(compactOut, "1 minute ago") || strings.Contains(compactOut, "↵") {
+		t.Fatalf("compact user bubble should remove the header row:\n%s", compactOut)
+	}
+	if !strings.Contains(compactOut, "hello") {
+		t.Fatalf("compact user bubble should keep body text:\n%s", compactOut)
+	}
+}
+
 func TestMessageListEmpty(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}

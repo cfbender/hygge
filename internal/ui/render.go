@@ -125,6 +125,7 @@ func (a *App) renderChatContent() string {
 			ExpandedTools:      a.expandedTools,
 			ExpandedThinking:   a.expandedThinkingFor(a.foregroundTranscriptID()),
 			MessageIndexOffset: messageIndexOffset,
+			Compact:            a.effectiveLayout() == "compact",
 		}
 		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones, a.urlHitZones, a.userMsgHitZones = ml.ViewWithHitZones()
 		a.msgCacheValid = true
