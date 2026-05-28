@@ -557,9 +557,10 @@ func loadOneDir(reg *Registry, dirPath, source string) {
 type mdFrontmatter struct {
 	Description string `toml:"description"`
 	// Mode is the preferred field name; Agent is the accepted alias.
-	Mode  string `toml:"mode"`
-	Agent string `toml:"agent"`
-	Model string `toml:"model"`
+	Mode     string `toml:"mode"`
+	Agent    string `toml:"agent"`
+	Provider string `toml:"provider"`
+	Model    string `toml:"model"`
 }
 
 // frontmatterSep is the YAML-style delimiter that separates the
@@ -580,7 +581,7 @@ func loadOneMDFile(reg *Registry, path, source string) {
 	}
 
 	name := strings.TrimSuffix(filepath.Base(path), ".md")
-	cmd, err := parseMDCommand(name, data, source, path)
+	cmd, err := parseMDCommand(name, data, source)
 	if err != nil {
 		slog.Warn("command: skipping markdown command", "path", path, "err", err)
 		return
@@ -613,7 +614,7 @@ func findClosingFrontmatter(data []byte) (int, int, error) {
 // the remainder is the prompt body.  A missing or empty frontmatter
 // description produces an error (description is required).  A missing
 // prompt body also produces an error.
-func parseMDCommand(name string, data []byte, source, path string) (Command, error) {
+func parseMDCommand(name string, data []byte, source string) (Command, error) {
 	name = strings.TrimSpace(name)
 	if !nameRe.MatchString(name) {
 		return nil, fmt.Errorf("invalid name %q (must match %s)", name, nameRe)
@@ -668,20 +669,17 @@ func parseMDCommand(name string, data []byte, source, path string) (Command, err
 		return nil, fmt.Errorf("prompt body is required")
 	}
 
-	// Warn about unknown placeholders in the prompt, same as TOML loader.
-	for _, ph := range placeholdersIn(prompt) {
-		if ph == reservedTailArg {
-			continue
-		}
-		slog.Warn("command: template references unknown placeholder",
-			"path", path, "name", name, "placeholder", ph)
+	model := strings.TrimSpace(fm.Model)
+	provider := strings.TrimSpace(fm.Provider)
+	if provider != "" && model != "" && !strings.HasPrefix(model, provider+"/") {
+		model = provider + "/" + model
 	}
 
 	return &templateCommand{
 		name:        name,
 		description: desc,
 		mode:        mode,
-		model:       strings.TrimSpace(fm.Model),
+		model:       model,
 		source:      source,
 		prompt:      prompt,
 	}, nil

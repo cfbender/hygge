@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -243,11 +244,14 @@ func orderedUpdateKeys(updates map[string]string) []string {
 			keys = append(keys, key)
 		}
 	}
+	rest := make([]string, 0, len(updates)-len(keys))
 	for key := range updates {
 		if key != command.UpdateMode && key != command.UpdateModel {
-			keys = append(keys, key)
+			rest = append(rest, key)
 		}
 	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
 	return keys
 }
 

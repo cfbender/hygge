@@ -162,7 +162,7 @@ func TestLoadMarkdownCommandDirectory(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	pwd := t.TempDir()
-	writeFile(t, filepath.Join(pwd, ".hygge", "commands", "test.md"), "---\ndescription = \"Run tests with coverage\"\nmode = \"build\"\nmodel = \"anthropic/claude-3-5-sonnet-20241022\"\n---\n\nRun tests for {{tail}}.\n")
+	writeFile(t, filepath.Join(pwd, ".hygge", "commands", "test.md"), "---\ndescription = \"Run tests with coverage\"\nmode = \"build\"\nprovider = \"anthropic\"\nmodel = \"claude-3-5-sonnet-20241022\"\n---\n\nRun tests for {{tail}}.\n")
 	reg, err := Load(LoadOptions{HomeDir: home, Pwd: pwd})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
