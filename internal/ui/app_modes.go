@@ -30,7 +30,28 @@ func (a *App) cycleMode() tea.Cmd {
 		return nil
 	}
 
-	a.modeIndex = (a.modeIndex + 1) % len(a.opts.Modes)
+	return a.switchModeAt((a.modeIndex + 1) % len(a.opts.Modes))
+}
+
+func (a *App) switchModeByName(name string) tea.Cmd {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	for i, mode := range a.opts.Modes {
+		if strings.EqualFold(mode.Name, name) {
+			return a.switchModeAt(i)
+		}
+	}
+	return a.showToast("Mode not found", "No configured mode named "+name)
+}
+
+func (a *App) switchModeAt(index int) tea.Cmd {
+	if index < 0 || index >= len(a.opts.Modes) {
+		return nil
+	}
+
+	a.modeIndex = index
 	mode := a.opts.Modes[a.modeIndex]
 
 	// Update reasoning display.
