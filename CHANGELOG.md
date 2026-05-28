@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.15.3] — 2026-05-28
+
+### Chores
+
+- Update deps ([`e8e58dcd`](../../commit/e8e58dcd8a4f043c4a2d4c09fcb91ed347435e75))
 ## [0.15.2] — 2026-05-28
 
 ### Features
