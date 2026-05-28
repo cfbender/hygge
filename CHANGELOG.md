@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.15.2] — 2026-05-28
+
+### Features
+
+- Support custom commands (#64) ([`27222952`](../../commit/272229520de7a7e1b4421ee22a8caf9c7842242a))
 ## [0.15.1] — 2026-05-28
 
 ### Features
