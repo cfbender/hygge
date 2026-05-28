@@ -448,10 +448,9 @@ func buildTemplateCommand(name string, e tomlEntry, source, path string) (Comman
 	if mode == "" {
 		mode = strings.TrimSpace(e.Agent)
 	}
-	model := strings.TrimSpace(e.Model)
-	provider := strings.TrimSpace(e.Provider)
-	if provider != "" && model != "" && !strings.HasPrefix(model, provider+"/") {
-		model = provider + "/" + model
+	model, err := normalizeCommandModel(e.Provider, e.Model)
+	if err != nil {
+		return nil, err
 	}
 
 	return &templateCommand{
@@ -463,6 +462,24 @@ func buildTemplateCommand(name string, e tomlEntry, source, path string) (Comman
 		mode:        mode,
 		model:       model,
 	}, nil
+}
+
+func normalizeCommandModel(providerValue, modelValue string) (string, error) {
+	model := strings.TrimSpace(modelValue)
+	if model == "" {
+		return "", nil
+	}
+	provider := strings.TrimSpace(providerValue)
+	if provider != "" {
+		if strings.HasPrefix(model, provider+"/") {
+			return model, nil
+		}
+		return provider + "/" + model, nil
+	}
+	if strings.Contains(model, "/") {
+		return model, nil
+	}
+	return "", fmt.Errorf("model %q must include provider prefix or set provider", model)
 }
 
 // findProjectFile walks parents of start looking for a file at the
@@ -664,15 +681,14 @@ func parseMDCommand(name string, data []byte, source string) (Command, error) {
 		return nil, fmt.Errorf("description is required (add a frontmatter block with description = \"…\")")
 	}
 
-	prompt := strings.TrimSpace(string(body))
-	if prompt == "" {
+	prompt := string(body)
+	if len(prompt) == 0 {
 		return nil, fmt.Errorf("prompt body is required")
 	}
 
-	model := strings.TrimSpace(fm.Model)
-	provider := strings.TrimSpace(fm.Provider)
-	if provider != "" && model != "" && !strings.HasPrefix(model, provider+"/") {
-		model = provider + "/" + model
+	model, err := normalizeCommandModel(fm.Provider, fm.Model)
+	if err != nil {
+		return nil, err
 	}
 
 	return &templateCommand{

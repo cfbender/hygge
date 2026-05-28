@@ -181,7 +181,7 @@ func TestLoadMarkdownCommandDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if out.Message != "Run tests for internal/command." {
+	if out.Message != "\nRun tests for internal/command.\n" {
 		t.Errorf("message = %q", out.Message)
 	}
 	if got := out.Updates[UpdateMode]; got != "build" {
@@ -215,7 +215,41 @@ func TestLoadMarkdownCommandDirectorySupportsAgentAliasAndCRLF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if out.Message != "Run coverage." {
+	if out.Message != "\r\nRun coverage.\r\n" {
+		t.Errorf("message = %q", out.Message)
+	}
+}
+
+func TestLoadMarkdownCommandRejectsBareModel(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands", "bare.md"), "---\ndescription = \"Bare model\"\nmodel = \"gpt-5\"\n---\nBody\n")
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := reg.Get("bare"); ok {
+		t.Fatal("bare model without provider should skip /bare")
+	}
+}
+
+func TestLoadMarkdownCommandPreservesPromptBody(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands", "verbatim.md"), "---\ndescription = \"Verbatim\"\n---\n\n  indented {{tail}}\n\n")
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmd, ok := reg.Get("verbatim")
+	if !ok {
+		t.Fatal("missing /verbatim")
+	}
+	out, err := cmd.Execute(context.Background(), nil, "body")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Message != "\n  indented body\n\n" {
 		t.Errorf("message = %q", out.Message)
 	}
 }
@@ -256,8 +290,27 @@ func TestLoadCommandDirectoryPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if out.Message != "PROJECT HYGGE" {
+	if out.Message != "PROJECT HYGGE\n" {
 		t.Errorf("message = %q", out.Message)
+	}
+}
+
+func TestLoadTOMLRejectsBareModel(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".agents", "commands.toml"), `
+[[commands]]
+name = "bare"
+description = "Bare model"
+model = "gpt-5"
+command = "Body"
+`)
+	reg, err := Load(LoadOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := reg.Get("bare"); ok {
+		t.Fatal("bare model without provider should skip /bare")
 	}
 }
 
