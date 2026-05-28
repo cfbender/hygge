@@ -2331,3 +2331,84 @@ name = "from-local-profile"
 		t.Fatalf("model.name = %q, want from-explicit-profile", cfg.Model.Name)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Layout config tests
+// ---------------------------------------------------------------------------
+
+// TestLoad_Layout_Default verifies that an absent layout normalises to "default".
+func TestLoad_Layout_Default(t *testing.T) {
+	tmp := t.TempDir()
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Layout != "default" {
+		t.Errorf("layout default: got %q, want \"default\"", cfg.Layout)
+	}
+}
+
+// TestLoad_Layout_Compact verifies that layout = "compact" is accepted.
+func TestLoad_Layout_Compact(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+layout = "compact"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Layout != "compact" {
+		t.Errorf("layout: got %q, want \"compact\"", cfg.Layout)
+	}
+}
+
+// TestLoad_Layout_ExplicitDefault verifies that layout = "default" is accepted.
+func TestLoad_Layout_ExplicitDefault(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+layout = "default"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Layout != "default" {
+		t.Errorf("layout: got %q, want \"default\"", cfg.Layout)
+	}
+}
+
+// TestLoad_Layout_InvalidValueWarnsAndResets confirms an unrecognised layout
+// does NOT fail the load — it warns and resets to "default".
+func TestLoad_Layout_InvalidValueWarnsAndResets(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+layout = "ultra-compact"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load should not fail for invalid layout, got: %v", err)
+	}
+	if cfg.Layout != "default" {
+		t.Errorf("invalid layout should reset to \"default\", got %q", cfg.Layout)
+	}
+}
+
+// TestLoad_Layout_CaseInsensitive verifies upper-case values are normalised.
+func TestLoad_Layout_CaseInsensitive(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, ".config", "hygge")
+	writeTOML(t, filepath.Join(cfgDir, "config.toml"), `
+layout = "COMPACT"
+`)
+	cfg, _, err := Load(context.Background(), hermeticOpts(t, tmp, nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Layout != "compact" {
+		t.Errorf("layout should be lower-cased, got %q", cfg.Layout)
+	}
+}

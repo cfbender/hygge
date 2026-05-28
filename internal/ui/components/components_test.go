@@ -231,6 +231,53 @@ func TestMessageListCollapsesLongToolOutput(t *testing.T) {
 	}
 }
 
+func TestMessageListCompactHidesCollapsedToolOutput(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width:   80,
+		Theme:   styles.DefaultTheme(),
+		Compact: true,
+		Messages: []UIMessage{
+			{Role: RoleTool, ToolName: "bash", ToolUseID: "tool-1", Target: "echo hi", Raw: "secret output"},
+		},
+	}
+
+	out := ml.View()
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "Bash") {
+		t.Fatalf("compact tool should keep the tool label visible:\n%s", plain)
+	}
+	if strings.Contains(plain, "secret output") {
+		t.Fatalf("compact collapsed tool should hide output until expanded:\n%s", plain)
+	}
+
+	ml.ExpandedTools = map[string]bool{"tool-1": true}
+	out = ml.View()
+	plain = stripANSI(out)
+	if !strings.Contains(plain, "secret output") {
+		t.Fatalf("compact expanded tool should show output:\n%s", plain)
+	}
+}
+
+func TestMessageListCompactUsesTighterMessageSpacing(t *testing.T) {
+	t.Parallel()
+	messages := []UIMessage{
+		{Role: RoleUser, Raw: "first"},
+		{Role: RoleUser, Raw: "second"},
+	}
+	defaultOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Messages: messages}.View())
+	compactOut := stripANSI(MessageList{Width: 80, Theme: styles.DefaultTheme(), Compact: true, Messages: messages}.View())
+
+	if !strings.Contains(compactOut, "first") || !strings.Contains(compactOut, "second") {
+		t.Fatalf("compact layout should keep messages visible:\n%s", compactOut)
+	}
+	defaultLines := strings.Count(defaultOut, "\n")
+	compactLines := strings.Count(compactOut, "\n")
+	if compactLines >= defaultLines {
+		t.Fatalf("compact layout should render fewer lines than default; compact=%d default=%d\ncompact:\n%s\ndefault:\n%s", compactLines, defaultLines, compactOut, defaultOut)
+	}
+}
+
 func TestMessageListEmpty(t *testing.T) {
 	t.Parallel()
 	ml := MessageList{Width: 80, Theme: styles.DefaultTheme()}
