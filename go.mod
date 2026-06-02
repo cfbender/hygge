@@ -4,16 +4,16 @@ go 1.26.3
 
 require (
 	charm.land/bubbles/v2 v2.1.0
-	charm.land/bubbletea/v2 v2.0.6
-	charm.land/catwalk v0.44.2
+	charm.land/bubbletea/v2 v2.0.7
+	charm.land/catwalk v0.44.7
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.26.0
+	charm.land/fantasy v0.28.0
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/atotto/clipboard v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/glamour v1.0.0
-	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654
+	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/gen2brain/beeep v0.11.2
 	github.com/lucasb-eyer/go-colorful v1.4.0
@@ -35,22 +35,22 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
 	github.com/agentable/go-intl v0.2.5 // indirect
-	github.com/alecthomas/chroma/v2 v2.26.0 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.41.8 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
-	github.com/aws/aws-sdk-go-v2/config v1.32.19 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.18 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.24 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.24 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.24 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.25 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.9 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.24 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.1.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.30.18 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.42.2 // indirect
-	github.com/aws/smithy-go v1.26.0 // indirect
+	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.41.9 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.11 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.32.20 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.19 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.26 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.10 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.25 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.1.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.30.19 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.42.3 // indirect
+	github.com/aws/smithy-go v1.27.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -59,8 +59,8 @@ require (
 	github.com/charmbracelet/openai-go v0.0.0-20260319145158-d0740cc34266 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/etag v0.2.0 // indirect
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260527151214-009e6338d40d // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260527151214-009e6338d40d // indirect
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260602025833-85a30b5e440a // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260602025833-85a30b5e440a // indirect
 	github.com/charmbracelet/x/exp/strings v0.1.0 // indirect
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -69,11 +69,11 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.3 // indirect
-	github.com/dlclark/regexp2/v2 v2.1.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-json-experiment/json v0.0.0-20260520185125-572e7c383686 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260601182631-00ed12fed2a6 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
@@ -94,7 +94,7 @@ require (
 	github.com/kaptinlin/jsonschema v0.7.15 // indirect
 	github.com/kaptinlin/messageformat-go v0.6.5 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/mattn/go-runewidth v0.0.23 // indirect
+	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/mango v0.2.0 // indirect
@@ -131,7 +131,7 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/api v0.282.0 // indirect
+	google.golang.org/api v0.283.0 // indirect
 	google.golang.org/genai v1.58.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.81.1 // indirect
