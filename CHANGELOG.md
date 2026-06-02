@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.15.4] — 2026-06-02
+
+### Chores
+
+- Update dependencies (#65) ([`68fc2b78`](../../commit/68fc2b7879cfad64715d027a2086db9061affc38))
 ## [0.15.3] — 2026-05-28
 
 ### Chores
