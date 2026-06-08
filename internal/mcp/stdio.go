@@ -94,8 +94,8 @@ type stdioTransport struct {
 	stdoutBR *bufio.Reader
 	stderrW  *ringBuffer
 
-	// sendMu serialises Send calls to keep WriteFrame's two writes
-	// atomic on the pipe.
+	// sendMu serialises Send calls to keep WriteNDJSON's single write
+	// atomic on the pipe for concurrent callers.
 	sendMu sync.Mutex
 
 	// waitDone is closed when the wait goroutine finishes.
@@ -185,7 +185,7 @@ func (t *stdioTransport) Start(_ context.Context) error {
 	return nil
 }
 
-// Send writes one framed message to the server's stdin.
+// Send writes one newline-delimited JSON message to the server's stdin.
 func (t *stdioTransport) Send(_ context.Context, body []byte) error {
 	t.mu.Lock()
 	if !t.started || t.closed {
@@ -197,13 +197,14 @@ func (t *stdioTransport) Send(_ context.Context, body []byte) error {
 
 	t.sendMu.Lock()
 	defer t.sendMu.Unlock()
-	_, err := WriteFrame(w, body)
+	_, err := WriteNDJSON(w, body)
 	return err
 }
 
-// Recv reads one framed message from the server's stdout.  When the
-// server's stdout has closed (clean exit, pipe broken) Recv returns
-// io.EOF so the Client can shut down pending calls deterministically.
+// Recv reads one newline-delimited JSON message from the server's stdout.
+// When the server's stdout has closed (clean exit, pipe broken) Recv
+// returns io.EOF so the Client can shut down pending calls
+// deterministically.
 func (t *stdioTransport) Recv(_ context.Context) ([]byte, error) {
 	t.mu.Lock()
 	if !t.started {
@@ -212,7 +213,7 @@ func (t *stdioTransport) Recv(_ context.Context) ([]byte, error) {
 	}
 	r := t.stdoutBR
 	t.mu.Unlock()
-	body, err := ReadFrame(r)
+	body, err := ReadNDJSON(r)
 	if err == nil {
 		return body, nil
 	}
