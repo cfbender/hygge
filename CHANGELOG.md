@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.16.0] — 2026-06-08
+
+### Bug Fixes
+
+- Use newline delimited json for stdio mcp (#66) ([`ca9074b0`](../../commit/ca9074b0b5f2d74ececb2c89676a6f1b61b4bafd))
 ## [0.15.4] — 2026-06-02
 
 ### Chores
