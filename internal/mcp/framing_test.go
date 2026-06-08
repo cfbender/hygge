@@ -243,9 +243,22 @@ func TestReadNDJSON_ToleratesCRLF(t *testing.T) {
 	}
 }
 
+func TestReadNDJSON_AllowsMaxFrameSizeWithCRLF(t *testing.T) {
+	t.Parallel()
+	body := []byte(strings.Repeat("x", maxFrameSize))
+	r := bufio.NewReaderSize(strings.NewReader(string(body)+"\r\n"), 16)
+	got, err := ReadNDJSON(r)
+	if err != nil {
+		t.Fatalf("ReadNDJSON: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body length mismatch: got %d want %d", len(got), len(body))
+	}
+}
+
 func TestReadNDJSON_RejectsOversizedLineBeforeNewline(t *testing.T) {
 	t.Parallel()
-	r := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", maxFrameSize+2)), 16)
+	r := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", maxFrameSize+3)), 16)
 	_, err := ReadNDJSON(r)
 	if !errors.Is(err, ErrMalformedFrame) {
 		t.Fatalf("expected ErrMalformedFrame, got %v", err)

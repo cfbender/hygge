@@ -116,7 +116,7 @@ func ReadNDJSON(r *bufio.Reader) ([]byte, error) {
 	for {
 		chunk, err := r.ReadSlice('\n')
 		line = append(line, chunk...)
-		if len(line) > maxFrameSize+1 { // allow maxFrameSize body bytes plus trailing '\n'
+		if len(line) > maxFrameSize+2 { // allow maxFrameSize body bytes plus optional '\r' and trailing '\n'
 			return nil, fmt.Errorf("%w: NDJSON line length exceeds max %d", ErrMalformedFrame, maxFrameSize)
 		}
 		if err == nil {
