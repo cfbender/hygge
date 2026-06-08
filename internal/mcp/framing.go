@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -86,6 +87,58 @@ func ReadFrame(r *bufio.Reader) ([]byte, error) {
 			return nil, io.ErrUnexpectedEOF
 		}
 		return nil, err
+	}
+	return body, nil
+}
+
+// WriteNDJSON writes one JSON-RPC message to w as a newline-delimited
+// JSON line: the body bytes followed by exactly one '\n'.  body must
+// be a complete JSON object (no embedded newlines); callers are
+// responsible for ensuring this.  Returns the total bytes written
+// (len(body)+1).  The function does not flush w; callers that buffer
+// their writer must flush after this call returns.
+func WriteNDJSON(w io.Writer, body []byte) (int, error) {
+	// Combine into a single write so we don't race the newline onto
+	// a buffered pipe after the body.
+	line := make([]byte, len(body)+1)
+	copy(line, body)
+	line[len(body)] = '\n'
+	return w.Write(line)
+}
+
+// ReadNDJSON reads one newline-delimited JSON line from r and returns
+// the body bytes (without the trailing '\n').  Returns io.EOF when r
+// reports EOF at a line boundary (no bytes read for this message yet).
+// A truncated line (EOF mid-line) returns io.ErrUnexpectedEOF.
+// Lines that exceed maxFrameSize bytes return ErrMalformedFrame.
+func ReadNDJSON(r *bufio.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > maxFrameSize+1 { // allow maxFrameSize body bytes plus trailing '\n'
+			return nil, fmt.Errorf("%w: NDJSON line length exceeds max %d", ErrMalformedFrame, maxFrameSize)
+		}
+		if err == nil {
+			break
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if len(line) == 0 {
+				// Clean EOF at a line boundary.
+				return nil, io.EOF
+			}
+			// EOF mid-line — truncated message.
+			return nil, io.ErrUnexpectedEOF
+		}
+		return nil, err
+	}
+	// Trim the trailing newline (and optional CR for robustness).
+	body := bytes.TrimRight(line, "\r\n")
+	if len(body) > maxFrameSize {
+		return nil, fmt.Errorf("%w: NDJSON line length %d exceeds max %d", ErrMalformedFrame, len(body), maxFrameSize)
 	}
 	return body, nil
 }

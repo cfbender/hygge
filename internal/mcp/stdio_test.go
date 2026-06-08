@@ -14,9 +14,10 @@ import (
 
 func TestStdioTransport_RoundtripWithShCat(t *testing.T) {
 	t.Parallel()
-	// `sh -c cat` echoes its stdin to its stdout: framed input becomes
-	// framed output.  This exercises the full subprocess-spawn +
-	// pipe-wire-up path without depending on any MCP binary.
+	// `sh -c cat` echoes its stdin to its stdout: an NDJSON line sent
+	// by Send comes back verbatim and Recv strips the trailing newline.
+	// This exercises the full subprocess-spawn + pipe-wire-up path
+	// without depending on any MCP binary.
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not on PATH")
 	}

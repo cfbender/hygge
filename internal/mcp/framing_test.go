@@ -150,3 +150,104 @@ func intToString(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// ---------------------------------------------------------------------------
+// NDJSON framing
+// ---------------------------------------------------------------------------
+
+func TestWriteReadNDJSON_Roundtrip(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"hello"}`)
+	var buf bytes.Buffer
+	n, err := WriteNDJSON(&buf, body)
+	if err != nil {
+		t.Fatalf("WriteNDJSON: %v", err)
+	}
+	if n != len(body)+1 {
+		t.Fatalf("WriteNDJSON returned %d, want %d", n, len(body)+1)
+	}
+	// The written bytes should be body + '\n'.
+	if raw := buf.Bytes(); raw[len(raw)-1] != '\n' {
+		t.Fatalf("WriteNDJSON did not append newline: %q", raw)
+	}
+
+	r := bufio.NewReader(&buf)
+	got, err := ReadNDJSON(r)
+	if err != nil {
+		t.Fatalf("ReadNDJSON: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body mismatch: got %q want %q", got, body)
+	}
+}
+
+func TestWriteReadNDJSON_MultipleBackToBack(t *testing.T) {
+	t.Parallel()
+	bodies := [][]byte{
+		[]byte(`{"jsonrpc":"2.0","id":1}`),
+		[]byte(`{"jsonrpc":"2.0","method":"ping"}`),
+		[]byte(`{"jsonrpc":"2.0","id":2,"result":{}}`),
+	}
+	var buf bytes.Buffer
+	for _, b := range bodies {
+		if _, err := WriteNDJSON(&buf, b); err != nil {
+			t.Fatalf("WriteNDJSON: %v", err)
+		}
+	}
+	r := bufio.NewReader(&buf)
+	for i, want := range bodies {
+		got, err := ReadNDJSON(r)
+		if err != nil {
+			t.Fatalf("ReadNDJSON[%d]: %v", i, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("ReadNDJSON[%d]: got %q want %q", i, got, want)
+		}
+	}
+	// Next read at clean EOF should return io.EOF.
+	if _, err := ReadNDJSON(r); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF at end, got %v", err)
+	}
+}
+
+func TestReadNDJSON_CleanEOF(t *testing.T) {
+	t.Parallel()
+	r := bufio.NewReader(strings.NewReader(""))
+	_, err := ReadNDJSON(r)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF on empty reader, got %v", err)
+	}
+}
+
+func TestReadNDJSON_TruncatedLine(t *testing.T) {
+	t.Parallel()
+	// No trailing newline — truncated message.
+	r := bufio.NewReader(strings.NewReader(`{"jsonrpc":"2.0"}`))
+	_, err := ReadNDJSON(r)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
+	}
+}
+
+func TestReadNDJSON_ToleratesCRLF(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"jsonrpc":"2.0","id":1}`)
+	input := string(body) + "\r\n"
+	r := bufio.NewReader(strings.NewReader(input))
+	got, err := ReadNDJSON(r)
+	if err != nil {
+		t.Fatalf("ReadNDJSON: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body mismatch: got %q want %q", got, body)
+	}
+}
+
+func TestReadNDJSON_RejectsOversizedLineBeforeNewline(t *testing.T) {
+	t.Parallel()
+	r := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", maxFrameSize+2)), 16)
+	_, err := ReadNDJSON(r)
+	if !errors.Is(err, ErrMalformedFrame) {
+		t.Fatalf("expected ErrMalformedFrame, got %v", err)
+	}
+}
