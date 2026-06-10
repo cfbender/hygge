@@ -692,7 +692,9 @@ func (a *App) Init() tea.Cmd {
 	// Store.GetSession during View().
 	if a.opts.SessionID != "" {
 		a.foregroundStack = []string{a.opts.SessionID}
-		a.hydrateMessagesFromStore(a.opts.SessionID)
+		if cmd := a.hydrateMessagesFromStore(a.opts.SessionID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		a.sessionTitle = a.loadSessionTitle(a.opts.SessionID)
 		a.hydrateTodoSummary(a.opts.SessionID)
 	}
@@ -843,8 +845,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Glamour renderer is sized to the body width; rebuild lazily.
 		a.renderer = nil
 		a.rendererW = 0
-		a.rerenderFinalMarkdownMessages()
-		return a, nil
+		// Schedule async re-render of all finalized messages at the new width.
+		// Tail-first so the visible end of chat upgrades before the rest.
+		return a, a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
 
 	case tea.BackgroundColorMsg:
 		a.terminalBg = m.Color
@@ -1304,6 +1307,64 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if a.msgViewport.AtBottom() {
 				a.userScrolled = false
 			}
+		}
+		return a, nil
+
+	case markdownBatchMsg:
+		// Background render of hydrated messages completed.
+		// Ignore stale results: if a resize changed msgColW since the render
+		// started the rendered widths would be wrong; re-issue the command at
+		// the current width so the latest geometry is used.
+		if m.width != a.msgColW {
+			return a, a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
+		}
+		if len(m.rendered) == 0 && len(m.fallback) == 0 {
+			return a, nil
+		}
+		changed := false
+		// Apply MessageID-keyed results (safe against index shifts).
+		if len(m.rendered) > 0 {
+			// Build a lookup of current messages by MessageID for O(1) application.
+			for i := range a.messages {
+				target := &a.messages[i]
+				if target.MessageID == "" {
+					continue
+				}
+				s, ok := m.rendered[target.MessageID]
+				if !ok || s == "" {
+					continue
+				}
+				if !markdownRenderableRole(target.Role) || target.IsStreaming {
+					continue
+				}
+				target.FinalMarkdown = s
+				changed = true
+			}
+		}
+		// Apply index-keyed fallback for messages without a stable MessageID.
+		// Only applied when the message at that index still has the same Raw.
+		for _, fb := range m.fallback {
+			if fb.idx < 0 || fb.idx >= len(a.messages) {
+				continue
+			}
+			target := &a.messages[fb.idx]
+			if target.MessageID != "" {
+				// Now has a MessageID; skip (should have been handled above or
+				// will be handled by the ID-keyed path in a subsequent batch).
+				continue
+			}
+			if !markdownRenderableRole(target.Role) || target.IsStreaming {
+				continue
+			}
+			if target.Raw != fb.rawSnap {
+				// Raw changed between snapshot and receipt; skip.
+				continue
+			}
+			target.FinalMarkdown = fb.out
+			changed = true
+		}
+		if changed {
+			a.invalidateMsgCache()
 		}
 		return a, nil
 

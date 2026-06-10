@@ -4,18 +4,138 @@ import (
 	"log/slog"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/cfbender/hygge/internal/session"
 	"github.com/cfbender/hygge/internal/ui/components"
 )
 
-func (a *App) hydrateMessagesFromStore(sid string) {
+// hydrateMessagesFromStore loads persisted history for sid and assigns it to
+// a.messages.  It returns a tea.Cmd that renders markdown for all hydrated
+// messages in a background goroutine (markdownBatchMsg), so the first paint
+// never blocks on glamour.  When there is nothing to render (empty session,
+// no store, etc.) nil is returned.
+func (a *App) hydrateMessagesFromStore(sid string) tea.Cmd {
 	if a.opts.Store == nil || sid == "" {
-		return
+		return nil
 	}
 	visited := make(map[string]struct{})
 	msgs := a.hydrateSessionMessages(sid, visited)
 	a.messages = msgs
 	a.invalidateMsgCache()
+	return a.renderMarkdownBatchTailFirstCmd(0, len(msgs))
+}
+
+// markdownRenderableRole reports whether role is one that the async markdown
+// batch renderer should process (RoleUser or RoleAssistant).
+func markdownRenderableRole(role components.MessageRole) bool {
+	return role == components.RoleUser || role == components.RoleAssistant
+}
+
+// renderMarkdownBatchCmd returns a tea.Cmd that glamour-renders messages in
+// a.messages[startIdx:endIdx] whose Role is RoleUser or RoleAssistant and
+// whose Raw is non-empty.  It constructs a fresh renderer (independent of
+// a.renderer) at the current msgColW so there is no shared-state data race.
+//
+// Results are keyed by MessageID when available (safe against index shifts).
+// Messages without a MessageID fall back to an index+rawSnap guard so they
+// are only applied if the message at that index still has the same Raw.
+//
+// When startIdx >= endIdx or the slice is empty the function returns nil.
+func (a *App) renderMarkdownBatchCmd(startIdx, endIdx int) tea.Cmd {
+	if startIdx >= endIdx {
+		return nil
+	}
+	// Snapshot only what the goroutine needs; no App pointer is captured.
+	type renderSpec struct {
+		idx       int
+		messageID string
+		raw       string
+		role      components.MessageRole
+	}
+	specs := make([]renderSpec, 0, endIdx-startIdx)
+	for i := startIdx; i < endIdx; i++ {
+		m := a.messages[i]
+		if !markdownRenderableRole(m.Role) || m.Raw == "" || m.IsStreaming {
+			continue
+		}
+		specs = append(specs, renderSpec{
+			idx:       i,
+			messageID: m.MessageID,
+			raw:       m.Raw,
+			role:      m.Role,
+		})
+	}
+	if len(specs) == 0 {
+		return nil
+	}
+	theme := a.opts.Theme
+	width := a.msgColW
+	if width <= 0 {
+		width = 80
+	}
+	return func() tea.Msg {
+		r, err := newRenderer(theme, width)
+		if err != nil {
+			// Renderer creation failed: return empty result so Update skips
+			// gracefully (FinalMarkdown stays empty → P1 plain-text fallback).
+			return markdownBatchMsg{
+				rendered: make(map[string]string),
+				width:    width,
+			}
+		}
+		rendered := make(map[string]string, len(specs))
+		var fallback []markdownBatchFallback
+		for _, spec := range specs {
+			out := renderMarkdown(r, spec.raw)
+			if out == "" {
+				continue
+			}
+			if spec.messageID != "" {
+				rendered[spec.messageID] = out
+			} else {
+				fallback = append(fallback, markdownBatchFallback{
+					idx:     spec.idx,
+					rawSnap: spec.raw,
+					out:     out,
+				})
+			}
+		}
+		return markdownBatchMsg{rendered: rendered, fallback: fallback, width: width}
+	}
+}
+
+// renderMarkdownBatchTailFirstCmd issues two Cmds when the message slice is
+// large enough: the tail (last tailN messages) first so the visible end of the
+// chat upgrades immediately, followed by the remainder.  When the total count
+// is <= tailN a single Cmd is returned (no split needed).
+//
+// tailN is the number of messages to prioritize from the tail.
+const markdownBatchTailN = 30
+
+func (a *App) renderMarkdownBatchTailFirstCmd(startIdx, endIdx int) tea.Cmd {
+	total := endIdx - startIdx
+	if total <= 0 {
+		return nil
+	}
+	tailStart := endIdx - markdownBatchTailN
+	if tailStart <= startIdx {
+		// Small enough to handle in one batch.
+		return a.renderMarkdownBatchCmd(startIdx, endIdx)
+	}
+	// Issue tail first, then the preceding head.
+	tailCmd := a.renderMarkdownBatchCmd(tailStart, endIdx)
+	headCmd := a.renderMarkdownBatchCmd(startIdx, tailStart)
+	if tailCmd == nil && headCmd == nil {
+		return nil
+	}
+	if tailCmd == nil {
+		return headCmd
+	}
+	if headCmd == nil {
+		return tailCmd
+	}
+	return tea.Batch(tailCmd, headCmd)
 }
 
 func (a *App) hydrateTodoSummary(sid string) {
@@ -106,7 +226,7 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 
 	// Pass 2: build the flat message list, passing the result index so that
 	// assistant messages can inline results for their PartToolUse parts.
-	var out []uiMessage
+	out := make([]uiMessage, 0, len(storeMsgs))
 	for _, m := range storeMsgs {
 		// Inject marker banner before this message if one targets it.
 		if mk, ok := markerByBefore[m.ID]; ok {
@@ -124,21 +244,14 @@ func (a *App) hydrateSessionMessages(sid string, visited map[string]struct{}) []
 			}
 		}
 		// Wire AgentType and ModelName on assistant entries so bubbles render correctly.
-		// Also glamour-render the body text so hydrated messages look the same as
-		// finalized live messages.
+		// VisibleRaw is streaming-only; do not set it on hydrated messages.
+		// FinalMarkdown is left empty and filled asynchronously by markdownBatchTailFirstCmd.
 		for i := range entries {
 			switch entries[i].Role {
 			case components.RoleAssistant:
 				entries[i].AgentType = a.ActiveModeName()
 				entries[i].ModelName = a.opts.ModelName
 				entries[i].ModeColor = a.activeModeColor()
-				if entries[i].Raw != "" {
-					entries[i].FinalMarkdown = renderMarkdown(a.ensureRenderer(), entries[i].Raw)
-				}
-			case components.RoleUser:
-				if entries[i].Raw != "" {
-					entries[i].FinalMarkdown = renderMarkdown(a.ensureRenderer(), entries[i].Raw)
-				}
 			}
 		}
 		out = append(out, entries...)

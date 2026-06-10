@@ -488,19 +488,18 @@ func (a *App) rerenderFinalMarkdownMessages() {
 		return
 	}
 	for i := range a.messages {
-		msg := &a.messages[i]
-		if msg.Raw == "" {
+		target := &a.messages[i]
+		if target.Raw == "" {
 			continue
 		}
 		// Skip streaming messages: glamour-rendering Raw mid-stream would
 		// produce garbled partial output and violate the invariant that
 		// FinalMarkdown is empty while a message is streaming.
-		if msg.IsStreaming {
+		if target.IsStreaming {
 			continue
 		}
-		switch msg.Role {
-		case components.RoleUser, components.RoleAssistant:
-			msg.FinalMarkdown = renderMarkdown(r, msg.Raw)
+		if markdownRenderableRole(target.Role) {
+			target.FinalMarkdown = renderMarkdown(r, target.Raw)
 		}
 	}
 	a.invalidateMsgCache()
