@@ -537,13 +537,13 @@ func (h *registryHost) Exec(ctx context.Context, cmdStr string, args []string, o
 			Command:  cmdStr,
 			ToolName: "plugin:" + h.pluginName,
 		}
-		dec, err := h.reg.opts.Permission.Ask(ctx, req)
-		if err != nil {
-			return ExecResult{}, fmt.Errorf("plugin: exec: permission ask: %w", err)
-		}
-		if dec.Action == permission.ActionDeny {
+		if err := permission.Gate(ctx, h.reg.opts.Permission, req); err != nil {
+			var denied *permission.DeniedError
+			if !errors.As(err, &denied) {
+				return ExecResult{}, fmt.Errorf("plugin: exec: permission ask: %w", err)
+			}
 			return ExecResult{
-				Stderr: "permission denied: " + dec.Reason,
+				Stderr: "permission denied: " + denied.Reason,
 				Code:   1,
 			}, nil
 		}
@@ -630,12 +630,12 @@ func (a *pluginToolAdapter) Execute(ctx context.Context, args json.RawMessage, e
 			ToolName:  a.name,
 			Pwd:       ec.Pwd,
 		}
-		dec, err := ec.Permission.Ask(ctx, req)
-		if err != nil {
-			return tool.Result{}, &tool.ToolError{Code: tool.CodePermissionDenied, Message: err.Error()}
-		}
-		if dec.Action == permission.ActionDeny {
-			return tool.Result{IsError: true, Content: "permission denied: " + dec.Reason}, nil
+		if err := permission.Gate(ctx, ec.Permission, req); err != nil {
+			var denied *permission.DeniedError
+			if !errors.As(err, &denied) {
+				return tool.Result{}, &tool.ToolError{Code: tool.CodePermissionDenied, Message: err.Error()}
+			}
+			return tool.Result{IsError: true, Content: "permission denied: " + denied.Reason}, nil
 		}
 	}
 
