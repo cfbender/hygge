@@ -482,29 +482,6 @@ func (a *App) ensureRenderer() *glamour.TermRenderer {
 	return a.renderer
 }
 
-func (a *App) rerenderFinalMarkdownMessages() {
-	r := a.ensureRenderer()
-	if r == nil {
-		return
-	}
-	for i := range a.messages {
-		target := &a.messages[i]
-		if target.Raw == "" {
-			continue
-		}
-		// Skip streaming messages: glamour-rendering Raw mid-stream would
-		// produce garbled partial output and violate the invariant that
-		// FinalMarkdown is empty while a message is streaming.
-		if target.IsStreaming {
-			continue
-		}
-		if markdownRenderableRole(target.Role) {
-			target.FinalMarkdown = renderMarkdown(r, target.Raw)
-		}
-	}
-	a.invalidateMsgCache()
-}
-
 // extractTarget makes a best-effort attempt to surface a useful target
 // string (path, command) from a tool's raw JSON args.  Returns "" when the
 // args don't decode or don't contain anything obvious.  We are intentionally

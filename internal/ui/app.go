@@ -1080,17 +1080,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.err != nil {
 			return a, a.setNotice("theme switch failed: " + m.err.Error())
 		}
+		var rerenderCmd tea.Cmd
 		if m.theme != nil {
 			a.opts.Theme = m.theme
 			a.styles = m.theme
 			a.input.SetStyles(m.theme)
 			a.renderer = nil
 			a.rendererW = 0
+			// Re-render finalized markdown with the new palette. Any batch
+			// still in flight for the old theme is rejected by the staleness
+			// check in the markdownBatchMsg handler.
+			rerenderCmd = a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
 		}
 		if m.saveErr != nil {
-			return a, a.setNotice("theme applied for this session but save failed: " + m.saveErr.Error())
+			return a, tea.Batch(rerenderCmd, a.setNotice("theme applied for this session but save failed: "+m.saveErr.Error()))
 		}
-		return a, a.showToast("Theme switched", "Using "+m.name)
+		return a, tea.Batch(rerenderCmd, a.showToast("Theme switched", "Using "+m.name))
 
 	case promptEditorFinishedMsg:
 		if m.err != nil {
@@ -1312,19 +1317,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case markdownBatchMsg:
 		// Background render of hydrated messages completed.
-		// Ignore stale results: if a resize changed msgColW since the render
-		// started the rendered widths would be wrong; re-issue the command at
-		// the current width so the latest geometry is used.
-		if m.width != a.msgColW {
+		// Ignore stale results: if a resize changed msgColW or a theme switch
+		// changed the palette since the render started, the rendered output
+		// would be wrong; re-issue the command so the latest geometry and
+		// theme are used.
+		if m.width != a.msgColW || m.theme != a.opts.Theme {
 			return a, a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
 		}
 		if len(m.rendered) == 0 && len(m.fallback) == 0 {
 			return a, nil
 		}
 		changed := false
-		// Apply MessageID-keyed results (safe against index shifts).
+		// Apply MessageID-keyed results: scan the current messages and look
+		// each one's MessageID up in the rendered map, so index shifts since
+		// the snapshot are harmless.
 		if len(m.rendered) > 0 {
-			// Build a lookup of current messages by MessageID for O(1) application.
 			for i := range a.messages {
 				target := &a.messages[i]
 				if target.MessageID == "" {
@@ -1348,11 +1355,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			target := &a.messages[fb.idx]
-			if target.MessageID != "" {
-				// Now has a MessageID; skip (should have been handled above or
-				// will be handled by the ID-keyed path in a subsequent batch).
-				continue
-			}
 			if !markdownRenderableRole(target.Role) || target.IsStreaming {
 				continue
 			}

@@ -2341,3 +2341,36 @@ func TestTruncateThinking_CollapsedAffordance(t *testing.T) {
 		t.Errorf("collapsed long thinking should not have collapse affordance; got:\n%s", result)
 	}
 }
+
+// TestDisplayBody_StreamingToolRowShowsRaw verifies that a streaming tool row
+// (IsStreaming=true, no VisibleRaw — VisibleRaw is assistant-only) still
+// renders its Raw body, e.g. the "(running…)" placeholder.
+func TestDisplayBody_StreamingToolRowShowsRaw(t *testing.T) {
+	t.Parallel()
+	msg := UIMessage{
+		Role:        RoleTool,
+		ToolName:    "bash",
+		Raw:         "(running…)",
+		IsStreaming: true,
+	}
+	if got := displayBody(msg); got != "(running…)" {
+		t.Errorf("displayBody(streaming tool) = %q, want Raw %q", got, "(running…)")
+	}
+}
+
+// TestDisplayBody_StreamingAssistantUsesVisibleRaw verifies the streaming
+// assistant branch returns the incrementally-revealed buffer, not Raw or
+// FinalMarkdown.
+func TestDisplayBody_StreamingAssistantUsesVisibleRaw(t *testing.T) {
+	t.Parallel()
+	msg := UIMessage{
+		Role:          RoleAssistant,
+		Raw:           "full buffer",
+		VisibleRaw:    "full",
+		FinalMarkdown: "stale render",
+		IsStreaming:   true,
+	}
+	if got := displayBody(msg); got != "full" {
+		t.Errorf("displayBody(streaming assistant) = %q, want VisibleRaw %q", got, "full")
+	}
+}

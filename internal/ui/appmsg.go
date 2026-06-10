@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // busDelivery is the bubbletea Msg that wraps a single event read off the
@@ -138,8 +139,9 @@ type busyReconcileTickMsg struct{}
 //   - fallback holds per-index (startIdx+i → rawSnap,rendered) data for messages
 //     that had no MessageID at snapshot time.  These are applied only when the
 //     message at that index still has the same Raw as when snapshotted.
-//   - width is the msgColW that was current when the render started; used to
-//     detect stale results when a resize arrived in the meantime.
+//   - width and theme are the msgColW and Theme that were current when the
+//     render started; used to detect stale results when a resize or theme
+//     switch arrived in the meantime.
 type markdownBatchMsg struct {
 	// MessageID-keyed results (safe against index shifts).
 	rendered map[string]string // messageID → glamour output
@@ -147,6 +149,7 @@ type markdownBatchMsg struct {
 	// Only applied when the message at the index still has the same Raw.
 	fallback []markdownBatchFallback
 	width    int
+	theme    *styles.Styles
 }
 
 // markdownBatchFallback holds the index-keyed render result for a message

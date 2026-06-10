@@ -70,18 +70,24 @@ func (a *App) renderMarkdownBatchCmd(startIdx, endIdx int) tea.Cmd {
 		return nil
 	}
 	theme := a.opts.Theme
-	width := a.msgColW
-	if width <= 0 {
-		width = 80
+	// colW is the staleness token echoed back in markdownBatchMsg; renderW is
+	// the (clamped) width actually used for glamour.  Echoing the unclamped
+	// value keeps the handler's staleness comparison an exact match against
+	// msgColW even if it were ever non-positive.
+	colW := a.msgColW
+	renderW := colW
+	if renderW <= 0 {
+		renderW = 80
 	}
 	return func() tea.Msg {
-		r, err := newRenderer(theme, width)
+		r, err := newRenderer(theme, renderW)
 		if err != nil {
 			// Renderer creation failed: return empty result so Update skips
 			// gracefully (FinalMarkdown stays empty → P1 plain-text fallback).
 			return markdownBatchMsg{
 				rendered: make(map[string]string),
-				width:    width,
+				width:    colW,
+				theme:    theme,
 			}
 		}
 		rendered := make(map[string]string, len(specs))
@@ -101,7 +107,7 @@ func (a *App) renderMarkdownBatchCmd(startIdx, endIdx int) tea.Cmd {
 				})
 			}
 		}
-		return markdownBatchMsg{rendered: rendered, fallback: fallback, width: width}
+		return markdownBatchMsg{rendered: rendered, fallback: fallback, width: colW, theme: theme}
 	}
 }
 

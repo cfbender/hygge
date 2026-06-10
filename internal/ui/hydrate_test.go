@@ -2016,6 +2016,7 @@ func TestHydrate_P2_MarkdownBatchMsgAppliesFinalMarkdown(t *testing.T) {
 	batch := markdownBatchMsg{
 		rendered: rendered,
 		width:    app.msgColW,
+		theme:    app.opts.Theme,
 	}
 	_, _ = app.Update(batch)
 
@@ -2049,6 +2050,7 @@ func TestHydrate_P2_MarkdownBatchMsgStaleWidthIgnored(t *testing.T) {
 	batch := markdownBatchMsg{
 		rendered: map[string]string{mid: "<stale-render>"},
 		width:    staleW,
+		theme:    app.opts.Theme,
 	}
 	_, _ = app.Update(batch)
 
@@ -2080,6 +2082,7 @@ func TestHydrate_P2_MarkdownBatchMsgUnknownIDsSkipped(t *testing.T) {
 			"unknown-id-2": "r2",
 		},
 		width: app.msgColW,
+		theme: app.opts.Theme,
 	}
 	// Should not panic; existing message must not be modified.
 	_, _ = app.Update(batch)
@@ -2120,12 +2123,11 @@ func TestWindowSizeMsg_NoSyncGlamourRender(t *testing.T) {
 	if app.messages[0].FinalMarkdown == "" {
 		t.Fatal("expected FinalMarkdown set after flush")
 	}
-	original := app.messages[0].FinalMarkdown
 
 	// Clear FinalMarkdown to simulate a "not yet rendered" state.
 	app.messages[0].FinalMarkdown = ""
 
-	// WindowSizeMsg must NOT synchronously re-render (no rerenderFinalMarkdownMessages call).
+	// WindowSizeMsg must NOT synchronously re-render.
 	_, cmd := app.Update(tea.WindowSizeMsg{Width: 200, Height: 40})
 
 	// FinalMarkdown must still be empty after the Update returns (async pending).
@@ -2145,16 +2147,12 @@ func TestWindowSizeMsg_NoSyncGlamourRender(t *testing.T) {
 	}
 	app.Update(result)
 
-	// After applying the batch result, FinalMarkdown must differ from the old value
-	// (re-rendered at the new width 200 instead of the previous width).
+	// After applying the batch result, FinalMarkdown must be populated.  It may
+	// equal the pre-resize render if the width change did not affect wrapping;
+	// what matters is that it was applied asynchronously, not synchronously.
 	if app.messages[0].FinalMarkdown == "" {
 		t.Errorf("FinalMarkdown should be populated after batch result applied")
 	}
-	if app.messages[0].FinalMarkdown == original {
-		// May match if the width change did not affect wrapping — that's OK.
-		// The important thing is that it was applied asynchronously, not synchronously.
-	}
-	_ = original
 }
 
 // TestMarkdownBatchMsg_WidthMismatchReissues verifies that receiving a
@@ -2175,6 +2173,7 @@ func TestMarkdownBatchMsg_WidthMismatchReissues(t *testing.T) {
 	staleBatch := markdownBatchMsg{
 		rendered: map[string]string{"msg-w1": "<stale>"},
 		width:    staleW,
+		theme:    app.opts.Theme,
 	}
 	_, reissueCmd := app.Update(staleBatch)
 
@@ -2228,6 +2227,7 @@ func TestMarkdownBatch_MessageIDKeyedSkipsIndexShift(t *testing.T) {
 	batch := markdownBatchMsg{
 		rendered: map[string]string{"aid-1": "<rendered-assistant>"},
 		width:    app.msgColW,
+		theme:    app.opts.Theme,
 	}
 
 	// Simulate an index shift: insert a new message at the front.
@@ -2283,5 +2283,91 @@ func TestHydrate_VisibleRawNotSetOnHydratedMessages(t *testing.T) {
 			t.Errorf("messages[%d] (role %q) has VisibleRaw=%q; must be empty for hydrated messages (streaming-only)",
 				i, msg.Role, msg.VisibleRaw)
 		}
+	}
+}
+
+// TestMarkdownBatchMsg_StaleThemeReissues verifies that a markdownBatchMsg
+// rendered under a theme that is no longer current (the user switched themes
+// while the batch was in flight) is rejected and a fresh batch is re-issued,
+// so old-palette glamour output never overwrites FinalMarkdown.
+func TestMarkdownBatchMsg_StaleThemeReissues(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "# themed content"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "msg-t1"})
+	app.messages[0].FinalMarkdown = ""
+	app.msgColW = 80
+
+	// Width matches, but the batch was rendered under a different theme.
+	staleBatch := markdownBatchMsg{
+		rendered: map[string]string{"msg-t1": "<old-theme-render>"},
+		width:    app.msgColW,
+		theme:    styles.DefaultTheme(), // distinct pointer from app.opts.Theme
+	}
+	_, reissueCmd := app.Update(staleBatch)
+
+	if app.messages[0].FinalMarkdown != "" {
+		t.Errorf("stale-theme batch must not apply FinalMarkdown; got %q", app.messages[0].FinalMarkdown)
+	}
+	if reissueCmd == nil {
+		t.Fatal("theme mismatch must re-issue a new batch Cmd")
+	}
+	reissueResult := reissueCmd()
+	if reissueResult == nil {
+		t.Fatal("re-issued Cmd returned nil")
+	}
+	app.Update(reissueResult)
+	if app.messages[0].FinalMarkdown == "" {
+		t.Errorf("FinalMarkdown should be set after re-issued batch under the current theme")
+	}
+}
+
+// TestThemeSwitch_RerendersFinalMarkdown verifies that switching themes at
+// runtime schedules an async re-render so finalized messages pick up the new
+// palette instead of keeping old-theme glamour output until the next resize.
+func TestThemeSwitch_RerendersFinalMarkdown(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "# heading"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "msg-th1"})
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("expected FinalMarkdown set after flush")
+	}
+	app.messages[0].FinalMarkdown = ""
+
+	newTheme := styles.DefaultTheme()
+	_, cmd := app.Update(themeSwitchResult{name: "claret", theme: newTheme})
+	if app.opts.Theme != newTheme {
+		t.Fatal("expected opts.Theme updated by themeSwitchResult")
+	}
+	if cmd == nil {
+		t.Fatal("theme switch should return a Cmd (re-render batch + toast)")
+	}
+
+	// Drain the batched cmds; apply any markdownBatchMsg produced.
+	drainBatchMsgs(t, app, cmd, 0)
+	if app.messages[0].FinalMarkdown == "" {
+		t.Error("FinalMarkdown should be re-rendered after theme switch")
+	}
+}
+
+// drainBatchMsgs executes cmd (recursing into tea.BatchMsg) and feeds any
+// markdownBatchMsg results back into app.Update.
+func drainBatchMsgs(t *testing.T, app *App, cmd tea.Cmd, depth int) {
+	t.Helper()
+	if cmd == nil || depth > 4 {
+		return
+	}
+	switch msg := cmd().(type) {
+	case nil:
+		return
+	case tea.BatchMsg:
+		for _, c := range msg {
+			drainBatchMsgs(t, app, c, depth+1)
+		}
+	case markdownBatchMsg:
+		app.Update(msg)
 	}
 }
