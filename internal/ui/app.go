@@ -290,6 +290,10 @@ type App struct {
 	// styles is the resolved theme style system.
 	styles *styles.Styles
 
+	// overlayStyles caches the theme-derived styles used by the overlay and
+	// chrome renderers. Built lazily on first use; reset on theme switches.
+	overlayStyles *overlayStyles
+
 	// modeIndex is the index into opts.Modes for the currently active mode.
 	// Always >= 0; Modes is guaranteed non-empty after config loading.
 	modeIndex int
@@ -1080,6 +1084,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.theme != nil {
 			a.opts.Theme = m.theme
 			a.styles = m.theme
+			a.overlayStyles = nil
 			a.input.SetStyles(m.theme)
 			a.renderer = nil
 			a.rendererW = 0
