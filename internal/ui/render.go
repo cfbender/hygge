@@ -16,16 +16,11 @@ import (
 // render rebuilds it. Call this whenever messages change (append, stream
 // delta, resize, theme switch).
 func (a *App) invalidateMsgCache() {
-	a.msgCacheValid = false
-	a.msgCacheStreamingDirty = false
+	a.msgCache.Invalidate()
 }
 
 func (a *App) invalidateMsgCacheForStreamingDelta() {
-	if a.userScrolled && a.msgCacheValid {
-		a.msgCacheStreamingDirty = true
-		return
-	}
-	a.invalidateMsgCache()
+	a.msgCache.InvalidateStreaming(a.userScrolled)
 }
 
 // msgScrollbackCap is the maximum number of messages rendered into the
@@ -90,11 +85,8 @@ func (a *App) renderChatContent() string {
 	// Check if the cache is still valid. Invalidate every 30 seconds
 	// so relative timestamps stay fresh.
 	now := a.opts.Now()
-	needsRebuild := !a.msgCacheValid ||
-		a.msgCacheW != l.leftW ||
-		a.msgCacheLen != len(visibleMessages) ||
-		(!a.userScrolled && a.msgCacheStreamingDirty) ||
-		now.Sub(a.msgCacheTime) > 30*time.Second
+	content, cacheHit := a.msgCache.Get(l.leftW, len(visibleMessages), now, a.userScrolled)
+	needsRebuild := !cacheHit
 
 	// Streaming deltas mutate existing messages and explicitly invalidate the
 	// cache via handleBusEvent/append helpers. Do not rebuild solely because the
@@ -127,12 +119,14 @@ func (a *App) renderChatContent() string {
 			MessageIndexOffset: messageIndexOffset,
 			Compact:            a.effectiveLayout() == "compact",
 		}
-		a.msgCache, a.subagentHitZones, a.toolHitZones, a.thinkingHitZones, a.urlHitZones, a.userMsgHitZones = ml.ViewWithHitZones()
-		a.msgCacheValid = true
-		a.msgCacheStreamingDirty = false
-		a.msgCacheW = l.leftW
-		a.msgCacheLen = len(visibleMessages)
-		a.msgCacheTime = now
+		rendered, sa, tool, think, url, userMsg := ml.ViewWithHitZones()
+		a.subagentHitZones = sa
+		a.toolHitZones = tool
+		a.thinkingHitZones = think
+		a.urlHitZones = url
+		a.userMsgHitZones = userMsg
+		a.msgCache.Put(rendered, l.leftW, len(visibleMessages), now)
+		content = rendered
 	}
 
 	// Update viewport dimensions.
@@ -144,7 +138,7 @@ func (a *App) renderChatContent() string {
 	// parses the full string into lines which is expensive for large
 	// conversations.
 	if needsRebuild {
-		a.msgViewport.SetContent("\n" + a.msgCache)
+		a.msgViewport.SetContent("\n" + content)
 	}
 
 	if !a.userScrolled {
