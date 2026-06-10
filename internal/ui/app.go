@@ -692,7 +692,9 @@ func (a *App) Init() tea.Cmd {
 	// Store.GetSession during View().
 	if a.opts.SessionID != "" {
 		a.foregroundStack = []string{a.opts.SessionID}
-		a.hydrateMessagesFromStore(a.opts.SessionID)
+		if cmd := a.hydrateMessagesFromStore(a.opts.SessionID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		a.sessionTitle = a.loadSessionTitle(a.opts.SessionID)
 		a.hydrateTodoSummary(a.opts.SessionID)
 	}
@@ -843,8 +845,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Glamour renderer is sized to the body width; rebuild lazily.
 		a.renderer = nil
 		a.rendererW = 0
-		a.rerenderFinalMarkdownMessages()
-		return a, nil
+		a.clearRenderedMarkdown()
+		// Schedule async re-render of all finalized messages at the new width.
+		// Tail-first so the visible end of chat upgrades before the rest.
+		return a, a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
 
 	case tea.BackgroundColorMsg:
 		a.terminalBg = m.Color
@@ -1077,17 +1081,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.err != nil {
 			return a, a.setNotice("theme switch failed: " + m.err.Error())
 		}
+		var rerenderCmd tea.Cmd
 		if m.theme != nil {
 			a.opts.Theme = m.theme
 			a.styles = m.theme
 			a.input.SetStyles(m.theme)
 			a.renderer = nil
 			a.rendererW = 0
+			a.clearRenderedMarkdown()
+			// Re-render finalized markdown with the new palette. Any batch
+			// still in flight for the old theme is rejected by the staleness
+			// check in the markdownBatchMsg handler.
+			rerenderCmd = a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
 		}
 		if m.saveErr != nil {
-			return a, a.setNotice("theme applied for this session but save failed: " + m.saveErr.Error())
+			return a, tea.Batch(rerenderCmd, a.setNotice("theme applied for this session but save failed: "+m.saveErr.Error()))
 		}
-		return a, a.showToast("Theme switched", "Using "+m.name)
+		return a, tea.Batch(rerenderCmd, a.showToast("Theme switched", "Using "+m.name))
 
 	case promptEditorFinishedMsg:
 		if m.err != nil {
@@ -1304,6 +1314,61 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if a.msgViewport.AtBottom() {
 				a.userScrolled = false
 			}
+		}
+		return a, nil
+
+	case markdownBatchMsg:
+		// Background render of hydrated messages completed.
+		// Ignore stale results: if a resize changed msgColW or a theme switch
+		// changed the palette since the render started, the rendered output
+		// would be wrong; re-issue the command so the latest geometry and
+		// theme are used.
+		if m.width != a.msgColW || m.theme != a.opts.Theme {
+			return a, a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
+		}
+		if len(m.rendered) == 0 && len(m.fallback) == 0 {
+			return a, nil
+		}
+		changed := false
+		// Apply MessageID-keyed results: scan the current messages and look
+		// each one's MessageID up in the rendered map, so index shifts since
+		// the snapshot are harmless.
+		if len(m.rendered) > 0 {
+			for i := range a.messages {
+				target := &a.messages[i]
+				if target.MessageID == "" {
+					continue
+				}
+				s, ok := m.rendered[target.MessageID]
+				if !ok || s == "" {
+					continue
+				}
+				if !markdownRenderableRole(target.Role) || target.IsStreaming {
+					continue
+				}
+				target.FinalMarkdown = s
+				changed = true
+			}
+		}
+		// Apply index-keyed fallback for messages without a stable MessageID.
+		// Only applied when the message at that index still has the same Raw.
+		for _, fb := range m.fallback {
+			if fb.idx < 0 || fb.idx >= len(a.messages) {
+				continue
+			}
+			target := &a.messages[fb.idx]
+			if !markdownRenderableRole(target.Role) || target.IsStreaming {
+				continue
+			}
+			if target.Raw != fb.rawSnap {
+				// Raw changed between snapshot and receipt; skip.
+				continue
+			}
+			target.FinalMarkdown = fb.out
+			changed = true
+		}
+		if changed {
+			a.invalidateMsgCache()
 		}
 		return a, nil
 
