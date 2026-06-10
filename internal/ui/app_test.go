@@ -1233,8 +1233,9 @@ func TestStreamingAssistantChunkReveal(t *testing.T) {
 	if msg.VisibleRaw != "abc" {
 		t.Fatalf("VisibleRaw = %q after first chunk, want %q (chunk-level reveal)", msg.VisibleRaw, "abc")
 	}
-	if msg.FinalMarkdown == "" {
-		t.Fatal("FinalMarkdown should be rendered immediately after chunk reveal")
+	// FinalMarkdown must be empty while streaming (set only on flush).
+	if msg.FinalMarkdown != "" {
+		t.Fatal("FinalMarkdown must not be set during streaming delta")
 	}
 	// The text must be visible in the view without any tick.
 	if !strings.Contains(app.View().Content, "abc") {
@@ -1259,24 +1260,30 @@ func TestStreamingAssistantMarkdownRendersVisibleBuffer(t *testing.T) {
 	if !app.messages[0].IsStreaming {
 		t.Fatal("expected assistant message to still be streaming")
 	}
-	// Chunk-level reveal: FinalMarkdown is rendered immediately on each delta.
-	if app.messages[0].FinalMarkdown == "" {
-		t.Fatal("expected FinalMarkdown rendered immediately after chunk delta")
+	// FinalMarkdown must be empty while streaming (rendered only on flush).
+	if app.messages[0].FinalMarkdown != "" {
+		t.Fatal("FinalMarkdown must not be set during streaming delta")
 	}
 	if app.messages[0].VisibleRaw != app.messages[0].Raw {
 		t.Fatalf("VisibleRaw = %q, want full raw %q (chunk-level reveal)", app.messages[0].VisibleRaw, app.messages[0].Raw)
 	}
 
+	// During streaming, plain VisibleRaw is rendered; the raw markdown syntax is visible.
 	before := app.View().Content
 	plainBefore := ansiEscapeRE.ReplaceAllString(before, "")
-	if strings.Contains(plainBefore, "# heading") {
-		t.Fatalf("streaming view should use markdown rendering once buffer is revealed, got:\n%s", before)
+	if !strings.Contains(plainBefore, "# heading") {
+		t.Fatalf("streaming view should show plain VisibleRaw (raw markdown syntax visible), got:\n%s", before)
 	}
 
+	// After flush, FinalMarkdown is set and the heading is glamour-rendered (no raw "#").
 	app.Handle(bus.MessageAppended{Role: "assistant", MessageID: "m1"})
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("expected FinalMarkdown populated after MessageAppended")
+	}
 	after := app.View().Content
-	if got, want := lipgloss.Height(after), lipgloss.Height(before); got != want {
-		t.Fatalf("finalizing markdown changed view height: got %d, want %d\nbefore:\n%s\nafter:\n%s", got, want, before, after)
+	plainAfter := ansiEscapeRE.ReplaceAllString(after, "")
+	if strings.Contains(plainAfter, "# heading") {
+		t.Fatalf("finalized view should use glamour rendering (no raw '# heading'), got:\n%s", after)
 	}
 }
 
@@ -3134,6 +3141,12 @@ func TestBusyReconcileTick_ReleasesPendingQueueFlush(t *testing.T) {
 	app.busy = true
 	app.activeTurns = 0
 	app.pendingQueueFlush = true
+	app.messages = append(app.messages, uiMessage{
+		Role:        components.RoleAssistant,
+		Raw:         "final response",
+		VisibleRaw:  "final response",
+		IsStreaming: true,
+	})
 	app.enqueuePromptDraft(queuedPromptDraft{Text: "reconciled draft"})
 
 	cmd := app.handleBusyReconcileTick()
@@ -3145,6 +3158,12 @@ func TestBusyReconcileTick_ReleasesPendingQueueFlush(t *testing.T) {
 	}
 	if app.busy {
 		t.Fatal("app should be idle before dispatching reconciled queued draft")
+	}
+	if app.messages[0].IsStreaming {
+		t.Fatal("streaming assistant should be finalized by reconcile fallback")
+	}
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("FinalMarkdown should be populated by reconcile fallback finalization")
 	}
 	got := readSeenPrompt(t, seen)
 	if got != "reconciled draft" {

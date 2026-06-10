@@ -1462,11 +1462,18 @@ func (a *App) handleBusyReconcileTick() tea.Cmd {
 	case !agentBusy && a.busy && a.pendingQueueFlush:
 		// Recovery case: TurnCompleted arrived while the assistant bubble was
 		// still streaming, but the final MessageAppended(assistant) never made it
-		// through to release the deferred queue flush. Let the next queued draft
-		// start rather than leaving the input permanently busy.
+		// through to release the deferred queue flush. Finalize any remaining
+		// streaming bubble from the in-memory buffer, then let the next queued
+		// draft start rather than leaving the input permanently busy.
+		a.activeTurns = 0
+		if idx := a.currentAssistantMessageIndex(); idx >= 0 && a.messages[idx].IsStreaming {
+			if cmd := a.flushAssistantStream("assistant", ""); cmd != nil {
+				extraCmds = append(extraCmds, cmd)
+			}
+			break
+		}
 		a.pendingQueueFlush = false
 		a.busy = false
-		a.activeTurns = 0
 		a.workingVerb = ""
 		a.input.SetBusy(false, "")
 		if len(a.queuedDrafts) > 0 {
