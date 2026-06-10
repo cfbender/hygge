@@ -656,7 +656,7 @@ func (a *App) applyLayoutOverride(value string) tea.Cmd {
 			a.layoutOverride = "compact"
 		}
 	}
-	a.msgCacheValid = false
+	a.msgCache.Invalidate()
 	if a.layoutOverride == "" {
 		return nil
 	}

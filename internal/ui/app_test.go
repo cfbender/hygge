@@ -420,22 +420,22 @@ func TestRenderChatContent_StreamingTailUsesCacheWithoutNewDelta(t *testing.T) {
 	seedLargeStreamingChat(t, app)
 
 	_ = app.renderChatContent()
-	if !app.msgCacheValid {
+	if !app.msgCache.valid {
 		t.Fatal("expected initial render to populate message cache")
 	}
-	cached := app.msgCache
-	cachedAt := app.msgCacheTime
+	cached := app.msgCache.content
+	cachedAt := app.msgCache.cachedAt
 	advanced := cachedAt.Add(time.Second)
 	app.opts.Now = func() time.Time { return advanced }
 	app.userScrolled = true
 	app.msgViewport.PageUp()
 
 	_ = app.renderChatContent()
-	if app.msgCache != cached {
+	if app.msgCache.content != cached {
 		t.Fatal("scroll render rebuilt message cache despite unchanged streaming content")
 	}
-	if !app.msgCacheTime.Equal(cachedAt) {
-		t.Fatalf("cache timestamp changed on scroll render: got %s want %s", app.msgCacheTime, cachedAt)
+	if !app.msgCache.cachedAt.Equal(cachedAt) {
+		t.Fatalf("cache timestamp changed on scroll render: got %s want %s", app.msgCache.cachedAt, cachedAt)
 	}
 }
 
@@ -445,7 +445,7 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	seedLargeStreamingChat(t, app)
 
 	_ = app.renderChatContent()
-	baseline := app.msgCache
+	baseline := app.msgCache.content
 	app.userScrolled = true
 	app.msgViewport.PageUp()
 	app.appendAssistantDelta(" more")
@@ -453,19 +453,19 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	app.invalidateMsgCacheForStreamingDelta()
 
 	_ = app.renderChatContent()
-	if app.msgCache != baseline {
+	if app.msgCache.content != baseline {
 		t.Fatal("scrolled streaming delta rebuilt full message cache")
 	}
-	if !app.msgCacheStreamingDirty {
+	if !app.msgCache.streamingDirty {
 		t.Fatal("expected streaming dirty flag while rerender is deferred")
 	}
 
 	app.userScrolled = false
 	_ = app.renderChatContent()
-	if app.msgCache == baseline {
+	if app.msgCache.content == baseline {
 		t.Fatal("returning to bottom did not render deferred streaming delta")
 	}
-	if app.msgCacheStreamingDirty {
+	if app.msgCache.streamingDirty {
 		t.Fatal("streaming dirty flag should clear after rebuild")
 	}
 }
@@ -564,7 +564,7 @@ func TestRenderChatContent_ScrollbackCapRendersNotice(t *testing.T) {
 	_ = app.renderChatContent()
 
 	// Inspect the full rendered cache (not the scrolled viewport view).
-	plain := ansiEscapeRE.ReplaceAllString(app.msgCache, "")
+	plain := ansiEscapeRE.ReplaceAllString(app.msgCache.content, "")
 
 	if !strings.Contains(plain, "older messages") {
 		t.Fatalf("expected scrollback cap notice in message cache; got:\n%s", plain)
@@ -597,15 +597,15 @@ func TestRenderChatContent_CacheKeyUsesFullMessageCount(t *testing.T) {
 	}
 	app.invalidateMsgCache()
 	_ = app.renderChatContent()
-	if app.msgCacheLen != len(app.messages) {
-		t.Fatalf("msgCacheLen = %d, want %d (full message count)", app.msgCacheLen, len(app.messages))
+	if app.msgCache.msgLen != len(app.messages) {
+		t.Fatalf("msgCacheLen = %d, want %d (full message count)", app.msgCache.msgLen, len(app.messages))
 	}
 
 	// Append one more message; the cache must rebuild.
 	app.messages = append(app.messages, uiMessage{Role: components.RoleUser, Raw: "new user turn"})
 	app.invalidateMsgCache()
 	_ = app.renderChatContent()
-	if !strings.Contains(ansiEscapeRE.ReplaceAllString(app.msgCache, ""), "new user turn") {
+	if !strings.Contains(ansiEscapeRE.ReplaceAllString(app.msgCache.content, ""), "new user turn") {
 		t.Fatal("new message not present in rebuilt cache after scrollback cap was active")
 	}
 }
