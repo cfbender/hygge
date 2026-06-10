@@ -233,9 +233,13 @@ func (a *App) applySwitchSessionWithToast(id, toastTitle, toastSubtitle string) 
 	a.subagentAnims = map[string]*anim.Anim{}
 	a.renderer = nil
 	a.rendererW = 0
+
+	var cmds []tea.Cmd
 	if id != "" {
 		a.resetForeground(id)
-		a.hydrateMessagesFromStore(id)
+		if cmd := a.hydrateMessagesFromStore(id); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		a.sessionTitle = a.loadSessionTitle(id)
 		a.hydrateTodoSummary(id)
 	} else {
@@ -246,7 +250,6 @@ func (a *App) applySwitchSessionWithToast(id, toastTitle, toastSubtitle string) 
 		a.todosCache = nil
 	}
 
-	var cmds []tea.Cmd
 	if bridgeNeeded {
 		a.bridge()
 		cmds = append(cmds, a.listenBus())

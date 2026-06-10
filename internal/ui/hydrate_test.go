@@ -1932,3 +1932,434 @@ func TestNoDuplicate_UserMessageAppendedTwice(t *testing.T) {
 		t.Errorf("user message Raw = %q, want 'hello'", app.messages[0].Raw)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// P2 tests: async markdown hydration
+// ---------------------------------------------------------------------------
+
+// TestHydrate_P2_NoSyncRenderOnHydrate verifies that after hydrateMessagesFromStore
+// the messages have Raw populated but FinalMarkdown and VisibleRaw are initially
+// empty (glamour render has not yet run synchronously; VisibleRaw is streaming-only).
+func TestHydrate_P2_NoSyncRenderOnHydrate(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "## heading"}},
+		},
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "# response"}},
+		},
+	})
+
+	// Hydrate directly (without running Init's tea.Cmd).
+	app.messages = nil
+	_ = app.hydrateMessagesFromStore(app.opts.SessionID)
+
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages after hydration, got %d", got)
+	}
+	// Raw must be set (P1 plain-text fallback works via Raw).
+	for i, msg := range app.messages {
+		if msg.Raw == "" {
+			t.Errorf("messages[%d].Raw is empty; want the raw text populated", i)
+		}
+		// VisibleRaw is streaming-only and must NOT be set on hydrated messages.
+		if msg.VisibleRaw != "" {
+			t.Errorf("messages[%d].VisibleRaw = %q; must be empty for hydrated messages (streaming-only field)", i, msg.VisibleRaw)
+		}
+		// FinalMarkdown must be empty immediately after hydration (not rendered yet).
+		if msg.FinalMarkdown != "" {
+			t.Errorf("messages[%d].FinalMarkdown is %q immediately after hydration; expected empty (async render pending)", i, msg.FinalMarkdown)
+		}
+	}
+}
+
+// TestHydrate_P2_MarkdownBatchMsgAppliesFinalMarkdown verifies that when
+// markdownBatchMsg arrives with the correct width, FinalMarkdown is set and the
+// cache is invalidated.  Results are keyed by MessageID.
+func TestHydrate_P2_MarkdownBatchMsgAppliesFinalMarkdown(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "hello user"}},
+		},
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "hello assistant"}},
+		},
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	app.messages = nil
+	_ = app.hydrateMessagesFromStore(app.opts.SessionID)
+
+	if got := len(app.messages); got != 2 {
+		t.Fatalf("expected 2 messages, got %d", got)
+	}
+
+	// Both messages have MessageIDs set by hydration; use the ID-keyed format.
+	rendered := map[string]string{}
+	for _, msg := range app.messages {
+		if msg.MessageID == "" {
+			t.Fatalf("hydrated message missing MessageID; cannot test ID-keyed batch")
+		}
+		switch msg.Role {
+		case components.RoleUser:
+			rendered[msg.MessageID] = "<rendered-user>"
+		case components.RoleAssistant:
+			rendered[msg.MessageID] = "<rendered-assistant>"
+		}
+	}
+
+	batch := markdownBatchMsg{
+		rendered: rendered,
+		width:    app.msgColW,
+		theme:    app.opts.Theme,
+	}
+	_, _ = app.Update(batch)
+
+	if app.messages[0].FinalMarkdown != "<rendered-user>" {
+		t.Errorf("messages[0].FinalMarkdown = %q, want '<rendered-user>'", app.messages[0].FinalMarkdown)
+	}
+	if app.messages[1].FinalMarkdown != "<rendered-assistant>" {
+		t.Errorf("messages[1].FinalMarkdown = %q, want '<rendered-assistant>'", app.messages[1].FinalMarkdown)
+	}
+}
+
+// TestHydrate_P2_MarkdownBatchMsgStaleWidthIgnored verifies that a
+// markdownBatchMsg with a width that no longer matches msgColW does not apply
+// stale rendered strings to FinalMarkdown (a new batch at the correct width
+// will be re-issued by the handler).
+func TestHydrate_P2_MarkdownBatchMsgStaleWidthIgnored(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "some response"}},
+		},
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	app.messages = nil
+	_ = app.hydrateMessagesFromStore(app.opts.SessionID)
+
+	// Deliver a batch with a different (stale) width.
+	staleW := app.msgColW + 99
+	mid := app.messages[0].MessageID
+	batch := markdownBatchMsg{
+		rendered: map[string]string{mid: "<stale-render>"},
+		width:    staleW,
+		theme:    app.opts.Theme,
+	}
+	_, _ = app.Update(batch)
+
+	// FinalMarkdown must remain empty because the result was stale.
+	if app.messages[0].FinalMarkdown != "" {
+		t.Errorf("FinalMarkdown should be empty for stale-width batch, got %q", app.messages[0].FinalMarkdown)
+	}
+}
+
+// TestHydrate_P2_MarkdownBatchMsgUnknownIDsSkipped verifies that a
+// markdownBatchMsg with MessageIDs that do not match any current message is
+// safely applied (no panic, no wrong application).
+func TestHydrate_P2_MarkdownBatchMsgUnknownIDsSkipped(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleAssistant,
+			Parts: []session.Part{{Kind: session.PartText, Text: "short"}},
+		},
+	})
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	app.messages = nil
+	_ = app.hydrateMessagesFromStore(app.opts.SessionID)
+
+	// Batch contains a stale/unknown MessageID.
+	batch := markdownBatchMsg{
+		rendered: map[string]string{
+			"unknown-id-1": "r1",
+			"unknown-id-2": "r2",
+		},
+		width: app.msgColW,
+		theme: app.opts.Theme,
+	}
+	// Should not panic; existing message must not be modified.
+	_, _ = app.Update(batch)
+	if app.messages[0].FinalMarkdown != "" {
+		t.Errorf("FinalMarkdown should be empty for unknown-ID batch, got %q", app.messages[0].FinalMarkdown)
+	}
+}
+
+// TestHydrate_P2_PreallocatedSlice verifies that hydrateSessionMessages
+// returns a non-nil slice even for an empty session (preallocated make).
+func TestHydrate_P2_PreallocatedSlice(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, nil /* no messages */)
+	visited := make(map[string]struct{})
+	msgs := app.hydrateSessionMessages(app.opts.SessionID, visited)
+	// Expect non-nil (make returns empty, not nil slice) when empty.
+	if msgs == nil {
+		t.Errorf("expected non-nil slice from hydrateSessionMessages for empty session")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// P2 regression tests (batch 2): WindowSizeMsg async, width re-issue,
+// MessageID-keyed safety, hydrated VisibleRaw empty.
+// ---------------------------------------------------------------------------
+
+// TestWindowSizeMsg_NoSyncGlamourRender verifies that WindowSizeMsg does not
+// synchronously update FinalMarkdown on any message.  Instead it returns a
+// tea.Cmd (the async batch).  FinalMarkdown is only updated when that Cmd's
+// result is applied.
+func TestWindowSizeMsg_NoSyncGlamourRender(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	// Finalize an assistant message so it has FinalMarkdown set.
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "# heading\n\nbody"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "msg-1"})
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("expected FinalMarkdown set after flush")
+	}
+
+	// Clear FinalMarkdown to simulate a "not yet rendered" state.
+	app.messages[0].FinalMarkdown = ""
+
+	// WindowSizeMsg must NOT synchronously re-render.
+	_, cmd := app.Update(tea.WindowSizeMsg{Width: 200, Height: 40})
+
+	// FinalMarkdown must still be empty after the Update returns (async pending).
+	if app.messages[0].FinalMarkdown != "" {
+		t.Errorf("WindowSizeMsg must not synchronously update FinalMarkdown; got %q", app.messages[0].FinalMarkdown)
+	}
+
+	// The returned Cmd must be non-nil (the batch cmd).
+	if cmd == nil {
+		t.Fatal("WindowSizeMsg with messages should return a non-nil batch Cmd")
+	}
+
+	// Executing the Cmd should produce a markdownBatchMsg, possibly inside a batch.
+	drainBatchMsgs(t, app, cmd, 0)
+
+	// After applying the batch result, FinalMarkdown must be populated.  It may
+	// equal the pre-resize render if the width change did not affect wrapping;
+	// what matters is that it was applied asynchronously, not synchronously.
+	if app.messages[0].FinalMarkdown == "" {
+		t.Errorf("FinalMarkdown should be populated after batch result applied")
+	}
+}
+
+// TestMarkdownBatchMsg_WidthMismatchReissues verifies that receiving a
+// markdownBatchMsg with a stale width causes the handler to re-issue a new
+// batch Cmd at the current width (rather than returning nil).
+func TestMarkdownBatchMsg_WidthMismatchReissues(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "# some content"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "msg-w1"})
+	// Clear FinalMarkdown to test re-issue.
+	app.messages[0].FinalMarkdown = ""
+	app.msgColW = 80
+
+	// Deliver a batch with a mismatched width.
+	staleW := app.msgColW + 50
+	staleBatch := markdownBatchMsg{
+		rendered: map[string]string{"msg-w1": "<stale>"},
+		width:    staleW,
+		theme:    app.opts.Theme,
+	}
+	_, reissueCmd := app.Update(staleBatch)
+
+	// FinalMarkdown must NOT have been applied (stale).
+	if app.messages[0].FinalMarkdown != "" {
+		t.Errorf("stale-width batch must not apply FinalMarkdown; got %q", app.messages[0].FinalMarkdown)
+	}
+
+	// A re-issue Cmd must be returned.
+	if reissueCmd == nil {
+		t.Fatal("width mismatch must re-issue a new batch Cmd")
+	}
+
+	// The re-issued Cmd should produce and apply a markdownBatchMsg at the current width.
+	drainBatchMsgs(t, app, reissueCmd, 0)
+
+	// After the correctly-widthed batch is applied, FinalMarkdown should be set.
+	if app.messages[0].FinalMarkdown == "" {
+		t.Errorf("FinalMarkdown should be set after re-issued batch at correct width")
+	}
+}
+
+// TestMarkdownBatch_MessageIDKeyedSkipsIndexShift verifies that when messages
+// are rendered with MessageID keys, applying results after an index shift
+// (e.g. a new message was prepended) does NOT apply to the wrong message.
+// The ID-keyed lookup correctly routes the result regardless of index.
+func TestMarkdownBatch_MessageIDKeyedSkipsIndexShift(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+	app.msgColW = 80
+
+	// Set up two messages: user at [0], assistant at [1].
+	app.messages = []uiMessage{
+		{
+			Role:      components.RoleUser,
+			Raw:       "user question",
+			MessageID: "uid-1",
+		},
+		{
+			Role:      components.RoleAssistant,
+			Raw:       "assistant answer",
+			MessageID: "aid-1",
+		},
+	}
+
+	// Build a batch targeting only the assistant message (by ID).
+	batch := markdownBatchMsg{
+		rendered: map[string]string{"aid-1": "<rendered-assistant>"},
+		width:    app.msgColW,
+		theme:    app.opts.Theme,
+	}
+
+	// Simulate an index shift: insert a new message at the front.
+	// Now assistant is at index [2] instead of [1].
+	app.messages = append([]uiMessage{{
+		Role:      components.RoleUser,
+		Raw:       "new user message",
+		MessageID: "uid-2",
+	}}, app.messages...)
+
+	// Apply the batch. The ID-keyed lookup must find "aid-1" at its current index.
+	app.Update(batch)
+
+	// Find the assistant message (now at index [2]) and check FinalMarkdown.
+	var found bool
+	for _, msg := range app.messages {
+		if msg.MessageID == "aid-1" {
+			if msg.FinalMarkdown != "<rendered-assistant>" {
+				t.Errorf("aid-1 FinalMarkdown = %q, want '<rendered-assistant>'", msg.FinalMarkdown)
+			}
+			found = true
+		} else if msg.FinalMarkdown != "" {
+			t.Errorf("message %q should not have FinalMarkdown set, got %q", msg.MessageID, msg.FinalMarkdown)
+		}
+	}
+	if !found {
+		t.Error("message 'aid-1' not found in app.messages")
+	}
+}
+
+// TestHydrate_VisibleRawNotSetOnHydratedMessages verifies (at the integration
+// level) that resuming a session never sets VisibleRaw on any hydrated message.
+// VisibleRaw is a streaming-only field.
+func TestHydrate_VisibleRawNotSetOnHydratedMessages(t *testing.T) {
+	t.Parallel()
+	app, _, _ := newTestAppWithStore(t, []session.NewMessage{
+		{
+			Role:  session.RoleUser,
+			Parts: []session.Part{{Kind: session.PartText, Text: "question with **markdown**"}},
+		},
+		{
+			Role: session.RoleAssistant,
+			Parts: []session.Part{{
+				Kind: session.PartText,
+				Text: "# Answer\n\nWith some _formatting_.",
+			}},
+		},
+	})
+	_ = app.Init()
+
+	for i, msg := range app.messages {
+		if msg.VisibleRaw != "" {
+			t.Errorf("messages[%d] (role %q) has VisibleRaw=%q; must be empty for hydrated messages (streaming-only)",
+				i, msg.Role, msg.VisibleRaw)
+		}
+	}
+}
+
+// TestMarkdownBatchMsg_StaleThemeReissues verifies that a markdownBatchMsg
+// rendered under a theme that is no longer current (the user switched themes
+// while the batch was in flight) is rejected and a fresh batch is re-issued,
+// so old-palette glamour output never overwrites FinalMarkdown.
+func TestMarkdownBatchMsg_StaleThemeReissues(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "# themed content"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "msg-t1"})
+	app.messages[0].FinalMarkdown = ""
+	app.msgColW = 80
+
+	// Width matches, but the batch was rendered under a different theme.
+	staleBatch := markdownBatchMsg{
+		rendered: map[string]string{"msg-t1": "<old-theme-render>"},
+		width:    app.msgColW,
+		theme:    styles.DefaultTheme(), // distinct pointer from app.opts.Theme
+	}
+	_, reissueCmd := app.Update(staleBatch)
+
+	if app.messages[0].FinalMarkdown != "" {
+		t.Errorf("stale-theme batch must not apply FinalMarkdown; got %q", app.messages[0].FinalMarkdown)
+	}
+	if reissueCmd == nil {
+		t.Fatal("theme mismatch must re-issue a new batch Cmd")
+	}
+	reissueResult := reissueCmd()
+	if reissueResult == nil {
+		t.Fatal("re-issued Cmd returned nil")
+	}
+	app.Update(reissueResult)
+	if app.messages[0].FinalMarkdown == "" {
+		t.Errorf("FinalMarkdown should be set after re-issued batch under the current theme")
+	}
+}
+
+// TestThemeSwitch_RerendersFinalMarkdown verifies that switching themes at
+// runtime schedules an async re-render so finalized messages pick up the new
+// palette instead of keeping old-theme glamour output until the next resize.
+func TestThemeSwitch_RerendersFinalMarkdown(t *testing.T) {
+	t.Parallel()
+	app, _ := makeForegroundApp(t)
+
+	app.Handle(bus.AssistantTextDelta{SessionID: "fg-session", Text: "# heading"})
+	app.Handle(bus.MessageAppended{SessionID: "fg-session", Role: "assistant", MessageID: "msg-th1"})
+	if app.messages[0].FinalMarkdown == "" {
+		t.Fatal("expected FinalMarkdown set after flush")
+	}
+	app.messages[0].FinalMarkdown = ""
+
+	newTheme := styles.DefaultTheme()
+	_, cmd := app.Update(themeSwitchResult{name: "claret", theme: newTheme})
+	if app.opts.Theme != newTheme {
+		t.Fatal("expected opts.Theme updated by themeSwitchResult")
+	}
+	if cmd == nil {
+		t.Fatal("theme switch should return a Cmd (re-render batch + toast)")
+	}
+
+	// Drain the batched cmds; apply any markdownBatchMsg produced.
+	drainBatchMsgs(t, app, cmd, 0)
+	if app.messages[0].FinalMarkdown == "" {
+		t.Error("FinalMarkdown should be re-rendered after theme switch")
+	}
+}
+
+// drainBatchMsgs executes cmd (recursing into tea.BatchMsg) and feeds any
+// markdownBatchMsg results back into app.Update.
+func drainBatchMsgs(t *testing.T, app *App, cmd tea.Cmd, depth int) {
+	t.Helper()
+	if cmd == nil || depth > 4 {
+		return
+	}
+	switch msg := cmd().(type) {
+	case nil:
+		return
+	case tea.BatchMsg:
+		for _, c := range msg {
+			drainBatchMsgs(t, app, c, depth+1)
+		}
+	case markdownBatchMsg:
+		app.Update(msg)
+	}
+}

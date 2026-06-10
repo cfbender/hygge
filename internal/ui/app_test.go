@@ -1732,14 +1732,16 @@ func TestResizeRebuildsRenderer(t *testing.T) {
 	app.Handle(bus.MessageAppended{Role: "assistant"})
 	r1 := app.renderer
 
-	// Resize. Final rendered markdown is rebuilt immediately so completed
-	// bubbles wrap to the new width instead of keeping stale hard wraps.
+	// Resize clears the renderer (rebuilds lazily on next ensureRenderer call).
 	app.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
-	if app.renderer == nil {
-		t.Fatal("expected renderer rebuilt after resize")
+	// Renderer is nil until first use after resize.
+	if app.renderer != nil && app.renderer == r1 {
+		t.Errorf("expected renderer to be cleared or replaced after resize")
 	}
-	if app.renderer == r1 {
-		t.Errorf("expected new renderer instance after resize")
+	// Force renderer rebuild via ensureRenderer.
+	_ = app.ensureRenderer()
+	if app.renderer == nil {
+		t.Fatal("expected renderer rebuilt after ensureRenderer call")
 	}
 	if app.rendererW != 45 {
 		t.Errorf("renderer width = %d, want 45 (bubble content: int(60*0.80)-3)", app.rendererW)
@@ -1817,7 +1819,14 @@ func TestResizeRerendersFinalMarkdownToBubbleWidth(t *testing.T) {
 	}}
 	narrow := app.messages[0].FinalMarkdown
 
-	app.Update(tea.WindowSizeMsg{Width: 250, Height: 30})
+	// Resize: returns an async batch cmd; execute it to obtain the re-rendered result.
+	_, batchCmd := app.Update(tea.WindowSizeMsg{Width: 250, Height: 30})
+	if batchCmd != nil {
+		batchMsg := batchCmd()
+		if batchMsg != nil {
+			app.Update(batchMsg)
+		}
+	}
 	wide := app.messages[0].FinalMarkdown
 	if wide == narrow {
 		t.Fatal("FinalMarkdown was not rerendered after resize")

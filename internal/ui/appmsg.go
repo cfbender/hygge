@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/cfbender/hygge/internal/session"
+	"github.com/cfbender/hygge/internal/ui/styles"
 )
 
 // busDelivery is the bubbletea Msg that wraps a single event read off the
@@ -129,3 +130,32 @@ type splashFogTickMsg struct{}
 // a system lock with active streaming).  The tick re-arms itself only when
 // there is still something to watch; it self-terminates otherwise.
 type busyReconcileTickMsg struct{}
+
+// markdownBatchMsg carries the result of a background glamour render pass
+// over a set of hydrated messages, keyed by MessageID.
+//
+//   - rendered maps MessageID → rendered glamour string.  Only messages whose
+//     current MessageID matches a key here receive FinalMarkdown updates.
+//   - fallback holds per-index (startIdx+i → rawSnap,rendered) data for messages
+//     that had no MessageID at snapshot time.  These are applied only when the
+//     message at that index still has the same Raw as when snapshotted.
+//   - width and theme are the msgColW and Theme that were current when the
+//     render started; used to detect stale results when a resize or theme
+//     switch arrived in the meantime.
+type markdownBatchMsg struct {
+	// MessageID-keyed results (safe against index shifts).
+	rendered map[string]string // messageID → glamour output
+	// Index-keyed fallback for messages without a MessageID.
+	// Only applied when the message at the index still has the same Raw.
+	fallback []markdownBatchFallback
+	width    int
+	theme    *styles.Styles
+}
+
+// markdownBatchFallback holds the index-keyed render result for a message
+// that had no stable MessageID when the batch was issued.
+type markdownBatchFallback struct {
+	idx     int
+	rawSnap string
+	out     string
+}
