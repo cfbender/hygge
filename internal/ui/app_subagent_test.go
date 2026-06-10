@@ -1017,10 +1017,10 @@ func TestSubagentAnimStepMsgInvalidatesMsgCache(t *testing.T) {
 		t.Fatal("expected non-nil Anim for sub-cache")
 	}
 
-	// Prime the cache: View() sets msgCacheValid = true.
+	// Prime the cache: View() sets msgCache.valid = true.
 	_ = app.View()
-	if !app.msgCacheValid {
-		t.Fatal("expected msgCacheValid=true after View()")
+	if !app.msgCache.valid {
+		t.Fatal("expected msgCache.valid=true after View()")
 	}
 
 	// Synthesise a StepMsg targeting this exact Anim using the public ID() accessor.
@@ -1029,8 +1029,8 @@ func TestSubagentAnimStepMsgInvalidatesMsgCache(t *testing.T) {
 	_, cmd := app.Update(step)
 
 	// The cache must be invalidated so the new animation frame is rendered.
-	if app.msgCacheValid {
-		t.Error("expected msgCacheValid=false after anim StepMsg — animation frame would not be rendered without cache invalidation")
+	if app.msgCache.valid {
+		t.Error("expected msgCache.valid=false after anim StepMsg — animation frame would not be rendered without cache invalidation")
 	}
 
 	// The re-arm Cmd must be non-nil so the tick loop continues.
@@ -1073,8 +1073,8 @@ func TestSubagentAnimStepMsgStopsAfterCompletion(t *testing.T) {
 
 	// Prime the cache.
 	_ = app.View()
-	if !app.msgCacheValid {
-		t.Fatal("expected msgCacheValid=true after View()")
+	if !app.msgCache.valid {
+		t.Fatal("expected msgCache.valid=true after View()")
 	}
 
 	// A stale StepMsg for the now-deleted anim must be silently dropped.
@@ -1084,8 +1084,8 @@ func TestSubagentAnimStepMsgStopsAfterCompletion(t *testing.T) {
 		t.Error("expected nil Cmd for stale StepMsg after SubagentCompleted — tick loop should not re-arm")
 	}
 	// Cache must NOT have been invalidated (no state change occurred).
-	if !app.msgCacheValid {
-		t.Error("expected msgCacheValid=true after stale StepMsg — no frame advanced, no re-render needed")
+	if !app.msgCache.valid {
+		t.Error("expected msgCache.valid=true after stale StepMsg — no frame advanced, no re-render needed")
 	}
 }
 

@@ -344,17 +344,12 @@ type App struct {
 	// msgCache holds the pre-rendered message list content. Invalidated when
 	// messages change (append, stream delta, resize). This avoids re-rendering
 	// all messages on every frame — only the viewport scroll position changes.
-	msgCache               string
-	msgCacheValid          bool
-	msgCacheStreamingDirty bool      // streaming tail changed while user was scrolled away
-	msgCacheW              int       // width at which cache was rendered
-	msgCacheLen            int       // message count at which cache was rendered
-	msgCacheTime           time.Time // time at which cache was rendered (for relative timestamps)
-	subagentHitZones       []components.SubagentHitZone
-	toolHitZones           []components.ToolHitZone
-	thinkingHitZones       []components.ThinkingHitZone
-	urlHitZones            []components.URLHitZone
-	userMsgHitZones        []components.UserMsgHitZone
+	msgCache         messageCache
+	subagentHitZones []components.SubagentHitZone
+	toolHitZones     []components.ToolHitZone
+	thinkingHitZones []components.ThinkingHitZone
+	urlHitZones      []components.URLHitZone
+	userMsgHitZones  []components.UserMsgHitZone
 
 	// hoverSubagentID is the subagent ID under the mouse cursor, or "".
 	hoverSubagentID string
