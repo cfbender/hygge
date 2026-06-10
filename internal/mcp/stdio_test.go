@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cfbender/hygge/internal/procenv"
 )
 
 func TestStdioTransport_RoundtripWithShCat(t *testing.T) {
@@ -51,10 +53,10 @@ func TestStdioTransport_EnvAllowlist(t *testing.T) {
 	t.Setenv("HYGGE_MCP_TEST_LEAK", "leaky")
 	t.Setenv("PATH", "/usr/bin:/bin")
 
-	// Build the child env via mergeEnv and inspect it directly — this
-	// is the deterministic, fast path that doesn't depend on shelling
-	// out.
-	env := mergeEnv(stdioEnvAllowlist, map[string]string{"GITHUB_TOKEN": "abc"})
+	// Build the child env via procenv.Merged and inspect it directly —
+	// this is the deterministic, fast path that doesn't depend on
+	// shelling out.
+	env := procenv.Merged(map[string]string{"GITHUB_TOKEN": "abc"})
 	gotKeys := make(map[string]string, len(env))
 	for _, kv := range env {
 		before, after, ok := strings.Cut(kv, "=")
