@@ -208,6 +208,127 @@ type MessageList struct {
 	// assistant header row with model metadata (mode name goes inside the bubble),
 	// tool output hidden until explicitly expanded, subagent blocks two lines.
 	Compact bool
+
+	// pre holds the theme-derived styles shared by every message in a render
+	// pass. ViewWithHitZones builds it once per pass; the pointer survives the
+	// value copies made for each render helper.
+	pre *preStyles
+}
+
+// preStyles is the set of lipgloss styles and colors that depend only on the
+// theme, precomputed once per render pass instead of once per message.
+type preStyles struct {
+	thinkingIndicator lipgloss.Style // truncateThinking expand/collapse hint
+	urlHover          lipgloss.Style // hovered-URL highlight
+	accent            lipgloss.Style // mention highlight + user-bubble hover indicator
+	thinkingBody      lipgloss.Style // thinking text and placeholder bubble body
+	modeName          lipgloss.Style // compact-mode agent name inside the bubble
+	markerBorder      lipgloss.Style // compaction banner border (Width applied per call)
+	markerLabel       lipgloss.Style
+	markerBody        lipgloss.Style // compaction banner body (Width applied per call)
+	workingBorder     lipgloss.Style // in-flight compaction border (Width applied per call)
+	workingLabel      lipgloss.Style
+	workingAnim       lipgloss.Style // in-flight compaction spinner (Width applied per call)
+	toolStatus        lipgloss.Style // inline tool status text
+	toolErr           lipgloss.Style // inline tool error text
+	toolName          lipgloss.Style // tool name in group rows
+	roleUser          lipgloss.Style
+	roleAssistant     lipgloss.Style
+	roleTool          lipgloss.Style
+	roleDefault       lipgloss.Style
+	muted             lipgloss.Style
+
+	accentFg         color.Color // accent foreground; nil when colourless
+	userBorderFg     color.Color // user bubble accent; nil when colourless
+	distinctBorderFg color.Color // tool/subagent bubble accent; nil when colourless
+	agentBorderFg    color.Color // assistant bubble accent; nil when colourless
+	bubbleBg         color.Color // bubble background; nil when colourless
+}
+
+// visibleFg extracts a style's foreground color, returning nil when it is
+// unset or NoColor.
+func visibleFg(s lipgloss.Style) color.Color {
+	fg := s.GetForeground()
+	if _, isNoColor := fg.(lipgloss.NoColor); fg == nil || isNoColor {
+		return nil
+	}
+	return fg
+}
+
+// visibleBg extracts a style's background color, returning nil when it is
+// unset or NoColor.
+func visibleBg(s lipgloss.Style) color.Color {
+	bg := s.GetBackground()
+	if _, isNoColor := bg.(lipgloss.NoColor); bg == nil || isNoColor {
+		return nil
+	}
+	return bg
+}
+
+// buildPreStyles resolves the themed/unthemed style set for a render pass.
+func buildPreStyles(t *styles.Styles) *preStyles {
+	border := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1)
+	if t == nil {
+		return &preStyles{
+			thinkingIndicator: lipgloss.NewStyle().Faint(true),
+			urlHover:          lipgloss.NewStyle().Underline(true).Bold(true),
+			accent:            lipgloss.NewStyle(),
+			thinkingBody:      lipgloss.NewStyle().Faint(true).Italic(true),
+			modeName:          lipgloss.NewStyle().Faint(true).Bold(true),
+			markerBorder:      border,
+			markerLabel:       lipgloss.NewStyle().Bold(true),
+			markerBody:        lipgloss.NewStyle(),
+			workingBorder:     border,
+			workingLabel:      lipgloss.NewStyle().Bold(true),
+			workingAnim:       lipgloss.NewStyle(),
+			toolStatus:        lipgloss.NewStyle().Faint(true).Italic(true),
+			toolErr:           lipgloss.NewStyle().Faint(true),
+			toolName:          lipgloss.NewStyle(),
+			roleUser:          lipgloss.NewStyle().Bold(true),
+			roleAssistant:     lipgloss.NewStyle().Bold(true),
+			roleTool:          lipgloss.NewStyle().Bold(true),
+			roleDefault:       lipgloss.NewStyle().Bold(true),
+			muted:             lipgloss.NewStyle().Faint(true),
+		}
+	}
+	return &preStyles{
+		thinkingIndicator: t.Style(styles.AtomBubbleBodyMuted).Faint(true),
+		urlHover:          t.Style(styles.AtomAccent).Underline(true).Bold(true),
+		accent:            t.Style(styles.AtomAccent),
+		thinkingBody:      t.Style(styles.AtomBubbleBodyMuted).Italic(true),
+		modeName:          t.Style(styles.AtomMuted).Bold(true),
+		markerBorder:      border.BorderForeground(t.Style(styles.AtomWarn).GetForeground()),
+		markerLabel:       t.Style(styles.AtomWarn).Bold(true),
+		markerBody:        t.Style(styles.AtomMuted),
+		workingBorder:     border.BorderForeground(t.Style(styles.AtomAccent).GetForeground()),
+		workingLabel:      t.Style(styles.AtomAccent).Bold(true),
+		workingAnim:       t.Style(styles.AtomWarn),
+		toolStatus:        t.Style(styles.AtomBubbleBodyMuted).Faint(true).Italic(true),
+		toolErr:           t.Style(styles.AtomError).Faint(true),
+		toolName:          t.Style(styles.AtomPrimary),
+		roleUser:          t.Style(styles.AtomPrimary).Bold(true),
+		roleAssistant:     t.Style(styles.AtomAccent).Bold(true),
+		roleTool:          t.Style(styles.AtomMuted).Bold(true),
+		roleDefault:       t.Style(styles.AtomMuted),
+		muted:             t.Style(styles.AtomMuted),
+		accentFg:          visibleFg(t.Style(styles.AtomAccent)),
+		userBorderFg:      visibleFg(t.Style(styles.AtomBubbleUserBorder)),
+		distinctBorderFg:  visibleFg(t.Style(styles.AtomBubbleBorderDistinct)),
+		agentBorderFg:     visibleFg(t.Style(styles.AtomBubbleAgentBorder)),
+		bubbleBg:          visibleBg(t.Style(styles.AtomBubbleBg)),
+	}
+}
+
+// styleSet returns the precomputed style set, building one on demand for
+// callers (tests) that invoke render helpers without going through
+// ViewWithHitZones.
+func (m MessageList) styleSet() *preStyles {
+	if m.pre != nil {
+		return m.pre
+	}
+	return buildPreStyles(m.Theme)
 }
 
 // now returns the reference time for relative timestamps.
@@ -295,12 +416,7 @@ func hasExpandableThinking(thinking string) bool {
 // Returns the original string unchanged when it fits within thinkingMaxLines.
 func (m MessageList) truncateThinking(thinking string, expanded bool) string {
 	lines := strings.Split(thinking, "\n")
-	var indicatorStyle lipgloss.Style
-	if m.Theme != nil {
-		indicatorStyle = m.Theme.Style(styles.AtomBubbleBodyMuted).Faint(true)
-	} else {
-		indicatorStyle = lipgloss.NewStyle().Faint(true)
-	}
+	indicatorStyle := m.styleSet().thinkingIndicator
 	if len(lines) <= thinkingMaxLines {
 		if expanded {
 			// Was expanded but now fits — show collapse affordance.
@@ -386,6 +502,7 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 	if len(m.Messages) == 0 {
 		return m.renderEmptyState(), nil, nil, nil, nil, nil
 	}
+	m.pre = buildPreStyles(m.Theme)
 	collapseLimit := m.CollapseLines
 	if collapseLimit <= 0 {
 		collapseLimit = 8
@@ -705,11 +822,7 @@ func (m MessageList) highlightHoveredURL(body string) string {
 	if m.HoverURL == "" {
 		return body
 	}
-	style := lipgloss.NewStyle().Underline(true).Bold(true)
-	if m.Theme != nil {
-		style = m.Theme.Style(styles.AtomAccent).Underline(true).Bold(true)
-	}
-	return HighlightURL(body, m.HoverURL, style)
+	return HighlightURL(body, m.HoverURL, m.styleSet().urlHover)
 }
 
 func userBubbleWidth(width int) int {
@@ -737,12 +850,13 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 		width = 80
 	}
 	bubbleW := userBubbleWidth(width)
+	pre := m.styleSet()
 
 	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
 	body := displayBody(msg)
 	body = strings.TrimRight(body, "\n")
 	if m.Theme != nil {
-		body = HighlightMentions(body, m.Theme.Style(styles.AtomAccent))
+		body = HighlightMentions(body, pre.accent)
 	}
 	body = m.highlightHoveredURL(body)
 	body = LinkifyURLs(body)
@@ -757,21 +871,16 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	var accentColor color.Color
 	if m.Styles != nil && m.Styles.UserAccent != nil {
 		accentColor = m.Styles.UserAccent
-	} else if m.Theme != nil {
-		fg := m.Theme.Style(styles.AtomBubbleUserBorder).GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
-			accentColor = fg
-		}
+	} else if pre.userBorderFg != nil {
+		accentColor = pre.userBorderFg
 	}
 	hoverIndicator := ""
 	if m.HoverUserMsgID != "" && m.HoverUserMsgID == msg.MessageID {
 		if m.Theme != nil {
-			accentStyle := m.Theme.Style(styles.AtomAccent)
-			fg := accentStyle.GetForeground()
-			if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
-				accentColor = fg
+			if pre.accentFg != nil {
+				accentColor = pre.accentFg
 			}
-			hoverIndicator = accentStyle.Render("↵")
+			hoverIndicator = pre.accent.Render("↵")
 		} else {
 			hoverIndicator = "↵"
 		}
@@ -825,6 +934,8 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 		return ""
 	}
 
+	pre := m.styleSet()
+
 	// Compose body: thinking (muted italic) + blank line + response text.
 	var bodyParts []string
 	if thinking != "" {
@@ -832,26 +943,14 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 		expanded := m.ExpandedThinking != nil && m.ExpandedThinking[msgIdx]
 		thinking = m.truncateThinking(thinking, expanded)
 		// Render thinking in muted italic style.
-		var thinkStyle lipgloss.Style
-		if m.Theme != nil {
-			thinkStyle = m.Theme.Style(styles.AtomBubbleBodyMuted).Italic(true)
-		} else {
-			thinkStyle = lipgloss.NewStyle().Faint(true).Italic(true)
-		}
-		bodyParts = append(bodyParts, thinkStyle.Render(thinking))
+		bodyParts = append(bodyParts, pre.thinkingBody.Render(thinking))
 	}
 	if rawBody != "" {
 		if msg.IsPlaceholder {
 			// Placeholder bubbles render the waiting hint in muted italic so
 			// it visually reads as transient feedback rather than a real
 			// assistant reply.
-			var phStyle lipgloss.Style
-			if m.Theme != nil {
-				phStyle = m.Theme.Style(styles.AtomBubbleBodyMuted).Italic(true)
-			} else {
-				phStyle = lipgloss.NewStyle().Faint(true).Italic(true)
-			}
-			rawBody = phStyle.Render(rawBody)
+			rawBody = pre.thinkingBody.Render(rawBody)
 		} else {
 			rawBody = m.highlightHoveredURL(rawBody)
 			// Wrap plain http(s):// URLs with OSC 8 terminal hyperlinks so
@@ -898,13 +997,7 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 	headerLeft := agentType
 	if m.Compact {
 		// Prepend a muted mode-name line inside the bubble body.
-		var modeStyle lipgloss.Style
-		if m.Theme != nil {
-			modeStyle = m.Theme.Style(styles.AtomMuted).Bold(true)
-		} else {
-			modeStyle = lipgloss.NewStyle().Faint(true).Bold(true)
-		}
-		modePrefix := modeStyle.Render(agentType)
+		modePrefix := pre.modeName.Render(agentType)
 		body = modePrefix + "\n" + body
 		headerLeft = ""
 		headerRight = ""
@@ -938,18 +1031,10 @@ func (m MessageList) renderMarker(msg UIMessage) string {
 		return m.renderWorkingMarker(msg, innerW)
 	}
 
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		Width(innerW + 2)
-	labelStyle := lipgloss.NewStyle().Bold(true)
-	bodyStyle := lipgloss.NewStyle().Width(innerW)
-	if m.Theme != nil {
-		borderStyle = borderStyle.
-			BorderForeground(m.Theme.Style(styles.AtomWarn).GetForeground())
-		labelStyle = m.Theme.Style(styles.AtomWarn).Bold(true)
-		bodyStyle = m.Theme.Style(styles.AtomMuted).Width(innerW)
-	}
+	pre := m.styleSet()
+	borderStyle := pre.markerBorder.Width(innerW + 2)
+	labelStyle := pre.markerLabel
+	bodyStyle := pre.markerBody.Width(innerW)
 
 	header := fmt.Sprintf("── compacted · %s saved ──", formatTokensSaved(msg.MarkerTokensSaved))
 	if lipgloss.Width(header) > innerW {
@@ -965,19 +1050,11 @@ func (m MessageList) renderMarker(msg UIMessage) string {
 }
 
 func (m MessageList) renderWorkingMarker(msg UIMessage, innerW int) string {
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		Width(innerW + 2)
-	labelStyle := lipgloss.NewStyle().Bold(true)
-	bodyStyle := lipgloss.NewStyle().Width(innerW)
-	animStyle := lipgloss.NewStyle().Width(innerW)
-	if m.Theme != nil {
-		borderStyle = borderStyle.BorderForeground(m.Theme.Style(styles.AtomAccent).GetForeground())
-		labelStyle = m.Theme.Style(styles.AtomAccent).Bold(true)
-		bodyStyle = m.Theme.Style(styles.AtomMuted).Width(innerW)
-		animStyle = m.Theme.Style(styles.AtomWarn).Width(innerW)
-	}
+	pre := m.styleSet()
+	borderStyle := pre.workingBorder.Width(innerW + 2)
+	labelStyle := pre.workingLabel
+	bodyStyle := pre.markerBody.Width(innerW)
+	animStyle := pre.workingAnim.Width(innerW)
 
 	header := "── compaction · crunching ──"
 	if lipgloss.Width(header) > innerW {
@@ -1013,24 +1090,16 @@ func formatTokensSaved(n int64) string {
 
 // toolStatusText returns the inline status label for a tool row, or "" when
 // no text should be shown (Pending, Completed, Unknown).
-func toolStatusText(s ToolStatus, t *styles.Styles) string {
-	var muted, errStyle lipgloss.Style
-	if t != nil {
-		muted = t.Style(styles.AtomBubbleBodyMuted).Faint(true).Italic(true)
-		errStyle = t.Style(styles.AtomError).Faint(true)
-	} else {
-		muted = lipgloss.NewStyle().Faint(true).Italic(true)
-		errStyle = lipgloss.NewStyle().Faint(true)
-	}
+func toolStatusText(s ToolStatus, pre *preStyles) string {
 	switch s {
 	case ToolStatusAwaitingPermission:
-		return muted.Render("Requesting permission…")
+		return pre.toolStatus.Render("Requesting permission…")
 	case ToolStatusRunning:
-		return muted.Render("Waiting for tool response…")
+		return pre.toolStatus.Render("Waiting for tool response…")
 	case ToolStatusError:
-		return errStyle.Render("error")
+		return pre.toolErr.Render("error")
 	case ToolStatusCancelled:
-		return muted.Render("cancelled")
+		return pre.toolStatus.Render("cancelled")
 	default:
 		// Pending, Completed, Unknown — no status text.
 		return ""
@@ -1056,26 +1125,20 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	innerW := max(bubbleW-3, 1)
 
 	// Build body: one line per tool call.
-	nameStyle := lipgloss.NewStyle()
-	if m.Theme != nil {
-		nameStyle = m.Theme.Style(styles.AtomPrimary)
-	}
-	targetStyle := m.muted()
+	pre := m.styleSet()
+	nameStyle := pre.toolName
+	targetStyle := pre.muted
 
-	muted := m.muted()
+	muted := pre.muted
 	collapseLimit := 4
 
 	var rows []string
 	for _, msg := range items {
 		label := toolGroupLabel(msg, nameStyle, targetStyle)
 
-		statusTxt := toolStatusText(msg.Status, m.Theme)
+		statusTxt := toolStatusText(msg.Status, pre)
 		if statusTxt == "" && msg.IsError {
-			if m.Theme != nil {
-				statusTxt = m.Theme.Style(styles.AtomError).Faint(true).Render("error")
-			} else {
-				statusTxt = lipgloss.NewStyle().Faint(true).Render("error")
-			}
+			statusTxt = pre.toolErr.Render("error")
 		}
 		if statusTxt != "" {
 			label += " " + statusTxt
@@ -1144,13 +1207,7 @@ func (m MessageList) renderToolGroup(items []UIMessage) string {
 	}
 	body := strings.Join(rows, "\n")
 
-	var accentColor color.Color
-	if m.Theme != nil {
-		fg := m.Theme.Style(styles.AtomBubbleBorderDistinct).GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
-			accentColor = fg
-		}
-	}
+	accentColor := pre.distinctBorderFg
 
 	b := bubble.Bubble{
 		Width:           width,
@@ -1199,13 +1256,7 @@ func (m MessageList) wrapSubagentBubble(body string, hovered bool) string {
 	}
 	bubbleW := m.toolBubbleWidth(width)
 
-	var accentColor color.Color
-	if m.Theme != nil {
-		fg := m.Theme.Style(styles.AtomBubbleBorderDistinct).GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
-			accentColor = fg
-		}
-	}
+	accentColor := m.styleSet().distinctBorderFg
 
 	subStyle := bubble.StyleDistinct
 	if hovered {
@@ -1441,13 +1492,7 @@ func (m MessageList) agentAccentColor(msg UIMessage) color.Color {
 	if msg.SubagentColor != nil {
 		return msg.SubagentColor
 	}
-	if m.Theme != nil {
-		fg := m.Theme.Style(styles.AtomBubbleAgentBorder).GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); fg != nil && !isNoColor {
-			return fg
-		}
-	}
-	return nil
+	return m.styleSet().agentBorderFg
 }
 
 // ColorForSubagentType returns a deterministic color derived from a
@@ -1478,39 +1523,27 @@ func (m MessageList) bubbleBackgroundColor() color.Color {
 	if m.Styles != nil {
 		return m.Styles.BubbleBg
 	}
-	if m.Theme == nil {
-		return nil
-	}
-	bg := m.Theme.Style(styles.AtomBubbleBg).GetBackground()
-	if _, isNoColor := bg.(lipgloss.NoColor); bg == nil || isNoColor {
-		return nil
-	}
-	return bg
+	return m.styleSet().bubbleBg
 }
 
 // roleStyle returns the lipgloss style for a role gutter.
 func (m MessageList) roleStyle(role MessageRole) lipgloss.Style {
-	if m.Theme == nil {
-		return lipgloss.NewStyle().Bold(true)
-	}
+	pre := m.styleSet()
 	switch role {
 	case RoleUser:
-		return m.Theme.Style(styles.AtomPrimary).Bold(true)
+		return pre.roleUser
 	case RoleAssistant:
-		return m.Theme.Style(styles.AtomAccent).Bold(true)
+		return pre.roleAssistant
 	case RoleTool:
-		return m.Theme.Style(styles.AtomMuted).Bold(true)
+		return pre.roleTool
 	default:
-		return m.Theme.Style(styles.AtomMuted)
+		return pre.roleDefault
 	}
 }
 
 // muted returns the muted body style for placeholders and tool-content text.
 func (m MessageList) muted() lipgloss.Style {
-	if m.Theme == nil {
-		return lipgloss.NewStyle().Faint(true)
-	}
-	return m.Theme.Style(styles.AtomMuted)
+	return m.styleSet().muted
 }
 
 // collapseToolBody truncates a tool body to the first N lines and appends a

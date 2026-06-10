@@ -289,12 +289,26 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 	return ""
 }
 
-// renderQuitOverlay renders a centered quit confirmation dialog with
-// selectable Yes/No buttons.
-func (a *App) renderQuitOverlay(w, h int) string {
-	question := "Are you sure you want to quit?"
+// overlayStyles holds the lipgloss styles used by the overlay and chrome
+// renderers, built once per theme instead of once per frame.
+type overlayStyles struct {
+	quitSelected lipgloss.Style
+	quitNormal   lipgloss.Style
+	quitBgPad    lipgloss.Style
+	quitQuestion lipgloss.Style
+	quitBox      lipgloss.Style
+	noticeText   lipgloss.Style
+}
 
-	// Button styles.
+// ensureOverlayStyles returns the cached overlay style set, building it from
+// the current theme on first use. Reset to nil on theme switches so the next
+// frame rebuilds it.
+func (a *App) ensureOverlayStyles() *overlayStyles {
+	if a.overlayStyles != nil {
+		return a.overlayStyles
+	}
+
+	// Quit dialog palette.
 	var selectedBg, selectedFg, normalFg, boxBg, textFg color.Color
 	selectedBg = lipgloss.Color("#C75B7A")
 	selectedFg = lipgloss.Color("#180810")
@@ -305,25 +319,47 @@ func (a *App) renderQuitOverlay(w, h int) string {
 		boxBg = a.styles.BubbleBg
 	}
 
-	selectedStyle := lipgloss.NewStyle().
-		Bold(true).
-		Padding(0, 3).
-		Background(selectedBg).
-		Foreground(selectedFg)
-	normalStyle := lipgloss.NewStyle().
-		Padding(0, 3).
-		Foreground(normalFg).
-		Background(boxBg)
+	noticeText := lipgloss.NewStyle()
+	if a.opts.Theme != nil {
+		noticeText = a.opts.Theme.Style(styles.AtomMuted)
+	}
+
+	a.overlayStyles = &overlayStyles{
+		quitSelected: lipgloss.NewStyle().
+			Bold(true).
+			Padding(0, 3).
+			Background(selectedBg).
+			Foreground(selectedFg),
+		quitNormal: lipgloss.NewStyle().
+			Padding(0, 3).
+			Foreground(normalFg).
+			Background(boxBg),
+		quitBgPad:    lipgloss.NewStyle().Background(boxBg),
+		quitQuestion: lipgloss.NewStyle().Foreground(textFg).Background(boxBg),
+		quitBox: lipgloss.NewStyle().
+			Padding(1, 4).
+			Background(boxBg),
+		noticeText: noticeText,
+	}
+	return a.overlayStyles
+}
+
+// renderQuitOverlay renders a centered quit confirmation dialog with
+// selectable Yes/No buttons.
+func (a *App) renderQuitOverlay(w, h int) string {
+	question := "Are you sure you want to quit?"
+
+	ov := a.ensureOverlayStyles()
 
 	var yesBtn, noBtn string
 	if a.quitSelectedNo {
-		yesBtn = normalStyle.Render("yeah")
-		noBtn = selectedStyle.Render("nah")
+		yesBtn = ov.quitNormal.Render("yeah")
+		noBtn = ov.quitSelected.Render("nah")
 	} else {
-		yesBtn = selectedStyle.Render("yeah")
-		noBtn = normalStyle.Render("nah")
+		yesBtn = ov.quitSelected.Render("yeah")
+		noBtn = ov.quitNormal.Render("nah")
 	}
-	btnSep := lipgloss.NewStyle().Background(boxBg).Render(" ")
+	btnSep := ov.quitBgPad.Render(" ")
 	buttonRow := yesBtn + btnSep + noBtn
 
 	// Build content manually to avoid JoinVertical centering artifacts.
@@ -335,22 +371,17 @@ func (a *App) renderQuitOverlay(w, h int) string {
 
 	// Center the button row within the inner width.
 	btnPad := max((innerW-bW)/2, 0)
-	bgPad := lipgloss.NewStyle().Background(boxBg)
+	bgPad := ov.quitBgPad
 	centeredButtons := bgPad.Render(strings.Repeat(" ", btnPad)) + buttonRow + bgPad.Render(strings.Repeat(" ", innerW-bW-btnPad))
 
 	// Center the question too.
 	qPad := max((innerW-qW)/2, 0)
-	qStyle := lipgloss.NewStyle().Foreground(textFg).Background(boxBg)
-	centeredQ := bgPad.Render(strings.Repeat(" ", qPad)) + qStyle.Render(qText) + bgPad.Render(strings.Repeat(" ", innerW-qW-qPad))
+	centeredQ := bgPad.Render(strings.Repeat(" ", qPad)) + ov.quitQuestion.Render(qText) + bgPad.Render(strings.Repeat(" ", innerW-qW-qPad))
 
 	blankLine := bgPad.Render(strings.Repeat(" ", innerW))
 
-	boxStyle := lipgloss.NewStyle().
-		Padding(1, 4).
-		Background(boxBg)
-
 	content := centeredQ + "\n" + blankLine + "\n" + centeredButtons
-	box := boxStyle.Render(content)
+	box := ov.quitBox.Render(content)
 
 	boxW := lipgloss.Width(box)
 	boxH := lipgloss.Height(box)
@@ -412,18 +443,10 @@ func (a *App) renderChromeContent() string {
 
 	// Notices.
 	if a.notice != "" {
-		style := lipgloss.NewStyle()
-		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(styles.AtomMuted)
-		}
-		sections = append(sections, style.Render(a.notice))
+		sections = append(sections, a.ensureOverlayStyles().noticeText.Render(a.notice))
 	}
 	if a.compactionToast != "" {
-		style := lipgloss.NewStyle()
-		if a.opts.Theme != nil {
-			style = a.opts.Theme.Style(styles.AtomMuted)
-		}
-		sections = append(sections, style.Render(a.compactionToast))
+		sections = append(sections, a.ensureOverlayStyles().noticeText.Render(a.compactionToast))
 	}
 
 	return strings.Join(sections, "\n")
