@@ -176,7 +176,6 @@ func (a *App) appendAssistantDelta(text string) {
 			last.Raw += text
 			// Reveal the whole accumulated buffer immediately (chunk-level reveal).
 			last.VisibleRaw = last.Raw
-			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.VisibleRaw)
 			return
 		}
 		// Defensive guard: a delta arrived after the trailing assistant
@@ -194,7 +193,6 @@ func (a *App) appendAssistantDelta(text string) {
 			last.IsStreaming = true
 			last.Raw += text
 			last.VisibleRaw = last.Raw
-			last.FinalMarkdown = renderMarkdown(a.ensureRenderer(), last.VisibleRaw)
 			return
 		}
 	}
@@ -208,7 +206,6 @@ func (a *App) appendAssistantDelta(text string) {
 		ModelName:   a.opts.ModelName,
 		ModeColor:   a.activeModeColor(),
 	}
-	msg.FinalMarkdown = renderMarkdown(a.ensureRenderer(), msg.VisibleRaw)
 	a.messages = append(a.messages, msg)
 	a.lastAssistantFlushIdx = -1
 }
@@ -231,9 +228,13 @@ func (a *App) flushAssistantStream(role, messageID string) tea.Cmd {
 	// delivery order can have the flush happen before the tool row appears).
 	if messageID != "" {
 		for i := range a.messages {
-			if a.messages[i].MessageID == messageID && a.messages[i].Role == components.RoleAssistant {
-				// Message already present — nothing to do.  The persisted content
-				// is canonical; a second flush would not change it meaningfully.
+			if a.messages[i].MessageID == messageID && a.messages[i].Role == components.RoleAssistant && !a.messages[i].IsStreaming {
+				// Message already flushed and non-streaming — nothing to do.  The
+				// persisted content is canonical; a second flush would not change it
+				// meaningfully.  We only skip non-streaming duplicates so that a
+				// bubble re-opened by a post-flush delta (IsStreaming set back to
+				// true via the lastAssistantFlushIdx branch) falls through and
+				// re-finalizes correctly.
 				return nil
 			}
 		}
@@ -489,6 +490,12 @@ func (a *App) rerenderFinalMarkdownMessages() {
 	for i := range a.messages {
 		msg := &a.messages[i]
 		if msg.Raw == "" {
+			continue
+		}
+		// Skip streaming messages: glamour-rendering Raw mid-stream would
+		// produce garbled partial output and violate the invariant that
+		// FinalMarkdown is empty while a message is streaming.
+		if msg.IsStreaming {
 			continue
 		}
 		switch msg.Role {

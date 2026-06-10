@@ -65,9 +65,8 @@ const (
 
 // UIMessage is one entry in the conversation view.
 //
-// FinalMarkdown is the glamour-rendered output. Assistant messages populate it
-// while streaming and again on completion so the body does not reflow when the
-// stream finalizes.
+// FinalMarkdown is the glamour-rendered output. Set by flushAssistantStream
+// (and hydration/resize paths) once streaming completes; empty while streaming.
 type UIMessage struct {
 	Role      MessageRole
 	ToolName  string // populated for RoleTool
@@ -616,6 +615,28 @@ func isExpandableToolBlock(msg UIMessage) bool {
 	}
 }
 
+// assistantDisplayBody returns the text body to render for an assistant message.
+//
+// Invariant: FinalMarkdown is empty while a message is streaming;
+// flushAssistantStream sets it once the stream ends.
+//
+//   - While streaming: return VisibleRaw (the incrementally-revealed buffer).
+//   - After streaming, if FinalMarkdown is set: return FinalMarkdown (glamour output).
+//   - Otherwise: return Raw (hydrated messages or unit-test fixtures where the
+//     renderer was not available at flush time).
+//
+// The same chain is safe for non-streaming user messages because IsStreaming is
+// always false for user messages and VisibleRaw is never set on them.
+func assistantDisplayBody(msg UIMessage) string {
+	if msg.IsStreaming {
+		return msg.VisibleRaw
+	}
+	if msg.FinalMarkdown != "" {
+		return msg.FinalMarkdown
+	}
+	return msg.Raw
+}
+
 // renderOne renders a single message with its gutter, plus any nested
 // subagent block bound to it.  msgIdx is the index of msg in m.Messages and
 // is used to look up per-message expansion state (e.g. thinking).
@@ -652,10 +673,7 @@ func (m MessageList) renderOne(msg UIMessage, msgIdx int, collapseLimit int) str
 
 	gutter := m.gutter(msg)
 
-	body := msg.Raw
-	if !msg.IsStreaming && msg.FinalMarkdown != "" {
-		body = msg.FinalMarkdown
-	}
+	body := assistantDisplayBody(msg)
 	body = strings.TrimRight(body, "\n")
 
 	// Tool result truncation: only applies when the message is a tool with
@@ -718,10 +736,9 @@ func (m MessageList) renderUserBubble(msg UIMessage) string {
 	bubbleW := userBubbleWidth(width)
 
 	// Body: prefer FinalMarkdown when not streaming; Raw otherwise.
-	body := msg.Raw
-	if !msg.IsStreaming && msg.FinalMarkdown != "" {
-		body = msg.FinalMarkdown
-	}
+	// Uses assistantDisplayBody which implements the canonical chain:
+	// IsStreaming → VisibleRaw; FinalMarkdown set → FinalMarkdown; else → Raw.
+	body := assistantDisplayBody(msg)
 	body = strings.TrimRight(body, "\n")
 	if m.Theme != nil {
 		body = HighlightMentions(body, m.Theme.Style(styles.AtomAccent))
@@ -798,16 +815,9 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 		bubbleW = 1
 	}
 
-	// Body: prefer rendered markdown when available, including during streaming,
-	// so completion does not cause a visible raw→glamour layout jump. Streaming
-	// messages render FinalMarkdown from VisibleRaw, not the full buffered Raw.
-	rawBody := msg.Raw
-	if msg.IsStreaming {
-		rawBody = msg.VisibleRaw
-	}
-	if msg.FinalMarkdown != "" {
-		rawBody = msg.FinalMarkdown
-	}
+	// Body selection: delegate to assistantDisplayBody which encodes the
+	// canonical chain. See assistantDisplayBody for the invariant.
+	rawBody := assistantDisplayBody(msg)
 	rawBody = strings.TrimRight(rawBody, "\n")
 	thinking := strings.TrimRight(msg.Thinking, "\n")
 
