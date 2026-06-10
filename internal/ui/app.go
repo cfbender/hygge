@@ -845,6 +845,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Glamour renderer is sized to the body width; rebuild lazily.
 		a.renderer = nil
 		a.rendererW = 0
+		a.clearRenderedMarkdown()
 		// Schedule async re-render of all finalized messages at the new width.
 		// Tail-first so the visible end of chat upgrades before the rest.
 		return a, a.renderMarkdownBatchTailFirstCmd(0, len(a.messages))
@@ -1087,6 +1088,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.input.SetStyles(m.theme)
 			a.renderer = nil
 			a.rendererW = 0
+			a.clearRenderedMarkdown()
 			// Re-render finalized markdown with the new palette. Any batch
 			// still in flight for the old theme is rejected by the staleness
 			// check in the markdownBatchMsg handler.

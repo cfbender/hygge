@@ -32,6 +32,16 @@ func markdownRenderableRole(role components.MessageRole) bool {
 	return role == components.RoleUser || role == components.RoleAssistant
 }
 
+func (a *App) clearRenderedMarkdown() {
+	for i := range a.messages {
+		m := &a.messages[i]
+		if markdownRenderableRole(m.Role) && !m.IsStreaming {
+			m.FinalMarkdown = ""
+		}
+	}
+	a.invalidateMsgCache()
+}
+
 // renderMarkdownBatchCmd returns a tea.Cmd that glamour-renders messages in
 // a.messages[startIdx:endIdx] whose Role is RoleUser or RoleAssistant and
 // whose Raw is non-empty.  It constructs a fresh renderer (independent of

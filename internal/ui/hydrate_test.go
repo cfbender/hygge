@@ -2140,12 +2140,8 @@ func TestWindowSizeMsg_NoSyncGlamourRender(t *testing.T) {
 		t.Fatal("WindowSizeMsg with messages should return a non-nil batch Cmd")
 	}
 
-	// Executing the Cmd should produce a markdownBatchMsg.
-	result := cmd()
-	if result == nil {
-		t.Fatal("batch Cmd returned nil Msg")
-	}
-	app.Update(result)
+	// Executing the Cmd should produce a markdownBatchMsg, possibly inside a batch.
+	drainBatchMsgs(t, app, cmd, 0)
 
 	// After applying the batch result, FinalMarkdown must be populated.  It may
 	// equal the pre-resize render if the width change did not affect wrapping;
@@ -2187,12 +2183,8 @@ func TestMarkdownBatchMsg_WidthMismatchReissues(t *testing.T) {
 		t.Fatal("width mismatch must re-issue a new batch Cmd")
 	}
 
-	// The re-issued Cmd should produce a markdownBatchMsg at the current width.
-	reissueResult := reissueCmd()
-	if reissueResult == nil {
-		t.Fatal("re-issued Cmd returned nil")
-	}
-	app.Update(reissueResult)
+	// The re-issued Cmd should produce and apply a markdownBatchMsg at the current width.
+	drainBatchMsgs(t, app, reissueCmd, 0)
 
 	// After the correctly-widthed batch is applied, FinalMarkdown should be set.
 	if app.messages[0].FinalMarkdown == "" {
