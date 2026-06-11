@@ -911,6 +911,43 @@ func TestSnapshotFile_ETagRoundTrips(t *testing.T) {
 	}
 }
 
+// TestReadSnapshotFile_NormalizesKeyCasing confirms that disk snapshots
+// carrying mixed-case provider/model keys are lowercased on read, so
+// lookups keep working against caches written with non-canonical casing.
+func TestReadSnapshotFile_NormalizesKeyCasing(t *testing.T) {
+	t.Parallel()
+	dir := tempStateDir(t)
+	path := filepath.Join(dir, "catalog.json")
+	snap := &Snapshot{
+		FetchedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Providers: map[string]map[string]Entry{
+			"Anthropic": {
+				"Claude-Sonnet-4-5": {Provider: "anthropic", ID: "claude-sonnet-4-5"},
+			},
+		},
+		ProvidersMeta: map[string]ProviderMeta{
+			"Anthropic": {Type: "anthropic"},
+		},
+	}
+	if err := writeSnapshotFile(path, snap); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readSnapshotFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	mods, ok := got.Providers["anthropic"]
+	if !ok {
+		t.Fatalf("provider key not lowercased: %v", got.Providers)
+	}
+	if _, ok := mods["claude-sonnet-4-5"]; !ok {
+		t.Errorf("model key not lowercased: %v", mods)
+	}
+	if _, ok := got.ProvidersMeta["anthropic"]; !ok {
+		t.Errorf("meta key not lowercased: %v", got.ProvidersMeta)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Embedded snapshot test
 // ---------------------------------------------------------------------------
@@ -1265,32 +1302,30 @@ func TestLookupProvider_DefaultHeadersMutationIsolated(t *testing.T) {
 	}
 }
 
-// TestLookupProvider_OriginalKeyPathMutationIsolated covers the
-// original-providerID (non-lowercase) fallback branch of LookupProvider.
-func TestLookupProvider_OriginalKeyPathMutationIsolated(t *testing.T) {
+// TestLookupProvider_MixedCaseQueryMutationIsolated covers a mixed-case
+// query against the lowercase snapshot keys.
+func TestLookupProvider_MixedCaseQueryMutationIsolated(t *testing.T) {
 	t.Parallel()
-	// Store under a mixed-case key so the lowercase path misses and the
-	// original-providerID path hits.
-	const mixedKey = "FancyProvider"
+	const key = "fancyprovider"
 	snap := &Snapshot{
 		FetchedAt: time.Now(),
 		Providers: map[string]map[string]Entry{},
 		ProvidersMeta: map[string]ProviderMeta{
-			mixedKey: {
+			key: {
 				DefaultHeaders: map[string]string{"X-Token": "secret"},
 			},
 		},
 	}
 	c := &Catalog{snapshot: snap, src: SourceDisk, now: time.Now}
 
-	pm, ok := c.LookupProvider(mixedKey) // lowercase("FancyProvider") != mixedKey → fallback branch
+	pm, ok := c.LookupProvider("FancyProvider")
 	if !ok {
-		t.Fatalf("LookupProvider(%q): not found via original-key path", mixedKey)
+		t.Fatal(`LookupProvider("FancyProvider"): not found via mixed-case query`)
 	}
 	pm.DefaultHeaders["X-Token"] = "overwritten"
 
-	if snap.ProvidersMeta[mixedKey].DefaultHeaders["X-Token"] != "secret" {
-		t.Error("snapshot DefaultHeaders[X-Token] was mutated via original-key fallback path")
+	if snap.ProvidersMeta[key].DefaultHeaders["X-Token"] != "secret" {
+		t.Error("snapshot DefaultHeaders[X-Token] was mutated via mixed-case query path")
 	}
 }
 

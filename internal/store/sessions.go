@@ -296,12 +296,11 @@ func (s *Store) UpdateSessionTotals(ctx context.Context, id string, delta sessio
 // a partial write is an acceptable failure mode — the next delta will
 // catch up.
 //
-// Returns the slice of session ids that were updated, ordered leaf-first
-// (id is always index 0; the root ancestor is last).
-func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.Totals) ([]string, error) {
+// Returns one update per session, carrying the session id and its
+// post-update running totals, ordered leaf-first (id is always index 0;
+// the root ancestor is last).
+func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.Totals) ([]session.SessionTotalsUpdate, error) {
 	// Step 1: collect the ancestor chain in a single read query.
-	// We do this outside the update transaction so we can return the
-	// list of ids for event publishing even if the update partially fails.
 	const chainSQL = `
 		WITH RECURSIVE ancestors(id, parent_id, depth) AS (
 			SELECT id, parent_id, 0 FROM sessions WHERE id = ?
@@ -335,7 +334,8 @@ func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.To
 		return nil, fmt.Errorf("store: PropagateTotals %q: %w", id, ErrNotFound)
 	}
 
-	// Step 2: apply the delta to each row in a single transaction.
+	// Step 2: apply the delta to each row in a single transaction,
+	// reading back the post-update totals while the row is still hot.
 	// The same delta is applied to each ancestor — we are adding the
 	// same token increment to every level of the chain.  Triple-counting
 	// is avoided because the caller (agent/cost.go) publishes CostUpdated
@@ -344,10 +344,11 @@ func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.To
 	now := time.Now().UnixMilli()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return chain, fmt.Errorf("store: PropagateTotals begin tx: %w", err)
+		return nil, fmt.Errorf("store: PropagateTotals begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	updates := make([]session.SessionTotalsUpdate, 0, len(chain))
 	for _, chainID := range chain {
 		_, err := tx.ExecContext(ctx, `
 			UPDATE sessions SET
@@ -363,14 +364,29 @@ func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.To
 			delta.CostUSD, now, chainID,
 		)
 		if err != nil {
-			return chain, fmt.Errorf("store: PropagateTotals update %q: %w", chainID, err)
+			return nil, fmt.Errorf("store: PropagateTotals update %q: %w", chainID, err)
 		}
+		var totals session.Totals
+		err = tx.QueryRowContext(ctx, `
+			SELECT total_input_tokens, total_output_tokens,
+			       total_cache_read_tokens, total_cache_write_tokens,
+			       total_cost_usd
+			  FROM sessions WHERE id = ?`, chainID,
+		).Scan(
+			&totals.InputTokens, &totals.OutputTokens,
+			&totals.CacheReadTokens, &totals.CacheWriteTokens,
+			&totals.CostUSD,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store: PropagateTotals read back %q: %w", chainID, err)
+		}
+		updates = append(updates, session.SessionTotalsUpdate{SessionID: chainID, Totals: totals})
 	}
 
 	if err := tx.Commit(); err != nil {
-		return chain, fmt.Errorf("store: PropagateTotals commit: %w", err)
+		return nil, fmt.Errorf("store: PropagateTotals commit: %w", err)
 	}
-	return chain, nil
+	return updates, nil
 }
 
 // SoftDeleteSession marks deleted_at and bumps updated_at.  No-op if

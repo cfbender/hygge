@@ -815,8 +815,11 @@ func TestPropagateTotals_SingleSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PropagateTotals: %v", err)
 	}
-	if len(updated) != 1 || updated[0] != root.ID {
+	if len(updated) != 1 || updated[0].SessionID != root.ID {
 		t.Fatalf("expected [%s], got %v", root.ID, updated)
+	}
+	if updated[0].Totals.InputTokens != 10 || updated[0].Totals.OutputTokens != 5 {
+		t.Errorf("returned totals: got %+v want {10,5,...}", updated[0].Totals)
 	}
 
 	got, err := s.GetSession(t.Context(), root.ID)
@@ -846,11 +849,17 @@ func TestPropagateTotals_Depth1(t *testing.T) {
 		t.Fatalf("expected 2 updated ids, got %d: %v", len(updated), updated)
 	}
 	// First entry must be the leaf (child), last must be the root (parent).
-	if updated[0] != child.ID {
-		t.Errorf("updated[0] = %s, want child %s", updated[0], child.ID)
+	if updated[0].SessionID != child.ID {
+		t.Errorf("updated[0] = %s, want child %s", updated[0].SessionID, child.ID)
 	}
-	if updated[1] != parent.ID {
-		t.Errorf("updated[1] = %s, want parent %s", updated[1], parent.ID)
+	if updated[1].SessionID != parent.ID {
+		t.Errorf("updated[1] = %s, want parent %s", updated[1].SessionID, parent.ID)
+	}
+	// Returned totals must match the post-update rows.
+	for _, u := range updated {
+		if u.Totals.InputTokens != 20 || u.Totals.OutputTokens != 10 {
+			t.Errorf("returned totals for %s: got %+v want {20,10,...}", u.SessionID, u.Totals)
+		}
 	}
 
 	gotChild, err := s.GetSession(t.Context(), child.ID)
@@ -894,11 +903,11 @@ func TestPropagateTotals_Depth2(t *testing.T) {
 	if len(updated) != 3 {
 		t.Fatalf("expected 3 updated ids, got %d: %v", len(updated), updated)
 	}
-	if updated[0] != leaf.ID {
-		t.Errorf("updated[0] = %s, want leaf %s", updated[0], leaf.ID)
+	if updated[0].SessionID != leaf.ID {
+		t.Errorf("updated[0] = %s, want leaf %s", updated[0].SessionID, leaf.ID)
 	}
-	if updated[len(updated)-1] != root.ID {
-		t.Errorf("updated[last] = %s, want root %s", updated[len(updated)-1], root.ID)
+	if updated[len(updated)-1].SessionID != root.ID {
+		t.Errorf("updated[last] = %s, want root %s", updated[len(updated)-1].SessionID, root.ID)
 	}
 
 	for _, sessID := range []string{root.ID, mid.ID, leaf.ID} {
