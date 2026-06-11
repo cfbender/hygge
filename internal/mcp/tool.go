@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -103,16 +104,16 @@ func (t *mcpTool) Execute(ctx context.Context, args json.RawMessage, ec tool.Exe
 		Pwd:       ec.Pwd,
 		Reason:    "MCP tool call to " + t.serverName,
 	}
-	decision, err := ec.Permission.Ask(ctx, req)
-	if err != nil {
-		return tool.Result{}, &tool.ToolError{
-			Code:    tool.CodePermissionDenied,
-			Message: fmt.Sprintf("permission ask failed: %v", err),
-			Wrapped: err,
+	if err := permission.Gate(ctx, ec.Permission, req); err != nil {
+		var denied *permission.DeniedError
+		if !errors.As(err, &denied) {
+			return tool.Result{}, &tool.ToolError{
+				Code:    tool.CodePermissionDenied,
+				Message: fmt.Sprintf("permission ask failed: %v", err),
+				Wrapped: err,
+			}
 		}
-	}
-	if decision.Action == permission.ActionDeny {
-		reason := decision.Reason
+		reason := denied.Reason
 		if reason == "" {
 			reason = "denied by policy"
 		}

@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -27,37 +28,39 @@ func resolvePath(ec ExecContext, raw string) (string, error) {
 	return filepath.Clean(filepath.Join(ec.Pwd, raw)), nil
 }
 
-// askPermission wraps ec.Permission.Ask, returning either the granted
-// decision (caller proceeds), an IsError Result (caller returns the
-// Result unchanged), or a *ToolError (caller propagates).
+// askPermission gates req through permission.Gate, returning either the
+// granted decision (caller proceeds), an IsError Result (caller returns
+// the Result unchanged), or a *ToolError (caller propagates).
 func askPermission(ctx context.Context, ec ExecContext, req permission.Request) (permission.Decision, *Result, error) {
 	if ec.Permission == nil {
 		return permission.Decision{}, nil, newExecutionFailed("permission engine not configured", nil)
 	}
 	req.SessionID = ec.SessionID
 	req.Pwd = ec.Pwd
-	d, err := ec.Permission.Ask(ctx, req)
-	if err != nil {
+	err := permission.Gate(ctx, ec.Permission, req)
+	if err == nil {
+		return permission.Decision{Action: permission.ActionAllow}, nil, nil
+	}
+	var denied *permission.DeniedError
+	if !errors.As(err, &denied) {
 		return permission.Decision{}, nil, newPermissionFailure(
 			fmt.Sprintf("permission ask failed: %v", err), err)
 	}
-	if d.Action == permission.ActionDeny {
-		reason := d.Reason
-		if reason == "" {
-			reason = "denied by policy"
-		}
-		return d, &Result{
-			IsError: true,
-			Content: fmt.Sprintf("permission denied: %s", reason),
-			Metadata: map[string]any{
-				"permission":        "denied",
-				"permission_reason": reason,
-				"category":          string(req.Category),
-				"target":            req.Target,
-			},
-		}, nil
+	reason := denied.Reason
+	if reason == "" {
+		reason = "denied by policy"
 	}
-	return d, nil, nil
+	d := permission.Decision{Action: permission.ActionDeny, Reason: denied.Reason}
+	return d, &Result{
+		IsError: true,
+		Content: fmt.Sprintf("permission denied: %s", reason),
+		Metadata: map[string]any{
+			"permission":        "denied",
+			"permission_reason": reason,
+			"category":          string(req.Category),
+			"target":            req.Target,
+		},
+	}, nil
 }
 
 // decodeArgs strictly decodes raw into out; returns a *ToolError on failure.
