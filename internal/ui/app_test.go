@@ -871,6 +871,9 @@ func TestMultiLinePasteCollapsesToMarkerAndSendsContent(t *testing.T) {
 		Foreground(lipgloss.Color("0")).
 		Background(lipgloss.Color("5")).
 		Render("[Pasted 3 lines]")
+	// Drop the trailing SGR reset: the cell after the chip carries the theme
+	// background, so the canvas emits a style change there, not a bare reset.
+	chip = strings.TrimSuffix(strings.TrimSuffix(chip, "\x1b[0m"), "\x1b[m")
 	if !strings.Contains(view, chip) {
 		t.Fatalf("paste marker missing from view:\n%s", view)
 	}
