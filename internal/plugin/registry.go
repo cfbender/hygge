@@ -543,7 +543,7 @@ func (h *registryHost) Exec(ctx context.Context, cmdStr string, args []string, o
 				return ExecResult{}, fmt.Errorf("plugin: exec: permission ask: %w", err)
 			}
 			return ExecResult{
-				Stderr: "permission denied: " + denied.Reason,
+				Stderr: denied.Error(),
 				Code:   1,
 			}, nil
 		}
@@ -633,7 +633,7 @@ func (a *pluginToolAdapter) Execute(ctx context.Context, args json.RawMessage, e
 		if err := permission.Gate(ctx, ec.Permission, req); err != nil {
 			var denied *permission.DeniedError
 			if !errors.As(err, &denied) {
-				return tool.Result{}, &tool.ToolError{Code: tool.CodePermissionDenied, Message: err.Error()}
+				return tool.Result{}, &tool.ToolError{Code: tool.CodePermissionDenied, Message: err.Error(), Wrapped: err}
 			}
 			return tool.Result{IsError: true, Content: "permission denied: " + denied.Reason}, nil
 		}
