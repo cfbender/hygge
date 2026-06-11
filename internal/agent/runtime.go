@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 
 	"charm.land/fantasy"
 
@@ -18,15 +19,14 @@ import (
 // compatibility surface for UI/CLI callers, while Runtime decides which
 // turn runner to use and how Fantasy tools are adapted from tool.Registry.
 type Runtime struct {
-	model              fantasy.LanguageModel
-	titleModel         fantasy.LanguageModel
-	titleModelExplicit bool
-	tools              *tool.Registry
-	// providerName is the hygge provider id (lower-case, e.g. "openrouter").
-	// Used by usageFromFantasy to apply provider-specific token-accounting
-	// quirks (see usageFromFantasy). May be empty in tests that exercise
-	// Runtime without a real provider; the conversion is a no-op then.
-	providerName string
+	// handle is the active-model bundle, shared with the owning Agent so a
+	// model swap is visible to both through one atomic store. Standalone
+	// runtimes (tests) own their handle pointer.
+	handle *atomic.Pointer[modelHandle]
+	// titleModel is the explicitly configured small/title model, or nil when
+	// titles should follow the active model.
+	titleModel fantasy.LanguageModel
+	tools      *tool.Registry
 }
 
 // RuntimeOptions configures Runtime.
@@ -38,60 +38,94 @@ type RuntimeOptions struct {
 	// when set, drives provider-specific token-accounting normalization in
 	// Runtime's no-tool summary/title calls. Lower-case is expected to match
 	// the same convention used by the parent Agent's Provider.Name().
+	// Ignored when Handle is supplied.
 	ProviderName string
+	// Handle, when non-nil, shares the owning Agent's active-model bundle so
+	// Agent.SetModel swaps are immediately visible to the runtime. When nil
+	// (standalone runtimes in tests), a private handle is built from Model
+	// and ProviderName.
+	Handle *atomic.Pointer[modelHandle]
 }
 
 // NewRuntime constructs the turn runtime. Tools may be nil only in tests that
 // do not execute turns; Agent.New validates the production path first.
 func NewRuntime(opts RuntimeOptions) *Runtime {
-	titleModel := opts.TitleModel
+	handle := opts.Handle
+	if handle == nil {
+		handle = &atomic.Pointer[modelHandle]{}
+		handle.Store(&modelHandle{
+			providerID:   strings.ToLower(strings.TrimSpace(opts.ProviderName)),
+			fantasyModel: opts.Model,
+		})
+	}
 	return &Runtime{
-		model:              opts.Model,
-		titleModel:         titleModel,
-		titleModelExplicit: titleModel != nil,
-		tools:              opts.Tools,
-		providerName:       opts.ProviderName,
+		handle:     handle,
+		titleModel: opts.TitleModel,
+		tools:      opts.Tools,
 	}
 }
 
 // SetModel replaces the Fantasy language model used to create future agents.
-// Existing fantasy.Agent instances are per-turn and are not reused, so assigning
-// here is enough to invalidate the old model for subsequent sends and internal
-// compaction/title calls.
+// Existing fantasy.Agent instances are per-turn and are not reused, so the
+// handle swap is enough to invalidate the old model for subsequent sends and
+// internal compaction/title calls. The rest of the handle (provider identity)
+// is preserved; Agent.SetModel stores a complete new handle instead.
 func (r *Runtime) SetModel(model fantasy.LanguageModel) {
-	if r == nil {
+	if r == nil || r.handle == nil {
 		return
 	}
-	r.model = model
-	if !r.titleModelExplicit {
-		r.titleModel = model
-	}
+	next := *r.handle.Load()
+	next.fantasyModel = model
+	r.handle.Store(&next)
 }
 
-// SetProviderName updates the hygge provider id used by usageFromFantasy to
-// pick the right token-accounting normalization. Call in lockstep with
-// SetModel when the runtime model is hot-swapped to a different provider.
-func (r *Runtime) SetProviderName(name string) {
-	if r == nil {
-		return
+// model returns the active Fantasy model from the shared handle.
+func (r *Runtime) model() fantasy.LanguageModel {
+	if r == nil || r.handle == nil {
+		return nil
 	}
-	r.providerName = name
+	h := r.handle.Load()
+	if h == nil {
+		return nil
+	}
+	return h.fantasyModel
+}
+
+// providerID returns the lower-case hygge provider id used by
+// usageFromFantasy to pick the right token-accounting normalization. May be
+// empty in tests that exercise Runtime without a real provider; the
+// conversion is a no-op then.
+func (r *Runtime) providerID() string {
+	if r == nil || r.handle == nil {
+		return ""
+	}
+	h := r.handle.Load()
+	if h == nil {
+		return ""
+	}
+	return h.providerID
 }
 
 func (r *Runtime) hasFantasyModel() bool {
-	return r != nil && r.model != nil
+	return r.model() != nil
 }
 
 func (r *Runtime) newInternalAgent() fantasy.Agent {
-	return fantasy.NewAgent(r.model, fantasy.WithTools())
+	return fantasy.NewAgent(r.model(), fantasy.WithTools())
+}
+
+// activeTitleModel resolves the model used for title generation: the
+// explicitly configured title model when present, otherwise the active model
+// (so titles follow model hot-swaps when small_model is absent).
+func (r *Runtime) activeTitleModel() fantasy.LanguageModel {
+	if r.titleModel != nil {
+		return r.titleModel
+	}
+	return r.model()
 }
 
 func (r *Runtime) newTitleAgent() fantasy.Agent {
-	model := r.titleModel
-	if model == nil {
-		model = r.model
-	}
-	return fantasy.NewAgent(model, fantasy.WithTools())
+	return fantasy.NewAgent(r.activeTitleModel(), fantasy.WithTools())
 }
 
 // Summarize runs a no-tool Fantasy agent for internal conversation compaction.
@@ -120,7 +154,7 @@ func (r *Runtime) Summarize(ctx context.Context, messages []fantasy.Message, max
 	if summary == "" {
 		summary = res.Response.Content.Text()
 	}
-	return strings.TrimSpace(summary), usageFromFantasy(r.providerName, res.TotalUsage), nil
+	return strings.TrimSpace(summary), usageFromFantasy(r.providerID(), res.TotalUsage), nil
 }
 
 // GenerateTitle is the narrow no-tool seam for model-generated session titles.
@@ -136,12 +170,10 @@ func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens in
 	}
 	_ = maxTokens
 	modelName := ""
-	if r.titleModel != nil {
-		modelName = r.titleModel.Model()
-	} else if r.model != nil {
-		modelName = r.model.Model()
+	if m := r.activeTitleModel(); m != nil {
+		modelName = m.Model()
 	}
-	slog.Debug("runtime: title model call", "model", modelName, "title_model_explicit", r.titleModelExplicit, "prompt_len", len(prompt))
+	slog.Debug("runtime: title model call", "model", modelName, "title_model_explicit", r.titleModel != nil, "prompt_len", len(prompt))
 	var text strings.Builder
 	res, err := r.newTitleAgent().Stream(ctx, fantasy.AgentStreamCall{
 		Messages: []fantasy.Message{
@@ -166,7 +198,7 @@ func (r *Runtime) GenerateTitle(ctx context.Context, prompt string, maxTokens in
 	}
 	out = strings.TrimSpace(out)
 	slog.Debug("runtime: title model returned", "model", modelName, "text", out)
-	return out, usageFromFantasy(r.providerName, res.TotalUsage), nil
+	return out, usageFromFantasy(r.providerID(), res.TotalUsage), nil
 }
 
 func (r *Runtime) buildFantasyTools(opts fantasyToolOptions) []fantasy.AgentTool {

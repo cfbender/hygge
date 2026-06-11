@@ -110,11 +110,15 @@ func (a *Agent) computeCost(ctx context.Context, modelName string, u provider.Us
 		u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
 		return cost.Money{}
 	}
-	pricing, _, err := a.opts.Catalog.LookUp(ctx, a.opts.Provider.Name(), modelName)
+	providerName := ""
+	if h := a.handle.Load(); h != nil && h.provider != nil {
+		providerName = h.provider.Name()
+	}
+	pricing, _, err := a.opts.Catalog.LookUp(ctx, providerName, modelName)
 	if err != nil {
 		if !errors.Is(err, cost.ErrModelNotPriced) {
 			slog.Warn("agent: catalog lookup failed",
-				"provider", a.opts.Provider.Name(),
+				"provider", providerName,
 				"model", modelName,
 				"err", err,
 			)
