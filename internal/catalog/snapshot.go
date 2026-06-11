@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/embedded"
@@ -53,6 +54,32 @@ type Snapshot struct {
 	ETag          string                      `json:"etag,omitempty"`
 	Providers     map[string]map[string]Entry `json:"providers"`
 	ProvidersMeta map[string]ProviderMeta     `json:"providers_meta,omitempty"`
+}
+
+// normalizeSnapshotKeys rebuilds the snapshot's provider and model maps
+// with lowercase keys.  Lookup paths index the maps directly with
+// lowercased inputs, so every snapshot ingestion point (network fetch,
+// disk cache, embedded data) must yield lowercase keys.
+func normalizeSnapshotKeys(snap *Snapshot) {
+	if snap == nil {
+		return
+	}
+	providers := make(map[string]map[string]Entry, len(snap.Providers))
+	for pid, mods := range snap.Providers {
+		lower := make(map[string]Entry, len(mods))
+		for mid, e := range mods {
+			lower[strings.ToLower(mid)] = e
+		}
+		providers[strings.ToLower(pid)] = lower
+	}
+	snap.Providers = providers
+	if snap.ProvidersMeta != nil {
+		meta := make(map[string]ProviderMeta, len(snap.ProvidersMeta))
+		for pid, pm := range snap.ProvidersMeta {
+			meta[strings.ToLower(pid)] = pm
+		}
+		snap.ProvidersMeta = meta
+	}
 }
 
 // cloneProviderMeta returns a shallow copy of pm with DefaultHeaders
@@ -142,7 +169,9 @@ func readSnapshotFile(path string) (*Snapshot, error) {
 	if f.Providers == nil {
 		f.Providers = map[string]map[string]Entry{}
 	}
-	return &Snapshot{FetchedAt: f.FetchedAt, ETag: f.ETag, Providers: f.Providers, ProvidersMeta: f.ProvidersMeta}, nil
+	snap := &Snapshot{FetchedAt: f.FetchedAt, ETag: f.ETag, Providers: f.Providers, ProvidersMeta: f.ProvidersMeta}
+	normalizeSnapshotKeys(snap)
+	return snap, nil
 }
 
 // writeSnapshotFile atomically writes the snapshot to disk using a
