@@ -8,523 +8,448 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
-## [0.16.0] — 2026-06-08
+## [0.17.0] — 2026-06-11
 
 ### Bug Fixes
 
-- Use newline delimited json for stdio mcp (#66) ([`ca9074b0`](../../commit/ca9074b0b5f2d74ececb2c89676a6f1b61b4bafd))
-## [0.15.4] — 2026-06-02
-
-### Chores
-
-- Update dependencies (#65) ([`68fc2b78`](../../commit/68fc2b7879cfad64715d027a2086db9061affc38))
-## [0.15.3] — 2026-05-28
-
-### Chores
-
-- Update deps ([`e8e58dcd`](../../commit/e8e58dcd8a4f043c4a2d4c09fcb91ed347435e75))
-## [0.15.2] — 2026-05-28
-
-### Features
-
-- Support custom commands (#64) ([`27222952`](../../commit/272229520de7a7e1b4421ee22a8caf9c7842242a))
-## [0.15.1] — 2026-05-28
-
-### Features
-
-- Compact mode (#62) ([`b0557f5b`](../../commit/b0557f5b23cf6a61cbc10e2399e3fef22c9b50aa))
-## [0.15.0] — 2026-05-28
-
-### Bug Fixes
-
-- Route prompt generation through fantasy (#58) ([`581417fa`](../../commit/581417fab3a4c0730a7d959bc98c769d877c72e6))
-- Use terminal colors for models command (#59) ([`3e8d86be`](../../commit/3e8d86be85ab27824e7004faa9326b612287c76a))
-- Bound user message click zone (#60) ([`09584605`](../../commit/09584605874807ada8637ec917cd13ab58efdf75))
-
-### Features
-
-- Add favorite models (#55) ([`49195ceb`](../../commit/49195ceb4f419eb39bf48c4a7ac6e0cc4f8d0e7e))
-- Better mode explanation (#57) ([`f1b79f24`](../../commit/f1b79f2464c433abfa4e249809e12c084841c369))
-## [0.14.1] — 2026-05-27
-
-### Bug Fixes
-
-- Parse timestamps for expires at (#47) ([`ccacfc5b`](../../commit/ccacfc5ba13649fcd4781c9d70a5c6835a4dc599))
-- Correct OpenRouter cost/context and add subagent split form (#49) ([`f2991ac0`](../../commit/f2991ac0d095968955c03a9cfff9e0ca705a4569))
-
-### Style
-
-- Smaller sidebar by two columns (#48) ([`06a8b239`](../../commit/06a8b239460e9352608de9a761e175d4a9f2e002))
-## [0.14.0] — 2026-05-27
-
-### Features
-
-- Support OAuth for MCP servers (#45) ([`3d3a5529`](../../commit/3d3a552970160cd857d3f23cb9eedfc2a5abd1dc))
-- Group shell permission approvals (#46) ([`d6d5617c`](../../commit/d6d5617c3ac13134ac29e2ef62a5acc6014dece3))
-## [0.13.4] — 2026-05-26
-
-### Bug Fixes
-
-- Default profile from hygge.local.toml (#42) ([`edd19e6a`](../../commit/edd19e6a240973c14fe3783b675df03d46420ed0))
-
-### Features
-
-- Add nix flake (#41) ([`ca0d69d4`](../../commit/ca0d69d4fc34df38d646499beeff1806f6269bcb))
-## [0.13.3] — 2026-05-25
-
-### Bug Fixes
-
-- Truncate permission modal tool details (#40) ([`31ed8b0b`](../../commit/31ed8b0b7ea4457a574d1ba7885ec89acd76ae55))
-## [0.13.2] — 2026-05-25
-
-### Features
-
-- Avoid auth method pagination (#39) ([`4cf52a70`](../../commit/4cf52a70694f13351bdc212fdfa62f9adac0e365))
-## [0.13.1] — 2026-05-25
-
-### Chores
-
-- Update go dependencies (#38) ([`8f8c45e2`](../../commit/8f8c45e2a447b2a335526c37f31e5b9b43e15f91))
-
-### Features
-
-- Add user message action modal (#37) ([`4601d78e`](../../commit/4601d78e883199faead0869beebb038cd5c8fcae))
-## [0.13.0] — 2026-05-25
-
-### Features
-
-- Annotate lazy project context loading (#34) ([`99cf40ff`](../../commit/99cf40ffc9495cb5d2bf051dbe577d1eadea968a))
-- Show session resume help on exit (#35) ([`46980d92`](../../commit/46980d92a63b8b58e08d51036752e968f4c36bc7))
-- Support hygge.toml config files (#36) ([`9d2b52bf`](../../commit/9d2b52bfa4022c0dc6afc0014a664a4192f746ae))
-## [0.12.4] — 2026-05-25
-
-### Chores
-
-- Update screenshot ([`b3996f1f`](../../commit/b3996f1f2b0f97ba1c83248bbc22fc608010a9bb))
-- Add release script ([`46618e29`](../../commit/46618e29c2bb7a202f17c9082d80bd806b9607d2))
-- Fix release script ([`3304cad8`](../../commit/3304cad89a49cea8347a3574b52d8e780b02feb8))
-- Drop bump and changelog tasks ([`9aa70f9b`](../../commit/9aa70f9b44e77fb2f21b2a955a736f10eb443d88))
-- Use usage params for release script ([`89c3698e`](../../commit/89c3698ea5b293e4650c7972aaeff9a8b3c4d91c))
-- Allow CHANGELOG changes to bump script ([`42f1fc97`](../../commit/42f1fc978f333463141dd121853d5c60e12a79c4))
-
-### Refactoring
-
-- Improve config explain output (#33) ([`90dfcdcb`](../../commit/90dfcdcb60e65002408e1c2b1e0264d74342fca8))
-## [0.12.3] — 2026-05-24
-
-### Bug Fixes
-
-- Keep slash model changes session-only (#31) ([`f8b85b9e`](../../commit/f8b85b9e67960003fa10b595bceee950a8d65c76))
-
-### Chores
-
-- Rectify version ([`60104be5`](../../commit/60104be598ef05efd101593f66d30869dbccf167))
-
-### Features
-
-- Clickable URLs (#28) ([`5def1d27`](../../commit/5def1d2746e93f6794926300a2901cded6fb0c8c))
-- Profile directories (#29) ([`128cb09d`](../../commit/128cb09d98a25d383183dd7d1945038ef6296902))
-- Add hygge logs command (#30) ([`0080a586`](../../commit/0080a586701dcbedc7898059b1f88adaafbc580d))
-
-### Refactoring
-
-- Drop top level model key (#27) ([`43b1f847`](../../commit/43b1f8479b8db1a40d2494f7913e5de5d89ff976))
-## [0.12.0] — 2026-05-24
-
-### Bug Fixes
-
-- **mcp:** Wire stdio stderr directly to ring buffer (#8) ([`1bc4f1c3`](../../commit/1bc4f1c38a25607b134c6b223ae10026dd3941cf))
-- Dedupe replayed appended messages ([`d292d84c`](../../commit/d292d84cbe1123edb829af81425605d0599b846a))
-- Keep parent transcript updating while viewing a subagent (#22) ([`dd06166f`](../../commit/dd06166fbe4f227b3a3c9c13c937d178cef8c8d9))
-- Defer queued sends until assistant finalizes (#23) ([`d1cfdfda`](../../commit/d1cfdfda0c30ccfa471d9a6efe39d2514a4a7414))
-- Refresh git branch display on send (#25) ([`0a179c64`](../../commit/0a179c64bdaab60acbdb4abc68760bcda8fecf91))
-
-### Chores
-
-- Todos ([`405a4746`](../../commit/405a4746ba0f6f34190e5d6db7fba18c2fe404b9))
-- Increase mcp bootstrap timeout ([`74eef552`](../../commit/74eef552270cc93fc8526ac47f18d4bbe554529d))
-- Update dependencies (#12) ([`8a25f555`](../../commit/8a25f55502bc9a2c8020bd7dc03faf0d4c4b7e2e))
-
-### Features
-
-- Persist always permissions per project (#17) ([`c40ac183`](../../commit/c40ac183416ec88d9b1163866c6297909d5499b1))
-- Add built-in Hygge skill (#18) ([`5b44de97`](../../commit/5b44de9737a1b6ada9e4e58bbc7ba30ef0ef4bad))
-- Hygge mcp add (#19) ([`24e1a539`](../../commit/24e1a539a14c02ea5bf67f5a3d2fdfe103214af7))
-- Compact and context to envelope (#21) ([`04973664`](../../commit/04973664ab6c02e6d52a5ca4824dc18eaf38ef4c))
-
-### Miscellaneous
-
-- Fix dry-run Gemini onboarding (#9) ([`c04c9ec7`](../../commit/c04c9ec7dc2c824b67b85864ae371587ed87a91c))
-- Fix MCP SSE and tool schema handling (#11) ([`afc725c9`](../../commit/afc725c940a0ff6bf09a71f7a3e3b61b272b7e2e))
-- Remove legacy Anthropic and OpenAI provider shims (#10) ([`b3310fa9`](../../commit/b3310fa9aff747c6c271cb3ba07913c2fd420e32))
-- HYGGE-8 Use Ctrl+G to leave subagent view (#15) ([`b0039c38`](../../commit/b0039c38007adcb9246706b9315bb7d764e599af))
-- HYGGE-9 Remove permission edit option (#16) ([`2693c4c5`](../../commit/2693c4c54c4452083b0cf1b71527f1af4fe855e2))
-
-### Refactoring
-
-- Remove dead legacy code (#20) ([`c595729c`](../../commit/c595729c0b25e2df62c56afb349b2cce323db12b))
-
-### Style
-
-- Polish CLI inspection output (#24) ([`d2ce73f1`](../../commit/d2ce73f1c7e410123958bb66befe9b4e34529cd3))
-
-### Tests
-
-- Cover title model selection (#14) ([`c9e15089`](../../commit/c9e15089cc60fb70d51904ec546528d07cfc4ccb))
-## [0.11.0] — 2026-05-22
-
-### Chores
-
-- Set fps explicitly ([`468fa9e8`](../../commit/468fa9e85eb32799d33b81f5f3ff8e6c443145cb))
-- Update gitignore ([`1dce3da9`](../../commit/1dce3da9f48c6d5ac91a27ca72303248d0596c56))
-- Ignore .worktrees/ ([`4a746a1a`](../../commit/4a746a1a5beace24cf7323f3e783d697506105d2))
-
-### Features
-
-- Fog splash screen ([`07309f35`](../../commit/07309f35433c78eb96a800c27edb882e7f27b555))
-- Test hygge skill ([`c9ce0190`](../../commit/c9ce0190f510daf2d6afaff5c7346885a70e9ea0))
-- **ui:** Expand assistant thinking on click (#2) ([`f89670b4`](../../commit/f89670b435c5dc4a8e01c1d4b67e09fea3cb6189))
-- **cli:** Add dry-run config preview (#3) ([`ad365d3e`](../../commit/ad365d3e8e1707ac66184f45c5a2f820b4e85635))
-- **ui:** Split compact token usage (#5) ([`dbce188f`](../../commit/dbce188fef4499c63fff36349e11d1b6a8fd2709))
-- Change spinner to fog line (#7) ([`a04e110f`](../../commit/a04e110f1cec5fcbae2f0beaf6141b878b46af99))
-
-### Miscellaneous
-
-- Add built-in iTerm themes (#6) ([`cbb8e787`](../../commit/cbb8e787b05c66910ae92be3304eabb22eecd12d))
-
-### Refactoring
-
-- Remove legacy theme package, consolidate on styles (#1) ([`4163b9e0`](../../commit/4163b9e02c2de148413b87690b4681718cb756cc))
-
-### Style
-
-- **ui:** Polish permission modal (#4) ([`79d8cbd1`](../../commit/79d8cbd1b5bf4233e3410fb73d4fb3b178c44bbe))
-## [0.10.5] — 2026-05-21
-
-### Features
-
-- Unbuttoned mouse movement cancels scroll ([`3f7dac4c`](../../commit/3f7dac4c86a5cce56ea582c88525d91b5f1bc61d))
-## [0.10.4] — 2026-05-20
-
-### Features
-
-- Scrollback limit ([`31fef863`](../../commit/31fef86356720327ba64f90b71e525b624df248d))
-## [0.10.3] — 2026-05-20
-
-### Bug Fixes
-
-- **ui:** Bridge subagent handoff with a 'continuing…' placeholder ([`62eb1ed2`](../../commit/62eb1ed2bd2cb0f33547865501273d2d1af3a77c))
-- Agent append garbled ([`c458083d`](../../commit/c458083d63f5d6906d64e2fa7efb06c37e5189fd))
-
-### Features
-
-- Continuation placeholder ([`b5b10f86`](../../commit/b5b10f8690626f4137abab4b7405768f70a48616))
-## [0.10.2] — 2026-05-20
-
-### Bug Fixes
-
-- Diff truncation ([`29e981a2`](../../commit/29e981a21b63e371d4320e0db27f700d0919f14b))
-## [0.10.1] — 2026-05-20
-
-### Bug Fixes
-
-- Hygge init colors and flow ([`f1e2d652`](../../commit/f1e2d652f310f73cd07259532636e105c6c0b327))
-## [0.10.0] — 2026-05-20
-
-### Bug Fixes
-
-- **cli:** Accept modes-only model config ([`b5221f46`](../../commit/b5221f46d5dc95e8ab29db724f56dfc570e6ace7))
-- **ui:** Buffer streaming response reveal ([`db16d007`](../../commit/db16d00788648e2c142ff3b835c44bbc76b4a77c))
-- Subagents and model config ([`f2b6e7c6`](../../commit/f2b6e7c6982a7590322f8c78200ad5a6c17b0b60))
-- **ui:** Show subagent model and cost metadata ([`6f8c4692`](../../commit/6f8c46928a5ce16045380a61e34888c0b1ccc32d))
-- Subagent keeps main thread running ([`3310fea6`](../../commit/3310fea6725fcf934006567f1f12f6eb96acd7f6))
-- Prevent animation ID collisions ([`640246b5`](../../commit/640246b558e77ccf0c9d1a4a224ab4d325a33f34))
-- Subagent spinner ([`46b61378`](../../commit/46b6137829e5e21c1cee8a469fb60788c1c0248d))
-- User message move on send ([`c7df86a8`](../../commit/c7df86a864203dce74218c1573d29b30374a59e0))
-- Preserve side-by-side diff pairs when truncated ([`6b95147b`](../../commit/6b95147b170f147af221386a671afb6217fd3490))
-- Cancel inflight send on session switch ([`f2a72cfc`](../../commit/f2a72cfc89b27a050318df52a26167a15cb0afd7))
-- Prevent diff view overflow ([`fb61b0b4`](../../commit/fb61b0b4361bfc659907c82f818dfbf8275756b9))
-- **ui:** Decode escaped tool targets ([`7f485ec1`](../../commit/7f485ec1bc1d8f411dff9da7b007130b2a8b5e22))
-- **ui:** Show expand affordance for git diff output ([`735d5487`](../../commit/735d548711a54e99216a9205c444a8643856ada2))
-- Git diff wrapping ([`ee438e98`](../../commit/ee438e98f0ad2285bdcbbd0b21dd90f728005d96))
-
-### Features
-
-- Hygge init ([`e0ea6e67`](../../commit/e0ea6e6743180d2cce1825ee42d15af5fb944115))
-- **subagent:** Load types from config profiles ([`6db15a89`](../../commit/6db15a896409e69a04f6eebdc2385e76833f8240))
-- **ui:** Fade in streaming response text ([`d3dcc4c4`](../../commit/d3dcc4c42ed78f02d5f7893a336dedfb768dba7e))
-- Stream bash tool progress in UI ([`5a9bf58f`](../../commit/5a9bf58f12872375927e84ccdf74536a308265d8))
-- Theme markdown rendering ([`6c5028a9`](../../commit/6c5028a951cf613ea38369674fdfb7525d3c7240))
-
-### Refactoring
-
-- **config:** Prefer modes for model selection ([`a64e87a4`](../../commit/a64e87a4da773e2a33b58f899bb8000a2fe2fb4c))
-
-### Style
-
-- Tone down diff additions ([`36031000`](../../commit/36031000602f482d743b40045948359517b5086b))
-- Diff view ([`89c2422b`](../../commit/89c2422b375e7dee0e97eed78e38dcd91e446a78))
-
-### Tests
-
-- **mcp:** Bound fake server waits ([`1bf766bb`](../../commit/1bf766bb6569af41d20ea477bc30436df197ab25))
-- **tool:** Guard subagent final response payload ([`b1c5e083`](../../commit/b1c5e083500b8e47c63439cc2b2800ca0638e5fd))
-## [0.9.5] — 2026-05-20
-
-### Bug Fixes
-
-- **ui:** Show project-relative tool paths ([`7b034747`](../../commit/7b03474735503497fd60039fa6210761857ef24d))
-- **permission:** Deny .aiexclude file access ([`f3e87989`](../../commit/f3e87989d22ade66229f7f36a186483753a06e29))
-
-### Documentation
-
-- Aiexclude ([`7503f0c5`](../../commit/7503f0c50dbe4f84dc5d7bf466f7af815c7e8a3d))
-## [0.9.4] — 2026-05-20
-
-### Features
-
-- Lua plugin dir expose ([`8e86abc5`](../../commit/8e86abc5160608f01c91c7c8011e6d4897f6f7a6))
-## [0.9.3] — 2026-05-20
-
-### Chores
-
-- Update readme ([`003677ac`](../../commit/003677ac84292826b11cf88f8096c885d551544a))
-- Bump catwalk ([`1d9aac82`](../../commit/1d9aac82e8395f17897405e9b586d4434b67179c))
-## [0.9.2] — 2026-05-19
-
-### Bug Fixes
-
-- Skip onboarding auth for configured providers ([`2c71b9da`](../../commit/2c71b9da9298c89f9af89ad07813309b3a529d07))
-- Allow pasting onboarding API keys ([`7a0c948d`](../../commit/7a0c948d998cde9134ea73e695f18bacf78d9410))
-- Use ansi colors in mac terminal ([`81480378`](../../commit/8148037899cb4515f3e5bb1a3e0ec1b4882d233e))
-
-### Chores
-
-- Update readme for mise binary install ([`8bc86c8a`](../../commit/8bc86c8aa63ab6614ac9a6af54272882d19d1c8c))
-## [0.9.1] — 2026-05-18
-
-### Bug Fixes
-
-- Providers list ([`a4cdfeae`](../../commit/a4cdfeae0418cd8ab1161b685278f395dd1cf9c6))
-
-### Chores
-
-- **deps:** Bump catwalk to v0.41.0 ([`b46f865f`](../../commit/b46f865f94a331ec5580f17829bbeef7e9fb38da))
-- **deps:** Bump fantasy to v0.25.0 ([`e133b5af`](../../commit/e133b5afde983fe214ace91818dee0acec2d5478))
-- **deps:** Bump ultraviolet ([`ab9f081b`](../../commit/ab9f081bcb8da3785800f9dc20411634b88c461f))
-
-### Features
-
-- **cli:** Polish help models and provider auth ([`797cba5c`](../../commit/797cba5c6574d45c2f58b3e87941b809d9116192))
-## [0.9.0] — 2026-05-18
-
-### Bug Fixes
-
-- **config:** Validate subagent permission mode ([`f46a4650`](../../commit/f46a46501bd3b723e05b592b50cf143a9f0411bd))
-- **permission:** Apply always approvals immediately ([`8c77ab28`](../../commit/8c77ab2832532b9279ab897ef169a31f23ea6aec))
-- Attachments ([`1527e21b`](../../commit/1527e21bc923582b9d0d974f6f1e53768ea9f15f))
-
-### Chores
-
-- Todos ([`a5bd175a`](../../commit/a5bd175a1847f21cca711b69d5f854c03a084001))
-
-### Features
-
-- **permission:** Show permission request rationale ([`aaaa2f7e`](../../commit/aaaa2f7efc1e71c753ad81bb432eb9ffd5592da4))
-
-### Refactoring
-
-- Split ui app responsibilities ([`b0a2d97e`](../../commit/b0a2d97e5f17808fd0cd678271dc2fec507665fe))
-
-### Tests
-
-- **permission:** Cover engine edge cases ([`ce8800b5`](../../commit/ce8800b5d63deef1f707a2f21b9e305240babf4d))
-## [0.8.0] — 2026-05-18
-
-### Features
-
-- Webfetch ([`d08425f1`](../../commit/d08425f1892c31c1c9e5976ce8411630d1e5cf5d))
-## [0.7.0] — 2026-05-18
-
-### Bug Fixes
-
-- Stabilize sqlite store connections ([`133a3049`](../../commit/133a3049428bdf62132c617aef88ad82eb8730f3))
-- Show subagent initial prompt ([`5daa9f20`](../../commit/5daa9f203148b06cb09232f564a0842755fd43b5))
-- Scroll completion palettes ([`7a8dbe86`](../../commit/7a8dbe867c1b6fd18af63062bf7ac7d600a2a552))
-- Keep assistant thinking out of prompt history ([`961e4483`](../../commit/961e4483ebc608e88a3c9162ffcd403f61ba41ce))
-- Apply go fix to palette scrolling ([`afafaf1f`](../../commit/afafaf1f35e3ed8a393ee90e62c184a3e1003ad4))
-- Scroll completion palettes with mouse wheel ([`4abd4c6c`](../../commit/4abd4c6ce8556c80fcdb74e07f3a6f7f618f6dd2))
-
-### Chores
-
-- Update TODOS ([`3c8eb5fd`](../../commit/3c8eb5fddf8c8f265ebc5b893e69a1b940488dd6))
-- Add todo ([`2f240b87`](../../commit/2f240b87cf514ef09e8a15c541dbefd8e74b5aff))
-
-### Documentation
-
-- Mark completed todos ([`6fae47af`](../../commit/6fae47afdb2dcdd04f10659c40540a57b8807952))
-
-### Features
-
-- Steer active turns by default ([`216f8cf2`](../../commit/216f8cf289a08d5f717071ffb5ca973da99c9ccb))
-- Onboarding tui ([`5ef9b304`](../../commit/5ef9b30423977e2aa016b5a45287c7bb49424cc1))
-- Queue busy sends and add steer command ([`49805817`](../../commit/498058172a1b7b07b5373c997904f6b7ae61aaa4))
-- /steer ([`e3a9adb4`](../../commit/e3a9adb40d3baa058b75986f01d0a46fc30c95db))
-
-### Refactoring
-
-- Prepare fantasy steps explicitly ([`bb08f752`](../../commit/bb08f752073e39e47bf75633ba8f85a6c93b6689))
-## [0.6.0] — 2026-05-18
-
-### Bug Fixes
-
-- **ui:** Remove todo notice pill ([`c4387764`](../../commit/c43877645f1b728d56567b7db9157f4cec399656))
-- **ui:** Clear stale render state on resize ([`8d8da43e`](../../commit/8d8da43ec107b8c1f33eff67916f074ad73883de))
-- **ui:** Flex footer metadata within width ([`e85fdfa6`](../../commit/e85fdfa69edc3d8bc1baa6d20805dba5cbb07977))
-- Models show across profiles ([`ca930abb`](../../commit/ca930abb93478122f1a8c592759779c01e099a4f))
-
-### Chores
-
-- Clear completed todos ([`7e9f7858`](../../commit/7e9f7858eb95da687693fa323d25d49b7c3044b9))
-
-### Features
-
-- **ui:** Expand diff previews on click ([`649763f4`](../../commit/649763f47f5a9fe1cdef4f1f9756dfe0d43cab38))
-- **ui:** Attach pasted image paths ([`9579ba07`](../../commit/9579ba0750c201a5e7e427936bedc83db395513e))
-- Image pasting ([`98ebff91`](../../commit/98ebff9127b045b812077246a34c11445dad7c3e))
-- Hygge onboard ([`91deef01`](../../commit/91deef01d9c72facdd37e4b7f5fad9be982aab95))
-## [0.5.1] — 2026-05-18
-
-### Bug Fixes
-
-- Only require provider for tui ([`78668ac1`](../../commit/78668ac13251fcba67800e1c53aaa949a95a706b))
-- Simplify side-by-side diff separator ([`79bf873f`](../../commit/79bf873fc6f582e4c958c1ca52aab033e86d2a4d))
-- Add top spacing to message viewport ([`68516abf`](../../commit/68516abf25f353fee5107a43d83e96abeb56ee65))
-- Wrap sidebar todo titles ([`6f4cc077`](../../commit/6f4cc077649df29e5a86f6866fece34be191bbc8))
-
-### Chores
-
-- Update readme ([`7dc906ca`](../../commit/7dc906ca10355bb07022f51f0f8787055b710199))
-- Todos and footer style ([`5aafffda`](../../commit/5aafffda7b8dfb3d725cf48694460b053f7ce550))
-- Update todos ([`e0070c67`](../../commit/e0070c678efdd1a7837d1722b74af41e8c291a08))
-
-### Features
-
-- Add side-by-side diff view ([`28e86657`](../../commit/28e86657ed2e1a014c5577d041b1e77dc3e22c44))
-## [0.5.0] — 2026-05-17
-
-### Chores
-
-- Drop legacy loop code ([`c2d6fb73`](../../commit/c2d6fb73c45f13a82ed868aa53d9dd2eeebf0edb))
-
-### Features
-
-- Load plugins from config ([`2ab9bc74`](../../commit/2ab9bc7421a1e899ed36ddfce55f20a266d9c75c))
-- Stub out user request wrapping ([`2c13290d`](../../commit/2c13290df4ed6183bd29a631f9c687dd177ad208))
-- Add session memories ([`45763909`](../../commit/4576390970e4e2b7007c9eb76523c2ecb7f9abde))
-- Add file-backed memories ([`e5a3bab9`](../../commit/e5a3bab99f71388b84721e4b9c238d36253d6156))
-- Warn on unignored project memories ([`1d6c9bc6`](../../commit/1d6c9bc66667ff48ad769253e26f20cef765d930))
-- Add memory tools ([`919adfe9`](../../commit/919adfe989affa130ba23ddd0d3435bf630d3d86))
-- Add memory management UI ([`4206c01f`](../../commit/4206c01f3baa80bd82c936d7eb087beddf0bdea6))
-- Add autonomous memory controls ([`28918f0d`](../../commit/28918f0df5911df41a4a6f44a20e50a8059d684b))
-## [0.4.3] — 2026-05-17
-
-### Bug Fixes
-
-- Fresh install problems ([`495c6bf1`](../../commit/495c6bf1d297402fd63a8191e4bcc4c6347c35f5))
-## [0.4.2] — 2026-05-16
-
-### Chores
-
-- Capture startup logs ([`8a8c6a44`](../../commit/8a8c6a44739a4cf8de99af1c4c85ae5cc5add2b6))
-
-### Features
-
-- Add hidden hook prompt context ([`aae058ac`](../../commit/aae058ac1c016cf2eac735ac043aee7989303759))
-- Lua table helpers ([`fb619fa1`](../../commit/fb619fa15cac844b9172a4d366abedca00cbd3aa))
-## [0.4.1] — 2026-05-16
-
-### Chores
-
-- Add quorum to example plugins ([`d6900386`](../../commit/d69003864b71bb52189170c8e702cd9f36d7c52e))
-
-### Features
-
-- Luals types ([`0761044e`](../../commit/0761044e4c6aaa9b034ca340b12d40ca9dd30b3a))
-## [0.4.0] — 2026-05-16
-
-### Bug Fixes
-
-- Persist plugin source changes ([`930220a9`](../../commit/930220a9d8d79c011aa6924fa7a4512469fbd602))
-- Unregister plugin-owned registrations ([`d185bc41`](../../commit/d185bc41a90e969892ec2cd37995263ded34cb81))
-- Render expanded tool blocks standalone ([`66df9a20`](../../commit/66df9a202b456a554b9bf91c57f90f8ebd89af73))
-- Title generation ([`b48e816c`](../../commit/b48e816c4cd8f212cb48d9c8494c860e60c0e878))
-- Expand subagent bash tool output ([`66301343`](../../commit/66301343b24bd127d465287491754fd21cd92480))
-- Keep foreground subagent events isolated ([`6d02dd58`](../../commit/6d02dd584b7f16b06f64daa96067c54ae27a075f))
+- **config:** Use double-underscore as env-var path separator ([`c3cb03e4`](../../commit/c3cb03e4d614ecd94dbcb4c4a682991c2eb32a6b))
+- **agent:** Plumb session model name to provider and catalog ([`83002042`](../../commit/8300204264073357637f1de44a870c91c49bca63))
+- Real anthropic model IDs + surface send errors + tui log file ([`030b9e96`](../../commit/030b9e96e492ff75b801f7fddb9050c506a3e2e5))
+- **skill:** Support .agents directory layout and YAML block scalars ([`df8f975f`](../../commit/df8f975f52a13c8a5e3195126ee088da427f494a))
+- **ui:** Hydrate message list from store on session resume ([`38d29f1b`](../../commit/38d29f1b637742473d637dbd60722b84155705c1))
+- **ui:** Hydrate tool calls across assistant + tool-result rows ([`a72dc2b5`](../../commit/a72dc2b5072fc3f72692a105e89287d38d7bd8f3))
+- **ui:** Correct bubble alignment, colors, and subagent padding ([`3469f78d`](../../commit/3469f78dbf269f1e9bca20b0230510b6272dcae3))
+- **ui:** Agent default border to ANSI 5 (matches accent) ([`847059b4`](../../commit/847059b48b752515251a5b62d332ea7c8772bddf))
+- **ui:** Bubble width respects sidebar; 80% of left column ([`dd3ca166`](../../commit/dd3ca166fa9ac9eabc5e98b4aaa28f776eca63a7))
+- **ui:** Cache session title; filter OSC leaks; instrument startup + subagent errors ([`b70c1349`](../../commit/b70c13496d4f0bc29401605f794787ed610d7d3d))
+- **ui:** Glamour wraps at bubble inner width; wire HYGGE_LOG_LEVEL ([`63877fde`](../../commit/63877fdecd8c4247d34366a56b78bb08e3842ca0))
+- **store:** Subagents no longer inherit parent transcript via fork-chain CTE ([`6154fa2f`](../../commit/6154fa2f6e8590992150b35408ab2a16f88852fb))
+- **ui:** Decouple send pipeline; filter leaked OSC responses ([`1f933aaa`](../../commit/1f933aaa495473e720c25305a0477de54680a041))
+- **agent:** Queue drain uses agent-owned context + emit TurnStarted ([`e1bb50f0`](../../commit/e1bb50f04d1b7276f597f0cb0b40e3f5d453df7f))
+- **ui:** Track busy via TurnStarted/TurnCompleted; don't drop busy on queued send ([`b828572b`](../../commit/b828572bb9485d079ea5cd24eefbcf3b8f48e75e))
+- **catalog:** Align catwalk cache and provider resolution ([`c1d2c768`](../../commit/c1d2c7683ab11d59d4b4df8b746a408b81088fb7))
+- **ui:** Apply selected model to runtime ([`79c8da0b`](../../commit/79c8da0ba80af4119e2e107097af6ed0189753b8))
+- **agent:** Preserve partial fantasy stream output on error ([`155cc34f`](../../commit/155cc34f5816dfcd42757ee5039a105f9fced1b3))
+- Osc keycodes and startup ([`cc936704`](../../commit/cc93670444e0a12e309b3c0e868101c2881e9d24))
+- Styling improvements ([`c591f63e`](../../commit/c591f63e8dc44722dcbf6c117633d93a2cc681e3))
+- Relative timestamp to 60 minute check ([`ea8158d6`](../../commit/ea8158d61d8673e9f94e1bf8ec2cada52f0f8ca9))
+- **ui:** Sidebar background fills entire right column ([`0d944714`](../../commit/0d944714e43722cd959bac9bf0929e80ae28de64))
+- **ui:** Address feedback — quit modal, tool display, scroll bar, spinner position ([`4be66e92`](../../commit/4be66e9297b6b9704b62a32791847f6f025b1691))
+- **ui:** Tool display, sidebar gap, scroll bar, quit modal ([`ceb4f5dc`](../../commit/ceb4f5dc2efaa8d74af06c92785ec8b976c14f8d))
+- **ui:** Tool output inline, sidebar gap, quit modal buttons, grep args ([`75f95479`](../../commit/75f95479bc6d154ced413a4cd210b7d7a05e66e7))
+- **ui:** Bash output inline with click-to-expand, grep single-line, quit modal colors ([`688adf7c`](../../commit/688adf7ce7a3b84b733151e38dfecce2fcf2f17f))
+- **ui:** Quit modal button background bleed-through ([`4e1f3ed8`](../../commit/4e1f3ed89262e40f484c6ded001caf78360e20f1))
+- **ui:** Quit modal background on centered button row ([`6afb082d`](../../commit/6afb082d4eaf37dc048c1a8ea7ec45bbbb6364d2))
+- **ui:** Quit modal gap between buttons ([`b6126431`](../../commit/b6126431db1b88e253b5883726c5eb471d180be6))
+- Assignment ([`48313806`](../../commit/48313806850a36416415c7c6eef44a861592f373))
+- Lint ([`c2aed404`](../../commit/c2aed4048faa4e79aef882b7ca651d2387acef25))
+- Pallette rendering ([`2d838108`](../../commit/2d838108f4f272bc25deef8a4e7bbdef76063fc7))
+- Load at-file mentions ([`44a30f45`](../../commit/44a30f4524d95358ae13f13ab1d1b3aa07851c59))
+- Allow large at-file mentions ([`a386817a`](../../commit/a386817a2ec8adcb77df938c6acd312168c2ec2c))
+- Make paste marker atomic ([`ca3750a0`](../../commit/ca3750a008abb2a5fb5643b672d085ed47ec0fcc))
+- Color pasted input chip ([`7272be9b`](../../commit/7272be9b375fdb0856b6c318a3da4ba37de709ce))
+- Tests ([`da1e3063`](../../commit/da1e3063b1641f5deb3a64f256c2c85a07c29e6d))
+- Toast model switch confirmation ([`b7f3f259`](../../commit/b7f3f25955b76e6488fd8721555e765895f01493))
+- Clarify tool diff rendering ([`79acd213`](../../commit/79acd213d5326f0673f37b22dacbaf5dacd722ed))
+- Keep queued drafts editable ([`f9bf2d90`](../../commit/f9bf2d90ce4f854e1cc108b2a2e545c6d3d7f870))
+- Rewrap bubbles on resize ([`12ae70a2`](../../commit/12ae70a2a5b54f1799cd92e74c7797ea880052e7))
+- Constrain compaction marker width ([`262edfbc`](../../commit/262edfbc555bd595e23bf502be523d13c0171f52))
+- Color input border by mode ([`15234d03`](../../commit/15234d0369aeedafa99dc1fa149f4875953528ac))
+- Stream compaction summaries ([`cd176309`](../../commit/cd176309077719e89dea522316b514852d792da6))
+- Refine splash prompt layout ([`2b29314f`](../../commit/2b29314f546097d1303be5e378825c0c9773672d))
+- Pin splash footer ([`0054d2d7`](../../commit/0054d2d77edca0cfa0dab86780bb569a4540e283))
+- Keep splash prompt active ([`acda2835`](../../commit/acda2835767cb3d9041926db72d6b11dc8e1288a))
+- Prompt tool narration ([`2c8b8a85`](../../commit/2c8b8a8535902357cfe4e82262615e6c8e7ab320))
+- Render markdown while streaming ([`637bd5c5`](../../commit/637bd5c52127a789013bbba281276739afdb5c1a))
+- Remove chat header ([`bcec55df`](../../commit/bcec55df1f31131619e2c098eb90c7489acc6b91))
+- Support root go install ([`b4418dc3`](../../commit/b4418dc358956ae836895d645fae3c23233d34d7))
+- Stderr hold and bash pipe ([`1f37573e`](../../commit/1f37573ee0dc7bc5354283154b94c068dfee53a9))
+- Skill discovery and usage ([`60f75094`](../../commit/60f750942e5c9acf606d487764b03ffb8ae48179))
+- Usage ([`d577f5d4`](../../commit/d577f5d4114f2cc3e607151a213c9b53be760b1b))
+- System prompt per mode ([`5fce3246`](../../commit/5fce32469f04377b01e252315d9523f865af8ada))
+- Message cutoff ([`1aebf7ec`](../../commit/1aebf7ec4e0607942ce68242c0cfeb6ea697a283))
+- Persist plugin source changes ([`cce1aa9a`](../../commit/cce1aa9a3bbf9c3db8a183b4e254937f823d4005))
+- Unregister plugin-owned registrations ([`f2ea6224`](../../commit/f2ea62242b5fb0fa0e10284f2fe2025ac5d4622f))
+- Render expanded tool blocks standalone ([`b36612a6`](../../commit/b36612a6d1473b6de8e95d473e4ad9e853bb5ac1))
+- Title generation ([`4ee9670b`](../../commit/4ee9670bbb9e459ad74ec3c83076be8ab6c54a11))
+- Expand subagent bash tool output ([`75299134`](../../commit/752991348cbd91bffe3facaae1770465ba4bd627))
+- Keep foreground subagent events isolated ([`3c5394e4`](../../commit/3c5394e4a5b7d1e851fec1588de0c71a89cc40a7))
+- Fresh install problems ([`f44c86aa`](../../commit/f44c86aa25f51e5ca5ab5f6a505c265767dc4d4d))
+- Only require provider for tui ([`3250ca57`](../../commit/3250ca57bd2362cde11bc20e8c8eb7838b952150))
+- Simplify side-by-side diff separator ([`7cede848`](../../commit/7cede8487745177065add8c2c790851bb78fcce7))
+- Add top spacing to message viewport ([`0de4b727`](../../commit/0de4b727c15e1b807c02e96a2ac2ef22b6f6414a))
+- Wrap sidebar todo titles ([`165f3414`](../../commit/165f3414a560c63f9cdaeb983f0f88ae6af0f598))
+- **ui:** Remove todo notice pill ([`d37ca7a3`](../../commit/d37ca7a3fb492aa1d700440c9af67ed1784d005a))
+- **ui:** Clear stale render state on resize ([`2c4dc11e`](../../commit/2c4dc11ee501acc91aca86fd3cc389e299d8633b))
+- **ui:** Flex footer metadata within width ([`557ef703`](../../commit/557ef70386e0fa9c94b7fc58639b4573a7ce3697))
+- Models show across profiles ([`20ce769f`](../../commit/20ce769fd18df5cc307f1b120e222fcbd14ae4f8))
+- Stabilize sqlite store connections ([`2d93800c`](../../commit/2d93800c0ab1db1e90ece70790067706da95afb2))
+- Show subagent initial prompt ([`30659c7a`](../../commit/30659c7a22e89800356826f48f99263e716e5706))
+- Scroll completion palettes ([`d9480b99`](../../commit/d9480b993ca8e7ba3f4d67e3e8c6907a37d0f9e1))
+- Keep assistant thinking out of prompt history ([`0b2c7d9c`](../../commit/0b2c7d9c552256f29b0fd99f2dd7b260249cd8b0))
+- Apply go fix to palette scrolling ([`fd33d815`](../../commit/fd33d8155bcb497d3f14f3542aecf1c088c02817))
+- Scroll completion palettes with mouse wheel ([`3f0dfd66`](../../commit/3f0dfd66a32ef1ab8775b92bd7cdc499d3051fc8))
+- **config:** Validate subagent permission mode ([`e376f619`](../../commit/e376f619554d3958179d6e1a2e7818db4998f403))
+- **permission:** Apply always approvals immediately ([`78f662fa`](../../commit/78f662fa68073a244554c02900b3581f3940d57c))
+- Attachments ([`e9b2205c`](../../commit/e9b2205ca8a29280d69c50d47d2defffbf52410f))
+- Providers list ([`88470ce9`](../../commit/88470ce95ca6e884eb46b98c78145d7393795ebc))
+- Skip onboarding auth for configured providers ([`7369eefe`](../../commit/7369eefee5128d6c38cae203d2d0662d6aeb2682))
+- Allow pasting onboarding API keys ([`288b2d36`](../../commit/288b2d365e307fce79fc922cc1a7764b429919ce))
+- Use ansi colors in mac terminal ([`a5df2155`](../../commit/a5df2155680fe8c9f43ab777673875ffdac2a5f5))
+- **ui:** Show project-relative tool paths ([`84d4457b`](../../commit/84d4457b8fd059cfb95622aa8c04d4bac5396a77))
+- **permission:** Deny .aiexclude file access ([`6b2d6d00`](../../commit/6b2d6d004e965aad3bc2491910b9f3415836f8b1))
+- **cli:** Accept modes-only model config ([`87df9afa`](../../commit/87df9afa8f7f2e6a27e024954aebc9b303b1153e))
+- **ui:** Buffer streaming response reveal ([`fd0ea14f`](../../commit/fd0ea14f2337fc273846704a36e5e69f3b3991e9))
+- Subagents and model config ([`19c8d1fe`](../../commit/19c8d1febb81ada0cc263d6299e5b5d4589dd716))
+- **ui:** Show subagent model and cost metadata ([`647eab15`](../../commit/647eab158c41bb8ac3d2aab29cbbec60315b3f33))
+- Subagent keeps main thread running ([`e33045de`](../../commit/e33045deed7a0acb320151ec162ffabf44517457))
+- Prevent animation ID collisions ([`8b2ab4c6`](../../commit/8b2ab4c6160d9353cafda415f450dbe7a334d034))
+- Subagent spinner ([`0fd12e98`](../../commit/0fd12e982974dbd3e0666bd18873e138e19e39be))
+- User message move on send ([`61fe9258`](../../commit/61fe925804646bf584cb0767df97ca0170d5df74))
+- Preserve side-by-side diff pairs when truncated ([`f3be21c9`](../../commit/f3be21c9fc4e59bb719d0aa3fd4fb4473647e0e8))
+- Cancel inflight send on session switch ([`f93c80db`](../../commit/f93c80db9acdc0ea02a54e1ef0031c6ab2e9501f))
+- Prevent diff view overflow ([`c60594b6`](../../commit/c60594b6943fb0a3a4b707fcfb1952412b27a4db))
+- **ui:** Decode escaped tool targets ([`a697ddb6`](../../commit/a697ddb6768687e57ee2e8b456edd0921fdcfd25))
+- **ui:** Show expand affordance for git diff output ([`756bfc66`](../../commit/756bfc66baf40f81ee22421b95b653a4fb5185d2))
+- Git diff wrapping ([`2cdf2d99`](../../commit/2cdf2d99c4300c58930bf184367b44877498f436))
+- Hygge init colors and flow ([`a30d495f`](../../commit/a30d495f9e07eaeb8114e3818966b57b9c9106b9))
+- Diff truncation ([`dcd040ef`](../../commit/dcd040efe93c7511aa947fae54687d481594124d))
+- **ui:** Bridge subagent handoff with a 'continuing…' placeholder ([`94297da6`](../../commit/94297da6519c9447e8d9a3b977b98fc3efe26937))
+- Agent append garbled ([`8ec807ee`](../../commit/8ec807ee9d30ad6618c96e7e953f30ed55f07d94))
+- **mcp:** Wire stdio stderr directly to ring buffer (#8) ([`5b5509ed`](../../commit/5b5509ed848159683d4059d7b4a4d3b7da148795))
+- Dedupe replayed appended messages ([`325f14b1`](../../commit/325f14b192222a69f41e93c114c389d1d09854fc))
+- Keep parent transcript updating while viewing a subagent (#22) ([`8f1d4a22`](../../commit/8f1d4a22a87bcfe09cb4662aefea2a1e07c157e4))
+- Defer queued sends until assistant finalizes (#23) ([`7c495a06`](../../commit/7c495a06e0b62b93cf9f6d2337e9a8662f5c56f0))
+- Refresh git branch display on send (#25) ([`69c49b51`](../../commit/69c49b51eb59e8d54f6266fac7960e787f000341))
+- Keep slash model changes session-only (#31) ([`e795c673`](../../commit/e795c673dca80e97798c86dac4a5cd03aa9d1c65))
+- Truncate permission modal tool details (#40) ([`3da0e6b0`](../../commit/3da0e6b00a47adc9f08274d4794e6a22ce38818c))
+- Default profile from hygge.local.toml (#42) ([`2559b09d`](../../commit/2559b09d4243c38e329d6d07340c81a80b4245c6))
+- Parse timestamps for expires at (#47) ([`2d1fbe5e`](../../commit/2d1fbe5e541895df22505adc5ea269cceb03dbe3))
+- Correct OpenRouter cost/context and add subagent split form (#49) ([`7be17bd3`](../../commit/7be17bd399a1413f73403300c81fb68713f426a7))
+- Route prompt generation through fantasy (#58) ([`c1cd577e`](../../commit/c1cd577e14c477577f228afa5d7b867137e46678))
+- Use terminal colors for models command (#59) ([`4edb52bc`](../../commit/4edb52bcf2849cfbbc868569c5995d964bf51484))
+- Bound user message click zone (#60) ([`b32b4026`](../../commit/b32b4026f450142361fc1e3a1ec84440c5bd75a8))
+- Use newline delimited json for stdio mcp (#66) ([`cfa6df1c`](../../commit/cfa6df1c4cb98df2f26c88a9dee9d77cd1eca7f8))
+- Avoid per-delta markdown rendering (#67) ([`08e28713`](../../commit/08e2871333a62f1cc4049d6531413020641deafc))
 
 ### CI
 
-- Bump actions version ([`e9e8953a`](../../commit/e9e8953a7ce0eacb6f2f4549aadb3ffa2421630f))
+- Test fixes ([`011621c8`](../../commit/011621c871afc4dbed0d71e1c144694fd7f72efd))
+- Test failures ([`5f16a649`](../../commit/5f16a649ad4ec74d770a58bf128d002d31c8dc79))
+- Bump actions version ([`9a9fbe63`](../../commit/9a9fbe6310fb4476822badc327300c8ba5e91cc6))
+- Bump actions version ([`6ee322b6`](../../commit/6ee322b6f40847247f4b56a7494c4102459bcc87))
 
 ### Chores
 
-- Readme pronunciation ([`651df788`](../../commit/651df78886cb5aa7d546af4e2dd9ddbeea868580))
-- Move pronunciation ([`c1340500`](../../commit/c134050075aef258fd124750ecf2cab9f6309a55))
-- Readme screenshot ([`cf31cb6c`](../../commit/cf31cb6c0d02e73fa6058fc7f39ecfd5ce546848))
-- Mark completed todos ([`cf738eeb`](../../commit/cf738eeb2cd877b5c072885ec33690e70223355a))
-- Title fixes ([`ae1be4ec`](../../commit/ae1be4ecab00e685c29bded6db5417a2a94ea432))
-- Fix lint warnings ([`2c85856e`](../../commit/2c85856e6c4b4f989f9a2a54f0d20e2f86c96434))
-
-### Features
-
-- Generate session titles with small model ([`c1db6fd2`](../../commit/c1db6fd2c23a7540c8967150243d394253489551))
-- Persist subagent parent tool ids ([`c631b5dc`](../../commit/c631b5dc6cdc33a6483995b361bbf9321352d8e0))
-- Enrich sessions list output ([`553e8540`](../../commit/553e8540a2c8781ce8d37a14de5ccefe111878e1))
-- Add interactive question tool ([`e8df29e1`](../../commit/e8df29e14706d8bf8223850fac276c11a30185f5))
-- Question tool fixes ([`6f80bfd4`](../../commit/6f80bfd431007e9aa444b8dcf3ce95f46a0ad39f))
-
-### Refactoring
-
-- Share noninteractive git runner ([`bc64ff84`](../../commit/bc64ff84dff54514920a16d5459fe31fb4d9b7e5))
-## [0.3.4] — 2026-05-16
-
-### Bug Fixes
-
-- Stderr hold and bash pipe ([`7b394db5`](../../commit/7b394db5b803ff05bbbe15b9db5be2def244696d))
-- Skill discovery and usage ([`819607ba`](../../commit/819607ba144709b05f807ac4db2551cd6811ba19))
-- Usage ([`ab67ef36`](../../commit/ab67ef3612ce7600b5579c554bff1c28b1f37db0))
-- System prompt per mode ([`a39922d0`](../../commit/a39922d04cb96fe754b40592bf93b7ac181ad168))
-- Message cutoff ([`b62efca4`](../../commit/b62efca4efe204b4b170a24ae97bd61784dfb5c8))
-
-### CI
-
-- Test failures ([`4f965d1c`](../../commit/4f965d1cb982eb9a9f49b421378424ecb6cfa31a))
-- Bump actions version ([`c0775d00`](../../commit/c0775d003c12ba4914c68d931d3f72e43a6ec70f))
+- Initial repo scaffolding ([`74f5012e`](../../commit/74f5012e881aee54e1db35f461198fa6660f5ab1))
+- Replace makefile with mise for toolchain and tasks ([`c437f0f7`](../../commit/c437f0f71ff7cc5bed6781454c1e1862e8a5b37a))
+- Bump go toolchain to 1.26 ([`ae8248e8`](../../commit/ae8248e8f0c2375fdc9b35bd920b2d060fab771a))
+- Manage golangci-lint via mise ([`257c993b`](../../commit/257c993b3e67c1afdb0673f1ad5ce8bae917b7a7))
+- Mise precommit ([`9e3d6b3e`](../../commit/9e3d6b3e7f8942f95c5e4bdaf5977bbeec5aaa76))
+- Rename mise run to mise cli ([`ff4dc835`](../../commit/ff4dc83549016fad8d954a58a65890ca01d38277))
+- Tighten subagent UI anchor + consolidate walk-up logic ([`c93dc4ca`](../../commit/c93dc4cade20cfd6ef7a5e6ef3bdfba83a037573))
+- **ui:** Migrate to bubbletea/lipgloss/bubbles v2 ([`074126f7`](../../commit/074126f745e77e0dae45d0247f4a080d6df39696))
+- **ui:** Remove dead code; wire input focus on modals ([`1c3749c3`](../../commit/1c3749c3f3298d890243d2e7b80979fc5639ddb0))
+- **deps,docs:** Add catwalk + fantasy; document target architecture ([`cc0866d6`](../../commit/cc0866d6094061aa2982a5e40f8c60b66d009551))
+- Bubble style and timestamp ([`abd36413`](../../commit/abd36413820e6fae7e5a31dcaaf6a76f969eb516))
+- Go fix ([`4f7148f3`](../../commit/4f7148f3c840f18c8a476667a2bd244ab3c3310f))
+- Cleanup ([`38d98c82`](../../commit/38d98c82faa72c5eb725a4958b63418c19e18f40))
+- Todos update ([`8353b3b4`](../../commit/8353b3b4ad5aa0fad3f29e567e46794011de796b))
+- Add more TODOs ([`a29a7771`](../../commit/a29a77713d7507a441cc9b4c4658a90122edf27c))
+- Add more TODOs ([`2268dc2d`](../../commit/2268dc2d09c7faa019c51582f19e0e9dc01ae4d7))
+- Todos update ([`ec90abf1`](../../commit/ec90abf152a4250a4c8de4067043abdf8d4df95d))
+- Reorg todos ([`c9a83250`](../../commit/c9a832508a6372c1a163338689fd9124478654a1))
+- Add border color to todos ([`897ca347`](../../commit/897ca347dbcd6b98f53bb5699779c64611960152))
+- Switch info log to debug ([`d0574e81`](../../commit/d0574e81e2f7796328b844aa6e4eff7a33412094))
+- Readme pronunciation ([`6ccfe36f`](../../commit/6ccfe36fdb0269b2847a48da0b1844ead533b8a1))
+- Move pronunciation ([`a7e379c9`](../../commit/a7e379c9f9a5cdad84cd0a94e44f93c773a20039))
+- Readme screenshot ([`245dcf17`](../../commit/245dcf175b77a9dc09c18f74b10bbda2b3781ee4))
+- Mark completed todos ([`2a2dca05`](../../commit/2a2dca05a34908159b429756c1518083eeaf8933))
+- Title fixes ([`928798aa`](../../commit/928798aa392275fb9b42f5120c401e783bd1f17c))
+- Fix lint warnings ([`7ccbe9cd`](../../commit/7ccbe9cd7dcf2d767437c3d222ca2576e44c6bb1))
+- Add quorum to example plugins ([`82aa3345`](../../commit/82aa33456c38639f3f1ac8067f3b4a823c6e9468))
+- Capture startup logs ([`b99749e1`](../../commit/b99749e170cf90b2807b987c8e1ec550ef1168f3))
+- Drop legacy loop code ([`6a67a6a5`](../../commit/6a67a6a5d9f54d7698b43d20f4ad23cb8c8f9c71))
+- Update readme ([`25a15bf7`](../../commit/25a15bf73774b8f9b23ba0994ac7735a5f014f79))
+- Todos and footer style ([`ec9f8646`](../../commit/ec9f864626d188149847ad883740af575a2752e4))
+- Update todos ([`4af68949`](../../commit/4af689490869057e64bcc0f00463796cb3860559))
+- Clear completed todos ([`8c6b2534`](../../commit/8c6b25349643a339e216e0a0ba6620ef8dcff69c))
+- Update TODOS ([`b897a0c8`](../../commit/b897a0c81a1197619b9fa64dfc28eb0507f68f8a))
+- Add todo ([`47dd09ee`](../../commit/47dd09ee37afd1669388fcd4688924788f48e475))
+- Todos ([`ae369a72`](../../commit/ae369a72b70a08c94645c88484973582a3680648))
+- **deps:** Bump catwalk to v0.41.0 ([`2bc68b0e`](../../commit/2bc68b0e79aa189751593d5f0d7cef8aab46160d))
+- **deps:** Bump fantasy to v0.25.0 ([`d96c0dad`](../../commit/d96c0dad01ac8dd443d7fb362c617ddc82c72173))
+- **deps:** Bump ultraviolet ([`b04c81e4`](../../commit/b04c81e4d195992434a1556124bc71d9df62b179))
+- Update readme for mise binary install ([`8084a181`](../../commit/8084a181338982d2ebb74dee840a1d545ac400d3))
+- Update readme ([`31841a74`](../../commit/31841a74a80ca373832fdd0262ee53c96589826d))
+- Bump catwalk ([`df7d0c59`](../../commit/df7d0c59da06c1335d5233043a83bb278e366b9b))
+- Set fps explicitly ([`6bad2c89`](../../commit/6bad2c891490dc0aeb18529cee360650dbd5d990))
+- Update gitignore ([`c4cfb9e3`](../../commit/c4cfb9e388fc9c17dd9b4ab8674c562e7b4f9b15))
+- Ignore .worktrees/ ([`17e7d7d7`](../../commit/17e7d7d7d1583ed1793ec1ca883e20c9597045e5))
+- Todos ([`237e1d4e`](../../commit/237e1d4e8cf4b32e312fddc54cce8f0ed5e2c4f5))
+- Increase mcp bootstrap timeout ([`cfd05de1`](../../commit/cfd05de1d057bec30cd799a7a8ecac816a425158))
+- Update dependencies (#12) ([`fb7692e3`](../../commit/fb7692e3c4f8d0f340040dc91ed2795f91790771))
+- Rectify version ([`55bc074a`](../../commit/55bc074a4684bb4874f2c280305c1a4a7bb0616e))
+- Update screenshot ([`3dffe2d3`](../../commit/3dffe2d3e45dce2fe6d679e71d5288fbb9727610))
+- Add release script ([`464c0fdd`](../../commit/464c0fdd62040f10685e5cfbc42d3299b6f6c1a9))
+- Fix release script ([`128b4690`](../../commit/128b46904c737d700acbfb05e28801550b1ca9b4))
+- Drop bump and changelog tasks ([`1363ad7c`](../../commit/1363ad7cac315adc4a0a27e241d3f27e35dce86c))
+- Use usage params for release script ([`d6085e17`](../../commit/d6085e17eacd5b4762c727a5d84d99d77ef36b33))
+- Allow CHANGELOG changes to bump script ([`2c144e1c`](../../commit/2c144e1c798da1c354f215ac527f6f9b0d9a9aca))
+- Update go dependencies (#38) ([`02767ed9`](../../commit/02767ed961fbc14c3e3a7691dcaf161dbe288b67))
+- Update deps ([`c7af3930`](../../commit/c7af3930fa4771c63b85d7857a870e4960c7366d))
+- Update dependencies (#65) ([`e91c2baa`](../../commit/e91c2baa9ee31438ec1d774eaadb53e11da76f8a))
 
 ### Documentation
 
-- Cleanup ([`fb94c32f`](../../commit/fb94c32f66fbc120677cb00122eddaa0995b346f))
+- Skills + AGENTS.md sections in README and SMOKE ([`c2fa401f`](../../commit/c2fa401f71ebd2d0c0e27038576d3c16743fb83b))
+- Refine system prompt ([`cb0d6581`](../../commit/cb0d658121fe10deded33ba2b14348653e217e09))
+- Tighten system prompt guidance ([`d2320004`](../../commit/d2320004763d7a481f582ba48f128b3cf58962c7))
+- Cleanup ([`4360c58c`](../../commit/4360c58cef1175a6bd7c931f4f6030b06bda26b6))
+- Mark completed todos ([`479988ad`](../../commit/479988ad1fe0c153dd3a4faf53a46eb1f1ac68fa))
+- Aiexclude ([`48c3cb45`](../../commit/48c3cb45fb172db7c488394640b38d7c8cdcd889))
 
 ### Features
 
-- Skill name display ([`a962eb66`](../../commit/a962eb66066756ded6d86dd667839cc1a6336059))
+- **config:** TOML loader with profile + pwd-walkup deep-merge and provenance ([`710564e0`](../../commit/710564e0ddc981065417f99f0b1b2163f8b65473))
+- **state:** Persistent runtime state with atomic writes ([`67dee6e8`](../../commit/67dee6e8dcda5ff44b59ce99918f3f9e45da55dd))
+- **bus:** Generic typed pubsub with bounded delivery ([`01f5a7ce`](../../commit/01f5a7ce86610b1877953f05a9dd2a3f579b7461))
+- **theme:** Shell-palette default and TOML theme loader ([`1c2b6067`](../../commit/1c2b6067c33455d3e6279a3e43de43cf29ec2224))
+- **session:** Domain types and typed message parts ([`f98baa2c`](../../commit/f98baa2c4a41e2594a3a9d9ce4d8176ef540a623))
+- **store:** Sqlite persistence with fork-chain and compaction queries ([`2a5b6320`](../../commit/2a5b63205c072c146aa0eb2b43308b3f62ce2975))
+- **provider:** Provider interface and event types ([`d7f12157`](../../commit/d7f1215761e0331af0ca547d8429af42b4108e5d))
+- **provider:** Anthropic adapter with SSE streaming and tool use ([`37f60102`](../../commit/37f601026905f43749b9f68f32082662c0d306da))
+- **state:** Add allowed_rules for persistent permission approvals ([`a577f42c`](../../commit/a577f42ccfadb6aad4531448206d96d6640ba7d6))
+- **permission:** Allow/deny/ask engine with rules and secrets denylist ([`e7f13218`](../../commit/e7f13218a7e0ba49d38fa16af59daf4535fd7a87))
+- **bus:** Add ToolCallProgress event for streaming tool output ([`ea338646`](../../commit/ea33864642686915020ea7702e38320d611dcdb1))
+- **tool:** Tool framework with registry and execution context ([`ac5e012a`](../../commit/ac5e012a2e128fc69540d3456f665b0d98d69df1))
+- **tool:** Builtin read/write/edit/bash/grep/glob ([`1e6037ea`](../../commit/1e6037ea16c3af1863b840736bf11d2a201c0f43))
+- **cost:** Models.dev catalog with TTL cache and fallback pricing ([`9f0f8200`](../../commit/9f0f82002059f2a2d882c9cdb1819e86c9bfc0f3))
+- **bus:** Add AssistantTextDelta and related streaming events ([`6b5124f6`](../../commit/6b5124f6ca9d168eb5ecc322a9964531fff20933))
+- **agent:** Orchestrator loop wiring provider, tools, permission, and store ([`d419015a`](../../commit/d419015a23c282bba643dec759a78f26d863cb57))
+- **ui:** Bubbletea tui shell with bus-driven message stream ([`c5520335`](../../commit/c55203358bb2ae2df4dc47b56057f322754196a5))
+- **ui:** Lazy session creation on first Send ([`7eb85d86`](../../commit/7eb85d86c2ed7ad3822cf4c5f1375b9837d8314b))
+- **cli:** Cobra command tree wiring all components ([`52f41bb6`](../../commit/52f41bb6b7dd513750fe1f4773e0128fd317497c))
+- **v0.1:** End-to-end smoke test, ship checklist, readme ([`f54092cc`](../../commit/f54092cc1daa9c4fd2bc9b5e389edf7e5aed5eaf))
+- **auth:** Per-machine credential store ([`4150dc4f`](../../commit/4150dc4fc95bf8f7cdaf9bb2cb6100c9449ea4c3))
+- **cli:** Inject auth-store credentials into provider options ([`5696d769`](../../commit/5696d7697fe111207c6009e547ab6ea504b594af))
+- **cli:** Hygge provider auth/list/remove subcommands ([`4aed0758`](../../commit/4aed0758e97f0f3748e2d78b68892aaf03b331cf))
+- **cli:** Alias "hygge auth" → "hygge provider" ([`416caa5a`](../../commit/416caa5a0d57697ace6bdfc6548659c61bb75665))
+- **provider:** Openai-compatible adapter shared by openai/openrouter/groq/etc. ([`d6406966`](../../commit/d64069669fa8fc58223e59d06e2c7dc27179168b))
+- **provider:** Openai shim ([`c914393d`](../../commit/c914393d13532e199c3fbf82b2b6347da3d8e415))
+- **provider:** Openrouter shim ([`cc8b8a3e`](../../commit/cc8b8a3eb8ac3b8f5aa59ac96353a30d8e165c0c))
+- **skill:** Markdown+frontmatter skill loader with .agents convention ([`c7f11b33`](../../commit/c7f11b33964eb5f08801c46436681697372bd2e1))
+- **tool:** Skill tool for lazy-loading skill bodies ([`356d6a8f`](../../commit/356d6a8fefd198179a140d6a6df2213cb33127c5))
+- **agentsmd:** AGENTS.md project-context loader ([`67ad3548`](../../commit/67ad35484d85f0f356e111ba55e490b0513e6beb))
+- **cli:** Wire skills + AGENTS.md into bootstrap and commands ([`04e242c6`](../../commit/04e242c648720d8bcae764c85a46402689e5ef2f))
+- **mcp:** Json-rpc framing and protocol types ([`2b1d79ca`](../../commit/2b1d79ca367d14565b85d8883f7a3d66716a6b64))
+- **mcp:** Stdio transport with subprocess lifecycle ([`b1834111`](../../commit/b1834111f37c304b04a198426dd071c275db941b))
+- **mcp:** Client with initialize/list/call/ping ([`c4735fea`](../../commit/c4735fea8943de1937f19408d182658c3223dd16))
+- **mcp:** Mcp.toml loader with .agents convention ([`bb20cd1e`](../../commit/bb20cd1e521bf6d643eed313a9f273a766b82173))
+- **permission:** Add mcp category ([`9bb151eb`](../../commit/9bb151eb81ab4766e6687e1a62bc78f5d79209ab))
+- **cli:** Mcp commands and bootstrap integration ([`ca4c1e01`](../../commit/ca4c1e01cf63479699f2fc5cab0023ed9b38f3c4))
+- **agentsmd:** Recursive scan, CLAUDE.md compat, hygge context list ([`ff31a289`](../../commit/ff31a2892b43a1d75dbb1e2f3fb974202b1e4c62))
+- **agentsmd:** Lazy per-tool-call subdir context loader ([`c929da5b`](../../commit/c929da5bebfe3aada9e37fb61765c4096ef689f0))
+- **subagent:** Task tool + subagent runtime with TOML registry ([`bc0ae1e4`](../../commit/bc0ae1e479b074c77d288fca325adad8e72b6d4e))
+- **subagent:** Honor per-type model override ([`e25a5b84`](../../commit/e25a5b84ef1a5b016d325cc7f7ba634d2fce5619))
+- **ui:** Live nested transcript for subagent invocations ([`c91b0679`](../../commit/c91b0679f4aa9abda04105000d95e1c1bef56687))
+- **provider:** Unified reasoning-model support ([`a9439802`](../../commit/a9439802542c0ad66e5ab6edb22e629f22812477))
+- **catalog:** Models.dev-driven model + capability catalog ([`871a6fb2`](../../commit/871a6fb2189b0d852a57f8693309322d760e32a6))
+- **command:** Slash commands framework with TOML extensibility ([`a8121c91`](../../commit/a8121c91580e8621b0ecd0f46ae74c1cf3927b20))
+- **ui:** Session management modal with filter, switch, rename, fork, delete ([`62411759`](../../commit/624117592755f5ff266c1db7dc1ba06f65c02519))
+- **mcp:** SSE transport ([`46a1144c`](../../commit/46a1144c24f2d9733a960746f6fb973c08bea40d))
+- **mcp:** Streamable HTTP transport ([`c281bf5a`](../../commit/c281bf5afd185a2c7c1824ac78252fbff29fa95e))
+- **hook:** Hooks framework with pre/post tool + message events ([`58779c5e`](../../commit/58779c5ef0d739c2b46670341822b344f4c79107))
+- **agent,ui:** Cost roll-up + foreground-switch into subagents ([`c25efe6c`](../../commit/c25efe6c0053c50a3b01953093048df64fcdca9b))
+- **agent,ui:** Compaction UX with confirmation, threshold banner, toasts ([`91320133`](../../commit/91320133a6f451e6ae9b54155ad46c66df351b02))
+- **cli:** Smarter session resume with picker, --continue, --new ([`2c782b5d`](../../commit/2c782b5da9cb8021dfb2559e8c3d29445c49cb07))
+- **plugin:** Lua-based plugin host with github/local sourcing ([`d61996ca`](../../commit/d61996ca8787f7c4bba953539fd171588054ee30))
+- **catalog,anthropic:** Periodic refresh + catalog-driven reasoning detection ([`15137db3`](../../commit/15137db3e3d9d3cb469ddf0c3b40bcbbfd2587ab))
+- **agent:** Parallel tool execution for parallelizable tools ([`d7b79b63`](../../commit/d7b79b631e6da2ca892a2fe0b467e6500f348ef7))
+- **ui:** Render thinking, compaction markers, and subagents on resume ([`29536981`](../../commit/29536981023b4784c04ddd124de33c4eb76c03e4))
+- **ui:** Restyle subagent block with compact heading and animated spinner ([`cd43eed4`](../../commit/cd43eed488353cd4e2d191fc6bf27dfa23e82709))
+- **ui:** Add header bar, simplify footer, introduce bubble primitive ([`9574627a`](../../commit/9574627ae4979ec0735e4d896eb2da20ffde3530))
+- **ui:** Wire Version, HomeDir, NerdFonts into App options ([`7b97122e`](../../commit/7b97122e1f7ee0a4fdf9e51fce7808847be1f802))
+- **ui:** Render user and assistant messages as chat bubbles ([`b5ca5ecc`](../../commit/b5ca5ecc405420cd0476edba0f7152c16bf6b542))
+- **ui:** Group tool calls and wrap subagent in bubble container ([`273ea30d`](../../commit/273ea30d6e965d3d0b116f6ead4bd2b029c9dbab))
+- **ui:** Polish chat layout — input box, tails, thinking cap, empty state ([`e758ae9b`](../../commit/e758ae9be432afae28f323a8a8361e0286abeeb9))
+- **ui:** Scrollable message list, 80% bubble widths, dim backgrounds, distinct user/agent colors ([`d272bbfd`](../../commit/d272bbfdd1dba8c6158074ac4f6896b68eeafc9b))
+- **ui:** Border-only bubbles; agent default red ([`c2d0918e`](../../commit/c2d0918e35e9b60b6de4d27fff7748880467a618))
+- **ui:** Add right sidebar with context, MCPs, files, replaces header bar ([`b0dbd51c`](../../commit/b0dbd51c321183d64d712ef958909439ec4de50a))
+- **ui:** Wire modified files into sidebar with git numstat ([`02beaa84`](../../commit/02beaa844e79e3a3cbb2ca860cacf2124d280014))
+- **ui:** Sessions modal shows own + rolled-up cost ([`766672ee`](../../commit/766672ee33fd953667533215292efe15462a4e84))
+- **ui:** Boot progress bar; working placeholder; pass env to tea ([`36dbc15b`](../../commit/36dbc15b4c5668df861cf32bcd7c6a51aef67cdc))
+- **ui:** Inline tool status text — requesting permission / waiting for response ([`464faadf`](../../commit/464faadf82688917d0ae43aa6c3133548e4d3897))
+- **agent:** Per-session prompt queue with bus events ([`b3b7dfe0`](../../commit/b3b7dfe03f111ffa19d117064505acf2538d6297))
+- **notify:** Desktop notification backend + config ([`d45a62c2`](../../commit/d45a62c26f31b48f7287dbcdb210de7894cf3dd5))
+- **ui:** Wire queue display + notification triggers ([`70d71fdc`](../../commit/70d71fdc28586ee59641bd1ef04564db6e59cb5c))
+- **catalog:** Use catwalk provider catalog ([`c3cc0350`](../../commit/c3cc0350d0264012df649140b90a177a51860f33))
+- **provider:** Build providers with fantasy ([`0b5bb2c7`](../../commit/0b5bb2c7a9aecda18a01d15e74fcbff75e9ba514))
+- **agent:** Run turns through fantasy stream ([`964cfebd`](../../commit/964cfebd2022d23cbf4ad15f8afee35c6965dabc))
+- **agent:** Use fantasy for summaries and titles ([`688958d5`](../../commit/688958d531698f9d53b0fea94596b27bf8079f61))
+- **ui:** Add queue pills and input event filter ([`b28a866c`](../../commit/b28a866c4b8e6ba7ccbcf82c09b426d760343f6e))
+- **ui:** Add slash command completions ([`17ce2c74`](../../commit/17ce2c7483b87dfa24ffbbafdb336f09db9fefcd))
+- **agent,ui:** Add session todos and busy pill ([`1b82f7b1`](../../commit/1b82f7b14d2e53eeb8aecdbf1909844fb39dd056))
+- **ui:** Add prompt file attachments ([`e09416c6`](../../commit/e09416c61277f3a763694ba8c931a13fdf58e358))
+- **ui:** Add model selection dialog ([`ddcbf2f4`](../../commit/ddcbf2f45f356ff2f370626f7e231c7ac95362aa))
+- **config:** Persist selected model safely ([`08ee324e`](../../commit/08ee324e440e14104f925d36c10307e5f994292a))
+- **ui:** Add api key dialog ([`1f1b2fd6`](../../commit/1f1b2fd6764f1875e7eb1a10581671e5376025fa))
+- **ui:** Add theme selection dialog ([`edbcf6e9`](../../commit/edbcf6e9acb3a6faf1fdc52e721881f88288a516))
+- **todo:** Persist session todos ([`18c4bd13`](../../commit/18c4bd13578cc7d2a8c7b3914c23cf1e1d68fd64))
+- Input history ([`1d90bc5b`](../../commit/1d90bc5b5a07b129bbbba69c44fd87b7db260541))
+- Displace general subagent with ones configured ([`d071f43b`](../../commit/d071f43b75fdfaa1b4f2e90269def7bf0972ab80))
+- Subagent view improvements ([`bcb01183`](../../commit/bcb01183c92a533541e31a81373fae84b6131c64))
+- Click to view subagents ([`4ddc6e11`](../../commit/4ddc6e11955038f969476f2485bd840c4e97118a))
+- **ui:** Double-Esc to interrupt all processes ([`e79bdae4`](../../commit/e79bdae4ea3766fa816609955760ef945abf9063))
+- **ui:** Ctrl+C confirmation before quit ([`84e5dfc4`](../../commit/84e5dfc48c4e09b8e6a15462a38d4f30953af53a))
+- **ui:** Expandable tool output with Ctrl+E ([`aa869b69`](../../commit/aa869b6915efbfd2a848c8f1a01788893db1427f))
+- **ui:** Richer tool block gutter text ([`1b7fe959`](../../commit/1b7fe959aa7499e874c4032f36810318c4e63e78))
+- **ui:** Scroll position indicator ([`c672f801`](../../commit/c672f8015ff137ded0c21b2a5fa2423d58ac2560))
+- **ui:** Animated busy spinner in footer ([`e1e699db`](../../commit/e1e699dbbc7a593bb3c726b8b6ba46f67fcbd27f))
+- **ui:** Ctrl+R cycles reasoning level ([`8926275e`](../../commit/8926275ebb73559afe8d057fb038d88b3b794942))
+- Layout and shift+enter ([`2fd6b2be`](../../commit/2fd6b2be10cc2ccc588c4539309e8b77730bf541))
+- Show richer tool details ([`d5f53882`](../../commit/d5f538822c43feb44effd17814dc3ed121e6a74f))
+- Add at-mention completions ([`60034b41`](../../commit/60034b41ab4020ff3783bea05f29f7977cc8c090))
+- Collapse multi-line paste input ([`5732edc7`](../../commit/5732edc7bc75209725b1b47cafda0f895cf4896d))
+- Footer working text ([`101cea22`](../../commit/101cea22336895f52c020b70d9e2b8c792667648))
+- Filter model picker providers ([`94bacfb8`](../../commit/94bacfb86aa32b34787d36c210a012551a5d0e14))
+- Render tool diffs ([`f84867c3`](../../commit/f84867c30b830a3fc3069acf6e81a627e5f8d34a))
+- Add external prompt editor ([`873714f0`](../../commit/873714f04fc6020f7d5b5e211a27086913bb9b5a))
+- Add yolo mode ([`3183eb77`](../../commit/3183eb77d9f2501c84fe96cecfd38a782b9d139a))
+- Show queued prompts near input ([`f07acc4b`](../../commit/f07acc4b77f4a62c4f38f147bb8d133ef4bbd240))
+- Add new session command ([`7eb43e0f`](../../commit/7eb43e0fe63fb417549040280c24059d22718fbe))
+- Drag chat scrollbar ([`59880f85`](../../commit/59880f85c2e20668673ff4aea64c954cdee49890))
+- Show compaction working block ([`6c1a94ca`](../../commit/6c1a94ca4a261763161cc9e89069df176d7c3782))
+- Add animated splash screen ([`94a7cf01`](../../commit/94a7cf01b170761b37b83d441e91adb430377b51))
+- Configure default profile ([`68e4b82a`](../../commit/68e4b82aba2c6f6ab5e287230ad0670d74594907))
+- Redesign header band ([`a7e2d533`](../../commit/a7e2d5334719d631eac2f44d8dc07d7471517103))
+- Animate splash chimney ([`3ec63b70`](../../commit/3ec63b703e57e4cb1288f78d80832931df68fb0f))
+- Bump script ([`a634f8fd`](../../commit/a634f8fdc8b1475ce71e1ec2ee2a98527bda954d))
+- Skill name display ([`0b70e2bd`](../../commit/0b70e2bdb37fd47b810b5f232e2751c2330b9c89))
+- Generate session titles with small model ([`4f43188e`](../../commit/4f43188ef576ad9470d0ce98673a5ae1258dc455))
+- Persist subagent parent tool ids ([`c545f278`](../../commit/c545f278a85dcf571d67d6f1ae1467e4dfe292a5))
+- Enrich sessions list output ([`109ba786`](../../commit/109ba786eb64cc8bc4eab0c689e776dc4c406a79))
+- Add interactive question tool ([`5b6ffd7e`](../../commit/5b6ffd7e1304d1298fb3c6ceeac07432518f3f54))
+- Question tool fixes ([`51246094`](../../commit/512460946e355f55285b24d23bd6de099c67d152))
+- Luals types ([`e8ef399f`](../../commit/e8ef399f381f3d0af54a6976d00fea963ef2011a))
+- Add hidden hook prompt context ([`8b263418`](../../commit/8b263418645bb1d9bfcdcd3f3b5f858a4f97e138))
+- Lua table helpers ([`020a9562`](../../commit/020a95622d7c51247dd595147135005aaf1905a3))
+- Load plugins from config ([`1a850bd0`](../../commit/1a850bd057239a81329eaa7010c89767b8bc8fff))
+- Stub out user request wrapping ([`7c0df771`](../../commit/7c0df77166b50b2e4c29f4b130dce2cec435bff6))
+- Add session memories ([`f9f433f9`](../../commit/f9f433f9da856692ebc8e23eb68a00b2182c8bbd))
+- Add file-backed memories ([`e401ff92`](../../commit/e401ff92b63dcc7bf49d307657f8360b94c5af53))
+- Warn on unignored project memories ([`eeb6863e`](../../commit/eeb6863e034d7ef505d8263966e5dfd33ca82187))
+- Add memory tools ([`6f862b44`](../../commit/6f862b44ed173753ab379ef237109d2b84c771cf))
+- Add memory management UI ([`3bc850fc`](../../commit/3bc850fc6e2e67763ab0a3b935965302c4b77a9d))
+- Add autonomous memory controls ([`0b3bc4d7`](../../commit/0b3bc4d7dddb21a01f7254e398ad6ba700c18fdd))
+- Add side-by-side diff view ([`4c032c2e`](../../commit/4c032c2ed746374b11bf62bb2eeb3668b8294a33))
+- **ui:** Expand diff previews on click ([`a06d8076`](../../commit/a06d80766124c9484caed9264db6aeea3c85ad8e))
+- **ui:** Attach pasted image paths ([`29800069`](../../commit/2980006991056e118de3740d7421310ddf971d36))
+- Image pasting ([`5ac96a2e`](../../commit/5ac96a2e34893d7b3776c15dae264e4da478becb))
+- Hygge onboard ([`9bba8859`](../../commit/9bba8859fbb57c15ba6cc7fc7cdf090dff1628d5))
+- Steer active turns by default ([`4eb77007`](../../commit/4eb7700704350e67e576afec80faefe4950f27c1))
+- Onboarding tui ([`6badb35e`](../../commit/6badb35e6aa2b991b5370512f41966f5f3e0a1e3))
+- Queue busy sends and add steer command ([`0eccda12`](../../commit/0eccda12ba73d09286124a45b9e23dee1d17e496))
+- /steer ([`cfbdcb46`](../../commit/cfbdcb4646e2e876eff4b73e2e99c675f12b6530))
+- Webfetch ([`002fc3b9`](../../commit/002fc3b9c69a1850fb37b614d00a57f7b2c49305))
+- **permission:** Show permission request rationale ([`a6d00837`](../../commit/a6d0083770974afaab0c6b0b3baa5c25fe0d2f8f))
+- **cli:** Polish help models and provider auth ([`6f443cd1`](../../commit/6f443cd19d6409cb8e229a97083a8c77bc68793d))
+- Lua plugin dir expose ([`38cc09d5`](../../commit/38cc09d5f9e4ff0e8e43c594f4718348f58dc770))
+- Hygge init ([`5c251516`](../../commit/5c251516d9a11f1f9894aabeacbf92ab9214348b))
+- **subagent:** Load types from config profiles ([`24a6d4cb`](../../commit/24a6d4cbce718ea4d0aa90614b1e90bba63a1ba0))
+- **ui:** Fade in streaming response text ([`c0665779`](../../commit/c0665779b99f3269067275239ea5fcf99eff6353))
+- Stream bash tool progress in UI ([`83a80b13`](../../commit/83a80b138a73db4f27fd2620033389a547a14309))
+- Theme markdown rendering ([`923f40a9`](../../commit/923f40a9dd948a152051c9b27726eac7868fa139))
+- Continuation placeholder ([`30bbedf6`](../../commit/30bbedf6aaba90a8b53f4c2feaea0991e4818e94))
+- Scrollback limit ([`0960076e`](../../commit/0960076eaf5ed453fe9ad180e48092b073fbc50d))
+- Unbuttoned mouse movement cancels scroll ([`442d1bce`](../../commit/442d1bce136aa0317ba2feb63a456e79709eba81))
+- Fog splash screen ([`639b13d2`](../../commit/639b13d2c9f90d82417486482c330d43ee5ee4b0))
+- Test hygge skill ([`26f00c1a`](../../commit/26f00c1aebafc33b937ba1a31aef6b3390f978f8))
+- **ui:** Expand assistant thinking on click (#2) ([`eb652b0f`](../../commit/eb652b0f9fc312088af12c3886a282727d77c184))
+- **cli:** Add dry-run config preview (#3) ([`c8ca9c75`](../../commit/c8ca9c75bc9fb328e92bdc80d1e28f17db28cba0))
+- **ui:** Split compact token usage (#5) ([`1c0b1c8e`](../../commit/1c0b1c8ebe1234d71560aa949f1202a455b9709e))
+- Change spinner to fog line (#7) ([`e210f7c6`](../../commit/e210f7c6532f699d8901f42e2b30a40b02483134))
+- Persist always permissions per project (#17) ([`d0d0af20`](../../commit/d0d0af202ed2e8af0023a895861d02621c970d0a))
+- Add built-in Hygge skill (#18) ([`5af2e14e`](../../commit/5af2e14ee3c5d623fe9cc33db9ef9b8e53b27315))
+- Hygge mcp add (#19) ([`aa47d968`](../../commit/aa47d968a25b0aea426e62cc420fa7edc917e87a))
+- Compact and context to envelope (#21) ([`06fc4111`](../../commit/06fc41116583518e882e28af1b5fab3560ce5658))
+- Clickable URLs (#28) ([`b32e8457`](../../commit/b32e8457de069ecd74ae7529a67ce3a3c1b2846f))
+- Profile directories (#29) ([`b5567458`](../../commit/b5567458542e37e24fa34f4aa8ba0580ea81b156))
+- Add hygge logs command (#30) ([`acf59046`](../../commit/acf59046900c748bfbee59c752365d76cde2c09b))
+- Annotate lazy project context loading (#34) ([`b2c92ba6`](../../commit/b2c92ba696f5cbf98292af6188d3e67781eeacce))
+- Show session resume help on exit (#35) ([`59fe4808`](../../commit/59fe4808c941015802d74205b62f5fd344046481))
+- Support hygge.toml config files (#36) ([`81188ae3`](../../commit/81188ae3b602e644883388445875a349d4213ab2))
+- Add user message action modal (#37) ([`ada59c9f`](../../commit/ada59c9f18ede160014e7ee70a747b9ef114a535))
+- Avoid auth method pagination (#39) ([`99ece812`](../../commit/99ece8128b0ddc79fc44f5444cdafd4d51d245a8))
+- Add nix flake (#41) ([`b18483fa`](../../commit/b18483fa94288b904821b7f04d16c829ed35c681))
+- Support OAuth for MCP servers (#45) ([`4327eff5`](../../commit/4327eff59e3de194581db86663d195b640d33927))
+- Group shell permission approvals (#46) ([`a25fa0e8`](../../commit/a25fa0e8d8361485bf78774dfae705b10ec53787))
+- Add favorite models (#55) ([`06d26194`](../../commit/06d2619427645e42b2ca388943f4c1be4dd17ce8))
+- Better mode explanation (#57) ([`3333d20a`](../../commit/3333d20a309ca47d12516ee36c75409ec0b9e687))
+- Compact mode (#62) ([`a5a3ac4c`](../../commit/a5a3ac4ce047092c985fa8d85f21c8a472635eef))
+- Support custom commands (#64) ([`35b82267`](../../commit/35b822675ed1afdac82bcfc5e70eb14a0e38b37b))
 
 ### Miscellaneous
 
-- Fix compaction marker hydration ordering ([`f594b28b`](../../commit/f594b28bfc068c29d08925c8237bf12684a154b7))
-## [0.3.3] — 2026-05-16
+- Initial commit ([`09a8dca4`](../../commit/09a8dca4491781d82640a87fe576abe770a28d01))
+- Revert "feat(cli): alias "hygge auth" → "hygge provider"" ([`0912f104`](../../commit/0912f104dd091b9ed3b12e59d1cd228138994f1f))
+- Fix compaction marker hydration ordering ([`d764015f`](../../commit/d764015f6ec52cde1f81a7a5c7ce681841021fcb))
+- Add built-in iTerm themes (#6) ([`09220e1a`](../../commit/09220e1a9c6334bd1061eaa001cbc6d0782ed42b))
+- Fix dry-run Gemini onboarding (#9) ([`eac41fb5`](../../commit/eac41fb523437fdb6e3b30c0e7f07e7d15813395))
+- Fix MCP SSE and tool schema handling (#11) ([`cec12754`](../../commit/cec12754eb084962ef1f943294deea65fbc6ead6))
+- Remove legacy Anthropic and OpenAI provider shims (#10) ([`da5270a6`](../../commit/da5270a68b4d22cb17dd0faf3a8da2860c47920f))
+- HYGGE-8 Use Ctrl+G to leave subagent view (#15) ([`c5f929c9`](../../commit/c5f929c950603834397b23e6ff2d05da8432a82c))
+- HYGGE-9 Remove permission edit option (#16) ([`5cf9ad5b`](../../commit/5cf9ad5bb2c6a9165643798dc82408f580b2ee0b))
 
-### Features
+### Performance
 
-- Bump script ([`e2c92198`](../../commit/e2c92198fdd5f70f07ddd19e72761705722b084b))
-## [0.3.2] — 2026-05-16
+- **ui:** Render hydrated markdown asynchronously (#68) ([`c49c61a3`](../../commit/c49c61a30cd3d2667ac2267caebd7ec6d628b953))
+- **ui:** Precompute theme-derived styles once per render pass (#70) ([`933d5ea6`](../../commit/933d5ea6d0a1dc2329e2ae78ae3cd423180917a1))
+- Return totals from PropagateTotals; lowercase catalog keys (#75) ([`90784adf`](../../commit/90784adf4500824b21bc719578c1627a67b59b6a))
 
-### Chores
+### Refactoring
 
-- Switch info log to debug ([`03dc8905`](../../commit/03dc8905eb8ee396b9a0659eb32a95d6cd6ce3a5))
-## [0.3.1] — 2026-05-16
+- **config:** Use internal/state for profile lookup ([`8898140e`](../../commit/8898140eb5e65fa6377f533d4632642639241778))
+- **cost:** Drop catalog relaxed-match; models.dev uses dashes too ([`c30d480a`](../../commit/c30d480a66fa41b5dc69fb3a8e8a83cb9800bff5))
+- **agentsmd:** Drop recursive subdir scan; subdir context is lazy ([`e00ec584`](../../commit/e00ec584938d3243d4c8bb54eafcec73d34fcc85))
+- **agent:** Introduce fantasy runtime coordinator ([`19f5677c`](../../commit/19f5677c16cabc1a1d1a3e47caa1d177d94c9a42))
+- **ui:** Introduce dialog overlay stack ([`ac33c063`](../../commit/ac33c06378476269f769f9b8008dae48b7b23afe))
+- Ui rewrite ([`8957751e`](../../commit/8957751e0e84eab8e36ab693b7cf4ae07044fffa))
+- Rename task to subagent ([`77b75ccd`](../../commit/77b75ccd6b3a832d7dea526c0c034f2cd183827d))
+- Always modes ([`437d209c`](../../commit/437d209c09f35e596e17e03904d448ae7fa17383))
+- Permissions to always allow subagent by default ([`4faddb02`](../../commit/4faddb027e68a5d1db344c05db7d322bd70cf3d4))
+- Swap setNotice for showToast ([`3a176f82`](../../commit/3a176f82e4a41f38d6aeaae356a5c86deb33756e))
+- Share noninteractive git runner ([`420e261b`](../../commit/420e261bc8ebcf18897bd9a6b3f0dadf1a11935b))
+- Prepare fantasy steps explicitly ([`a998c26e`](../../commit/a998c26e00dd320e6f7a5e13e10754c6cdd68d17))
+- Split ui app responsibilities ([`a583c928`](../../commit/a583c9281b2cf2c48cef24e57b4e68cd5f9eb1a2))
+- **config:** Prefer modes for model selection ([`ec960b05`](../../commit/ec960b052fdc5b6dfcb91e57ab5d23b292438e2f))
+- Remove legacy theme package, consolidate on styles (#1) ([`9e98a77c`](../../commit/9e98a77c012c09a4cf6bbd4371e9a350dedbe508))
+- Remove dead legacy code (#20) ([`b27eefa4`](../../commit/b27eefa4cbfc5f86edd981dd1f911e801540ac07))
+- Drop top level model key (#27) ([`5b8b5429`](../../commit/5b8b5429f229cbfa7e61989a9785a2fa52b9a549))
+- Improve config explain output (#33) ([`b2e1ffa5`](../../commit/b2e1ffa56ca278ed8f26183788eeaffdd3659963))
+- **ui:** Extract message cache into a deep module (#69) ([`5d5258dd`](../../commit/5d5258ddc59a17e570b278090b33f29407d33195))
+- **permission:** One shared gate behind every tool adapter (#71) ([`eca105dc`](../../commit/eca105dc578bfc7cbdcc3068599cf9d85c9b8adc))
+- Centralize subprocess env and output policy in procenv (#72) ([`e4144ddd`](../../commit/e4144ddd9e32ff24291bd1d9adcb5e9fe7cbc97d))
+- **cli:** Split bootstrap wiring out of common.go by subsystem (#76) ([`dd1259ad`](../../commit/dd1259ad76695bbdca919fa2944fed948b2538e9))
 
-### Bug Fixes
+### Reverts
 
-- Support root go install ([`8829994c`](../../commit/8829994c46d5a833335dc47455f1629e9c0de3a8))
+- Remove richer tool details ([`4f49d330`](../../commit/4f49d33094cd476e0f8b31cc480781bdbd5b086b))
+
+### Style
+
+- Sidebar width ([`1c7c41ec`](../../commit/1c7c41ec4ea795d31b02790be6fa151020044235))
+- Tool block padding ([`f9d45f3d`](../../commit/f9d45f3dc591f23eebf500a21e5e2ad870d962a7))
+- Tone down diff additions ([`9355ee99`](../../commit/9355ee99cf93c6afcf67fdc3cef94ca7b512a18d))
+- Diff view ([`c2670a9d`](../../commit/c2670a9d5314f5716fa8be8edcd6afaf1f79b324))
+- **ui:** Polish permission modal (#4) ([`40c3eff3`](../../commit/40c3eff352a75efbfd0d338cc1b824720c4981e9))
+- Polish CLI inspection output (#24) ([`2f5fe9ab`](../../commit/2f5fe9ab2b33ab87f18b506f36004794d57c0185))
+- Smaller sidebar by two columns (#48) ([`a9c75dbb`](../../commit/a9c75dbb6be55d23826fba1dbfa77e7cbb2608f3))
+
+### Tests
+
+- **permission:** Cover engine edge cases ([`d8fbceb5`](../../commit/d8fbceb570beca651cda72c701bc9d37a2500d35))
+- **mcp:** Bound fake server waits ([`41bb6829`](../../commit/41bb68297d97099e0e0db74e92a81b5582093640))
+- **tool:** Guard subagent final response payload ([`7a0f4e97`](../../commit/7a0f4e97b98277f693acdefc9901232b78033e77))
+- Cover title model selection (#14) ([`b8d8d2ec`](../../commit/b8d8d2ec4859bd97cf994d6a4cb8837a2b2d9daa))
 
