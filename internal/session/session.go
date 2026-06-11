@@ -96,10 +96,10 @@ type Totals struct {
 	CostUSD          float64
 }
 
-// SessionTotalsUpdate pairs a session id with its running totals as they
+// TotalsUpdate pairs a session id with its running totals as they
 // stood after an update.  Returned by Store.PropagateTotals so callers can
 // publish per-session cost events without re-reading each row.
-type SessionTotalsUpdate struct {
+type TotalsUpdate struct {
 	SessionID string
 	Totals    Totals
 }
@@ -320,7 +320,7 @@ type Store interface {
 	//
 	// Sessions that existed before T2.1 keep their prior (un-rolled-up)
 	// totals; only new deltas go through the chain walk.
-	PropagateTotals(ctx context.Context, id string, delta Totals) ([]SessionTotalsUpdate, error)
+	PropagateTotals(ctx context.Context, id string, delta Totals) ([]TotalsUpdate, error)
 
 	// SoftDeleteSession marks the session and bumps UpdatedAt.  Already
 	// deleted sessions are left untouched (no error).

@@ -299,7 +299,7 @@ func (s *Store) UpdateSessionTotals(ctx context.Context, id string, delta sessio
 // Returns one update per session, carrying the session id and its
 // post-update running totals, ordered leaf-first (id is always index 0;
 // the root ancestor is last).
-func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.Totals) ([]session.SessionTotalsUpdate, error) {
+func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.Totals) ([]session.TotalsUpdate, error) {
 	// Step 1: collect the ancestor chain in a single read query.
 	const chainSQL = `
 		WITH RECURSIVE ancestors(id, parent_id, depth) AS (
@@ -348,7 +348,7 @@ func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.To
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	updates := make([]session.SessionTotalsUpdate, 0, len(chain))
+	updates := make([]session.TotalsUpdate, 0, len(chain))
 	for _, chainID := range chain {
 		_, err := tx.ExecContext(ctx, `
 			UPDATE sessions SET
@@ -380,7 +380,7 @@ func (s *Store) PropagateTotals(ctx context.Context, id string, delta session.To
 		if err != nil {
 			return nil, fmt.Errorf("store: PropagateTotals read back %q: %w", chainID, err)
 		}
-		updates = append(updates, session.SessionTotalsUpdate{SessionID: chainID, Totals: totals})
+		updates = append(updates, session.TotalsUpdate{SessionID: chainID, Totals: totals})
 	}
 
 	if err := tx.Commit(); err != nil {
