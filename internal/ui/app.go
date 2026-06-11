@@ -234,6 +234,7 @@ func New(opts AppOptions) (*App, error) {
 		notifyBackend:         nb,
 		lastAssistantFlushIdx: -1,
 	}
+	a.quitConfirm = &quitOverlay{styles: a.ensureOverlayStyles}
 	a.msgViewport.MouseWheelEnabled = true
 	a.spinner.Spinner = spinner.Meter
 	if themeStyles.WorkingGradFromColor != nil {
@@ -307,8 +308,8 @@ type App struct {
 
 	// lastEscAt records when Esc was last pressed for double-Esc detection.
 	lastEscAt time.Time
-	// quitSelectedNo tracks which button is selected in the quit overlay.
-	quitSelectedNo bool
+	// quitConfirm is the quit confirmation overlay (see overlay_quit.go).
+	quitConfirm *quitOverlay
 
 	// expandedTools tracks which tool results are fully expanded (not truncated).
 	expandedTools map[string]bool

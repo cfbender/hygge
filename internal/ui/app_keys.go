@@ -37,6 +37,15 @@ func (a *App) splashFogTick() tea.Cmd {
 // keybinds work; everything else is dropped.
 func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if top, ok := a.overlays.Top(); ok {
+		// Migrated modals implement the overlay interface and handle their
+		// own keys; everything else still routes through the kind switch.
+		if ov := a.overlayFor(top); ov != nil {
+			cmd, done := ov.Update(k)
+			if done {
+				a.closeOverlay(top)
+			}
+			return a, cmd
+		}
 		switch top {
 		case overlayPermission:
 			return a.handleModalKey(k)
@@ -65,25 +74,6 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a.handleOnboardingKey(k)
 		case overlayMessageAction:
 			return a.handleMessageActionModalKey(k)
-		case overlayQuit:
-			switch k.String() {
-			case "y", "Y", "ctrl+c":
-				return a, tea.Quit
-			case "n", "N", "esc":
-				a.closeOverlay(overlayQuit)
-				return a, nil
-			case "left", "right", "tab", "h", "l":
-				a.quitSelectedNo = !a.quitSelectedNo
-				return a, nil
-			case "enter", " ":
-				if !a.quitSelectedNo {
-					return a, tea.Quit
-				}
-				a.closeOverlay(overlayQuit)
-				return a, nil
-			default:
-				return a, nil
-			}
 		}
 	}
 	if k.Code == tea.KeyEnter && (k.Mod.Contains(tea.ModShift) || k.Mod.Contains(tea.ModAlt)) {
@@ -102,7 +92,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if a.overlays.Has(overlayQuit) {
 			return a, tea.Quit
 		}
-		a.quitSelectedNo = true // default to "No" (safe choice)
+		a.quitConfirm.selectedNo = true // default to "No" (safe choice)
 		a.openOverlay(overlayQuit)
 		return a, nil
 	case "ctrl+l":
