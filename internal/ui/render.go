@@ -220,6 +220,12 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 	w := a.width
 	h := a.height
 
+	// Migrated modals render themselves; everything else still routes
+	// through the kind switch below.
+	if ov := a.overlayFor(overlay); ov != nil {
+		return ov.View(w, h)
+	}
+
 	switch overlay {
 	case overlayPermission:
 		return components.PermissionModal{
@@ -275,8 +281,6 @@ func (a *App) renderOverlayContent(overlay overlayKind) string {
 		a.messageActionModal.Width = w
 		a.messageActionModal.Height = h
 		return a.messageActionModal.View()
-	case overlayQuit:
-		return a.renderQuitOverlay(w, h)
 	}
 	return ""
 }
@@ -334,67 +338,6 @@ func (a *App) ensureOverlayStyles() *overlayStyles {
 		noticeText: noticeText,
 	}
 	return a.overlayStyles
-}
-
-// renderQuitOverlay renders a centered quit confirmation dialog with
-// selectable Yes/No buttons.
-func (a *App) renderQuitOverlay(w, h int) string {
-	question := "Are you sure you want to quit?"
-
-	ov := a.ensureOverlayStyles()
-
-	var yesBtn, noBtn string
-	if a.quitSelectedNo {
-		yesBtn = ov.quitNormal.Render("yeah")
-		noBtn = ov.quitSelected.Render("nah")
-	} else {
-		yesBtn = ov.quitSelected.Render("yeah")
-		noBtn = ov.quitNormal.Render("nah")
-	}
-	btnSep := ov.quitBgPad.Render(" ")
-	buttonRow := yesBtn + btnSep + noBtn
-
-	// Build content manually to avoid JoinVertical centering artifacts.
-	// Ensure every line has the box background.
-	qText := question
-	qW := lipgloss.Width(qText)
-	bW := lipgloss.Width(buttonRow)
-	innerW := max(bW, qW)
-
-	// Center the button row within the inner width.
-	btnPad := max((innerW-bW)/2, 0)
-	bgPad := ov.quitBgPad
-	centeredButtons := bgPad.Render(strings.Repeat(" ", btnPad)) + buttonRow + bgPad.Render(strings.Repeat(" ", innerW-bW-btnPad))
-
-	// Center the question too.
-	qPad := max((innerW-qW)/2, 0)
-	centeredQ := bgPad.Render(strings.Repeat(" ", qPad)) + ov.quitQuestion.Render(qText) + bgPad.Render(strings.Repeat(" ", innerW-qW-qPad))
-
-	blankLine := bgPad.Render(strings.Repeat(" ", innerW))
-
-	content := centeredQ + "\n" + blankLine + "\n" + centeredButtons
-	box := ov.quitBox.Render(content)
-
-	boxW := lipgloss.Width(box)
-	boxH := lipgloss.Height(box)
-
-	padLeft := (w - boxW) / 2
-	padTop := (h - boxH) / 2
-	if padLeft < 0 {
-		padLeft = 0
-	}
-	if padTop < 0 {
-		padTop = 0
-	}
-
-	var lines []string
-	for range padTop {
-		lines = append(lines, "")
-	}
-	for line := range strings.SplitSeq(box, "\n") {
-		lines = append(lines, strings.Repeat(" ", padLeft)+line)
-	}
-	return strings.Join(lines, "\n")
 }
 
 // renderChromeContent produces the "chrome" elements between chat and footer:

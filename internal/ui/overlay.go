@@ -3,8 +3,34 @@ package ui
 import (
 	"slices"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/cfbender/hygge/internal/command"
 )
+
+// overlay is a self-contained modal: it owns its state, handles its own
+// input, and renders itself. Update returns done=true when the overlay
+// should close; the App pops it from the stack and restores input focus.
+// Migrated modals implement this interface and are routed generically by
+// key handling and rendering; unmigrated modals still go through the
+// per-kind switches in app_keys.go and render.go.
+type overlay interface {
+	Update(msg tea.Msg) (cmd tea.Cmd, done bool)
+	View(w, h int) string
+}
+
+// overlayFor returns the overlay implementation for kind, or nil when that
+// modal has not been migrated to the overlay interface yet. As modals
+// migrate, they gain a case here and lose their branches in the key/render
+// switches.
+func (a *App) overlayFor(kind overlayKind) overlay {
+	switch kind {
+	case overlayQuit:
+		return a.quitConfirm
+	default:
+		return nil
+	}
+}
 
 type overlayKind string
 
