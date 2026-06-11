@@ -108,7 +108,9 @@ func parseCatwalkJSON(body []byte, etag string) (*Snapshot, error) {
 }
 
 // snapshotFromCatwalkProviders converts a slice of catwalk.Provider
-// values into a Snapshot.
+// values into a Snapshot.  Provider and model map keys are lowercased so
+// lookups can index directly with lowercased inputs; the Entry fields
+// keep the catalog's original spelling for display.
 func snapshotFromCatwalkProviders(providers []catwalk.Provider, etag string) *Snapshot {
 	out := make(map[string]map[string]Entry, len(providers))
 	meta := make(map[string]ProviderMeta, len(providers))
@@ -117,16 +119,17 @@ func snapshotFromCatwalkProviders(providers []catwalk.Provider, etag string) *Sn
 		if providerID == "" {
 			continue
 		}
+		pkey := strings.ToLower(providerID)
 		mods := make(map[string]Entry, len(p.Models))
 		for _, m := range p.Models {
 			if m.ID == "" {
 				continue
 			}
 			e := entryFromCatwalkModel(providerID, m)
-			mods[m.ID] = e
+			mods[strings.ToLower(m.ID)] = e
 		}
 		if len(mods) > 0 {
-			out[providerID] = mods
+			out[pkey] = mods
 		}
 		// Always capture provider-level metadata even when there are no models
 		// (unlikely, but defensive).
@@ -139,7 +142,7 @@ func snapshotFromCatwalkProviders(providers []catwalk.Provider, etag string) *Sn
 			pm.DefaultHeaders = make(map[string]string, len(p.DefaultHeaders))
 			maps.Copy(pm.DefaultHeaders, p.DefaultHeaders)
 		}
-		meta[providerID] = pm
+		meta[pkey] = pm
 	}
 	return &Snapshot{ETag: etag, Providers: out, ProvidersMeta: meta}
 }
