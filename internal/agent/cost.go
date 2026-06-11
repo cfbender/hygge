@@ -52,7 +52,7 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 	// delta to each row atomically.  On failure, we log and continue —
 	// per-message usage data is already persisted by AppendMessage so the
 	// data is not lost.
-	ancestors, err := a.opts.Store.PropagateTotals(ctx, sessionID, delta)
+	updates, err := a.opts.Store.PropagateTotals(ctx, sessionID, delta)
 	if err != nil {
 		slog.Warn("agent: propagate session totals failed",
 			"session_id", sessionID, "err", err)
@@ -76,26 +76,21 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 			})
 		}
 	} else {
-		// Publish CostUpdated for each updated session (leaf first, root last).
-		// The TUI footer subscribes to the root id; sub-agent block headers
-		// subscribe to the leaf id.  Subscribing to intermediate ancestors is
-		// not done today — those rows silently accumulate in the DB and are
-		// visible in the sessions modal's per-row breakdown.
-		for _, ancestorID := range ancestors {
-			totalsForEvent, getErr := a.opts.Store.GetSession(ctx, ancestorID)
-			if getErr != nil {
-				slog.Warn("agent: load session for cost event failed",
-					"session_id", ancestorID, "err", getErr)
-				continue
-			}
+		// Publish CostUpdated for each updated session (leaf first, root last)
+		// straight from the totals PropagateTotals read back — no per-ancestor
+		// session loads.  The TUI footer subscribes to the root id; sub-agent
+		// block headers subscribe to the leaf id.  Subscribing to intermediate
+		// ancestors is not done today — those rows silently accumulate in the
+		// DB and are visible in the sessions modal's per-row breakdown.
+		for _, update := range updates {
 			bus.Publish(a.opts.Bus, bus.CostUpdated{
-				SessionID:        ancestorID,
-				InputTokens:      totalsForEvent.Totals.InputTokens,
-				OutputTokens:     totalsForEvent.Totals.OutputTokens,
-				CacheReadTokens:  totalsForEvent.Totals.CacheReadTokens,
-				CacheWriteTokens: totalsForEvent.Totals.CacheWriteTokens,
+				SessionID:        update.SessionID,
+				InputTokens:      update.Totals.InputTokens,
+				OutputTokens:     update.Totals.OutputTokens,
+				CacheReadTokens:  update.Totals.CacheReadTokens,
+				CacheWriteTokens: update.Totals.CacheWriteTokens,
 				ReasoningTokens:  u.ReasoningTokens,
-				DollarsTotal:     totalsForEvent.Totals.CostUSD,
+				DollarsTotal:     update.Totals.CostUSD,
 				At:               a.opts.Now(),
 			})
 		}
