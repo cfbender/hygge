@@ -96,6 +96,14 @@ type Totals struct {
 	CostUSD          float64
 }
 
+// TotalsUpdate pairs a session id with its running totals as they
+// stood after an update.  Returned by Store.PropagateTotals so callers can
+// publish per-session cost events without re-reading each row.
+type TotalsUpdate struct {
+	SessionID string
+	Totals    Totals
+}
+
 // Session is a single conversation, optionally rooted at a parent fork point.
 type Session struct {
 	ID                  string
@@ -303,15 +311,16 @@ type Store interface {
 	// All updates happen in a single SQL transaction so the chain is
 	// updated atomically.
 	//
-	// Returns the slice of session ids that were updated, ordered
-	// leaf-first (id is index 0; the root ancestor is last).  The
-	// caller uses this list to publish CostUpdated events for each
-	// ancestor so the TUI footer — which subscribes to the root id —
-	// sees the rolled-up total.
+	// Returns one update per session in the chain, each carrying the
+	// session id and its post-update running totals, ordered leaf-first
+	// (id is index 0; the root ancestor is last).  The caller uses this
+	// list to publish CostUpdated events for each ancestor so the TUI
+	// footer — which subscribes to the root id — sees the rolled-up
+	// total without issuing an extra read per ancestor.
 	//
 	// Sessions that existed before T2.1 keep their prior (un-rolled-up)
 	// totals; only new deltas go through the chain walk.
-	PropagateTotals(ctx context.Context, id string, delta Totals) ([]string, error)
+	PropagateTotals(ctx context.Context, id string, delta Totals) ([]TotalsUpdate, error)
 
 	// SoftDeleteSession marks the session and bumps UpdatedAt.  Already
 	// deleted sessions are left untouched (no error).

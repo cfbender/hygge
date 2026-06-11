@@ -468,10 +468,10 @@ func (c *Catalog) Close() error {
 // arguments are matched against the canonical id used by Catwalk.
 // Returns ok=false when not found.
 //
-// The lookup is case-insensitive on provider and on model, since
-// upstream provider ids are sometimes spelled differently across hygge's
-// surfaces (e.g. user typing "Anthropic" in a config field) but Catwalk
-// canonicalises provider ids to lowercase.
+// The lookup is case-insensitive on provider and on model: snapshot map
+// keys are lowercased at build time, so lowercasing the inputs here is
+// enough to match regardless of how hygge's surfaces spell an id (e.g.
+// a user typing "Anthropic" in a config field).
 func (c *Catalog) Lookup(provider, model string) (Entry, bool) {
 	if provider == "" || model == "" {
 		return Entry{}, false
@@ -487,28 +487,11 @@ func (c *Catalog) Lookup(provider, model string) (Entry, bool) {
 	mkey := strings.ToLower(model)
 	mods, ok := snap.Providers[pkey]
 	if !ok {
-		// Try the original spelling as a fallback in case the
-		// upstream catalog keeps a non-lowercase provider id.
-		mods, ok = snap.Providers[provider]
-		if !ok {
-			return Entry{}, false
-		}
+		return Entry{}, false
 	}
 	if e, ok := mods[mkey]; ok {
 		e.Source = src
 		return e, true
-	}
-	if e, ok := mods[model]; ok {
-		e.Source = src
-		return e, true
-	}
-	// One final pass: walk the map case-insensitively.  Rare path —
-	// only triggers when the upstream catalog uses mixed-case ids.
-	for k, e := range mods {
-		if strings.EqualFold(k, model) {
-			e.Source = src
-			return e, true
-		}
 	}
 	// OpenRouter alias pass: OpenRouter accepts both dashed and
 	// dotted forms of version suffixes server-side (e.g.
@@ -522,20 +505,10 @@ func (c *Catalog) Lookup(provider, model string) (Entry, bool) {
 	// openai) unaffected — they use deterministic ids and a false
 	// match would mask a typo.
 	if pkey == "openrouter" {
-		if alt, swapped := openRouterAlternateModelID(model); swapped {
-			if e, ok := mods[strings.ToLower(alt)]; ok {
-				e.Source = src
-				return e, true
-			}
+		if alt, swapped := openRouterAlternateModelID(mkey); swapped {
 			if e, ok := mods[alt]; ok {
 				e.Source = src
 				return e, true
-			}
-			for k, e := range mods {
-				if strings.EqualFold(k, alt) {
-					e.Source = src
-					return e, true
-				}
 			}
 		}
 	}
@@ -603,13 +576,9 @@ func (c *Catalog) Models(provider string) []Entry {
 	if snap == nil {
 		return nil
 	}
-	pkey := strings.ToLower(provider)
-	mods, ok := snap.Providers[pkey]
+	mods, ok := snap.Providers[strings.ToLower(provider)]
 	if !ok {
-		mods, ok = snap.Providers[provider]
-		if !ok {
-			return nil
-		}
+		return nil
 	}
 	out := make([]Entry, 0, len(mods))
 	for _, e := range mods {
@@ -654,14 +623,11 @@ func LookupProviderEmbedded(providerID string) (ProviderMeta, bool) {
 	if err != nil || snap == nil || snap.ProvidersMeta == nil {
 		return ProviderMeta{}, false
 	}
-	pkey := strings.ToLower(providerID)
-	if m, ok := snap.ProvidersMeta[pkey]; ok {
-		return cloneProviderMeta(m), true
+	m, ok := snap.ProvidersMeta[strings.ToLower(providerID)]
+	if !ok {
+		return ProviderMeta{}, false
 	}
-	if m, ok := snap.ProvidersMeta[providerID]; ok {
-		return cloneProviderMeta(m), true
-	}
-	return ProviderMeta{}, false
+	return cloneProviderMeta(m), true
 }
 
 func providerIDsFromSnapshot(snap *Snapshot) []string {
@@ -733,6 +699,7 @@ func (c *Catalog) Refresh(ctx context.Context) (RefreshResult, error) {
 		return RefreshResult{}, errors.New("catalog: source returned nil snapshot")
 	}
 	snap.FetchedAt = c.now()
+	normalizeSnapshotKeys(snap)
 
 	// Snap the previous age before we swap.
 	c.mu.RLock()
@@ -812,14 +779,11 @@ func (c *Catalog) LookupProvider(providerID string) (ProviderMeta, bool) {
 	if snap == nil || snap.ProvidersMeta == nil {
 		return ProviderMeta{}, false
 	}
-	pkey := strings.ToLower(providerID)
-	if m, ok := snap.ProvidersMeta[pkey]; ok {
-		return cloneProviderMeta(m), true
+	m, ok := snap.ProvidersMeta[strings.ToLower(providerID)]
+	if !ok {
+		return ProviderMeta{}, false
 	}
-	if m, ok := snap.ProvidersMeta[providerID]; ok {
-		return cloneProviderMeta(m), true
-	}
-	return ProviderMeta{}, false
+	return cloneProviderMeta(m), true
 }
 
 // StatePath returns the absolute path of the on-disk snapshot file, or
