@@ -34,7 +34,7 @@ func (s *stubStore) ListSessions(_ context.Context, _ ListOpts) ([]*Session, err
 func (s *stubStore) UpdateSessionTotals(_ context.Context, _ string, _ Totals) error {
 	panic("not implemented")
 }
-func (s *stubStore) PropagateTotals(_ context.Context, _ string, _ Totals) ([]SessionTotalsUpdate, error) {
+func (s *stubStore) PropagateTotals(_ context.Context, _ string, _ Totals) ([]TotalsUpdate, error) {
 	panic("not implemented")
 }
 func (s *stubStore) SoftDeleteSession(_ context.Context, _ string) error { panic("not implemented") }
