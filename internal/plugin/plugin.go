@@ -240,7 +240,8 @@ type SubagentRegistration struct {
 
 // ExecOptions configures a plugin Exec call.
 type ExecOptions struct {
-	// Env is extra environment variables to pass.
+	// Env is extra environment variables to pass.  Merged on top of
+	// the parent's environment filtered through procenv.Allowlist.
 	Env map[string]string
 
 	// Dir is the working directory; empty means the session's pwd.

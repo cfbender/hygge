@@ -15,19 +15,14 @@ import (
 
 	"github.com/cfbender/hygge/internal/bus"
 	"github.com/cfbender/hygge/internal/permission"
+	"github.com/cfbender/hygge/internal/procenv"
 )
 
 const (
 	bashDefaultTimeoutMs = 30_000
 	bashMaxTimeoutMs     = 600_000
-	bashMaxOutputBytes   = 100 * 1024 // 100 KB cap on combined output
+	bashMaxOutputBytes   = procenv.MaxOutputBytes // cap on combined output
 )
-
-// envPassthrough is the minimal allowlist of environment variables forwarded
-// to bash commands.  Anything else is stripped to keep the blast radius
-// small.  Tools that genuinely need more should propose a schema field in
-// a future version rather than expanding this list.
-var envPassthrough = []string{"PATH", "HOME", "LANG", "USER", "TERM", "LC_ALL", "LC_CTYPE"}
 
 type bashArgs struct {
 	Command     string `json:"command"`
@@ -118,7 +113,7 @@ func (t *bashTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 	if ec.Pwd != "" {
 		cmd.Dir = ec.Pwd
 	}
-	cmd.Env = filteredEnv(envPassthrough)
+	cmd.Env = procenv.Filtered()
 
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
@@ -175,7 +170,7 @@ func (t *bashTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 		toWrite := line + "\n"
 		if len(toWrite) > remaining {
 			combined.WriteString(toWrite[:remaining])
-			combined.WriteString("… (output truncated)\n")
+			combined.WriteString(procenv.TruncationMarker + "\n")
 			outTruncated = true
 		} else {
 			combined.WriteString(toWrite)
@@ -292,16 +287,4 @@ func scanPipe(wg *sync.WaitGroup, r io.Reader, stream string,
 	// Scanner errors here are surfaced as truncation; we do not propagate
 	// them to the caller because the process exit status is the
 	// authoritative outcome signal.
-}
-
-// filteredEnv returns a slice of "KEY=value" pairs for the named
-// environment variables that are actually set in the current process.
-func filteredEnv(names []string) []string {
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		if v, ok := os.LookupEnv(name); ok {
-			out = append(out, name+"="+v)
-		}
-	}
-	return out
 }
