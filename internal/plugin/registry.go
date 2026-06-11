@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 	"github.com/cfbender/hygge/internal/command"
 	"github.com/cfbender/hygge/internal/hook"
 	"github.com/cfbender/hygge/internal/permission"
+	"github.com/cfbender/hygge/internal/procenv"
 	"github.com/cfbender/hygge/internal/subagent"
 	"github.com/cfbender/hygge/internal/tool"
 )
@@ -562,9 +562,11 @@ func (h *registryHost) Exec(ctx context.Context, cmdStr string, args []string, o
 	} else if h.reg.opts.Pwd != "" {
 		cmd.Dir = h.reg.opts.Pwd
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Env = procenv.Merged(opts.Env)
+	stdout := &procenv.LimitedBuffer{Max: procenv.MaxOutputBytes}
+	stderr := &procenv.LimitedBuffer{Max: procenv.MaxOutputBytes}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	runErr := cmd.Run()
 	code := 0

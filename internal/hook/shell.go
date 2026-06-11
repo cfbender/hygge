@@ -6,17 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"maps"
-	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
-)
 
-// envAllowlist mirrors the MCP stdio allowlist so hook subprocesses
-// receive the same baseline environment as MCP servers.
-var envAllowlist = []string{"PATH", "HOME", "LANG", "USER", "TERM", "LC_ALL", "LC_CTYPE"}
+	"github.com/cfbender/hygge/internal/procenv"
+)
 
 // maxStderrBytes is the cap applied when using stderr as a deny reason.
 const maxStderrBytes = 1024
@@ -77,7 +72,7 @@ func (h *shellHook) Run(ctx context.Context, in Input) (Action, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, h.command, h.args...) //nolint:gosec // command is config-supplied and allowlisted
-	cmd.Env = mergeEnv(envAllowlist, h.env)
+	cmd.Env = procenv.Merged(h.env)
 	cmd.Stdin = bytes.NewReader(inBytes)
 	// WaitDelay ensures the process is killed and pipes drained promptly
 	// after the context deadline fires, preventing a misbehaving hook
@@ -134,23 +129,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-// mergeEnv builds the child's environment from the parent's filtered
-// allowlist plus the caller-supplied overrides.  Returns deterministic
-// "KEY=value" pairs sorted for stable test output.
-func mergeEnv(allow []string, extra map[string]string) []string {
-	merged := make(map[string]string, len(allow)+len(extra))
-	for _, name := range allow {
-		if v, ok := os.LookupEnv(name); ok {
-			merged[name] = v
-		}
-	}
-	maps.Copy(merged, extra)
-	out := make([]string, 0, len(merged))
-	for k, v := range merged {
-		out = append(out, k+"="+v)
-	}
-	sort.Strings(out)
-	return out
 }

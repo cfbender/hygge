@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
-	"sort"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/cfbender/hygge/internal/procenv"
 )
 
 // Transport is the wire-level interface a Client speaks to.  In v0.2
@@ -46,12 +46,6 @@ type Transport interface {
 	ServerLabel() string
 }
 
-// stdioEnvAllowlist is the set of environment variables forwarded from
-// the parent process to every MCP subprocess.  Matches internal/tool
-// bash's envPassthrough so the behaviour is consistent across the
-// codebase.
-var stdioEnvAllowlist = []string{"PATH", "HOME", "LANG", "USER", "TERM", "LC_ALL", "LC_CTYPE"}
-
 // stderrRingSize bounds the stderr capture buffer for diagnostics.
 // 64 KiB matches the spec; older lines are dropped.
 const stderrRingSize = 64 * 1024
@@ -67,7 +61,7 @@ type StdioOptions struct {
 
 	// Env adds / overrides environment variables for the child.
 	// Merged on top of the parent's environment filtered through
-	// stdioEnvAllowlist.
+	// procenv.Allowlist.
 	Env map[string]string
 
 	// Dir sets the child's working directory.  Defaults to the
@@ -141,7 +135,7 @@ func (t *stdioTransport) Start(_ context.Context) error {
 	// final stderr.  The Client owns Recv-side cancellation by
 	// closing stdin via Close.
 	cmd := exec.Command(t.opts.Command, t.opts.Args...) //nolint:gosec // command is permission-gated and config-supplied
-	cmd.Env = mergeEnv(stdioEnvAllowlist, t.opts.Env)
+	cmd.Env = procenv.Merged(t.opts.Env)
 	if t.opts.Dir != "" {
 		cmd.Dir = t.opts.Dir
 	}
@@ -292,25 +286,6 @@ func (t *stdioTransport) Close() error {
 		return fmt.Errorf("%w; stderr: %s", werr, stderrTail)
 	}
 	return werr
-}
-
-// mergeEnv builds the child's environment from the parent's filtered
-// allowlist plus the caller-supplied overrides.  Returns deterministic
-// "KEY=value" pairs sorted for stable test output.
-func mergeEnv(allow []string, extra map[string]string) []string {
-	merged := make(map[string]string, len(allow)+len(extra))
-	for _, name := range allow {
-		if v, ok := os.LookupEnv(name); ok {
-			merged[name] = v
-		}
-	}
-	maps.Copy(merged, extra)
-	out := make([]string, 0, len(merged))
-	for k, v := range merged {
-		out = append(out, k+"="+v)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // ringBuffer is a bounded byte buffer that drops older data when full.
