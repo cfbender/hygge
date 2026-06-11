@@ -15,22 +15,6 @@ import (
 func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	l := a.layout
 
-	// Fill every cell with the theme background so no terminal default
-	// bleeds through (works even in multiplexers like Zellij/tmux that
-	// may not forward OSC background-color escapes).
-	if a.styles != nil && a.styles.Background != nil {
-		bgCell := &uv.Cell{
-			Content: " ",
-			Style:   uv.Style{Bg: a.styles.Background},
-			Width:   1,
-		}
-		for y := area.Min.Y; y < area.Max.Y; y++ {
-			for x := area.Min.X; x < area.Max.X; x++ {
-				scr.SetCell(x, y, bgCell)
-			}
-		}
-	}
-
 	// Compose the left column as a content flow.
 	leftContent := a.renderLeftColumn()
 	leftArea := area
@@ -41,20 +25,8 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// of participating in the left-column flow and pushing the editor down.
 	a.drawCompletionPalette(scr, area)
 
-	// Draw sidebar into the right column with its own background.
+	// Draw sidebar into the right column.
 	if l.sidebarW > 0 {
-		if a.styles != nil && a.styles.SidebarBg != nil {
-			bgCell := &uv.Cell{
-				Content: " ",
-				Style:   uv.Style{Bg: a.styles.SidebarBg},
-				Width:   1,
-			}
-			for y := l.sidebar.Min.Y; y < l.sidebar.Max.Y; y++ {
-				for x := l.sidebar.Min.X; x < l.sidebar.Max.X; x++ {
-					scr.SetCell(x, y, bgCell)
-				}
-			}
-		}
 		a.drawSidebar(scr, l.sidebar)
 	}
 
@@ -85,7 +57,66 @@ func (a *App) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		cursor = a.drawOverlay(scr, a.layout.overlay, top)
 	}
 
+	// Backfill the theme background into every cell the content left
+	// unstyled, so no terminal default bleeds through (works even in
+	// multiplexers like Zellij/tmux that may not forward OSC
+	// background-color escapes). This must run after all content draws:
+	// StyledString.Draw clears its area to unstyled cells before printing,
+	// which would wipe a background painted up front.
+	a.fillBackgroundGaps(scr, area)
+
 	return cursor
+}
+
+// fillBackgroundGaps assigns the theme background to cells without one —
+// SidebarBg inside the sidebar region, Background everywhere else. Content
+// cells that already carry a background are untouched.
+func (a *App) fillBackgroundGaps(scr uv.Screen, area uv.Rectangle) {
+	if a.styles == nil || a.styles.Background == nil {
+		return
+	}
+	bg := a.styles.Background
+	sidebarBg := a.styles.SidebarBg
+	if sidebarBg == nil || a.layout.sidebarW <= 0 {
+		sidebarBg = bg
+	}
+	sidebar := a.layout.sidebar
+
+	// The View pipeline draws into a ScreenBuffer rebuilt every frame, so
+	// cells can be patched in place without SetCell's per-cell equality and
+	// damage tracking.
+	if sb, ok := scr.(uv.ScreenBuffer); ok {
+		for y := area.Min.Y; y < area.Max.Y && y < len(sb.Lines); y++ {
+			line := sb.Lines[y]
+			for x := area.Min.X; x < area.Max.X && x < len(line); x++ {
+				if line[x].Style.Bg != nil {
+					continue
+				}
+				if y >= sidebar.Min.Y && y < sidebar.Max.Y && x >= sidebar.Min.X && x < sidebar.Max.X {
+					line[x].Style.Bg = sidebarBg
+				} else {
+					line[x].Style.Bg = bg
+				}
+			}
+		}
+		return
+	}
+
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			c := scr.CellAt(x, y)
+			if c == nil || c.Style.Bg != nil {
+				continue
+			}
+			patched := *c
+			if y >= sidebar.Min.Y && y < sidebar.Max.Y && x >= sidebar.Min.X && x < sidebar.Max.X {
+				patched.Style.Bg = sidebarBg
+			} else {
+				patched.Style.Bg = bg
+			}
+			scr.SetCell(x, y, &patched)
+		}
+	}
 }
 
 // renderLeftColumn composes chat + chrome + editor + footer into a single
