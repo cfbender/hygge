@@ -76,11 +76,11 @@ type LimitedBuffer struct {
 // Write implements io.Writer.  It reports the full len(p) so writers
 // upstream never see a short-write error.
 func (b *LimitedBuffer) Write(p []byte) (int, error) {
-	max := b.Max
-	if max <= 0 {
-		max = MaxOutputBytes
+	limit := b.Max
+	if limit <= 0 {
+		limit = MaxOutputBytes
 	}
-	remaining := max - len(b.buf)
+	remaining := limit - len(b.buf)
 	switch {
 	case remaining <= 0:
 		if len(p) > 0 {
