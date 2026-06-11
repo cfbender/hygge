@@ -393,6 +393,7 @@ type App struct {
 	// 30fps fog tick is gated by fogTickRunning so it does not double-up.
 	fogStart       time.Time
 	fogTickRunning bool
+	fogCache       fogFrameCache
 
 	// cost / context state
 	costDollars     float64

@@ -74,6 +74,66 @@ type fogCell struct {
 	cr, cg, cb uint8
 }
 
+// Footer fog spinner cache parameters. The footer spinner runs on every frame
+// for the whole duration of a busy turn, so instead of recomputing FBM noise
+// live it plays a short precomputed loop.
+const (
+	fogCacheFrames = 24  // precomputed frames covering one playback direction
+	fogCachePeriod = 3.0 // seconds of fog time spanned by those frames
+	fogCacheFPS    = 8.0 // playback rate; fog drifts slowly, 8fps is plenty
+)
+
+// fogFrameCache holds a precomputed loop of footer spinner lines keyed by
+// size and tint, so the busy-state render path costs a string lookup instead
+// of per-cell noise. Frames play back ping-pong (0..n-1, n-2..1) because the
+// underlying noise is aperiodic and a straight loop would visibly jump at
+// the seam.
+type fogFrameCache struct {
+	key   string
+	lines []string // densest line of each precomputed banner frame
+}
+
+// line returns the footer spinner line for time t, regenerating the loop when
+// the size or tint changes (e.g. on theme switch).
+func (c *fogFrameCache) line(w, h int, accent color.Color, t float64) string {
+	if w < 1 || h < 1 {
+		return ""
+	}
+	hue, accentSat, _ := rgbToHSL(splitRGB(accent))
+	sat := math.Max(accentSat, fogSaturationFloor)
+	key := fmt.Sprintf("%dx%d|%.2f|%.2f", w, h, hue, sat)
+	if key != c.key {
+		c.key = key
+		c.lines = make([]string, fogCacheFrames)
+		for i := range c.lines {
+			ft := fogCachePeriod * float64(i) / fogCacheFrames
+			cells := computeFogCells(w, h, ft, hue, sat)
+			c.lines[i] = densestFogLine(serializeFogCells(cells, w, h))
+		}
+	}
+	// Ping-pong index: 0..n-1 then back down to 1, period 2n-2.
+	idx := max(int(t*fogCacheFPS)%(2*fogCacheFrames-2), 0)
+	if idx >= fogCacheFrames {
+		idx = 2*fogCacheFrames - 2 - idx
+	}
+	return c.lines[idx]
+}
+
+// densestFogLine picks the banner line with the most visible glyphs, which is
+// what the footer shows as its one-line spinner.
+func densestFogLine(frame string) string {
+	densest := ""
+	densestWidth := 0
+	for line := range strings.SplitSeq(frame, "\n") {
+		w := lipgloss.Width(strings.ReplaceAll(line, " ", ""))
+		if w > densestWidth {
+			densest = line
+			densestWidth = w
+		}
+	}
+	return densest
+}
+
 // renderFogBanner produces a w×h ANSI-coloured fog banner at time t, tinted
 // with the theme accent's hue. If label is non-empty, it is overlaid in
 // bold accent colour in the bottom-right of the grid.
