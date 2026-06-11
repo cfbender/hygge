@@ -807,7 +807,7 @@ func toolUseEvent(t *testing.T, id, name string, input map[string]any) provider.
 // server returning 500, with a cache path under t.TempDir.  Every LookUp
 // returns ErrModelNotPriced via the fallback path because the fakeProvider
 // model name is not in the hard-coded fallback table.
-func pricelessCatalog(t *testing.T) *cost.Catalog {
+func pricelessCatalog(t testing.TB) *cost.Catalog {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -821,7 +821,7 @@ func pricelessCatalog(t *testing.T) *cost.Catalog {
 
 // testEnv bundles the pieces every test needs.  Construct with newTestEnv.
 type testEnv struct {
-	t         *testing.T
+	t         testing.TB
 	Bus       *bus.Bus
 	Store     *store.Store
 	Perm      *permission.Engine
@@ -840,7 +840,7 @@ type testEnv struct {
 // newTestEnv wires every dependency in memory: a fresh in-memory SQLite
 // store, an isolated XDG-style state dir, a permission engine, the six
 // builtin tools, and a fixed clock.
-func newTestEnv(t *testing.T) *testEnv {
+func newTestEnv(t testing.TB) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 
@@ -927,7 +927,7 @@ func (e *testEnv) newAgent(prov provider.Provider, optFns ...func(*Options)) *Ag
 // autoAllow subscribes to PermissionAsked events and replies with an
 // allow-once decision for every one.  Returns a cancel func for tests
 // that want to switch to a custom responder mid-test.
-func autoAllow(t *testing.T, b *bus.Bus) func() {
+func autoAllow(t testing.TB, b *bus.Bus) func() {
 	t.Helper()
 	sub := bus.Subscribe[bus.PermissionAsked](b, bus.SubscribeOptions{BufferSize: 64})
 	done := make(chan struct{})
