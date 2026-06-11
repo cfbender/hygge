@@ -188,15 +188,7 @@ func (a *App) renderFooterFogSpinner() string {
 	if a.fogStart.IsZero() {
 		a.fogStart = time.Now()
 	}
-	frame := renderFogBanner(15, 5, time.Since(a.fogStart).Seconds(), resolveAccentRGB(a.styles, a.opts.Theme), "")
-	lines := strings.Split(frame, "\n")
-	densest := ""
-	for _, line := range lines {
-		if lipgloss.Width(strings.ReplaceAll(line, " ", "")) > lipgloss.Width(strings.ReplaceAll(densest, " ", "")) {
-			densest = line
-		}
-	}
-	return densest
+	return a.fogCache.line(15, 5, resolveAccentRGB(a.styles, a.opts.Theme), time.Since(a.fogStart).Seconds())
 }
 
 // renderSidebarContent produces the string content for the sidebar.
