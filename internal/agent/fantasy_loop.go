@@ -156,13 +156,18 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		ctx = a.opts.TurnContextDecorator(ctx, sessionID)
 	}
 
-	// Freeze the active provider id for the whole turn.  Callbacks
+	// Freeze the active model handle for the whole turn.  Callbacks
 	// (OnStreamFinish, OnStepFinish) consult usageFromFantasy
 	// repeatedly during a stream, and Agent.SetModel can swap the
-	// provider between turns; reading a.providerName() inside the
-	// callbacks would race the swap and could even mix providers
-	// within a single turn's accounting.
-	providerID := a.providerName()
+	// handle between turns; loading it inside the callbacks would race
+	// the swap and could even mix providers within a single turn's
+	// accounting.  The frozen handle also supplies the turn's model so
+	// model and provider id can never disagree mid-turn.
+	turnHandle := a.handle.Load()
+	providerID := ""
+	if turnHandle != nil {
+		providerID = turnHandle.providerID
+	}
 
 	msgs, marker, err := a.opts.Store.MessagesSinceLatestMarker(ctx, sessionID)
 	if err != nil {
@@ -290,7 +295,11 @@ func (a *Agent) runFantasyLoop(ctx context.Context, sessionID, modelName string)
 		a.collectLazyContext(sessionID, pwd, toolMsg)
 		return nil
 	}})
-	ag := fantasy.NewAgent(a.runtime.model, fantasy.WithTools(ftools...))
+	var turnModel fantasy.LanguageModel
+	if turnHandle != nil {
+		turnModel = turnHandle.fantasyModel
+	}
+	ag := fantasy.NewAgent(turnModel, fantasy.WithTools(ftools...))
 	call := fantasy.AgentStreamCall{Messages: fmsgs,
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
 			return a.prepareFantasyStep(ctx, sessionID, opts)

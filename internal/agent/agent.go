@@ -62,6 +62,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/fantasy"
@@ -173,7 +174,11 @@ type Agent struct {
 	opts    Options
 	runtime *Runtime
 	session *SessionAgent
-	model   session.ModelRef
+	// handle is the active-model bundle (provider/model ref, provider seam,
+	// provider id, Fantasy model). Swapped atomically by SetModel and shared
+	// with the Runtime, so hot-path readers never take a lock and can never
+	// observe a provider/model mismatch.
+	handle *atomic.Pointer[modelHandle]
 
 	// mu guards closed, ctx, cancel, locks, pendingLazy,
 	// pendingSystemAdditions, activeModeName, thresholdFired, pluginInjects,
@@ -261,9 +266,15 @@ func New(opts Options) (*Agent, error) {
 		opts.CompactionMaxTokens = 1024
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	handle := &atomic.Pointer[modelHandle]{}
+	handle.Store(newModelHandle(
+		session.ModelRef{Provider: opts.Provider.Name(), Name: modelName(opts.FantasyModel)},
+		opts.Provider,
+		opts.FantasyModel,
+	))
 	a := &Agent{
 		opts:                   opts,
-		model:                  session.ModelRef{Provider: opts.Provider.Name(), Name: modelName(opts.FantasyModel)},
+		handle:                 handle,
 		ctx:                    ctx,
 		cancel:                 cancel,
 		locks:                  make(map[string]*sync.Mutex),
@@ -276,10 +287,9 @@ func New(opts Options) (*Agent, error) {
 		queues:                 make(map[string][]QueuedSend),
 	}
 	a.runtime = NewRuntime(RuntimeOptions{
-		Model:        opts.FantasyModel,
-		TitleModel:   opts.TitleFantasyModel,
-		Tools:        opts.Tools,
-		ProviderName: providerNameFor(opts.Provider),
+		TitleModel: opts.TitleFantasyModel,
+		Tools:      opts.Tools,
+		Handle:     handle,
 	})
 	a.session = NewSessionAgent(a, a.runtime)
 	return a, nil
@@ -300,13 +310,7 @@ func (a *Agent) SetModel(providerName, modelName string, prv provider.Provider, 
 	if a.closed {
 		return ErrClosed
 	}
-	a.opts.Provider = prv
-	a.opts.FantasyModel = fm
-	a.model = session.ModelRef{Provider: providerName, Name: modelName}
-	if a.runtime != nil {
-		a.runtime.SetModel(fm)
-		a.runtime.SetProviderName(providerNameFor(prv))
-	}
+	a.handle.Store(newModelHandle(session.ModelRef{Provider: providerName, Name: modelName}, prv, fm))
 	return nil
 }
 
@@ -331,18 +335,18 @@ func providerNameFor(prv provider.Provider) string {
 // providerName returns the active provider id for use by usageFromFantasy.
 // Returns "" when the agent has no provider configured (test fixtures).
 //
-// Acquires a.mu because Agent.SetModel writes a.opts.Provider under the
-// same mutex; calling this without synchronisation would race a concurrent
-// SetModel.  Hot-path callers in the turn loop should capture the value
-// once at turn start instead of calling this in every callback.
+// Lock-free: reads the atomic model handle. Hot-path callers in the turn
+// loop should still capture the value once at turn start so a mid-turn
+// SetModel cannot mix providers within one turn's accounting.
 func (a *Agent) providerName() string {
 	if a == nil {
 		return ""
 	}
-	a.mu.Lock()
-	prv := a.opts.Provider
-	a.mu.Unlock()
-	return providerNameFor(prv)
+	h := a.handle.Load()
+	if h == nil {
+		return ""
+	}
+	return h.providerID
 }
 
 // SetSystemPrompt replaces the system prompt used by subsequent sends. It does
@@ -566,9 +570,11 @@ func (a *Agent) maybeSeedPreviewTitle(ctx context.Context, sessionID string, use
 }
 
 func (a *Agent) activeModel() session.ModelRef {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.model
+	h := a.handle.Load()
+	if h == nil {
+		return session.ModelRef{}
+	}
+	return h.ref
 }
 
 // latestUsageFor returns the most recently recorded context usage for
