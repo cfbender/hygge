@@ -8,6 +8,21 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.17.1] — 2026-06-12
+
+### Performance
+
+- **ui:** Precompute footer fog spinner frames (#77) ([`d89ac9d2`](../../commit/d89ac9d2beb64a8a3dae06e32ea2c985d8d739b3))
+- **ui:** Backfill theme background after content instead of pre-filling (#78) ([`5a9e97be`](../../commit/5a9e97be1971a5646a519a6b6b1098a70c6bc31b))
+
+### Refactoring
+
+- **agent:** Consolidate active-model identity into one atomic handle (#80) ([`e02841a3`](../../commit/e02841a34809158709cb56bcaa0278b758d5051b))
+- **ui:** Introduce overlay interface; migrate quit confirm (#81) ([`7c46e59a`](../../commit/7c46e59aa77a3eaf7760395e84d15e2bd924e174))
+
+### Tests
+
+- **agent:** Benchmark concurrent subagent sends against one parent (#79) ([`d7166a76`](../../commit/d7166a761e3d51df928a14754091c6c2b79d9c5a))
 ## [0.17.0] — 2026-06-11
 
 ### Bug Fixes
