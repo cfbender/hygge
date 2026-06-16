@@ -8,6 +8,13 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.17.4] — 2026-06-16
+
+### Bug Fixes
+
+- Bash hanging child processes ([`162c9165`](../../commit/162c91650c63dcdfb8182d92dd6c8c592a4397ad))
+- Reasoning tokens count towards context usage ([`4ae3bdda`](../../commit/4ae3bddaa62dd7f5d9651e0177c1d7a96e2fa389))
+- Reserve output budget from context usage denominator ([`0ae6ce50`](../../commit/0ae6ce50884bec4328d2d16be0ef06a779fdd44a))
 ## [0.17.3] — 2026-06-16
 
 ### Bug Fixes
