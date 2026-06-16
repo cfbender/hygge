@@ -114,6 +114,11 @@ func (t *bashTool) Execute(ctx context.Context, raw json.RawMessage, ec ExecCont
 		cmd.Dir = ec.Pwd
 	}
 	cmd.Env = procenv.Filtered()
+	// Run the command in its own process group so an interrupt or timeout
+	// kills the whole tree, not just the direct `sh` child. Without this,
+	// grandchildren are orphaned and keep spinning CPU for the life of the
+	// session.
+	configureProcessGroup(cmd)
 
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
