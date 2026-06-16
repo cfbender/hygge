@@ -8,6 +8,15 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.17.3] — 2026-06-16
+
+### Bug Fixes
+
+- Better error messages ([`c40cc7fe`](../../commit/c40cc7fed86b36696f8bcb77852d5c625349d70b))
+
+### Refactoring
+
+- Cache messages ([`a197a5c6`](../../commit/a197a5c654b1f5c8149ec33068d6511607c762a0))
 ## [0.17.2] — 2026-06-16
 
 ### Bug Fixes
