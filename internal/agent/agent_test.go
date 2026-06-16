@@ -1601,6 +1601,75 @@ func TestWrapFantasyStreamErrorIncludesNestedProviderDetail(t *testing.T) {
 	}
 }
 
+func TestFantasyErrorDetail_RateLimitFromPreviousErrors(t *testing.T) {
+	// Mirrors a real OpenRouter envelope where a fallback provider returned 400
+	// but the meaningful failure (a 429 rate limit) is recorded under
+	// previous_errors. The user-facing message should surface the rate limit,
+	// not the generic envelope.
+	body := `{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"error\":{\"code\":400,\"message\":\"Corrupted thought signature.\"}}","provider_name":"Google AI Studio","previous_errors":[{"code":429,"message":"Provider returned error","provider_name":"Google","raw":"gemini is temporarily rate-limited upstream. Please retry shortly."}]}}}`
+	providerErr := &fantasy.ProviderError{StatusCode: 429, Message: "Provider returned error", ResponseBody: []byte(body)}
+
+	got := fantasyErrorDetail(providerErr)
+	if !strings.Contains(got, "Rate limited (429)") {
+		t.Fatalf("missing friendly rate-limit label: %q", got)
+	}
+	// The most-final upstream error ("Corrupted thought signature") is the
+	// specific cause; the 429 label already conveys the rate-limit context.
+	if !strings.Contains(got, "Corrupted thought signature") {
+		t.Fatalf("missing specific upstream detail: %q", got)
+	}
+	if strings.Contains(got, "Provider returned error") {
+		t.Fatalf("leaked generic envelope message: %q", got)
+	}
+}
+
+func TestFantasyErrorDetail_PreviousErrorWhenNoFinalDetail(t *testing.T) {
+	// When the final attempt carries no specific raw error, fall back to the
+	// previous_errors entry so the user still sees a meaningful cause.
+	body := `{"error":{"message":"Provider returned error","metadata":{"provider_name":"Google","previous_errors":[{"code":429,"message":"Provider returned error","provider_name":"Google","raw":"gemini is temporarily rate-limited upstream. Please retry shortly."}]}}}`
+	providerErr := &fantasy.ProviderError{StatusCode: 429, Message: "Provider returned error", ResponseBody: []byte(body)}
+
+	got := fantasyErrorDetail(providerErr)
+	if !strings.Contains(got, "Rate limited (429)") || !strings.Contains(got, "rate-limited upstream") {
+		t.Fatalf("missing upstream rate-limit detail: %q", got)
+	}
+}
+
+func TestFantasyErrorDetail_StripsRawHTTPDump(t *testing.T) {
+	// Some SDK fallback paths put the entire HTTP response (status line +
+	// headers + body) into Message/ResponseBody. We must not echo that blob.
+	dump := "HTTP/2.0 429 Too Many Requests\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n" +
+		`{"error":{"message":"rate limit exceeded","metadata":{"provider_name":"OpenAI"}}}`
+	providerErr := &fantasy.ProviderError{
+		StatusCode:   429,
+		Message:      dump,
+		ResponseBody: []byte(dump),
+	}
+
+	got := fantasyErrorDetail(providerErr)
+	if strings.Contains(got, "HTTP/2.0") || strings.Contains(got, "Connection: close") {
+		t.Fatalf("leaked raw HTTP dump: %q", got)
+	}
+	if !strings.Contains(got, "Rate limited (429)") || !strings.Contains(got, "rate limit exceeded") {
+		t.Fatalf("missing clean rate-limit message: %q", got)
+	}
+}
+
+func TestFantasyErrorDetail_NonJSONBodyFallsBackToStatus(t *testing.T) {
+	// A non-JSON body with an unparseable Message should still yield a clean,
+	// status-labelled message rather than a blob or empty string.
+	providerErr := &fantasy.ProviderError{
+		StatusCode:   503,
+		Title:        "service unavailable",
+		ResponseBody: []byte("upstream connect error or disconnect/reset before headers"),
+	}
+
+	got := fantasyErrorDetail(providerErr)
+	if !strings.Contains(got, "Provider unavailable (503)") {
+		t.Fatalf("missing status label: %q", got)
+	}
+}
+
 // 7. Cost catalog miss: pricing returns ErrModelNotPriced, usage still records.
 func TestSend_CostCatalogMiss(t *testing.T) {
 	env := newTestEnv(t)

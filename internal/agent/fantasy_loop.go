@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -757,28 +758,102 @@ func logFantasyStreamError(err error, sessionID, modelName string) {
 	slog.Error("agent: fantasy stream failed", fields...)
 }
 
+// maxErrorDetailLen caps the length of a provider error message surfaced to the
+// user. Full detail is preserved in the structured log (see
+// logFantasyStreamError); this keeps the on-screen message readable.
+const maxErrorDetailLen = 500
+
 func fantasyErrorDetail(err error) string {
 	var providerErr *fantasy.ProviderError
 	if !errors.As(err, &providerErr) {
 		return ""
 	}
-	msg := strings.TrimSpace(providerErr.Message)
-	if nested := nestedProviderErrorMessage(providerErr.ResponseBody); nested != "" && nested != msg {
-		if provider := nestedProviderName(providerErr.ResponseBody); provider != "" {
-			return fmt.Sprintf("provider returned %d from %s: %s", providerErr.StatusCode, provider, nested)
-		}
-		return fmt.Sprintf("provider returned %d: %s", providerErr.StatusCode, nested)
+
+	body := extractJSONBody(providerErr.ResponseBody)
+	status := providerErr.StatusCode
+
+	// Prefer the most specific message we can find: the upstream provider's own
+	// error (including anything tucked into previous_errors) beats the generic
+	// "Provider returned error" envelope.
+	msg := nestedProviderErrorMessage(body)
+	if msg == "" {
+		msg = strings.TrimSpace(providerErr.Message)
 	}
 	if msg == "" {
 		msg = strings.TrimSpace(providerErr.Title)
 	}
+	msg = sanitizeErrorMessage(msg)
+	provider := nestedProviderName(body)
+
+	label := statusLabel(status)
+	switch {
+	case label != "" && provider != "" && msg != "":
+		return fmt.Sprintf("%s from %s: %s", label, provider, msg)
+	case label != "" && msg != "":
+		return fmt.Sprintf("%s: %s", label, msg)
+	case label != "":
+		return label
+	case provider != "" && msg != "":
+		return fmt.Sprintf("%s: %s", provider, msg)
+	default:
+		return msg
+	}
+}
+
+// statusLabel maps an HTTP status code to a short, human-friendly label. It
+// returns "" when the status is unknown or zero so callers can fall back to the
+// raw provider message.
+func statusLabel(status int) string {
+	switch status {
+	case 0:
+		return ""
+	case 401:
+		return "Authentication failed (401)"
+	case 403:
+		return "Access denied (403)"
+	case 404:
+		return "Model or endpoint not found (404)"
+	case 408:
+		return "Request timed out (408)"
+	case 413:
+		return "Request too large (413)"
+	case 429:
+		return "Rate limited (429)"
+	case 500, 502, 503, 504:
+		return fmt.Sprintf("Provider unavailable (%d)", status)
+	default:
+		return fmt.Sprintf("Provider error (%d)", status)
+	}
+}
+
+// sanitizeErrorMessage trims a message to a single readable line and caps its
+// length so a runaway provider blob never floods the UI.
+func sanitizeErrorMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return ""
 	}
-	if providerErr.StatusCode != 0 {
-		return fmt.Sprintf("provider returned %d: %s", providerErr.StatusCode, msg)
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		msg = strings.TrimSpace(msg[:i])
+	}
+	if len(msg) > maxErrorDetailLen {
+		msg = strings.TrimSpace(msg[:maxErrorDetailLen]) + "…"
 	}
 	return msg
+}
+
+// extractJSONBody returns the JSON object embedded in a provider response body.
+// Some providers (or the SDK's fallback path) hand back the full HTTP response
+// dump — status line plus headers plus body — so we slice from the first '{' to
+// the matching final '}' before attempting to parse. When no JSON object is
+// present the input is returned unchanged.
+func extractJSONBody(body []byte) []byte {
+	start := bytes.IndexByte(body, '{')
+	end := bytes.LastIndexByte(body, '}')
+	if start < 0 || end < start {
+		return body
+	}
+	return body[start : end+1]
 }
 
 func nestedProviderName(body []byte) string {
@@ -795,30 +870,63 @@ func nestedProviderName(body []byte) string {
 	return strings.TrimSpace(payload.Error.Metadata.ProviderName)
 }
 
+// providerErrorBody mirrors the OpenRouter-style error envelope, including the
+// previous_errors list that records the real upstream failure (e.g. the 429
+// rate-limit reason) before a fallback provider was tried.
+type providerErrorBody struct {
+	Error struct {
+		Message  string `json:"message"`
+		Metadata struct {
+			Raw            string `json:"raw"`
+			PreviousErrors []struct {
+				Message      string `json:"message"`
+				ProviderName string `json:"provider_name"`
+				Raw          string `json:"raw"`
+			} `json:"previous_errors"`
+		} `json:"metadata"`
+	} `json:"error"`
+}
+
 func nestedProviderErrorMessage(body []byte) string {
-	var payload struct {
-		Error struct {
-			Message  string `json:"message"`
-			Metadata struct {
-				Raw string `json:"raw"`
-			} `json:"metadata"`
-		} `json:"error"`
-	}
+	var payload providerErrorBody
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return strings.TrimSpace(string(body))
+		// Not a JSON envelope we understand. Don't echo the raw bytes; let the
+		// caller fall back to the structured ProviderError fields.
+		return ""
 	}
-	if raw := strings.TrimSpace(payload.Error.Metadata.Raw); raw != "" {
-		var nested struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
+
+	// A nested raw payload (the upstream provider's own JSON) is the most
+	// specific signal. Prefer its message, then any previous_errors entry.
+	if msg := messageFromRaw(payload.Error.Metadata.Raw); msg != "" {
+		return msg
+	}
+	for _, prev := range payload.Error.Metadata.PreviousErrors {
+		if msg := messageFromRaw(prev.Raw); msg != "" {
+			return msg
 		}
-		if err := json.Unmarshal([]byte(raw), &nested); err == nil {
-			if msg := strings.TrimSpace(nested.Error.Message); msg != "" {
-				return msg
-			}
+		if m := strings.TrimSpace(prev.Message); m != "" && m != "Provider returned error" {
+			return m
 		}
-		return raw
 	}
 	return strings.TrimSpace(payload.Error.Message)
+}
+
+// messageFromRaw extracts a human message from a nested raw error payload, which
+// may itself be JSON ({"error":{"message":...}}) or a plain string.
+func messageFromRaw(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var nested struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &nested); err == nil {
+		if msg := strings.TrimSpace(nested.Error.Message); msg != "" {
+			return msg
+		}
+	}
+	return raw
 }
