@@ -77,6 +77,9 @@ func (a *App) fillBackgroundGaps(scr uv.Screen, area uv.Rectangle) {
 	}
 	bg := a.styles.Background
 	sidebarBg := a.styles.SidebarBg
+	if _, overlayOpen := a.overlays.Top(); overlayOpen {
+		sidebarBg = bg
+	}
 	if sidebarBg == nil || a.layout.sidebarW <= 0 {
 		sidebarBg = bg
 	}

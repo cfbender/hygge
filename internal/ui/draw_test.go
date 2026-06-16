@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -52,6 +53,51 @@ func TestDrawSidebarGapsUseSidebarBackground(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDrawOverlayGapsUseAppBackgroundOverSidebar(t *testing.T) {
+	app := drawTestApp(t, 200, 60, 2)
+	if app.styles.SidebarBg == nil || sameColor(app.styles.SidebarBg, app.styles.Background) {
+		t.Skip("theme has no distinct sidebar background")
+	}
+	app.openOverlay(overlayQuit)
+	app.View()
+
+	sb := app.layout.sidebar
+	if sb.Dx() <= 0 {
+		t.Fatal("expected a sidebar region at 200 columns")
+	}
+
+	checked := 0
+	for y := sb.Min.Y; y < sb.Max.Y; y++ {
+		for x := sb.Min.X; x < sb.Max.X; x++ {
+			c := app.lastCanvas.CellAt(x, y)
+			if c == nil || c.Style.Bg == nil {
+				t.Fatalf("overlay sidebar cell (%d,%d) has no background", x, y)
+			}
+			// Skip text cells from the centered modal itself; the regression was the
+			// transparent backdrop around it revealing the sidebar panel background.
+			if c.Content != " " {
+				continue
+			}
+			checked++
+			if !sameColor(c.Style.Bg, app.styles.Background) {
+				t.Fatalf("overlay sidebar gap (%d,%d) bg = %#v, want app background %#v", x, y, c.Style.Bg, app.styles.Background)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("expected at least one transparent overlay cell in the sidebar region")
+	}
+}
+
+func sameColor(a, b color.Color) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
 func drawTestApp(t *testing.T, w, h, msgs int) *App {
