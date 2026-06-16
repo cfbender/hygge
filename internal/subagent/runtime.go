@@ -33,6 +33,7 @@ type Runner struct {
 	fantasyModel  FantasyModelResolver
 	pwd           string
 	contextWindow int64
+	maxOutput     int64
 	now           func() time.Time
 }
 
@@ -64,6 +65,12 @@ type RunnerOptions struct {
 	// forwarded to the embedded agent loop for ContextUsageUpdated
 	// pct-used math.  Zero is legal: the loop just skips PctUsed.
 	ContextWindow int64
+
+	// MaxOutput is the model's reserved output budget in tokens,
+	// forwarded to the embedded agent loop so PctUsed is computed
+	// against the input-available window (ContextWindow-MaxOutput).
+	// Zero is legal: no output reservation is applied.
+	MaxOutput int64
 
 	// ProviderResolver, when non-nil, is consulted whenever a
 	// [Type.Model] override is set on the requested type.  The
@@ -125,6 +132,7 @@ func NewRunner(opts RunnerOptions) (*Runner, error) {
 		fantasyModel:  opts.FantasyModelResolver,
 		pwd:           opts.Pwd,
 		contextWindow: opts.ContextWindow,
+		maxOutput:     opts.MaxOutput,
 		now:           opts.Now,
 	}, nil
 }
@@ -366,6 +374,7 @@ func (r *Runner) Run(ctx context.Context, in RunInput) (Result, error) {
 		Pwd:           r.pwd,
 		Now:           r.now,
 		ContextWindow: r.contextWindow,
+		MaxOutput:     r.maxOutput,
 		// LazyContext is intentionally nil: sub-agents start with a
 		// clean slate.  Stage C may revisit if a sub-agent type
 		// wants its own subdir-context tracker.

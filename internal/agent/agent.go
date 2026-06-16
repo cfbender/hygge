@@ -117,8 +117,15 @@ type Options struct {
 	// Now is an injectable clock for bus event timestamps.  Nil means time.Now.
 	Now func() time.Time
 	// ContextWindow is the model's maximum context size in tokens.  When
-	// non-zero, [bus.ContextUsageUpdated.PctUsed] is computed against it.
+	// non-zero, [bus.ContextUsageUpdated.PctUsed] is computed against the
+	// input-available window (ContextWindow minus MaxOutput).
 	ContextWindow int64
+	// MaxOutput is the model's reserved output budget in tokens.  The
+	// provider deducts this from the context window before accepting input,
+	// so the effective ceiling for prompt tokens is ContextWindow-MaxOutput.
+	// Reserving it from the PctUsed denominator keeps the gauge from reading
+	// optimistically near the limit.  Zero means "unknown" — no reservation.
+	MaxOutput int64
 	// CompactionMaxTokens caps the size of the generated summary in
 	// Compact.  Zero means 1024.
 	CompactionMaxTokens int

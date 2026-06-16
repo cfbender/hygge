@@ -462,6 +462,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 	// test injections) the value is 0 — the agent treats 0 as "unknown"
 	// and skips PctUsed math.
 	contextWindow := fantasyResolved.Metadata.ContextWindow
+	maxOutput := fantasyResolved.Metadata.MaxOutput
 	memoryStore := memory.NewFileStore(memory.FileStoreOptions{ProjectDir: opts.Pwd, HomeDir: opts.HomeDir, XDGConfigHome: xdgConfig, Now: opts.Now})
 
 	// Phase: skills load
@@ -542,6 +543,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		ParentTools:          tools,
 		Pwd:                  opts.Pwd,
 		ContextWindow:        contextWindow,
+		MaxOutput:            maxOutput,
 		ProviderResolver:     buildProviderResolver(cfg, stateOpts, prv),
 		FantasyModelResolver: buildFantasyModelResolver(cfg, stateOpts, catSrc, fantasyResolved.Model, orBuildOpts),
 		Now:                  opts.Now,
@@ -670,6 +672,7 @@ func bootstrap(ctx context.Context, opts bootstrapOptions) (rt *appRuntime, err 
 		Catalog:                catalog,
 		Pwd:                    opts.Pwd,
 		ContextWindow:          contextWindow,
+		MaxOutput:              maxOutput,
 		CompactionThresholdPct: cfg.Compaction.ThresholdPct,
 		SystemPrompt:           sysPrompt,
 		Now:                    opts.Now,

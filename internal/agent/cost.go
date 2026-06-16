@@ -105,9 +105,19 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 	// OutputTokens, so they must be added explicitly or the gauge under-counts.
 	used := u.InputTokens + u.CacheReadTokens + u.OutputTokens + u.ReasoningTokens
 	maxTok := a.opts.ContextWindow
+	// The provider reserves MaxOutput tokens of the window for the response,
+	// so the effective ceiling for prompt/input tokens is ContextWindow minus
+	// MaxOutput.  Dividing by that ceiling keeps the gauge from reading
+	// optimistically as usage approaches the real limit.  Guard against a
+	// misconfigured MaxOutput >= ContextWindow by falling back to the full
+	// window.
+	denom := maxTok
+	if a.opts.MaxOutput > 0 && a.opts.MaxOutput < maxTok {
+		denom = maxTok - a.opts.MaxOutput
+	}
 	var pct float64
-	if maxTok > 0 {
-		pct = float64(used) / float64(maxTok)
+	if denom > 0 {
+		pct = float64(used) / float64(denom)
 	}
 	bus.Publish(a.opts.Bus, bus.ContextUsageUpdated{
 		SessionID:       sessionID,

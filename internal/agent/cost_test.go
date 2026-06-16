@@ -578,6 +578,53 @@ func TestRecordUsage_IncludesReasoningTokens(t *testing.T) {
 	}
 }
 
+// TestRecordUsage_ReservesMaxOutputFromDenominator verifies that PctUsed is
+// computed against the input-available window (ContextWindow-MaxOutput), not
+// the full window.  The provider reserves MaxOutput for the response, so the
+// effective ceiling for prompt tokens is lower than the raw context window;
+// dividing by the full window would make the gauge read optimistically near
+// the real limit.
+func TestRecordUsage_ReservesMaxOutputFromDenominator(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+		o.MaxOutput = 200
+	})
+
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 400})
+
+	_, pctUsed := a.latestUsageFor(env.sessionID)
+	// 400 / (1000 - 200) = 0.5, not 400/1000 = 0.4.
+	if pctUsed != 0.5 {
+		t.Errorf("latestUsageFor.pctUsed = %v, want 0.5 (denominator reserves MaxOutput)", pctUsed)
+	}
+}
+
+// TestRecordUsage_MaxOutputClampsToFullWindow verifies that a misconfigured
+// MaxOutput >= ContextWindow does not produce a zero or negative denominator;
+// recordUsage falls back to dividing by the full window.
+func TestRecordUsage_MaxOutputClampsToFullWindow(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+		o.MaxOutput = 1000 // degenerate: equal to the window
+	})
+
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 400})
+
+	_, pctUsed := a.latestUsageFor(env.sessionID)
+	// Fallback to full window: 400/1000 = 0.4.
+	if pctUsed != 0.4 {
+		t.Errorf("latestUsageFor.pctUsed = %v, want 0.4 (clamped to full window)", pctUsed)
+	}
+}
+
 // TestRecordUsage_LatestUsageUpdatesOnSubsequentCalls verifies that the stored
 // usage is replaced (not accumulated) on subsequent calls.
 func TestRecordUsage_LatestUsageUpdatesOnSubsequentCalls(t *testing.T) {
