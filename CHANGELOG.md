@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.17.2] — 2026-06-16
+
+### Bug Fixes
+
+- Sidebar bleedthrough ([`13a4f719`](../../commit/13a4f719551b919f6966f4816677b8b2024ebf28))
 ## [0.17.1] — 2026-06-12
 
 ### Performance
