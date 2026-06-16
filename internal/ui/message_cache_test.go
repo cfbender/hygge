@@ -70,48 +70,98 @@ func TestMessageCache_TTLExpiryMiss(t *testing.T) {
 	}
 }
 
-// TestMessageCache_StreamingDirtyScrolledAway verifies the deferred-rebuild
-// path: when userScrolled=true and streamingDirty is set, Get returns a hit
-// so the full re-render is deferred until the user returns to the bottom.
-func TestMessageCache_StreamingDirtyScrolledAway(t *testing.T) {
+// TestMessageCache_MarkStreamingDirtyDoesNotForceMiss verifies that a streaming
+// delta marks the cache dirty without forcing a Get miss. Rebuilds are paced by
+// the coalescing tick, so an intervening render frame (keypress/scroll) keeps
+// hitting the cache regardless of scroll position.
+func TestMessageCache_MarkStreamingDirtyDoesNotForceMiss(t *testing.T) {
 	t.Parallel()
 	var c messageCache
 	c.Put("before", 80, 5, baseTime)
 
-	// Simulate a streaming delta while scrolled away: InvalidateStreaming with
-	// userScrolled=true should set streamingDirty and not fully invalidate.
-	c.InvalidateStreaming(true)
+	c.MarkStreamingDirty()
 
 	if !c.streamingDirty {
-		t.Fatal("expected streamingDirty=true after InvalidateStreaming(scrolled=true)")
+		t.Fatal("expected streamingDirty=true after MarkStreamingDirty")
 	}
 	if !c.valid {
-		t.Fatal("expected valid=true (cache not fully invalidated while scrolled)")
+		t.Fatal("expected valid=true (MarkStreamingDirty must not invalidate)")
 	}
 
-	// Get with userScrolled=true → hit (defer the rebuild).
-	got, ok := c.Get(80, 5, baseTime, true)
-	if !ok {
-		t.Fatal("expected cache hit while scrolled away with streamingDirty; got miss")
-	}
-	if got != "before" {
-		t.Fatalf("Get returned %q; want %q", got, "before")
+	// Both at-bottom and scrolled-away must hit: rebuilds are tick-paced.
+	for _, scrolled := range []bool{false, true} {
+		got, ok := c.Get(80, 5, baseTime, scrolled)
+		if !ok {
+			t.Fatalf("expected cache hit while streamingDirty (scrolled=%v); got miss", scrolled)
+		}
+		if got != "before" {
+			t.Fatalf("Get returned %q; want %q", got, "before")
+		}
 	}
 }
 
-// TestMessageCache_StreamingDirtyAtBottom verifies that when the user is at the
-// bottom (userScrolled=false) and streamingDirty is set, Get returns a miss so
-// the content is rebuilt immediately.
-func TestMessageCache_StreamingDirtyAtBottom(t *testing.T) {
+// TestMessageCache_FlushStreamingDirtyAtBottom verifies the coalescing tick
+// flush: at the bottom (userScrolled=false) a pending delta invalidates the
+// cache (reports rebuilt=true) so the next frame rebuilds once.
+func TestMessageCache_FlushStreamingDirtyAtBottom(t *testing.T) {
 	t.Parallel()
 	var c messageCache
 	c.Put("before", 80, 5, baseTime)
-	c.InvalidateStreaming(true) // set streamingDirty while scrolled away
+	c.MarkStreamingDirty()
 
-	// Now the user scrolls back to the bottom.
-	_, ok := c.Get(80, 5, baseTime, false)
-	if ok {
-		t.Fatal("expected cache miss at bottom with streamingDirty; got hit")
+	rebuilt := c.FlushStreamingDirty(false)
+	if !rebuilt {
+		t.Fatal("expected FlushStreamingDirty to report rebuilt=true at bottom")
+	}
+	if c.valid {
+		t.Fatal("expected valid=false after flush at bottom")
+	}
+	if c.streamingDirty {
+		t.Fatal("expected streamingDirty cleared after flush at bottom")
+	}
+	if _, ok := c.Get(80, 5, baseTime, false); ok {
+		t.Fatal("expected cache miss after flush; got hit")
+	}
+}
+
+// TestMessageCache_FlushStreamingDirtyScrolledAway verifies that while scrolled
+// away the flush defers the rebuild: it keeps the dirty flag and the cache stays
+// valid (reports rebuilt=false), so off-screen streaming costs nothing.
+func TestMessageCache_FlushStreamingDirtyScrolledAway(t *testing.T) {
+	t.Parallel()
+	var c messageCache
+	c.Put("before", 80, 5, baseTime)
+	c.MarkStreamingDirty()
+
+	rebuilt := c.FlushStreamingDirty(true)
+	if rebuilt {
+		t.Fatal("expected FlushStreamingDirty to report rebuilt=false while scrolled away")
+	}
+	if !c.valid {
+		t.Fatal("expected valid=true (rebuild deferred while scrolled away)")
+	}
+	if !c.streamingDirty {
+		t.Fatal("expected streamingDirty retained while scrolled away")
+	}
+	// Returning to the bottom and flushing should now rebuild.
+	if !c.FlushStreamingDirty(false) {
+		t.Fatal("expected rebuilt=true after returning to bottom")
+	}
+}
+
+// TestMessageCache_FlushStreamingDirtyNoop verifies that flushing with no
+// pending delta is a no-op that reports rebuilt=false and leaves the cache
+// valid.
+func TestMessageCache_FlushStreamingDirtyNoop(t *testing.T) {
+	t.Parallel()
+	var c messageCache
+	c.Put("before", 80, 5, baseTime)
+
+	if c.FlushStreamingDirty(false) {
+		t.Fatal("expected rebuilt=false when nothing is dirty")
+	}
+	if !c.valid {
+		t.Fatal("expected valid=true (no-op flush must not invalidate)")
 	}
 }
 
@@ -121,7 +171,7 @@ func TestMessageCache_InvalidateClearsStreamingDirty(t *testing.T) {
 	t.Parallel()
 	var c messageCache
 	c.Put("x", 80, 3, baseTime)
-	c.InvalidateStreaming(true) // sets streamingDirty
+	c.MarkStreamingDirty()
 
 	c.Invalidate() // full invalidation
 
@@ -134,14 +184,14 @@ func TestMessageCache_InvalidateClearsStreamingDirty(t *testing.T) {
 }
 
 // TestMessageCache_PutClearsStreamingDirty verifies that a Put after a
-// streaming invalidation clears the dirty flag so a subsequent hit is clean.
+// streaming-dirty mark clears the dirty flag so a subsequent hit is clean.
 func TestMessageCache_PutClearsStreamingDirty(t *testing.T) {
 	t.Parallel()
 	var c messageCache
 	c.Put("before", 80, 5, baseTime)
-	c.InvalidateStreaming(true) // sets streamingDirty
+	c.MarkStreamingDirty()
 
-	// Full rebuild by caller after returning to bottom.
+	// Full rebuild by caller after the coalescing tick invalidated.
 	c.Put("after", 80, 5, baseTime)
 
 	if c.streamingDirty {
@@ -153,24 +203,6 @@ func TestMessageCache_PutClearsStreamingDirty(t *testing.T) {
 	}
 	if got != "after" {
 		t.Fatalf("Get returned %q; want %q", got, "after")
-	}
-}
-
-// TestMessageCache_InvalidateStreamingNotScrolledFullyInvalidates ensures that
-// InvalidateStreaming with userScrolled=false does a full invalidation, not just
-// setting the dirty flag.
-func TestMessageCache_InvalidateStreamingNotScrolledFullyInvalidates(t *testing.T) {
-	t.Parallel()
-	var c messageCache
-	c.Put("content", 80, 5, baseTime)
-
-	c.InvalidateStreaming(false) // NOT scrolled away → full invalidate
-
-	if c.valid {
-		t.Fatal("expected valid=false when InvalidateStreaming called with userScrolled=false")
-	}
-	if c.streamingDirty {
-		t.Fatal("expected streamingDirty=false (full invalidate clears it)")
 	}
 }
 

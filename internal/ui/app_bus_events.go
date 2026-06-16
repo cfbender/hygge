@@ -36,8 +36,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 	case bus.AssistantTextDelta:
 		if a.routeToSubagent(e.SessionID) {
 			a.appendSubagentDelta(e.SessionID, e.Text)
-			a.invalidateMsgCacheForStreamingDelta()
-			return nil
+			return a.invalidateMsgCacheForStreamingDelta()
 		}
 		if !a.isForeground(e.SessionID) {
 			return nil
@@ -45,7 +44,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 		// Finalize any trailing streaming thinking block before appending text.
 		a.finalizeTrailingThinking()
 		a.appendAssistantDelta(e.Text)
-		a.invalidateMsgCacheForStreamingDelta()
+		return a.invalidateMsgCacheForStreamingDelta()
 
 	case bus.AssistantThinkingDelta:
 		if a.routeToSubagent(e.SessionID) {
@@ -56,7 +55,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		a.appendThinkingDelta(e.Text)
-		a.invalidateMsgCacheForStreamingDelta()
+		return a.invalidateMsgCacheForStreamingDelta()
 
 	case bus.MessageAppended:
 		if a.routeToSubagent(e.SessionID) {
@@ -135,7 +134,7 @@ func (a *App) handleBusEvent(ev any) tea.Cmd {
 			return nil
 		}
 		a.appendToolProgress(e)
-		a.invalidateMsgCacheForStreamingDelta()
+		return a.invalidateMsgCacheForStreamingDelta()
 
 	case bus.ToolCallCompleted:
 		if a.routeToSubagent(e.SessionID) {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/cfbender/hygge/internal/ui/components"
@@ -19,8 +20,23 @@ func (a *App) invalidateMsgCache() {
 	a.msgCache.Invalidate()
 }
 
-func (a *App) invalidateMsgCacheForStreamingDelta() {
-	a.msgCache.InvalidateStreaming(a.userScrolled)
+// invalidateMsgCacheForStreamingDelta records that a streaming delta arrived
+// but does NOT rebuild the transcript inline. Instead it marks the cache
+// streaming-dirty and ensures the coalescing tick is running; the tick flushes
+// the dirty flag at a bounded rate (streamCoalesceInterval). This keeps the
+// expensive full-transcript re-style off the per-delta path and off any
+// keypress/scroll frame that happens to land between ticks.
+//
+// It returns a tea.Cmd to start the coalescing tick when one is not already
+// running, or nil when the tick is already armed. Callers must thread the
+// returned command back through Update.
+func (a *App) invalidateMsgCacheForStreamingDelta() tea.Cmd {
+	a.msgCache.MarkStreamingDirty()
+	if a.streamCoalesceRunning {
+		return nil
+	}
+	a.streamCoalesceRunning = true
+	return a.streamCoalesceTick()
 }
 
 // msgScrollbackCap is the maximum number of messages rendered into the

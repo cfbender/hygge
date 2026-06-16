@@ -131,6 +131,13 @@ type splashFogTickMsg struct{}
 // there is still something to watch; it self-terminates otherwise.
 type busyReconcileTickMsg struct{}
 
+// streamCoalesceTickMsg fires at streamCoalesceInterval while the assistant is
+// streaming text. Its handler flushes the message cache's streaming-dirty flag
+// (at most one full transcript rebuild per tick) and re-arms while streaming
+// remains pending; it self-terminates once nothing is dirty, so idle sessions
+// do not tick.
+type streamCoalesceTickMsg struct{}
+
 // markdownBatchMsg carries the result of a background glamour render pass
 // over a set of hydrated messages, keyed by MessageID.
 //

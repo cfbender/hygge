@@ -2143,6 +2143,124 @@ func TestThinkingClickToExpand_AffordancePresent(t *testing.T) {
 	}
 }
 
+// TestStreamingThinkingCollapsesWhenTextPresent verifies the anti-reflow
+// behavior: while an assistant message is streaming AND has begun emitting
+// response text, the (long) thinking body is replaced by a fixed one-line
+// indicator so the response text below it never gets pushed down by late
+// thinking deltas. No ThinkingHitZone is registered mid-stream.
+func TestStreamingThinkingCollapsesWhenTextPresent(t *testing.T) {
+	t.Parallel()
+	var thinkLines []string
+	for i := range thinkingMaxLines + 4 {
+		thinkLines = append(thinkLines, "thought "+itoa(i))
+	}
+	thinking := strings.Join(thinkLines, "\n")
+
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:        RoleAssistant,
+				Raw:         "partial response",
+				VisibleRaw:  "partial response",
+				Thinking:    thinking,
+				IsStreaming: true,
+			},
+		},
+	}
+
+	content, _, _, thinkingZones, _, _ := ml.ViewWithHitZones()
+	plain := stripANSI(content)
+
+	if !strings.Contains(plain, streamingThinkingIndicator) {
+		t.Fatalf("expected fixed thinking indicator %q while streaming with text; got:\n%s", streamingThinkingIndicator, plain)
+	}
+	// The live thinking body must NOT be rendered (no reflow source).
+	if strings.Contains(plain, "thought 0") {
+		t.Fatalf("streaming thinking body should be collapsed, but found reasoning text:\n%s", plain)
+	}
+	if strings.Contains(plain, "click to expand") {
+		t.Fatalf("no expand affordance should appear mid-stream:\n%s", plain)
+	}
+	// The response text stays visible.
+	if !strings.Contains(plain, "partial response") {
+		t.Fatalf("expected streaming response text to remain visible; got:\n%s", plain)
+	}
+	// No hit zone while collapsed mid-stream.
+	if len(thinkingZones) != 0 {
+		t.Fatalf("expected 0 ThinkingHitZones mid-stream, got %d", len(thinkingZones))
+	}
+}
+
+// TestStreamingThinkingShownBeforeText verifies that during the pre-text
+// thinking phase (streaming, thinking present, no response text yet) the live
+// reasoning body is still shown — there is no text below to disturb, and users
+// benefit from seeing the model work.
+func TestStreamingThinkingShownBeforeText(t *testing.T) {
+	t.Parallel()
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:        RoleAssistant,
+				Raw:         "",
+				VisibleRaw:  "",
+				Thinking:    "considering the options",
+				IsStreaming: true,
+			},
+		},
+	}
+
+	content, _, _, _, _, _ := ml.ViewWithHitZones()
+	plain := stripANSI(content)
+	if !strings.Contains(plain, "considering the options") {
+		t.Fatalf("expected live thinking body before any text; got:\n%s", plain)
+	}
+	if strings.Contains(plain, streamingThinkingIndicator) {
+		t.Fatalf("should show live thinking, not the collapsed indicator, before text:\n%s", plain)
+	}
+}
+
+// TestFlushedThinkingRestoresFullBody verifies that once the message is
+// finalized (IsStreaming=false) the full collapsed/expandable thinking body is
+// rendered again rather than the streaming indicator.
+func TestFlushedThinkingRestoresFullBody(t *testing.T) {
+	t.Parallel()
+	var thinkLines []string
+	for i := range thinkingMaxLines + 4 {
+		thinkLines = append(thinkLines, "thought "+itoa(i))
+	}
+	thinking := strings.Join(thinkLines, "\n")
+
+	ml := MessageList{
+		Width: 80,
+		Theme: styles.DefaultTheme(),
+		Messages: []UIMessage{
+			{
+				Role:        RoleAssistant,
+				Raw:         "final response",
+				Thinking:    thinking,
+				IsStreaming: false,
+			},
+		},
+	}
+
+	content, _, _, thinkingZones, _, _ := ml.ViewWithHitZones()
+	plain := stripANSI(content)
+
+	if strings.Contains(plain, streamingThinkingIndicator) {
+		t.Fatalf("flushed message should not show the streaming indicator:\n%s", plain)
+	}
+	if !strings.Contains(plain, "click to expand") {
+		t.Fatalf("expected expand affordance on flushed long thinking; got:\n%s", plain)
+	}
+	if len(thinkingZones) != 1 {
+		t.Fatalf("expected 1 ThinkingHitZone after flush, got %d", len(thinkingZones))
+	}
+}
+
 // TestThinkingClickToExpand_NoZoneWhenShort verifies that assistant messages
 // with thinking that fits within thinkingMaxLines do NOT produce a
 // ThinkingHitZone (no click-to-expand needed).

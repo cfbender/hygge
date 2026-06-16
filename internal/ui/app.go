@@ -396,6 +396,14 @@ type App struct {
 	fogTickRunning bool
 	fogCache       fogFrameCache
 
+	// streamCoalesceRunning gates the streaming-delta coalescing tick so it
+	// does not double-up. While the assistant streams text, each delta marks
+	// the message cache streaming-dirty instead of rebuilding the whole
+	// transcript inline; the coalescing tick performs at most one rebuild per
+	// interval, keeping the user's keypress/scroll frames off the rebuild
+	// path. See streamCoalesceTick / handleStreamCoalesceTick.
+	streamCoalesceRunning bool
+
 	// cost / context state
 	costDollars     float64
 	billedInputTok  int64 // cumulative input+cache billed tokens
@@ -910,6 +918,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case busyReconcileTickMsg:
 		return a, a.handleBusyReconcileTick()
+
+	case streamCoalesceTickMsg:
+		return a, a.handleStreamCoalesceTick()
 
 	case anim.StepMsg:
 		if a.compactionAnim != nil {
@@ -1567,4 +1578,27 @@ func (a *App) handleBusyReconcileTick() tea.Cmd {
 		return nil
 	}
 	return tea.Batch(extraCmds...)
+}
+
+// handleStreamCoalesceTick paces full-transcript rebuilds triggered by
+// streaming deltas. Each delta only marks the message cache streaming-dirty
+// (see invalidateMsgCacheForStreamingDelta); this tick is the single place
+// that turns that flag into a rebuild, at most once per streamCoalesceInterval.
+//
+// On each tick it flushes the dirty flag (invalidating the cache so the next
+// frame rebuilds once, when the user is at the bottom). It re-arms while a
+// rebuild may still be pending — while the assistant is busy, or while a
+// deferred dirty flag is still set (user scrolled away). Otherwise it
+// self-terminates so idle sessions do not tick.
+func (a *App) handleStreamCoalesceTick() tea.Cmd {
+	a.msgCache.FlushStreamingDirty(a.userScrolled)
+
+	// Keep ticking while more deltas may arrive (busy) or while a deferred
+	// rebuild is still outstanding (dirty flag retained because the user is
+	// scrolled away). Otherwise stop.
+	if a.busy || a.msgCache.StreamingDirty() {
+		return a.streamCoalesceTick()
+	}
+	a.streamCoalesceRunning = false
+	return nil
 }

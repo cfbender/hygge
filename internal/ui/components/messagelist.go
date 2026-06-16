@@ -400,6 +400,11 @@ func (m MessageList) renderEmptyState() string {
 // section before appending a truncation indicator.
 const thinkingMaxLines = 8
 
+// streamingThinkingIndicator is the fixed one-line label shown in place of the
+// live reasoning body once response text has started streaming, so the visible
+// response text stays anchored instead of being pushed down by late thinking.
+const streamingThinkingIndicator = "✻ Thinking…"
+
 // hasExpandableThinking reports whether the given thinking text is long enough
 // to need an expand/collapse affordance.
 func hasExpandableThinking(thinking string) bool {
@@ -545,10 +550,15 @@ func (m MessageList) ViewWithHitZones() (string, []SubagentHitZone, []ToolHitZon
 			if chunk.single.Role == RoleTool && chunk.single.ToolName == "subagent" && chunk.single.SubagentID != "" {
 				subID = chunk.single.SubagentID
 			}
-			// Track assistant thinking blocks for click-to-expand.
+			// Track assistant thinking blocks for click-to-expand. While the
+			// message is streaming with response text present, the thinking
+			// body is collapsed to a fixed indicator (see renderAssistantBubble)
+			// and there is nothing to expand yet, so no hit zone is registered;
+			// the full expandable block returns once the message flushes.
 			if chunk.single.Role == RoleAssistant {
 				thinking := strings.TrimRight(chunk.single.Thinking, "\n")
-				if hasExpandableThinking(thinking) {
+				streamingCollapsed := chunk.single.IsStreaming && strings.TrimRight(displayBody(chunk.single), "\n") != ""
+				if hasExpandableThinking(thinking) && !streamingCollapsed {
 					thinkingZones = append(thinkingZones, ThinkingHitZone{
 						MsgIndex:  msgIdx,
 						partIndex: len(parts),
@@ -937,13 +947,31 @@ func (m MessageList) renderAssistantBubble(msg UIMessage, msgIdx int) string {
 	pre := m.styleSet()
 
 	// Compose body: thinking (muted italic) + blank line + response text.
+	//
+	// While streaming, once response text has started we collapse the thinking
+	// section to a single fixed-height indicator line instead of rendering the
+	// growing reasoning body above the text. Reasoning models often emit more
+	// thinking after text has begun; rendering it above the text would push the
+	// already-visible response down on every frame (the "replay"/jump effect)
+	// and force a full bubble re-style each coalescing tick. A fixed indicator
+	// keeps the response text anchored and the streaming render cheap. The full
+	// thinking body is restored on flush (IsStreaming=false) via the normal
+	// collapsed/expand path below.
+	//
+	// During the pre-text thinking phase (streaming, thinking present, no text
+	// yet) we still show the live reasoning body so users see it working; that
+	// phase has no text below to disturb.
 	var bodyParts []string
 	if thinking != "" {
-		// Apply max-height cap before rendering, respecting per-message expansion.
-		expanded := m.ExpandedThinking != nil && m.ExpandedThinking[msgIdx]
-		thinking = m.truncateThinking(thinking, expanded)
-		// Render thinking in muted italic style.
-		bodyParts = append(bodyParts, pre.thinkingBody.Render(thinking))
+		if msg.IsStreaming && rawBody != "" {
+			bodyParts = append(bodyParts, pre.thinkingIndicator.Render(streamingThinkingIndicator))
+		} else {
+			// Apply max-height cap before rendering, respecting per-message expansion.
+			expanded := m.ExpandedThinking != nil && m.ExpandedThinking[msgIdx]
+			thinking = m.truncateThinking(thinking, expanded)
+			// Render thinking in muted italic style.
+			bodyParts = append(bodyParts, pre.thinkingBody.Render(thinking))
+		}
 	}
 	if rawBody != "" {
 		if msg.IsPlaceholder {

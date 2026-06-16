@@ -33,6 +33,21 @@ func (a *App) splashFogTick() tea.Cmd {
 	})
 }
 
+// streamCoalesceInterval bounds how often streaming deltas trigger a full
+// transcript rebuild. At ~80ms (~12.5 rebuilds/sec) streamed text still
+// appears to flow smoothly to the eye, while keypress and scroll frames that
+// land between ticks render from the valid cache instead of paying for a
+// re-style. Caller is responsible for setting a.streamCoalesceRunning before
+// invoking.
+const streamCoalesceInterval = 80 * time.Millisecond
+
+// streamCoalesceTick schedules the next streaming-delta coalescing tick.
+func (a *App) streamCoalesceTick() tea.Cmd {
+	return tea.Tick(streamCoalesceInterval, func(time.Time) tea.Msg {
+		return streamCoalesceTickMsg{}
+	})
+}
+
 // handleKey dispatches a key.  When the modal is open, only the modal
 // keybinds work; everything else is dropped.
 func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

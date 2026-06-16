@@ -452,21 +452,105 @@ func TestRenderChatContent_ScrolledStreamingDeltaDefersRerenderUntilBottom(t *te
 	// Simulate the invalidation that the bus event handler performs after each delta.
 	app.invalidateMsgCacheForStreamingDelta()
 
+	// Rendering while a delta is pending must NOT rebuild: rebuilds are paced
+	// by the coalescing tick, not by render frames.
 	_ = app.renderChatContent()
 	if app.msgCache.content != baseline {
-		t.Fatal("scrolled streaming delta rebuilt full message cache")
+		t.Fatal("streaming delta rebuilt full message cache on a render frame")
 	}
 	if !app.msgCache.streamingDirty {
 		t.Fatal("expected streaming dirty flag while rerender is deferred")
 	}
 
+	// Coalescing tick while scrolled away keeps the rebuild deferred.
+	app.handleStreamCoalesceTick()
+	_ = app.renderChatContent()
+	if app.msgCache.content != baseline {
+		t.Fatal("scrolled-away coalesce tick rebuilt full message cache")
+	}
+	if !app.msgCache.streamingDirty {
+		t.Fatal("expected streaming dirty flag retained while scrolled away")
+	}
+
+	// Returning to the bottom and ticking flushes the deferred rebuild.
 	app.userScrolled = false
+	app.handleStreamCoalesceTick()
 	_ = app.renderChatContent()
 	if app.msgCache.content == baseline {
-		t.Fatal("returning to bottom did not render deferred streaming delta")
+		t.Fatal("coalesce tick at bottom did not render deferred streaming delta")
 	}
 	if app.msgCache.streamingDirty {
 		t.Fatal("streaming dirty flag should clear after rebuild")
+	}
+}
+
+// TestStreamingDeltasCoalesceToOneRebuildPerTick is the core performance
+// guarantee of the coalescing tick: many streaming deltas between two ticks
+// must produce at most one full transcript rebuild, not one per delta. This is
+// what keeps the user's keypress/scroll frames off the rebuild path during a
+// stream.
+func TestStreamingDeltasCoalesceToOneRebuildPerTick(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	seedLargeStreamingChat(t, app)
+	app.userScrolled = false
+
+	// Establish a valid cache baseline.
+	_ = app.renderChatContent()
+	rebuilds := 0
+	lastContent := app.msgCache.content
+	renderAndCount := func() {
+		_ = app.renderChatContent()
+		if app.msgCache.content != lastContent {
+			rebuilds++
+			lastContent = app.msgCache.content
+		}
+	}
+
+	// Many deltas arrive, each followed by a render frame (as if the user is
+	// typing/scrolling while the stream flows). No coalesce tick fires yet.
+	for range 20 {
+		app.appendAssistantDelta("x")
+		app.invalidateMsgCacheForStreamingDelta()
+		renderAndCount()
+	}
+	if rebuilds != 0 {
+		t.Fatalf("expected 0 rebuilds from deltas before any tick; got %d", rebuilds)
+	}
+
+	// One coalescing tick should flush all pending deltas into a single rebuild.
+	app.handleStreamCoalesceTick()
+	renderAndCount()
+	if rebuilds != 1 {
+		t.Fatalf("expected exactly 1 rebuild after one tick; got %d", rebuilds)
+	}
+}
+
+// TestStreamCoalesceTickSelfTerminatesWhenIdle verifies the tick stops
+// re-arming once streaming is done so idle sessions do not tick forever.
+func TestStreamCoalesceTickSelfTerminatesWhenIdle(t *testing.T) {
+	t.Parallel()
+	app, _ := newTestApp(t)
+	seedLargeStreamingChat(t, app)
+	app.userScrolled = false
+	app.busy = false
+
+	// A delta starts the tick.
+	app.appendAssistantDelta("x")
+	if cmd := app.invalidateMsgCacheForStreamingDelta(); cmd == nil {
+		t.Fatal("expected a tick-start command from the first streaming delta")
+	}
+	if !app.streamCoalesceRunning {
+		t.Fatal("expected streamCoalesceRunning=true after first delta")
+	}
+
+	// Not busy and nothing dirty after the flush → tick must not re-arm.
+	cmd := app.handleStreamCoalesceTick()
+	if cmd != nil {
+		t.Fatal("expected nil (no re-arm) when idle and not dirty")
+	}
+	if app.streamCoalesceRunning {
+		t.Fatal("expected streamCoalesceRunning=false after self-termination")
 	}
 }
 
