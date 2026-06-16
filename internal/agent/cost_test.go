@@ -553,6 +553,31 @@ func TestRecordUsage_StoresLatestUsagePerSession(t *testing.T) {
 	}
 }
 
+// TestRecordUsage_IncludesReasoningTokens verifies that internal reasoning
+// tokens count toward context-window usage. On reasoning models these are
+// reported separately from OutputTokens but still occupy context budget, so
+// omitting them makes the sidebar gauge under-report.
+func TestRecordUsage_IncludesReasoningTokens(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	prov := newFakeProvider("fake")
+	a := env.newAgent(prov, func(o *Options) {
+		o.ContextWindow = 1000
+	})
+
+	a.recordUsage(ctx, env.sessionID, "fake-model", provider.Usage{InputTokens: 300, CacheReadTokens: 100, OutputTokens: 200, ReasoningTokens: 150})
+
+	usedTokens, pctUsed := a.latestUsageFor(env.sessionID)
+	// 300 + 100 + 200 + 150 = 750.
+	if usedTokens != 750 {
+		t.Errorf("latestUsageFor.usedTokens = %d, want 750 (reasoning tokens included)", usedTokens)
+	}
+	if pctUsed != 0.75 {
+		t.Errorf("latestUsageFor.pctUsed = %v, want 0.75", pctUsed)
+	}
+}
+
 // TestRecordUsage_LatestUsageUpdatesOnSubsequentCalls verifies that the stored
 // usage is replaced (not accumulated) on subsequent calls.
 func TestRecordUsage_LatestUsageUpdatesOnSubsequentCalls(t *testing.T) {

@@ -99,8 +99,11 @@ func (a *Agent) recordUsage(ctx context.Context, sessionID, modelName string, u 
 	// Context-window pressure includes prompt tokens served from provider
 	// cache: cached tokens may be cheaper, but they still occupy the model's
 	// input context. Cache-write tokens are already represented by InputTokens
-	// for the turn and are not added again.
-	used := u.InputTokens + u.CacheReadTokens + u.OutputTokens
+	// for the turn and are not added again. Reasoning tokens are internal
+	// thinking tokens the model emits before its visible output; on reasoning
+	// models they consume real context budget but are reported separately from
+	// OutputTokens, so they must be added explicitly or the gauge under-counts.
+	used := u.InputTokens + u.CacheReadTokens + u.OutputTokens + u.ReasoningTokens
 	maxTok := a.opts.ContextWindow
 	var pct float64
 	if maxTok > 0 {
