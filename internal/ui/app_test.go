@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1279,6 +1280,99 @@ func TestAtFileMentionAllowsLargeTextFileContext(t *testing.T) {
 	}
 }
 
+func TestMentionFilesRespectsGitignore(t *testing.T) {
+	t.Parallel()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(git, append([]string{"-C", dir}, args...)...) //nolint:gosec // test helper with fixed git args
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_CONFIG_SYSTEM=/dev/null",
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+
+	writeFile := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(".gitignore", "ignored/\n*.log\n")
+	writeFile("keep.go", "package keep")
+	writeFile("docs/notes.md", "notes")
+	writeFile("ignored/secret.txt", "secret")    // ignored by dir rule
+	writeFile("debug.log", "noise")              // ignored by glob
+	writeFile("untracked_new.go", "package new") // untracked but not ignored
+
+	app := &App{opts: AppOptions{ProjectDir: dir}}
+	got := app.mentionFiles()
+	gotSet := map[string]bool{}
+	for _, p := range got {
+		gotSet[p] = true
+	}
+
+	for _, want := range []string{".gitignore", "keep.go", "docs/notes.md", "untracked_new.go"} {
+		if !gotSet[want] {
+			t.Errorf("mentionFiles missing %q; got %v", want, got)
+		}
+	}
+	for _, unwanted := range []string{"ignored/secret.txt", "debug.log"} {
+		if gotSet[unwanted] {
+			t.Errorf("mentionFiles included gitignored %q; got %v", unwanted, got)
+		}
+	}
+}
+
+func TestMentionFilesFallsBackToWalkWithoutGitRepo(t *testing.T) {
+	t.Parallel()
+	// A plain directory (no git repo) must still yield candidates via the walk
+	// fallback, while skipping the hardcoded heavy directories.
+	dir := t.TempDir()
+	for rel, content := range map[string]string{
+		"main.go":               "package main",
+		"node_modules/dep/x.js": "noise",
+		"target/build.out":      "noise",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	app := &App{opts: AppOptions{ProjectDir: dir}}
+	got := app.mentionFiles()
+	gotSet := map[string]bool{}
+	for _, p := range got {
+		gotSet[p] = true
+	}
+	if !gotSet["main.go"] {
+		t.Errorf("walk fallback missing main.go; got %v", got)
+	}
+	for _, unwanted := range []string{"node_modules/dep/x.js", "target/build.out"} {
+		if gotSet[unwanted] {
+			t.Errorf("walk fallback included heavy-dir file %q; got %v", unwanted, got)
+		}
+	}
+}
+
 func TestRankedFileMentionsSurfacesMatchesPastTheCap(t *testing.T) {
 	t.Parallel()
 	// Build more matching files than the display cap, named so that the most
@@ -1316,7 +1410,7 @@ func TestMentionMatchScoreRanksBasenameAndPrefixHigher(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		path, query string
-		want         int
+		want        int
 	}{
 		{"internal/ui/app.go", "", 0},
 		{"internal/ui/app.go", "app.go", 100},

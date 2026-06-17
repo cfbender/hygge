@@ -1,13 +1,16 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/cfbender/hygge/internal/ui/components"
@@ -156,6 +159,71 @@ func (a *App) mentionFiles() []string {
 		return a.mentionFileCache
 	}
 
+	paths, ok := gitTrackedMentionFiles(root)
+	if !ok {
+		paths = walkMentionFiles(root)
+	}
+	sort.Strings(paths)
+	if len(paths) > maxMentionFileCandidates {
+		paths = paths[:maxMentionFileCandidates]
+	}
+	a.mentionFileRoot = root
+	a.mentionFileCache = paths
+	return paths
+}
+
+// gitTrackedMentionFiles lists project files via git so @ completions honor
+// .gitignore and skip build/dependency output. It returns ok=false when git is
+// unavailable or root is not inside a work tree, so the caller can fall back to a
+// raw filesystem walk. Both tracked and untracked-but-not-ignored files are
+// listed so newly created files are mentionable before they are staged.
+func gitTrackedMentionFiles(root string) (paths []string, ok bool) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// -c core.quotepath=off keeps non-ASCII paths literal instead of octal-escaped.
+	cmd := exec.CommandContext(ctx, git, //nolint:gosec // git resolved via LookPath; only fixed flags plus the configured project dir
+		"-C", root,
+		"-c", "core.quotepath=off",
+		"ls-files",
+		"--cached", "--others", "--exclude-standard",
+		"-z",
+	)
+	// Neutralize interactive prompts so a stray credential helper can never hang
+	// the UI render path; this read-only call needs no auth.
+	cmd.Stdin = nil
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=/bin/echo",
+		"SSH_ASKPASS=/bin/echo",
+		"GCM_INTERACTIVE=Never",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	seen := make(map[string]struct{})
+	for rel := range strings.SplitSeq(string(out), "\x00") {
+		if rel == "" {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		if _, dup := seen[rel]; dup {
+			continue
+		}
+		seen[rel] = struct{}{}
+		paths = append(paths, rel)
+	}
+	return paths, true
+}
+
+// walkMentionFiles is the non-git fallback: a raw filesystem walk that skips a
+// fixed set of heavy directories. It is used when the project is not a git work
+// tree or git is not installed.
+func walkMentionFiles(root string) []string {
 	var paths []string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -176,14 +244,13 @@ func (a *App) mentionFiles() []string {
 			return nil
 		}
 		paths = append(paths, filepath.ToSlash(rel))
-		if len(paths) >= maxMentionFileCandidates {
+		if len(paths) >= maxMentionFileCandidates*4 {
+			// Collect a generous superset; mentionFiles sorts then truncates so
+			// the retained set is deterministic rather than walk-order dependent.
 			return fs.SkipAll
 		}
 		return nil
 	})
-	sort.Strings(paths)
-	a.mentionFileRoot = root
-	a.mentionFileCache = paths
 	return paths
 }
 
