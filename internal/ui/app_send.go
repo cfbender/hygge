@@ -61,7 +61,14 @@ func (a *App) startSendWithAttachments(text string, attachments []promptAttachme
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
-	a.inflightCancel = cancel
+	// Only the active turn's cancel belongs in inflightCancel. When the app is
+	// already busy, this send will be queued at the agent level (Agent.Send
+	// returns immediately) and its context cannot stop the running turn.
+	// Overwriting inflightCancel here would orphan the active turn's cancel and
+	// break double-Esc / Ctrl+C interruption.
+	if !a.busy {
+		a.inflightCancel = cancel
+	}
 
 	// Resolve which send function to call: real agent or test stub.
 	sendFn := func(ctx context.Context, sid string, parts []session.Part) (*session.Message, error) {

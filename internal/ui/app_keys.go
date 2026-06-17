@@ -202,6 +202,14 @@ func (a *App) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.mentionDismissed = false
 		// Resume auto-scroll when the user sends a message.
 		a.userScrolled = false
+		// While a turn is running, hold the message as an editable draft in the
+		// UI-side queue instead of pushing it straight into the agent queue.
+		// This keeps queued messages clickable/editable (the same affordance as
+		// /queue) and flushes them in order on TurnCompleted.
+		if a.busy {
+			a.enqueuePromptDraft(queuedPromptDraft{Text: displayText, Attachments: attachments})
+			return a, nil
+		}
 		return a, a.startSendWithAttachments(displayText, attachments)
 	case "pgup":
 		// Scroll message list up one page; pause auto-scroll.

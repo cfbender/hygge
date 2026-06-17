@@ -1163,8 +1163,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case sendCompleted:
-		// The goroutine is done; no more cancellable work on this context.
-		a.inflightCancel = nil
+		// A queued send acks immediately with (nil, nil) while the active turn
+		// is still streaming (Agent.Send returns nil,nil when the session is
+		// busy). That completion must NOT clear inflightCancel, otherwise the
+		// active turn becomes uncancellable and double-Esc / Ctrl+C stop
+		// working. Only clear the cancel when this completion ends the active
+		// turn: an error, or a real result, or when nothing is busy.
+		queuedAck := m.Err == nil && m.Result == nil && a.busy && a.activeTurns > 0
+		if !queuedAck {
+			// The goroutine is done; no more cancellable work on this context.
+			a.inflightCancel = nil
+		}
 		if m.Err != nil {
 			a.optimisticUserPending = false
 			// An error means no TurnCompleted will fire (the turn failed or was

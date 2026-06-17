@@ -2697,6 +2697,77 @@ func TestStartSend_InflightCancelStopsGoroutine(t *testing.T) {
 	_ = sendCtx // suppress unused-variable warning
 }
 
+// TestQueuedSendKeepsActiveTurnCancellable reproduces the double-Esc
+// regression: when the user types a follow-up while a turn is streaming and
+// hits Enter, that second send is queued at the agent level (Agent.Send returns
+// nil,nil immediately). The UI must NOT clobber the active turn's inflightCancel
+// with the queued send's context, otherwise double-Esc can no longer stop the
+// running turn.
+// Not marked parallel: shares SQLite migration state with other store tests.
+func TestQueuedSendKeepsActiveTurnCancellable(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		activeCtx context.Context
+		started   = make(chan struct{})
+		callCount int
+	)
+	app, _, _ := newTestAppWithSendFn(t, func(ctx context.Context, _ string, _ []session.Part) (*session.Message, error) {
+		mu.Lock()
+		callCount++
+		n := callCount
+		mu.Unlock()
+		if n == 1 {
+			// Active turn: capture ctx and block until cancelled.
+			mu.Lock()
+			activeCtx = ctx
+			mu.Unlock()
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		// Queued send: agent returns immediately (nil,nil) because the
+		// session is already busy.
+		return nil, nil
+	})
+
+	// Start the active turn.
+	_ = app.startSend("turn A")
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("active turn never started")
+	}
+
+	// Simulate the app being busy (TurnStarted would have set this).
+	app.busy = true
+	app.activeTurns = 1
+
+	// User types a follow-up and hits Enter while busy: this calls
+	// startSendWithAttachments again. Agent.Send queues it and returns
+	// nil,nil immediately, producing a sendCompleted{Err:nil}.
+	_ = app.startSendWithAttachments("turn B", nil)
+
+	// Process the queued send's sendCompleted (Err == nil).
+	app.Update(sendCompleted{Result: nil, Err: nil})
+
+	// Now double-Esc / Ctrl+C should still cancel the ACTIVE turn.
+	if app.inflightCancel == nil {
+		t.Fatal("inflightCancel was cleared by the queued send; active turn can no longer be cancelled")
+	}
+	app.inflightCancel()
+
+	// The active turn's context must observe the cancellation.
+	mu.Lock()
+	ac := activeCtx
+	mu.Unlock()
+	select {
+	case <-ac.Done():
+		// Good: active turn was cancelled.
+	case <-time.After(2 * time.Second):
+		t.Fatal("active turn context was not cancelled — double-Esc no longer stops the agent")
+	}
+}
+
 // ── Tool status tests ─────────────────────────────────────────────────────────
 
 // TestToolStatus_PendingOnRequest verifies that after ToolCallRequested the tool
@@ -3058,6 +3129,49 @@ func TestQueueCommandQueuesDraftOutOfChatAndClickEdits(t *testing.T) {
 	}
 	if app.queueCount != 0 || len(app.queuedDrafts) != 0 {
 		t.Fatalf("queued draft not removed after edit: count %d drafts %#v", app.queueCount, app.queuedDrafts)
+	}
+}
+
+// TestTypedWhileBusyIsEditableQueuedDraft verifies that typing a message while
+// a turn is running and pressing Enter holds it as an editable draft in the
+// UI-side queue (clickable, "click to edit") instead of pushing it straight
+// into the non-editable agent queue. Clicking the queued row then loads it back
+// into the input for editing.
+func TestTypedWhileBusyIsEditableQueuedDraft(t *testing.T) {
+	t.Parallel()
+	app, _, reg := newSlashApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	app.opts.Commands = reg
+	app.busy = true
+	app.activeTurns = 1
+	app.input.SetBusy(true, "")
+
+	// Type a follow-up while busy and press Enter.
+	typeInto(app, "follow up message")
+	_, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	// It must land in the editable draft queue, not be sent immediately.
+	if len(app.queuedDrafts) != 1 || app.queuedDrafts[0].Text != "follow up message" {
+		t.Fatalf("typed-while-busy message should be an editable draft, drafts = %#v", app.queuedDrafts)
+	}
+	if app.input.Value() != "" {
+		t.Fatalf("input should be cleared after queuing, got %q", app.input.Value())
+	}
+
+	// The pill must advertise the editable affordance.
+	out := app.View().Content
+	if !strings.Contains(out, "click to edit") {
+		t.Fatalf("queued draft hint missing from view:\n%s", out)
+	}
+
+	// Clicking the queued row loads it back for editing and removes it.
+	queuedY := headerHeight + app.layout.chat.Dy() + chatBottomPadding + 1
+	app.Update(tea.MouseClickMsg{X: 4, Y: queuedY, Button: tea.MouseLeft})
+	if got := app.input.Value(); got != "follow up message" {
+		t.Fatalf("input after queued draft click = %q, want %q", got, "follow up message")
+	}
+	if len(app.queuedDrafts) != 0 {
+		t.Fatalf("queued draft not removed after click-edit: %#v", app.queuedDrafts)
 	}
 }
 
