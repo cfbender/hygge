@@ -73,19 +73,78 @@ func (a *App) mentionMatches() []mentionCandidate {
 		}
 	}
 
-	for _, path := range a.mentionFiles() {
-		if q == "" || strings.Contains(strings.ToLower(path), q) {
-			out = append(out, mentionCandidate{
-				MentionItem: components.MentionItem{Kind: "file", Label: path},
-				Insert:      "@" + path + " ",
-			})
-		}
-		if len(out) >= 50 {
-			break
-		}
-	}
+	out = append(out, rankedFileMentions(a.mentionFiles(), q, maxMentionMatches-len(out))...)
 
 	return out
+}
+
+const maxMentionMatches = 50
+
+// rankedFileMentions returns up to limit file candidates for q, ordered by
+// relevance so the most likely matches survive the display cap. Without ranking,
+// a substring filter over an alphabetically sorted list silently hides every
+// match past the first limit entries, which makes whole areas of the project
+// look "missing" from @ completions.
+func rankedFileMentions(paths []string, q string, limit int) []mentionCandidate {
+	if limit <= 0 {
+		return nil
+	}
+	type scored struct {
+		path  string
+		score int
+	}
+	var matches []scored
+	for _, path := range paths {
+		score := mentionMatchScore(path, q)
+		if score < 0 {
+			continue
+		}
+		matches = append(matches, scored{path: path, score: score})
+	}
+	// Higher score first; ties keep the existing alphabetical order (stable).
+	sort.SliceStable(matches, func(i, j int) bool {
+		return matches[i].score > matches[j].score
+	})
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	out := make([]mentionCandidate, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, mentionCandidate{
+			MentionItem: components.MentionItem{Kind: "file", Label: m.path},
+			Insert:      "@" + m.path + " ",
+		})
+	}
+	return out
+}
+
+// mentionMatchScore ranks how well a project-relative path matches the lowercase
+// query q. It returns -1 when the path does not match. Higher is better:
+// basename matches rank above path-only matches, and prefix matches above
+// interior ones, so the file a user is most likely reaching for surfaces first.
+func mentionMatchScore(path, q string) int {
+	if q == "" {
+		return 0
+	}
+	lowerPath := strings.ToLower(path)
+	base := lowerPath
+	if i := strings.LastIndex(lowerPath, "/"); i >= 0 {
+		base = lowerPath[i+1:]
+	}
+	switch {
+	case base == q:
+		return 100
+	case strings.HasPrefix(base, q):
+		return 80
+	case strings.Contains(base, q):
+		return 60
+	case strings.HasPrefix(lowerPath, q):
+		return 40
+	case strings.Contains(lowerPath, q):
+		return 20
+	default:
+		return -1
+	}
 }
 
 func (a *App) mentionFiles() []string {

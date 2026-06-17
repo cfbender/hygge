@@ -1279,6 +1279,60 @@ func TestAtFileMentionAllowsLargeTextFileContext(t *testing.T) {
 	}
 }
 
+func TestRankedFileMentionsSurfacesMatchesPastTheCap(t *testing.T) {
+	t.Parallel()
+	// Build more matching files than the display cap, named so that the most
+	// relevant file (basename match) sorts last alphabetically. The pre-ranking
+	// implementation truncated the alphabetically-sorted list and would have
+	// dropped this file entirely.
+	var paths []string
+	for i := range maxMentionMatches + 10 {
+		paths = append(paths, fmt.Sprintf("internal/aaa/handler_%03d.go", i))
+	}
+	const target = "internal/zzz/handler.go"
+	// Append last so the basename match also sorts last alphabetically.
+	paths = append(paths, target)
+
+	got := rankedFileMentions(paths, "handler.go", maxMentionMatches)
+	if len(got) > maxMentionMatches {
+		t.Fatalf("rankedFileMentions returned %d, want <= %d", len(got), maxMentionMatches)
+	}
+	if got[0].Label != target {
+		t.Fatalf("top match = %q, want exact basename match %q", got[0].Label, target)
+	}
+	var found bool
+	for _, c := range got {
+		if c.Label == target {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("relevant file %q missing from %d ranked mentions", target, len(got))
+	}
+}
+
+func TestMentionMatchScoreRanksBasenameAndPrefixHigher(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		path, query string
+		want         int
+	}{
+		{"internal/ui/app.go", "", 0},
+		{"internal/ui/app.go", "app.go", 100},
+		{"internal/ui/app.go", "app", 80},
+		{"internal/ui/app_mentions.go", "mentions", 60},
+		{"internal/ui/app.go", "internal", 40},
+		{"internal/ui/app.go", "ui/app", 20},
+		{"internal/ui/app.go", "missing", -1},
+	}
+	for _, c := range cases {
+		if got := mentionMatchScore(c.path, c.query); got != c.want {
+			t.Errorf("mentionMatchScore(%q, %q) = %d, want %d", c.path, c.query, got, c.want)
+		}
+	}
+}
+
 func TestInputHeightGrowsToEightRowsThenCaps(t *testing.T) {
 	t.Parallel()
 	app, _ := newTestApp(t)
