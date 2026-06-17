@@ -8,6 +8,11 @@ See [docs/releasing.md](docs/releasing.md) for maintainer instructions.
 
 ---
 
+## [0.17.5] — 2026-06-17
+
+### Chores
+
+- Bump deps ([`57f4f14c`](../../commit/57f4f14c35af5b6b44fc0421543d5fdd698332f8))
 ## [0.17.4] — 2026-06-16
 
 ### Bug Fixes
