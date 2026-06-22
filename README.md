@@ -1,5 +1,8 @@
 # Hygge
 
+> **Note:** Hygge is no longer under active development or in active use by me.
+> It was a fun experiment, but it's hard to compete with agents with company backing, and something like [oh-my-pi](https://github.com/can1357/oh-my-pi) fits my usecases really well
+
 Hygge (*H(Y)OO-gə*) is a terminal AI coding assistant built in Go. It provides a local-first
 Bubble Tea TUI, streaming model responses, persistent SQLite sessions, tools,
 plugins, MCP integrations, hooks, subagents, slash commands, and themeable chat
