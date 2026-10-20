@@ -372,9 +372,9 @@ func (a *App) renderHelpOverlay(width, height int) string {
 	if a.opts.Theme != nil {
 		bs := a.opts.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := a.opts.Theme.Style(styles.AtomModalBg)
-		if modal.GetBackground() != nil {
-			border = border.Background(modal.GetBackground())
+		bg := a.opts.Theme.Style(styles.AtomModalBg).GetBackground()
+		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor {
+			border = border.Background(bg)
 		}
 	}
 	primary := lipgloss.NewStyle().Bold(true)

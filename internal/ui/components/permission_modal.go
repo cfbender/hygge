@@ -52,9 +52,9 @@ func (m PermissionModal) renderBox() string {
 	if m.Theme != nil {
 		bs := m.Theme.Style(styles.AtomModalBorder)
 		border = border.BorderForeground(bs.GetForeground())
-		modal := m.Theme.Style(styles.AtomModalBg)
-		if modal.GetBackground() != nil {
-			border = border.Background(modal.GetBackground())
+		bg := m.Theme.Style(styles.AtomModalBg).GetBackground()
+		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor {
+			border = border.Background(bg)
 		}
 	}
 

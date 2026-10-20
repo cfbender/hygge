@@ -1,7 +1,7 @@
 [tools]
 docker-cli = "latest"
 git-cliff = "latest"
-go = "1.26"
+go = "1.26.10"
 golangci-lint = "2"
 staticcheck = "2026.1"
 

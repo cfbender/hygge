@@ -269,7 +269,7 @@ func (b Bubble) resolveAccentColor() color.Color {
 	if b.Theme != nil {
 		style := b.Theme.Style(styles.AtomBubbleBorder)
 		fg := style.GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); !isNoColor && fg != nil {
+		if _, isNoColor := fg.(lipgloss.NoColor); !isNoColor {
 			return fg
 		}
 	}
@@ -285,7 +285,7 @@ func (b Bubble) resolveBackgroundColor() color.Color {
 	if b.Theme != nil {
 		style := b.Theme.Style(styles.AtomBubbleBg)
 		bg := style.GetBackground()
-		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor && bg != nil {
+		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor {
 			return bg
 		}
 	}
@@ -347,7 +347,7 @@ func (b Bubble) resolveDistinctColor() color.Color {
 	if b.Theme != nil {
 		style := b.Theme.Style(styles.AtomBubbleBorderDistinct)
 		fg := style.GetForeground()
-		if _, isNoColor := fg.(lipgloss.NoColor); !isNoColor && fg != nil {
+		if _, isNoColor := fg.(lipgloss.NoColor); !isNoColor {
 			return fg
 		}
 	}

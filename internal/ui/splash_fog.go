@@ -364,7 +364,8 @@ func resolveAccentRGB(s *styles.Styles, t *styles.Styles) color.Color {
 		return s.WorkingGradFromColor
 	}
 	if t != nil {
-		if c := t.Style(styles.AtomAccent).GetForeground(); c != nil {
+		c := t.Style(styles.AtomAccent).GetForeground()
+		if _, isNoColor := c.(lipgloss.NoColor); !isNoColor {
 			return c
 		}
 	}

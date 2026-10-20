@@ -122,7 +122,9 @@ func (i *Input) HeightChanged() bool {
 // View renders the input area with a themed border.
 func (i *Input) View() string {
 	content := i.Textarea.View()
-	if i.PasteMarkerStyle.GetForeground() != nil || i.PasteMarkerStyle.GetBackground() != nil {
+	_, fgUnset := i.PasteMarkerStyle.GetForeground().(lipgloss.NoColor)
+	_, bgUnset := i.PasteMarkerStyle.GetBackground().(lipgloss.NoColor)
+	if !fgUnset || !bgUnset {
 		content = HighlightPastedInputMarkers(content, i.PasteMarkerStyle)
 	}
 	if i.Styles != nil {
