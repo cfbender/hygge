@@ -438,9 +438,6 @@ func (s Sidebar) sidebarBorderFg() color.Color {
 	}
 	style := s.Theme.Style(styles.AtomSidebarBorder)
 	fg := style.GetForeground()
-	if fg == nil {
-		return lipgloss.Color("8")
-	}
 	if _, isNo := fg.(lipgloss.NoColor); isNo {
 		return lipgloss.Color("8")
 	}
@@ -455,7 +452,7 @@ func (s Sidebar) sidebarBackgroundColor() color.Color {
 		return nil
 	}
 	bg := s.Theme.Style(styles.AtomSidebarBg).GetBackground()
-	if _, isNo := bg.(lipgloss.NoColor); bg == nil || isNo {
+	if _, isNo := bg.(lipgloss.NoColor); isNo {
 		return nil
 	}
 	return bg

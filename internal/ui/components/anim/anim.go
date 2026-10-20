@@ -183,9 +183,6 @@ func resolveGradientColors(t *styles.Styles, from, to styles.Atom) (colorful.Col
 func atomToColorful(t *styles.Styles, a styles.Atom, fb colorful.Color) colorful.Color {
 	style := t.Style(a)
 	fg := style.GetForeground()
-	if fg == nil {
-		return fb
-	}
 	// lipgloss colors stringify to hex, ANSI index, or empty.  We try hex
 	// parsing first, then fall back to a small ANSI→hex table.
 	hex := colorToString(fg)

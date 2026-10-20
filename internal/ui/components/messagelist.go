@@ -249,7 +249,7 @@ type preStyles struct {
 // unset or NoColor.
 func visibleFg(s lipgloss.Style) color.Color {
 	fg := s.GetForeground()
-	if _, isNoColor := fg.(lipgloss.NoColor); fg == nil || isNoColor {
+	if _, isNoColor := fg.(lipgloss.NoColor); isNoColor {
 		return nil
 	}
 	return fg
@@ -259,7 +259,7 @@ func visibleFg(s lipgloss.Style) color.Color {
 // unset or NoColor.
 func visibleBg(s lipgloss.Style) color.Color {
 	bg := s.GetBackground()
-	if _, isNoColor := bg.(lipgloss.NoColor); bg == nil || isNoColor {
+	if _, isNoColor := bg.(lipgloss.NoColor); isNoColor {
 		return nil
 	}
 	return bg
