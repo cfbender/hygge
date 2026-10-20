@@ -17,7 +17,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # go.mod declares "go 1.26.3"; pin the toolchain explicitly so the
+        # go.mod declares "go 1.26.10"; pin the toolchain explicitly so the
         # build does not drift with the nixpkgs default.
         go = pkgs.go_1_26;
 

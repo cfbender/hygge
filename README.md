@@ -12,7 +12,7 @@ UI chrome.
 
 ## Install
 
-Requires Go 1.26.3 or newer.
+Requires Go 1.26.10 or newer.
 
 ```sh
 go install github.com/cfbender/hygge@latest
